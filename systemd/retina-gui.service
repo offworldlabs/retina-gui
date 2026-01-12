@@ -1,0 +1,13 @@
+[Unit]
+Description=Retina GUI Web Interface
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/python3 /opt/retina-gui/app.py
+WorkingDirectory=/opt/retina-gui
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

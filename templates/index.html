@@ -21,6 +21,25 @@
                 adsb2dd - Delay-Doppler Truth
             </a>
         </div>
+
+        <h2 class="mt-4">SSH Access</h2>
+        <form action="/ssh-keys" method="post" class="mb-3">
+            <div class="input-group">
+                <input type="text" name="ssh_key" class="form-control"
+                       placeholder="ssh-ed25519 AAAA... user@host">
+                <button type="submit" class="btn btn-primary">Add Key</button>
+            </div>
+        </form>
+
+        {% if ssh_keys %}
+        <ul class="list-group">
+            {% for key in ssh_keys %}
+            <li class="list-group-item text-truncate">{{ key }}</li>
+            {% endfor %}
+        </ul>
+        {% else %}
+        <p class="text-muted">No SSH keys configured</p>
+        {% endif %}
     </div>
 </body>
 </html>
