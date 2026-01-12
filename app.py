@@ -29,6 +29,7 @@ def add_ssh_key(key):
     fd, tmp_path = tempfile.mkstemp(dir=DATA_DIR)
     with os.fdopen(fd, 'w') as f:
         f.write('\n'.join(keys) + '\n')
+    os.chmod(tmp_path, 0o644)  # World-readable so sshd can read for any user
     os.rename(tmp_path, AUTH_KEYS_FILE)
 
 @app.route("/")
@@ -44,4 +45,4 @@ def add_key():
     return redirect(url_for("index"))
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=8080, debug=True)
+    app.run(host="0.0.0.0", port=80, debug=False)
