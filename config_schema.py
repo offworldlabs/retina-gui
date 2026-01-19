@@ -16,8 +16,8 @@ class CaptureDevice(BaseModel):
     """SDR device settings."""
     type: str = Field(title="Device Type")
     agcSetPoint: int = Field(le=0, title="AGC Set Point", description="dBFS")
-    gainReduction: int = Field(ge=20, le=59, title="Gain Reduction", description="20-59 dB")
-    lnaState: int = Field(ge=1, le=9, title="LNA State", description="1-9")
+    gainReduction: int = Field(ge=20, le=59, title="Gain Reduction", description="20-59 dB, higher=less gain")
+    lnaState: int = Field(ge=1, le=9, title="LNA State", description="1=max gain, 9=min gain")
     dabNotch: bool = Field(title="DAB Notch Filter")
     rfNotch: bool = Field(title="RF Notch Filter")
     bandwidthNumber: int = Field(title="Bandwidth Number")

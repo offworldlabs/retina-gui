@@ -1,9 +1,11 @@
-from flask import Flask, render_template, request, redirect, url_for
+from flask import Flask, render_template, request, redirect, url_for, jsonify
 import os
 import re
+import subprocess
 import tempfile
 import yaml
 
+from pydantic import ValidationError
 from config_schema import CaptureConfig
 from form_utils import schema_to_form_fields
 
@@ -191,6 +193,16 @@ def delete_key():
     return redirect(url_for("index"))
 
 
+def format_validation_errors(validation_error):
+    """Convert Pydantic ValidationError to dict of field -> error message."""
+    errors = {}
+    for error in validation_error.errors():
+        # Build field path like "capture.device.gainReduction"
+        field_path = 'capture.' + '.'.join(str(loc) for loc in error['loc'])
+        errors[field_path] = error['msg']
+    return errors
+
+
 @app.route("/config", methods=["POST"])
 def save_config():
     """Save config form data to user.yml."""
@@ -206,6 +218,21 @@ def save_config():
         if 'rfNotch' not in device:
             device['rfNotch'] = False
 
+    # Validate with Pydantic
+    capture_data = form_dict.get('capture', {})
+    try:
+        CaptureConfig(**capture_data)
+    except ValidationError as e:
+        # Re-render form with errors
+        errors = format_validation_errors(e)
+        capture_fields = schema_to_form_fields(CaptureConfig, capture_data)
+        return render_template("index.html",
+                               ssh_keys=get_ssh_keys(),
+                               config=load_user_config(),
+                               retina_installed=is_retina_node_installed(),
+                               capture_fields=capture_fields,
+                               config_errors=errors)
+
     # Load existing config and merge (preserves fields not in form)
     existing = load_user_config()
     if 'capture' in form_dict:
@@ -213,6 +240,49 @@ def save_config():
 
     save_user_config(existing)
     return redirect(url_for("index"))
+
+
+@app.route("/config/apply", methods=["POST"])
+def apply_config():
+    """Run config-merger and restart services."""
+    if not is_retina_node_installed():
+        return jsonify({"success": False, "error": "retina-node not installed"}), 400
+
+    try:
+        # Run config-merger to merge user.yml with defaults
+        result = subprocess.run(
+            ["docker", "compose", "-p", "retina-node", "run", "--rm", "config-merger"],
+            cwd=RETINA_NODE_PATH,
+            capture_output=True,
+            text=True,
+            timeout=60
+        )
+        if result.returncode != 0:
+            return jsonify({
+                "success": False,
+                "error": f"config-merger failed: {result.stderr or result.stdout}"
+            }), 500
+
+        # Restart services with new config
+        result = subprocess.run(
+            ["docker", "compose", "-p", "retina-node", "up", "-d", "--force-recreate"],
+            cwd=RETINA_NODE_PATH,
+            capture_output=True,
+            text=True,
+            timeout=120
+        )
+        if result.returncode != 0:
+            return jsonify({
+                "success": False,
+                "error": f"restart failed: {result.stderr or result.stdout}"
+            }), 500
+
+        return jsonify({"success": True})
+
+    except subprocess.TimeoutExpired:
+        return jsonify({"success": False, "error": "Command timed out"}), 500
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
 
 
 if __name__ == "__main__":
