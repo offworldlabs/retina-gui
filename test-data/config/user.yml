@@ -2,38 +2,34 @@ capture:
   fs: 2000000
   fc: 503000000
   device:
-    type: "RspDuo"
+    type: RspDuo
     agcSetPoint: -60
-    bandwidthNumber: 0
-    gainReduction: 40
-    lnaState: 4
+    gainReduction: 30
+    lnaState: 9
     dabNotch: true
     rfNotch: true
-
+    bandwidthNumber: 0
 network:
-  node_id: "ret7dd2cb0d"
-
+  node_id: ret7dd2cb0d
 truth:
   adsb:
     enabled: true
-    tar1090: 'sfo1.retnode.com'
-    adsb2dd: 'localhost:49155'
+    tar1090: sfo1.retnode.com
+    adsb2dd: localhost:49155
     delay_tolerance: 2.0
     doppler_tolerance: 5.0
-
 location:
   rx:
-    latitude: 37.7644
+    latitude: 37.49917
     longitude: -122.3954
     altitude: 23
-    name: "150 Mississippi"
+    name: 150 Mississippi
   tx:
     latitude: 37.49917
     longitude: -121.87222
     altitude: 783
-    name: "KSCZ-LD"
-
+    name: KSCZ-LD
 tar1090:
-  adsb_source: "192.168.8.183,30005,beast_in"
   adsblol_fallback: true
   adsblol_radius: 40
+  adsb_source: 192.168.8.183,30005,beast_in

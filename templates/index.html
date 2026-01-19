@@ -9,8 +9,15 @@
     <div class="container mt-4">
         <h1>Retina Node</h1>
 
+        <div class="card mb-4">
+            <div class="card-body">
+                <span class="text-muted">Node ID:</span>
+                <strong class="ms-2">{{ node_id or 'Unknown' }}</strong>
+            </div>
+        </div>
+
         <h2 class="mt-4">Services</h2>
-        <div class="list-group">
+        <div class="list-group mb-4">
             <a href="http://retina.local:49152" target="_blank" class="list-group-item list-group-item-action">
                 blah2 - Passive Radar
             </a>
@@ -19,6 +26,13 @@
             </a>
             <a href="http://retina.local:49155" target="_blank" class="list-group-item list-group-item-action">
                 adsb2dd - Delay-Doppler Truth
+            </a>
+        </div>
+
+        <h2 class="mt-4">Configuration</h2>
+        <div class="list-group">
+            <a href="/config" class="list-group-item list-group-item-action">
+                Edit Node Settings
             </a>
         </div>
 
@@ -49,122 +63,6 @@
         </ul>
         {% else %}
         <p class="text-muted">No SSH keys configured</p>
-        {% endif %}
-
-        <h2 class="mt-4">Capture Settings</h2>
-        {% if retina_installed %}
-
-        {# Recursive macro to render form fields from Pydantic schema #}
-        {% macro render_field(field, prefix='') %}
-            {% set field_name = 'capture.' ~ (prefix ~ field.name if prefix else field.name) %}
-            {% set field_id = field_name | replace('.', '_') %}
-            {% set field_error = config_errors.get(field_name) if config_errors else none %}
-
-            {% if field.type == 'group' %}
-                <fieldset class="mb-3 p-3 border rounded">
-                    <legend class="fs-6 fw-bold">{{ field.title }}</legend>
-                    {% for subfield in field.fields %}
-                        {{ render_field(subfield, prefix ~ field.name ~ '.') }}
-                    {% endfor %}
-                </fieldset>
-            {% elif field.type == 'checkbox' %}
-                <div class="mb-2">
-                    <div class="form-check">
-                        <input type="checkbox" name="{{ field_name }}" class="form-check-input"
-                               id="{{ field_id }}" {% if field.value %}checked{% endif %}>
-                        <label class="form-check-label" for="{{ field_id }}">{{ field.title }}</label>
-                    </div>
-                    {% if field_error %}
-                    <div class="text-danger small">{{ field_error }}</div>
-                    {% endif %}
-                </div>
-            {% else %}
-                <div class="mb-2">
-                    <label class="form-label" for="{{ field_id }}">
-                        {{ field.title }}
-                        {% if field.description %}<small class="text-muted">({{ field.description }})</small>{% endif %}
-                    </label>
-                    <input type="{{ field.type }}" name="{{ field_name }}"
-                           class="form-control{% if field_error %} is-invalid{% endif %}"
-                           id="{{ field_id }}"
-                           value="{{ field.value if field.value is not none else '' }}"
-                           {% if field.min is defined and field.min is not none %}min="{{ field.min }}"{% endif %}
-                           {% if field.max is defined and field.max is not none %}max="{{ field.max }}"{% endif %}>
-                    {% if field_error %}
-                    <div class="invalid-feedback">{{ field_error }}</div>
-                    {% endif %}
-                </div>
-            {% endif %}
-        {% endmacro %}
-
-        <form action="/config" method="post">
-            {% for field in capture_fields %}
-                {{ render_field(field) }}
-            {% endfor %}
-
-            <div class="mt-3 d-flex gap-2 align-items-center">
-                <button type="submit" class="btn btn-primary" id="applyBtn">
-                    Apply Changes
-                </button>
-                <span id="applyStatus"></span>
-            </div>
-        </form>
-
-        <script>
-        document.querySelector('form[action="/config"]').addEventListener('submit', async function(e) {
-            e.preventDefault();
-            const btn = document.getElementById('applyBtn');
-            const status = document.getElementById('applyStatus');
-            const form = e.target;
-
-            btn.disabled = true;
-            btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Saving...';
-            status.className = '';
-            status.textContent = '';
-
-            try {
-                // First save the config
-                const saveResp = await fetch('/config', {
-                    method: 'POST',
-                    body: new FormData(form)
-                });
-
-                // Check for validation errors (returns HTML page, not redirect)
-                if (!saveResp.redirected && saveResp.headers.get('content-type')?.includes('text/html')) {
-                    const html = await saveResp.text();
-                    if (html.includes('is-invalid')) {
-                        document.body.innerHTML = html;
-                        return;
-                    }
-                }
-
-                status.textContent = 'Saved. Applying...';
-                btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Applying...';
-
-                // Then apply the config
-                const applyResp = await fetch('/config/apply', { method: 'POST' });
-                const data = await applyResp.json();
-
-                if (data.success) {
-                    status.className = 'text-success';
-                    status.textContent = 'Applied successfully!';
-                } else {
-                    status.className = 'text-danger';
-                    status.textContent = data.error || 'Failed to apply';
-                }
-            } catch (e) {
-                status.className = 'text-danger';
-                status.textContent = 'Error: ' + e.message;
-            } finally {
-                btn.disabled = false;
-                btn.textContent = 'Apply Changes';
-            }
-        });
-        </script>
-        {% else %}
-        <div class="alert alert-secondary">
-            Configuration available after retina-node is deployed via Mender.
-        </div>
         {% endif %}
     </div>
 </body>

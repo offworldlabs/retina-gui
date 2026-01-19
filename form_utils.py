@@ -26,13 +26,28 @@ def get_field_input_type(field_info):
 
 
 def get_field_constraints(field_info):
-    """Extract ge/le constraints from field metadata."""
+    """Extract ge/le/gt constraints from field metadata."""
     constraints = {}
     for meta in field_info.metadata:
         if hasattr(meta, 'ge') and meta.ge is not None:
             constraints['min'] = meta.ge
+        if hasattr(meta, 'gt') and meta.gt is not None:
+            # gt=0 means min should be just above 0, use small step
+            constraints['min'] = meta.gt
         if hasattr(meta, 'le') and meta.le is not None:
             constraints['max'] = meta.le
+
+    # Add step for float fields
+    annotation = field_info.annotation
+    origin = get_origin(annotation)
+    if origin is Union:
+        args = get_args(annotation)
+        non_none = [a for a in args if a is not type(None)]
+        if non_none:
+            annotation = non_none[0]
+    if annotation == float:
+        constraints['step'] = 'any'  # Allow any decimal
+
     return constraints
 
 
