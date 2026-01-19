@@ -7,7 +7,7 @@ import yaml
 
 from pydantic import ValidationError
 from config_schema import (
-    TruthConfig, Tar1090Config,
+    AdsbTruthConfig, Tar1090Config,
     CaptureFormConfig, LocationFormConfig
 )
 from form_utils import schema_to_form_fields
@@ -252,8 +252,8 @@ def config_page():
     location_flat = flatten_location_for_form(config.get('location', {}))
     location_fields = schema_to_form_fields(LocationFormConfig, location_flat)
 
-    truth_values = config.get('truth', {}) or {}
-    truth_fields = schema_to_form_fields(TruthConfig, truth_values)
+    truth_adsb_values = (config.get('truth', {}) or {}).get('adsb', {}) or {}
+    truth_fields = schema_to_form_fields(AdsbTruthConfig, truth_adsb_values)
 
     # tar1090 needs special handling for adsb_source split
     tar1090_values = parse_tar1090_adsb_source(config)
@@ -324,12 +324,7 @@ def parse_flat_form_data(form_data):
         elif key.startswith('location.'):
             location[key[9:]] = parsed  # Remove 'location.' prefix
         elif key.startswith('truth.'):
-            # Truth still uses nested format for adsb
-            parts = key[6:].split('.')  # Remove 'truth.' prefix
-            if len(parts) == 2 and parts[0] == 'adsb':
-                if 'adsb' not in truth:
-                    truth['adsb'] = {}
-                truth['adsb'][parts[1]] = parsed
+            truth[key[6:]] = parsed  # Remove 'truth.' prefix
         elif key.startswith('tar1090.'):
             tar1090[key[8:]] = parsed  # Remove 'tar1090.' prefix
 
@@ -338,8 +333,8 @@ def parse_flat_form_data(form_data):
         capture['device_dabNotch'] = False
     if 'device_rfNotch' not in capture:
         capture['device_rfNotch'] = False
-    if 'adsb' in truth and 'enabled' not in truth['adsb']:
-        truth['adsb']['enabled'] = False
+    if truth and 'enabled' not in truth:
+        truth['enabled'] = False
     if tar1090 and 'adsblol_fallback' not in tar1090:
         tar1090['adsblol_fallback'] = False
 
@@ -372,7 +367,7 @@ def save_config():
     # Validate truth (still nested)
     if truth_data:
         try:
-            TruthConfig(**truth_data)
+            AdsbTruthConfig(**truth_data)
         except ValidationError as e:
             all_errors.update(format_validation_errors(e, 'truth'))
 
@@ -389,7 +384,7 @@ def save_config():
                                retina_installed=is_retina_node_installed(),
                                capture_fields=schema_to_form_fields(CaptureFormConfig, capture_flat),
                                location_fields=schema_to_form_fields(LocationFormConfig, location_flat),
-                               truth_fields=schema_to_form_fields(TruthConfig, truth_data),
+                               truth_fields=schema_to_form_fields(AdsbTruthConfig, truth_data),
                                tar1090_fields=schema_to_form_fields(Tar1090Config, tar1090_data),
                                config_errors=all_errors)
 
@@ -412,7 +407,7 @@ def save_config():
     if location_flat:
         existing['location'] = location_nested
     if truth_data:
-        existing['truth'] = truth_data
+        existing['truth'] = {'adsb': truth_data}
     if tar1090_data:
         existing['tar1090'] = tar1090_data
 

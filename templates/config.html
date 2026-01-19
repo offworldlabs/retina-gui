@@ -4,6 +4,7 @@
     <title>Configuration - Retina Node</title>
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
 </head>
 <body>
     <div class="container mt-4">
@@ -62,51 +63,69 @@
         {% endmacro %}
 
         <form action="/config/save" method="post" id="configForm" novalidate>
-            {# Location Settings #}
-            <div class="card mb-4">
-                <div class="card-header">
-                    <h5 class="mb-0">Location Settings</h5>
+            <div class="accordion" id="configAccordion">
+                {# Location Settings #}
+                <div class="accordion-item">
+                    <h2 class="accordion-header">
+                        <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#locationSection">
+                            Location Settings
+                        </button>
+                    </h2>
+                    <div id="locationSection" class="accordion-collapse collapse" >
+                        <div class="accordion-body">
+                            {% for field in location_fields %}
+                                {{ render_field(field, 'location') }}
+                            {% endfor %}
+                        </div>
+                    </div>
                 </div>
-                <div class="card-body">
-                    {% for field in location_fields %}
-                        {{ render_field(field, 'location') }}
-                    {% endfor %}
-                </div>
-            </div>
 
-            {# Capture Settings #}
-            <div class="card mb-4">
-                <div class="card-header">
-                    <h5 class="mb-0">Capture Settings</h5>
+                {# Capture Settings #}
+                <div class="accordion-item">
+                    <h2 class="accordion-header">
+                        <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#captureSection">
+                            Capture Settings
+                        </button>
+                    </h2>
+                    <div id="captureSection" class="accordion-collapse collapse" >
+                        <div class="accordion-body">
+                            {% for field in capture_fields %}
+                                {{ render_field(field, 'capture') }}
+                            {% endfor %}
+                        </div>
+                    </div>
                 </div>
-                <div class="card-body">
-                    {% for field in capture_fields %}
-                        {{ render_field(field, 'capture') }}
-                    {% endfor %}
-                </div>
-            </div>
 
-            {# ADS-B Truth Settings #}
-            <div class="card mb-4">
-                <div class="card-header">
-                    <h5 class="mb-0">ADS-B Truth Settings</h5>
+                {# ADS-B Truth Settings #}
+                <div class="accordion-item">
+                    <h2 class="accordion-header">
+                        <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#truthSection">
+                            ADS-B Truth Settings
+                        </button>
+                    </h2>
+                    <div id="truthSection" class="accordion-collapse collapse" >
+                        <div class="accordion-body">
+                            {% for field in truth_fields %}
+                                {{ render_field(field, 'truth') }}
+                            {% endfor %}
+                        </div>
+                    </div>
                 </div>
-                <div class="card-body">
-                    {% for field in truth_fields %}
-                        {{ render_field(field, 'truth') }}
-                    {% endfor %}
-                </div>
-            </div>
 
-            {# tar1090 Settings #}
-            <div class="card mb-4">
-                <div class="card-header">
-                    <h5 class="mb-0">tar1090 Settings</h5>
-                </div>
-                <div class="card-body">
-                    {% for field in tar1090_fields %}
-                        {{ render_field(field, 'tar1090') }}
-                    {% endfor %}
+                {# tar1090 Settings #}
+                <div class="accordion-item">
+                    <h2 class="accordion-header">
+                        <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#tar1090Section">
+                            tar1090 Settings
+                        </button>
+                    </h2>
+                    <div id="tar1090Section" class="accordion-collapse collapse" >
+                        <div class="accordion-body">
+                            {% for field in tar1090_fields %}
+                                {{ render_field(field, 'tar1090') }}
+                            {% endfor %}
+                        </div>
+                    </div>
                 </div>
             </div>
 
@@ -115,6 +134,9 @@
                     Apply Changes
                 </button>
                 <span id="applyStatus"></span>
+                {% if config_errors %}
+                <span class="text-danger">Incorrect formatting, please check fields above</span>
+                {% endif %}
             </div>
         </form>
 

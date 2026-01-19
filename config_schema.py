@@ -47,17 +47,12 @@ class LocationFormConfig(BaseModel):
 # ============================================================================
 
 class AdsbTruthConfig(BaseModel):
-    """ADS-B ground truth matching settings."""
+    """ADS-B ground truth matching settings (flat for form display)."""
     enabled: bool = Field(title="Enabled")
     tar1090: str = Field(title="tar1090 Server")
     adsb2dd: str = Field(title="adsb2dd Address")
     delay_tolerance: float = Field(gt=0, title="Delay Tolerance")
     doppler_tolerance: float = Field(gt=0, title="Doppler Tolerance")
-
-
-class TruthConfig(BaseModel):
-    """Ground truth settings."""
-    adsb: AdsbTruthConfig = Field(title="ADS-B Truth")
 
 
 # ============================================================================
