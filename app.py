@@ -2,10 +2,18 @@ from flask import Flask, render_template, request, redirect, url_for
 import os
 import re
 import tempfile
+import yaml
+
+from config_schema import CaptureConfig
+from form_utils import schema_to_form_fields
 
 app = Flask(__name__)
 
-DATA_DIR = "/data/retina-gui"
+# Configurable paths - override via environment for local dev
+DATA_DIR = os.environ.get('DATA_DIR', '/data/retina-gui')
+USER_CONFIG_PATH = os.environ.get('USER_CONFIG_PATH', '/data/retina-node/config/user.yml')
+RETINA_NODE_PATH = os.environ.get('RETINA_NODE_PATH', '/data/mender-app/retina-node/manifests')
+
 AUTH_KEYS_FILE = os.path.join(DATA_DIR, "authorized_keys")
 
 # Valid SSH key types (exact match to prevent prefix tricks)
@@ -89,10 +97,79 @@ def remove_ssh_key(key_to_remove):
     os.rename(tmp_path, AUTH_KEYS_FILE)
 
 
+# ============================================================================
+# Config Management
+# ============================================================================
+
+def is_retina_node_installed():
+    """Check if retina-node stack is deployed."""
+    return os.path.exists(os.path.join(RETINA_NODE_PATH, 'docker-compose.yaml'))
+
+
+def load_user_config():
+    """Load user config from YAML file."""
+    if not os.path.exists(USER_CONFIG_PATH):
+        return {}
+    with open(USER_CONFIG_PATH) as f:
+        return yaml.safe_load(f) or {}
+
+
+def save_user_config(config):
+    """Save user config to YAML file (atomic write)."""
+    config_dir = os.path.dirname(USER_CONFIG_PATH)
+    os.makedirs(config_dir, exist_ok=True)
+
+    fd, tmp_path = tempfile.mkstemp(dir=config_dir)
+    with os.fdopen(fd, 'w') as f:
+        yaml.dump(config, f, default_flow_style=False, sort_keys=False)
+    os.chmod(tmp_path, 0o644)
+    os.rename(tmp_path, USER_CONFIG_PATH)
+
+
+def parse_form_to_nested_dict(form_data):
+    """
+    Convert flat form data with dot notation to nested dict.
+    e.g. {'capture.fs': '2000000', 'capture.device.type': 'RspDuo'}
+    becomes {'capture': {'fs': 2000000, 'device': {'type': 'RspDuo'}}}
+    """
+    result = {}
+    for key, value in form_data.items():
+        parts = key.split('.')
+        current = result
+        for part in parts[:-1]:
+            if part not in current:
+                current[part] = {}
+            current = current[part]
+
+        # Convert types
+        final_key = parts[-1]
+        if value == '':
+            continue  # Skip empty values
+        elif value.isdigit() or (value.startswith('-') and value[1:].isdigit()):
+            current[final_key] = int(value)
+        elif value.lower() in ('true', 'false', 'on'):
+            current[final_key] = value.lower() in ('true', 'on')
+        else:
+            current[final_key] = value
+
+    return result
+
+
 @app.route("/")
 def index():
     keys = get_ssh_keys()
-    return render_template("index.html", ssh_keys=keys)
+    config = load_user_config()
+    retina_installed = is_retina_node_installed()
+
+    # Generate form fields from Pydantic schema
+    capture_values = config.get('capture', {}) or {}
+    capture_fields = schema_to_form_fields(CaptureConfig, capture_values)
+
+    return render_template("index.html",
+                           ssh_keys=keys,
+                           config=config,
+                           retina_installed=retina_installed,
+                           capture_fields=capture_fields)
 
 @app.route("/ssh-keys", methods=["POST"])
 def add_key():
@@ -114,5 +191,31 @@ def delete_key():
     return redirect(url_for("index"))
 
 
+@app.route("/config", methods=["POST"])
+def save_config():
+    """Save config form data to user.yml."""
+    # Parse form data to nested dict
+    form_dict = parse_form_to_nested_dict(request.form.to_dict())
+
+    # Handle unchecked checkboxes (they don't get submitted)
+    # We need to explicitly set them to False
+    if 'capture' in form_dict and 'device' in form_dict['capture']:
+        device = form_dict['capture']['device']
+        if 'dabNotch' not in device:
+            device['dabNotch'] = False
+        if 'rfNotch' not in device:
+            device['rfNotch'] = False
+
+    # Load existing config and merge (preserves fields not in form)
+    existing = load_user_config()
+    if 'capture' in form_dict:
+        existing['capture'] = form_dict['capture']
+
+    save_user_config(existing)
+    return redirect(url_for("index"))
+
+
 if __name__ == "__main__":
-    app.run(host="::", port=80, debug=False)
+    port = int(os.environ.get('PORT', 80))
+    debug = os.environ.get('FLASK_DEBUG', 'false').lower() == 'true'
+    app.run(host="::", port=port, debug=debug)
