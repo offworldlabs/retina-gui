@@ -18,19 +18,20 @@
         </div>
         {% else %}
 
-        {# Recursive macro to render form fields from Pydantic schema #}
+        {# Macro to render form fields - supports flat fields and nested groups #}
         {% macro render_field(field, section, prefix='') %}
             {% set field_name = section ~ '.' ~ (prefix ~ field.name if prefix else field.name) %}
             {% set field_id = field_name | replace('.', '_') %}
             {% set field_error = config_errors.get(field_name) if config_errors else none %}
 
             {% if field.type == 'group' %}
-                <fieldset class="mb-3 p-3 border rounded">
-                    <legend class="fs-6 fw-bold">{{ field.title }}</legend>
+                {# Nested group - render as visual section with heading #}
+                <div class="mb-3 ps-3 border-start">
+                    <h6 class="fw-bold">{{ field.title }}</h6>
                     {% for subfield in field.fields %}
                         {{ render_field(subfield, section, prefix ~ field.name ~ '.') }}
                     {% endfor %}
-                </fieldset>
+                </div>
             {% elif field.type == 'checkbox' %}
                 <div class="mb-2">
                     <div class="form-check">
@@ -55,14 +56,12 @@
                            {% if field.step is defined and field.step is not none %}step="{{ field.step }}"{% endif %}
                            {% if field.min is defined and field.min is not none %}min="{{ field.min }}"{% endif %}
                            {% if field.max is defined and field.max is not none %}max="{{ field.max }}"{% endif %}>
-                    {% if field_error %}
-                    <div class="invalid-feedback">{{ field_error }}</div>
-                    {% endif %}
+                    <div class="invalid-feedback">{{ field_error or '' }}</div>
                 </div>
             {% endif %}
         {% endmacro %}
 
-        <form action="/config/save" method="post" id="configForm">
+        <form action="/config/save" method="post" id="configForm" novalidate>
             {# Location Settings #}
             <div class="card mb-4">
                 <div class="card-header">
@@ -120,55 +119,37 @@
         </form>
 
         <script>
-        document.getElementById('configForm').addEventListener('submit', async function(e) {
-            e.preventDefault();
+        // Auto-apply if we just saved successfully (redirected here with ?saved=1)
+        if (window.location.search.includes('saved=1')) {
+            // Clean URL
+            history.replaceState({}, '', window.location.pathname);
+
             const btn = document.getElementById('applyBtn');
             const status = document.getElementById('applyStatus');
-            const form = e.target;
 
             btn.disabled = true;
-            btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Saving...';
-            status.className = '';
-            status.textContent = '';
+            btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Applying...';
 
-            try {
-                // First save the config via fetch to check for errors
-                const saveResp = await fetch('/config/save', {
-                    method: 'POST',
-                    body: new FormData(form)
-                });
-
-                const html = await saveResp.text();
-
-                // Check for validation errors - if found, submit form traditionally
-                // This ensures proper page load with all CSS/scripts intact
-                if (html.includes('is-invalid')) {
-                    form.submit();
-                    return;
-                }
-
-                status.textContent = 'Saved. Applying...';
-                btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Applying...';
-
-                // Then apply the config
-                const applyResp = await fetch('/config/apply', { method: 'POST' });
-                const data = await applyResp.json();
-
-                if (data.success) {
-                    status.className = 'text-success';
-                    status.textContent = 'Applied successfully!';
-                } else {
+            fetch('/config/apply', { method: 'POST' })
+                .then(r => r.json())
+                .then(data => {
+                    if (data.success) {
+                        status.className = 'text-success';
+                        status.textContent = 'Applied successfully!';
+                    } else {
+                        status.className = 'text-danger';
+                        status.textContent = data.error || 'Failed to apply';
+                    }
+                })
+                .catch(e => {
                     status.className = 'text-danger';
-                    status.textContent = data.error || 'Failed to apply';
-                }
-            } catch (e) {
-                status.className = 'text-danger';
-                status.textContent = 'Error: ' + e.message;
-            } finally {
-                btn.disabled = false;
-                btn.textContent = 'Apply Changes';
-            }
-        });
+                    status.textContent = 'Error: ' + e.message;
+                })
+                .finally(() => {
+                    btn.disabled = false;
+                    btn.textContent = 'Apply Changes';
+                });
+        }
         </script>
         {% endif %}
     </div>

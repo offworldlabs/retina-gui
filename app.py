@@ -6,7 +6,10 @@ import tempfile
 import yaml
 
 from pydantic import ValidationError
-from config_schema import CaptureConfig, LocationConfig, TruthConfig, Tar1090Config
+from config_schema import (
+    TruthConfig, Tar1090Config,
+    CaptureFormConfig, LocationFormConfig
+)
 from form_utils import schema_to_form_fields
 
 app = Flask(__name__)
@@ -128,39 +131,75 @@ def save_user_config(config):
     os.rename(tmp_path, USER_CONFIG_PATH)
 
 
-def parse_form_to_nested_dict(form_data):
-    """
-    Convert flat form data with dot notation to nested dict.
-    e.g. {'capture.fs': '2000000', 'capture.device.type': 'RspDuo'}
-    becomes {'capture': {'fs': 2000000, 'device': {'type': 'RspDuo'}}}
-    """
-    result = {}
-    for key, value in form_data.items():
-        parts = key.split('.')
-        current = result
-        for part in parts[:-1]:
-            if part not in current:
-                current[part] = {}
-            current = current[part]
+def flatten_capture_for_form(nested):
+    """Convert nested capture config to flat form values."""
+    if not nested:
+        return {}
+    device = nested.get('device', {}) or {}
+    return {
+        'fs': nested.get('fs'),
+        'fc': nested.get('fc'),
+        'device_type': device.get('type'),
+        'device_agcSetPoint': device.get('agcSetPoint'),
+        'device_gainReduction': device.get('gainReduction'),
+        'device_lnaState': device.get('lnaState'),
+        'device_dabNotch': device.get('dabNotch'),
+        'device_rfNotch': device.get('rfNotch'),
+        'device_bandwidthNumber': device.get('bandwidthNumber'),
+    }
 
-        # Convert types
-        final_key = parts[-1]
-        if value == '':
-            continue  # Skip empty values
-        elif value.lower() in ('true', 'false', 'on'):
-            current[final_key] = value.lower() in ('true', 'on')
-        else:
-            # Try to parse as number (int or float)
-            try:
-                if '.' not in value:
-                    current[final_key] = int(value)
-                else:
-                    current[final_key] = float(value)
-            except ValueError:
-                # Keep as string
-                current[final_key] = value
 
-    return result
+def unflatten_capture_from_form(flat):
+    """Convert flat form values to nested capture config."""
+    return {
+        'fs': flat.get('fs'),
+        'fc': flat.get('fc'),
+        'device': {
+            'type': flat.get('device_type'),
+            'agcSetPoint': flat.get('device_agcSetPoint'),
+            'gainReduction': flat.get('device_gainReduction'),
+            'lnaState': flat.get('device_lnaState'),
+            'dabNotch': flat.get('device_dabNotch', False),
+            'rfNotch': flat.get('device_rfNotch', False),
+            'bandwidthNumber': flat.get('device_bandwidthNumber'),
+        }
+    }
+
+
+def flatten_location_for_form(nested):
+    """Convert nested location config to flat form values."""
+    if not nested:
+        return {}
+    rx = nested.get('rx', {}) or {}
+    tx = nested.get('tx', {}) or {}
+    return {
+        'rx_latitude': rx.get('latitude'),
+        'rx_longitude': rx.get('longitude'),
+        'rx_altitude': rx.get('altitude'),
+        'rx_name': rx.get('name'),
+        'tx_latitude': tx.get('latitude'),
+        'tx_longitude': tx.get('longitude'),
+        'tx_altitude': tx.get('altitude'),
+        'tx_name': tx.get('name'),
+    }
+
+
+def unflatten_location_from_form(flat):
+    """Convert flat form values to nested location config."""
+    return {
+        'rx': {
+            'latitude': flat.get('rx_latitude'),
+            'longitude': flat.get('rx_longitude'),
+            'altitude': flat.get('rx_altitude'),
+            'name': flat.get('rx_name'),
+        },
+        'tx': {
+            'latitude': flat.get('tx_latitude'),
+            'longitude': flat.get('tx_longitude'),
+            'altitude': flat.get('tx_altitude'),
+            'name': flat.get('tx_name'),
+        }
+    }
 
 
 @app.route("/")
@@ -207,11 +246,11 @@ def config_page():
     retina_installed = is_retina_node_installed()
 
     # Generate form fields from Pydantic schemas
-    capture_values = config.get('capture', {}) or {}
-    capture_fields = schema_to_form_fields(CaptureConfig, capture_values)
+    capture_flat = flatten_capture_for_form(config.get('capture', {}))
+    capture_fields = schema_to_form_fields(CaptureFormConfig, capture_flat)
 
-    location_values = config.get('location', {}) or {}
-    location_fields = schema_to_form_fields(LocationConfig, location_values)
+    location_flat = flatten_location_for_form(config.get('location', {}))
+    location_fields = schema_to_form_fields(LocationFormConfig, location_flat)
 
     truth_values = config.get('truth', {}) or {}
     truth_fields = schema_to_form_fields(TruthConfig, truth_values)
@@ -257,111 +296,128 @@ def format_validation_errors(validation_error, section_prefix):
     return errors
 
 
-def handle_unchecked_checkboxes(form_dict):
-    """Set unchecked checkboxes to False (they don't get submitted)."""
-    # Capture checkboxes
-    if 'capture' in form_dict and 'device' in form_dict['capture']:
-        device = form_dict['capture']['device']
-        if 'dabNotch' not in device:
-            device['dabNotch'] = False
-        if 'rfNotch' not in device:
-            device['rfNotch'] = False
+def parse_flat_form_data(form_data):
+    """Parse flat form data (capture.field_name, location.field_name) into section dicts."""
+    capture = {}
+    location = {}
+    truth = {}
+    tar1090 = {}
 
-    # Truth.adsb checkbox
-    if 'truth' in form_dict and 'adsb' in form_dict['truth']:
-        adsb = form_dict['truth']['adsb']
-        if 'enabled' not in adsb:
-            adsb['enabled'] = False
+    for key, value in form_data.items():
+        if value == '':
+            continue
+        # Parse value
+        if value.lower() in ('true', 'false', 'on'):
+            parsed = value.lower() in ('true', 'on')
+        else:
+            try:
+                if '.' in value:
+                    parsed = float(value)
+                else:
+                    parsed = int(value)
+            except ValueError:
+                parsed = value
 
-    # tar1090 checkbox
-    if 'tar1090' in form_dict:
-        tar1090 = form_dict['tar1090']
-        if 'adsblol_fallback' not in tar1090:
-            tar1090['adsblol_fallback'] = False
+        # Route to correct section
+        if key.startswith('capture.'):
+            capture[key[8:]] = parsed  # Remove 'capture.' prefix
+        elif key.startswith('location.'):
+            location[key[9:]] = parsed  # Remove 'location.' prefix
+        elif key.startswith('truth.'):
+            # Truth still uses nested format for adsb
+            parts = key[6:].split('.')  # Remove 'truth.' prefix
+            if len(parts) == 2 and parts[0] == 'adsb':
+                if 'adsb' not in truth:
+                    truth['adsb'] = {}
+                truth['adsb'][parts[1]] = parsed
+        elif key.startswith('tar1090.'):
+            tar1090[key[8:]] = parsed  # Remove 'tar1090.' prefix
 
+    # Handle unchecked checkboxes (they don't get submitted)
+    if 'device_dabNotch' not in capture:
+        capture['device_dabNotch'] = False
+    if 'device_rfNotch' not in capture:
+        capture['device_rfNotch'] = False
+    if 'adsb' in truth and 'enabled' not in truth['adsb']:
+        truth['adsb']['enabled'] = False
+    if tar1090 and 'adsblol_fallback' not in tar1090:
+        tar1090['adsblol_fallback'] = False
 
-def join_tar1090_adsb_source(form_dict):
-    """Join the 3 adsb_source fields into a single comma-separated string."""
-    if 'tar1090' in form_dict:
-        tar1090 = form_dict['tar1090']
-        host = tar1090.pop('adsb_source_host', '')
-        port = tar1090.pop('adsb_source_port', '')
-        protocol = tar1090.pop('adsb_source_protocol', '')
-        if host or port or protocol:
-            tar1090['adsb_source'] = f"{host},{port},{protocol}"
+    return capture, location, truth, tar1090
 
 
 @app.route("/config/save", methods=["POST"])
 def save_config():
     """Save config form data to user.yml."""
-    # Parse form data to nested dict
-    form_dict = parse_form_to_nested_dict(request.form.to_dict())
-
-    # Handle unchecked checkboxes
-    handle_unchecked_checkboxes(form_dict)
+    # Parse flat form data into section dicts
+    capture_flat, location_flat, truth_data, tar1090_data = parse_flat_form_data(request.form.to_dict())
 
     # Collect all validation errors
     all_errors = {}
 
-    # Validate capture
-    capture_data = form_dict.get('capture', {})
-    if capture_data:
+    # Validate capture (using flat schema)
+    if capture_flat:
         try:
-            CaptureConfig(**capture_data)
+            CaptureFormConfig(**capture_flat)
         except ValidationError as e:
             all_errors.update(format_validation_errors(e, 'capture'))
 
-    # Validate location
-    location_data = form_dict.get('location', {})
-    if location_data:
+    # Validate location (using flat schema)
+    if location_flat:
         try:
-            LocationConfig(**location_data)
+            LocationFormConfig(**location_flat)
         except ValidationError as e:
             all_errors.update(format_validation_errors(e, 'location'))
 
-    # Validate truth
-    truth_data = form_dict.get('truth', {})
+    # Validate truth (still nested)
     if truth_data:
         try:
             TruthConfig(**truth_data)
         except ValidationError as e:
             all_errors.update(format_validation_errors(e, 'truth'))
 
-    # Validate tar1090 (before joining adsb_source)
-    tar1090_data = form_dict.get('tar1090', {})
+    # Validate tar1090
     if tar1090_data:
         try:
             Tar1090Config(**tar1090_data)
         except ValidationError as e:
             all_errors.update(format_validation_errors(e, 'tar1090'))
 
-    # If validation errors, re-render form
+    # If validation errors, re-render form with flat data
     if all_errors:
-        config = load_user_config()
         return render_template("config.html",
                                retina_installed=is_retina_node_installed(),
-                               capture_fields=schema_to_form_fields(CaptureConfig, capture_data),
-                               location_fields=schema_to_form_fields(LocationConfig, location_data),
+                               capture_fields=schema_to_form_fields(CaptureFormConfig, capture_flat),
+                               location_fields=schema_to_form_fields(LocationFormConfig, location_flat),
                                truth_fields=schema_to_form_fields(TruthConfig, truth_data),
                                tar1090_fields=schema_to_form_fields(Tar1090Config, tar1090_data),
                                config_errors=all_errors)
 
-    # Join tar1090 adsb_source fields before saving
-    join_tar1090_adsb_source(form_dict)
+    # Convert flat form data to nested YAML structure
+    capture_nested = unflatten_capture_from_form(capture_flat)
+    location_nested = unflatten_location_from_form(location_flat)
+
+    # Join tar1090 adsb_source fields
+    if tar1090_data:
+        host = tar1090_data.pop('adsb_source_host', '')
+        port = tar1090_data.pop('adsb_source_port', '')
+        protocol = tar1090_data.pop('adsb_source_protocol', '')
+        if host or port or protocol:
+            tar1090_data['adsb_source'] = f"{host},{port},{protocol}"
 
     # Load existing config and merge (preserves fields not in form)
     existing = load_user_config()
-    if 'capture' in form_dict:
-        existing['capture'] = form_dict['capture']
-    if 'location' in form_dict:
-        existing['location'] = form_dict['location']
-    if 'truth' in form_dict:
-        existing['truth'] = form_dict['truth']
-    if 'tar1090' in form_dict:
-        existing['tar1090'] = form_dict['tar1090']
+    if capture_flat:
+        existing['capture'] = capture_nested
+    if location_flat:
+        existing['location'] = location_nested
+    if truth_data:
+        existing['truth'] = truth_data
+    if tar1090_data:
+        existing['tar1090'] = tar1090_data
 
     save_user_config(existing)
-    return redirect(url_for("config_page"))
+    return redirect(url_for("config_page") + "?saved=1")
 
 
 @app.route("/config/apply", methods=["POST"])

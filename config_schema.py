@@ -9,47 +9,37 @@ These models define:
 Form VALUES come from user.yml, not from schema defaults.
 """
 from pydantic import BaseModel, Field
-from typing import Optional
 
 
 # ============================================================================
 # Capture Settings
 # ============================================================================
-
-class CaptureDevice(BaseModel):
-    """SDR device settings."""
-    type: str = Field(title="Device Type")
-    agcSetPoint: int = Field(le=0, title="AGC Set Point", description="dBFS")
-    gainReduction: int = Field(ge=20, le=59, title="Gain Reduction", description="20-59 dB, higher=less gain")
-    lnaState: int = Field(ge=1, le=9, title="LNA State", description="1=max gain, 9=min gain")
-    dabNotch: bool = Field(title="DAB Notch Filter")
-    rfNotch: bool = Field(title="RF Notch Filter")
-    bandwidthNumber: int = Field(title="Bandwidth Number")
-
-
-class CaptureConfig(BaseModel):
-    """Capture/SDR settings."""
+class CaptureFormConfig(BaseModel):
+    """Flat capture config for form display."""
     fs: int = Field(title="Sample Rate", description="Hz")
     fc: int = Field(title="Center Frequency", description="Hz")
-    device: CaptureDevice = Field(title="Device Settings")
+    device_type: str = Field(title="Device Type")
+    device_agcSetPoint: int = Field(le=0, title="AGC Set Point", description="dBFS")
+    device_gainReduction: int = Field(ge=20, le=59, title="Gain Reduction", description="20-59 dB, higher=less gain")
+    device_lnaState: int = Field(ge=1, le=9, title="LNA State", description="1=max gain, 9=min gain")
+    device_dabNotch: bool = Field(title="DAB Notch Filter")
+    device_rfNotch: bool = Field(title="RF Notch Filter")
+    device_bandwidthNumber: int = Field(title="Bandwidth Number")
 
 
 # ============================================================================
 # Location Settings
 # ============================================================================
-
-class LocationPoint(BaseModel):
-    """A geographic location point."""
-    latitude: float = Field(ge=-90, le=90, title="Latitude", description="decimal degrees")
-    longitude: float = Field(ge=-180, le=180, title="Longitude", description="decimal degrees")
-    altitude: float = Field(title="Altitude", description="meters")
-    name: str = Field(title="Name", description="location name")
-
-
-class LocationConfig(BaseModel):
-    """Receiver and transmitter locations."""
-    rx: LocationPoint = Field(title="Receiver")
-    tx: LocationPoint = Field(title="Transmitter")
+class LocationFormConfig(BaseModel):
+    """Flat location config for form display."""
+    rx_latitude: float = Field(ge=-90, le=90, title="Receiver Latitude", description="decimal degrees")
+    rx_longitude: float = Field(ge=-180, le=180, title="Receiver Longitude", description="decimal degrees")
+    rx_altitude: float = Field(title="Receiver Altitude", description="meters")
+    rx_name: str = Field(title="Receiver Name", description="location name")
+    tx_latitude: float = Field(ge=-90, le=90, title="Transmitter Latitude", description="decimal degrees")
+    tx_longitude: float = Field(ge=-180, le=180, title="Transmitter Longitude", description="decimal degrees")
+    tx_altitude: float = Field(title="Transmitter Altitude", description="meters")
+    tx_name: str = Field(title="Transmitter Name", description="location name")
 
 
 # ============================================================================
@@ -87,13 +77,3 @@ class Tar1090Config(BaseModel):
     adsblol_radius: int = Field(ge=1, le=500, title="adsb.lol Radius", description="nautical miles")
 
 
-# ============================================================================
-# Top-level Config
-# ============================================================================
-
-class UserConfig(BaseModel):
-    """Top-level user config schema."""
-    capture: Optional[CaptureConfig] = Field(default=None, title="Capture Settings")
-    location: Optional[LocationConfig] = Field(default=None, title="Location Settings")
-    truth: Optional[TruthConfig] = Field(default=None, title="Truth Settings")
-    tar1090: Optional[Tar1090Config] = Field(default=None, title="tar1090 Settings")
