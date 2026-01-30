@@ -27,7 +27,6 @@ AUTH_KEYS_FILE = os.path.join(DATA_DIR, "authorized_keys")
 
 # Mender configuration for device-initiated OTA
 MENDER_SERVER_URL = os.environ.get('MENDER_SERVER_URL', 'https://hosted.mender.io')
-MENDER_AUTH_TOKEN_PATH = os.environ.get('MENDER_AUTH_TOKEN_PATH', '/var/lib/mender/authtoken')
 
 # Valid SSH key types (exact match to prevent prefix tricks)
 VALID_KEY_TYPES = (
@@ -90,12 +89,36 @@ def get_node_id():
 
 
 def get_mender_jwt():
-    """Read device's Mender JWT token from mender-auth."""
+    """Get device's Mender JWT token via D-Bus from mender-auth.
+
+    Returns (token, server_url) tuple, or (None, None) if not authenticated.
+    """
     try:
-        with open(MENDER_AUTH_TOKEN_PATH) as f:
-            return f.read().strip()
-    except FileNotFoundError:
-        return None
+        result = subprocess.run(
+            ['busctl', 'call', 'io.mender.AuthenticationManager',
+             '/io/mender/AuthenticationManager', 'io.mender.Authentication1',
+             'GetJwtToken'],
+            capture_output=True, text=True, timeout=5
+        )
+        if result.returncode != 0:
+            return None, None
+
+        # Output format: ss "token" "server_url"
+        # Parse the two quoted strings
+        output = result.stdout.strip()
+        if not output.startswith('ss '):
+            return None, None
+
+        # Extract the two quoted strings
+        parts = output[3:].split('" "')
+        if len(parts) != 2:
+            return None, None
+
+        token = parts[0].strip('"')
+        server_url = parts[1].strip('"')
+        return token, server_url
+    except Exception:
+        return None, None
 
 
 def parse_retina_node_version(artifact_name):
@@ -112,14 +135,14 @@ def parse_retina_node_version(artifact_name):
 
 def get_available_artifacts():
     """List artifacts available for this device from Mender."""
-    jwt = get_mender_jwt()
-    if not jwt:
+    token, server_url = get_mender_jwt()
+    if not token:
         return None, "Device not authenticated with Mender"
 
     try:
         resp = requests.get(
             f"{MENDER_SERVER_URL}/api/devices/v1/deployments/artifacts",
-            headers={"Authorization": f"Bearer {jwt}"},
+            headers={"Authorization": f"Bearer {token}"},
             timeout=30
         )
         if resp.status_code != 200:
@@ -152,15 +175,15 @@ def find_latest_retina_node_artifact(artifacts):
 
 def install_artifact(artifact_id):
     """Download and install artifact via mender-update."""
-    jwt = get_mender_jwt()
-    if not jwt:
+    token, server_url = get_mender_jwt()
+    if not token:
         return False, "Device not authenticated with Mender"
 
     try:
         # Get download URL for artifact
         resp = requests.get(
             f"{MENDER_SERVER_URL}/api/devices/v1/deployments/artifacts/{artifact_id}/download",
-            headers={"Authorization": f"Bearer {jwt}"},
+            headers={"Authorization": f"Bearer {token}"},
             timeout=30
         )
         if resp.status_code != 200:
