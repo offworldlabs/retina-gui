@@ -4,20 +4,23 @@
     <title>Retina Node</title>
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        body { padding-bottom: 60px; }
+    </style>
 </head>
 <body>
-    <div class="container mt-4">
-        <h1>Retina Node</h1>
-
-        <div class="card mb-4">
-            <div class="card-body">
-                <div><span class="text-muted">Node ID:</span> <strong>{{ node_id or 'Unknown' }}</strong></div>
-                <div><span class="text-muted">owl-os:</span> <strong>{{ owl_os_version or 'Unknown' }}</strong></div>
-                <div><span class="text-muted">retina-node:</span> <strong>{{ retina_node_version or 'Not installed' }}</strong></div>
-            </div>
+    <nav class="navbar navbar-expand-lg navbar-light bg-white border-bottom mb-4">
+        <div class="container">
+            <a class="navbar-brand" href="/">Retina Node</a>
+            <ul class="navbar-nav">
+                <li class="nav-item"><a class="nav-link active" href="/">Home</a></li>
+                <li class="nav-item"><a class="nav-link" href="/config">Config</a></li>
+            </ul>
         </div>
+    </nav>
 
-        <h2 class="mt-4">Services</h2>
+    <div class="container">
+        <h4>Services</h4>
         <div class="list-group mb-4">
             <a href="http://retina.local:49152" target="_blank" class="list-group-item list-group-item-action">
                 blah2 - Passive Radar
@@ -30,14 +33,7 @@
             </a>
         </div>
 
-        <h2 class="mt-4">Configuration</h2>
-        <div class="list-group">
-            <a href="/config" class="list-group-item list-group-item-action">
-                Edit Node Settings
-            </a>
-        </div>
-
-        <h2 class="mt-4">SSH Access</h2>
+        <h4 class="mt-4">SSH Access</h4>
         <form action="/ssh-keys" method="post" class="mb-3">
             <div class="input-group">
                 <input type="text" name="ssh_key" class="form-control"
@@ -66,5 +62,13 @@
         <p class="text-muted">No SSH keys configured</p>
         {% endif %}
     </div>
+
+    <footer class="fixed-bottom bg-light border-top py-2">
+        <div class="container text-center text-muted small">
+            Node: {{ node_id or 'Unknown' }} &bull;
+            owl-os: {{ owl_os_version or 'Unknown' }} &bull;
+            retina-node: {{ retina_node_version or 'Not installed' }}
+        </div>
+    </footer>
 </body>
 </html>
