@@ -1,11 +1,26 @@
-from flask import Flask, render_template, request, redirect, url_for
+from flask import Flask, render_template, request, redirect, url_for, jsonify
 import os
 import re
+import subprocess
 import tempfile
+import yaml
+
+from pydantic import ValidationError
+from config_schema import (
+    AdsbTruthConfig, Tar1090Config,
+    CaptureFormConfig, LocationFormConfig,
+    load_yaml_file, save_yaml_file, values_differ
+)
+from form_utils import schema_to_form_fields
 
 app = Flask(__name__)
 
-DATA_DIR = "/data/retina-gui"
+# Configurable paths - override via environment for local dev
+DATA_DIR = os.environ.get('DATA_DIR', '/data/retina-gui')
+USER_CONFIG_PATH = os.environ.get('USER_CONFIG_PATH', '/data/retina-node/config/user.yml')
+MERGED_CONFIG_PATH = os.environ.get('MERGED_CONFIG_PATH', '/data/retina-node/config/config.yml')
+RETINA_NODE_PATH = os.environ.get('RETINA_NODE_PATH', '/data/mender-app/retina-node/manifests')
+
 AUTH_KEYS_FILE = os.path.join(DATA_DIR, "authorized_keys")
 
 # Valid SSH key types (exact match to prevent prefix tricks)
@@ -89,10 +104,180 @@ def remove_ssh_key(key_to_remove):
     os.rename(tmp_path, AUTH_KEYS_FILE)
 
 
+# ============================================================================
+# Config Management - Layered Config System
+# ============================================================================
+#
+# Layered config flow:
+#   default.yml -> user.yml -> forced.yml -> config.yml (merged)
+#
+# This GUI:
+#   - READS from config.yml (merged) to show actual running values
+#   - WRITES to user.yml (only values that differ from merged config)
+#
+# This way users see what's actually running, but we don't bloat user.yml
+# with defaults they didn't explicitly set.
+# ============================================================================
+
+def is_retina_node_installed():
+    """Check if retina-node stack is deployed."""
+    return os.path.exists(os.path.join(RETINA_NODE_PATH, 'docker-compose.yaml'))
+
+
+def load_merged_config():
+    """Load merged config.yml (what's actually running)."""
+    return load_yaml_file(MERGED_CONFIG_PATH)
+
+
+def load_user_config():
+    """Load user.yml (user overrides only)."""
+    return load_yaml_file(USER_CONFIG_PATH)
+
+
+def save_user_config(config):
+    """Save user overrides to user.yml."""
+    save_yaml_file(USER_CONFIG_PATH, config)
+
+
+def flatten_capture_for_form(nested):
+    """Convert nested capture config to flat form values."""
+    if not nested:
+        return {}
+    device = nested.get('device', {}) or {}
+    return {
+        'fs': nested.get('fs'),
+        'fc': nested.get('fc'),
+        'device_type': device.get('type'),
+        'device_agcSetPoint': device.get('agcSetPoint'),
+        'device_gainReduction': device.get('gainReduction'),
+        'device_lnaState': device.get('lnaState'),
+        'device_dabNotch': device.get('dabNotch'),
+        'device_rfNotch': device.get('rfNotch'),
+        'device_bandwidthNumber': device.get('bandwidthNumber'),
+    }
+
+
+def unflatten_capture_from_form(flat):
+    """Convert flat form values to nested capture config."""
+    return {
+        'fs': flat.get('fs'),
+        'fc': flat.get('fc'),
+        'device': {
+            'type': flat.get('device_type'),
+            'agcSetPoint': flat.get('device_agcSetPoint'),
+            'gainReduction': flat.get('device_gainReduction'),
+            'lnaState': flat.get('device_lnaState'),
+            'dabNotch': flat.get('device_dabNotch', False),
+            'rfNotch': flat.get('device_rfNotch', False),
+            'bandwidthNumber': flat.get('device_bandwidthNumber'),
+        }
+    }
+
+
+def flatten_location_for_form(nested):
+    """Convert nested location config to flat form values."""
+    if not nested:
+        return {}
+    rx = nested.get('rx', {}) or {}
+    tx = nested.get('tx', {}) or {}
+    return {
+        'rx_latitude': rx.get('latitude'),
+        'rx_longitude': rx.get('longitude'),
+        'rx_altitude': rx.get('altitude'),
+        'rx_name': rx.get('name'),
+        'tx_latitude': tx.get('latitude'),
+        'tx_longitude': tx.get('longitude'),
+        'tx_altitude': tx.get('altitude'),
+        'tx_name': tx.get('name'),
+    }
+
+
+def unflatten_location_from_form(flat):
+    """Convert flat form values to nested location config."""
+    return {
+        'rx': {
+            'latitude': flat.get('rx_latitude'),
+            'longitude': flat.get('rx_longitude'),
+            'altitude': flat.get('rx_altitude'),
+            'name': flat.get('rx_name'),
+        },
+        'tx': {
+            'latitude': flat.get('tx_latitude'),
+            'longitude': flat.get('tx_longitude'),
+            'altitude': flat.get('tx_altitude'),
+            'name': flat.get('tx_name'),
+        }
+    }
+
+
 @app.route("/")
 def index():
+    """Home page with node ID, services, and SSH keys."""
     keys = get_ssh_keys()
-    return render_template("index.html", ssh_keys=keys)
+    # Read from merged config to show actual running values
+    config = load_merged_config()
+
+    # Get node_id from config
+    node_id = config.get('network', {}).get('node_id')
+
+    return render_template("index.html",
+                           ssh_keys=keys,
+                           node_id=node_id)
+
+
+def parse_tar1090_adsb_source(config):
+    """Split adsb_source string into separate fields for the form."""
+    tar1090 = config.get('tar1090', {}) or {}
+    adsb_source = tar1090.get('adsb_source', '')
+
+    if adsb_source and ',' in adsb_source:
+        parts = adsb_source.split(',', 2)
+        return {
+            'adsb_source_host': parts[0] if len(parts) > 0 else '',
+            'adsb_source_port': int(parts[1]) if len(parts) > 1 and parts[1].isdigit() else None,
+            'adsb_source_protocol': parts[2] if len(parts) > 2 else '',
+            'adsblol_fallback': tar1090.get('adsblol_fallback'),
+            'adsblol_radius': tar1090.get('adsblol_radius'),
+        }
+    return {
+        'adsb_source_host': None,
+        'adsb_source_port': None,
+        'adsb_source_protocol': None,
+        'adsblol_fallback': tar1090.get('adsblol_fallback'),
+        'adsblol_radius': tar1090.get('adsblol_radius'),
+    }
+
+
+@app.route("/config")
+def config_page():
+    """Configuration page with all settings.
+
+    Reads from merged config.yml to display actual running values.
+    """
+    # Read merged config for display (actual running values)
+    config = load_merged_config()
+    retina_installed = is_retina_node_installed()
+
+    # Generate form fields from Pydantic schemas
+    capture_flat = flatten_capture_for_form(config.get('capture', {}))
+    capture_fields = schema_to_form_fields(CaptureFormConfig, capture_flat)
+
+    location_flat = flatten_location_for_form(config.get('location', {}))
+    location_fields = schema_to_form_fields(LocationFormConfig, location_flat)
+
+    truth_adsb_values = (config.get('truth', {}) or {}).get('adsb', {}) or {}
+    truth_fields = schema_to_form_fields(AdsbTruthConfig, truth_adsb_values)
+
+    # tar1090 needs special handling for adsb_source split
+    tar1090_values = parse_tar1090_adsb_source(config)
+    tar1090_fields = schema_to_form_fields(Tar1090Config, tar1090_values)
+
+    return render_template("config.html",
+                           retina_installed=retina_installed,
+                           capture_fields=capture_fields,
+                           location_fields=location_fields,
+                           truth_fields=truth_fields,
+                           tar1090_fields=tar1090_fields)
 
 @app.route("/ssh-keys", methods=["POST"])
 def add_key():
@@ -114,5 +299,262 @@ def delete_key():
     return redirect(url_for("index"))
 
 
+def format_validation_errors(validation_error, section_prefix):
+    """Convert Pydantic ValidationError to dict of field -> error message."""
+    errors = {}
+    for error in validation_error.errors():
+        # Build field path like "capture.device.gainReduction"
+        field_path = section_prefix + '.' + '.'.join(str(loc) for loc in error['loc'])
+        errors[field_path] = error['msg']
+    return errors
+
+
+def parse_flat_form_data(form_data):
+    """Parse flat form data (capture.field_name, location.field_name) into section dicts."""
+    capture = {}
+    location = {}
+    truth = {}
+    tar1090 = {}
+
+    for key, value in form_data.items():
+        if value == '':
+            continue
+        # Parse value
+        if value.lower() in ('true', 'false', 'on'):
+            parsed = value.lower() in ('true', 'on')
+        else:
+            try:
+                if '.' in value:
+                    parsed = float(value)
+                else:
+                    parsed = int(value)
+            except ValueError:
+                parsed = value
+
+        # Route to correct section
+        if key.startswith('capture.'):
+            capture[key[8:]] = parsed  # Remove 'capture.' prefix
+        elif key.startswith('location.'):
+            location[key[9:]] = parsed  # Remove 'location.' prefix
+        elif key.startswith('truth.'):
+            truth[key[6:]] = parsed  # Remove 'truth.' prefix
+        elif key.startswith('tar1090.'):
+            tar1090[key[8:]] = parsed  # Remove 'tar1090.' prefix
+
+    # Handle unchecked checkboxes (they don't get submitted)
+    # Only add checkbox defaults if there's other capture data (not just checkboxes)
+    capture_has_data = any(k not in ('device_dabNotch', 'device_rfNotch') for k in capture)
+    if capture_has_data:
+        if 'device_dabNotch' not in capture:
+            capture['device_dabNotch'] = False
+        if 'device_rfNotch' not in capture:
+            capture['device_rfNotch'] = False
+
+    if truth and 'enabled' not in truth:
+        truth['enabled'] = False
+    if tar1090 and 'adsblol_fallback' not in tar1090:
+        tar1090['adsblol_fallback'] = False
+
+    return capture, location, truth, tar1090
+
+
+def compute_user_overrides(submitted_nested, merged_config, existing_user_config, section_key):
+    """
+    Compare submitted values against merged config, return only values that differ.
+
+    This implements Option C: only write to user.yml values that the user explicitly
+    changed from the defaults/merged config.
+
+    Args:
+        submitted_nested: The nested dict from form submission
+        merged_config: The current merged config.yml
+        existing_user_config: Current user.yml content
+        section_key: The top-level section key (e.g., 'capture', 'location')
+
+    Returns:
+        Dict with only the values that differ from merged config, or None if no changes
+    """
+    merged_section = merged_config.get(section_key, {}) or {}
+    existing_section = existing_user_config.get(section_key, {}) or {}
+
+    def find_changes(submitted, merged, existing):
+        """Recursively find changed values."""
+        changes = {}
+        for key, submitted_val in submitted.items():
+            merged_val = merged.get(key) if merged else None
+            existing_val = existing.get(key) if existing else None
+
+            if isinstance(submitted_val, dict):
+                # Recurse into nested dicts
+                nested_changes = find_changes(
+                    submitted_val,
+                    merged_val if isinstance(merged_val, dict) else {},
+                    existing_val if isinstance(existing_val, dict) else {}
+                )
+                if nested_changes:
+                    changes[key] = nested_changes
+            else:
+                # Check if value differs from merged config
+                if values_differ(submitted_val, merged_val):
+                    # User changed this value - add to overrides
+                    changes[key] = submitted_val
+                elif existing_val is not None and not values_differ(existing_val, submitted_val):
+                    # Value was already in user.yml and hasn't changed - keep it
+                    changes[key] = submitted_val
+
+        return changes
+
+    changes = find_changes(submitted_nested, merged_section, existing_section)
+    return changes if changes else None
+
+
+@app.route("/config/save", methods=["POST"])
+def save_config():
+    """Save config form data to user.yml.
+
+    Only writes values that differ from the merged config (Option C).
+    This keeps user.yml clean with just the user's explicit overrides.
+    """
+    # Parse flat form data into section dicts
+    capture_flat, location_flat, truth_data, tar1090_data = parse_flat_form_data(request.form.to_dict())
+
+    # Collect all validation errors
+    all_errors = {}
+
+    # Validate capture (using flat schema)
+    if capture_flat:
+        try:
+            CaptureFormConfig(**capture_flat)
+        except ValidationError as e:
+            all_errors.update(format_validation_errors(e, 'capture'))
+
+    # Validate location (using flat schema)
+    if location_flat:
+        try:
+            LocationFormConfig(**location_flat)
+        except ValidationError as e:
+            all_errors.update(format_validation_errors(e, 'location'))
+
+    # Validate truth (still nested)
+    if truth_data:
+        try:
+            AdsbTruthConfig(**truth_data)
+        except ValidationError as e:
+            all_errors.update(format_validation_errors(e, 'truth'))
+
+    # Validate tar1090
+    if tar1090_data:
+        try:
+            Tar1090Config(**tar1090_data)
+        except ValidationError as e:
+            all_errors.update(format_validation_errors(e, 'tar1090'))
+
+    # If validation errors, re-render form with flat data
+    if all_errors:
+        return render_template("config.html",
+                               retina_installed=is_retina_node_installed(),
+                               capture_fields=schema_to_form_fields(CaptureFormConfig, capture_flat),
+                               location_fields=schema_to_form_fields(LocationFormConfig, location_flat),
+                               truth_fields=schema_to_form_fields(AdsbTruthConfig, truth_data),
+                               tar1090_fields=schema_to_form_fields(Tar1090Config, tar1090_data),
+                               config_errors=all_errors)
+
+    # Convert flat form data to nested YAML structure
+    capture_nested = unflatten_capture_from_form(capture_flat)
+    location_nested = unflatten_location_from_form(location_flat)
+
+    # Join tar1090 adsb_source fields
+    tar1090_nested = {}
+    if tar1090_data:
+        host = tar1090_data.pop('adsb_source_host', '')
+        port = tar1090_data.pop('adsb_source_port', '')
+        protocol = tar1090_data.pop('adsb_source_protocol', '')
+        if host or port or protocol:
+            tar1090_nested['adsb_source'] = f"{host},{port},{protocol}"
+        tar1090_nested.update(tar1090_data)
+
+    # Load merged config (for comparison) and existing user config
+    merged_config = load_merged_config()
+    existing_user = load_user_config()
+
+    # Compute overrides - only save values that differ from merged config
+    new_user_config = {}
+
+    # Preserve fields not managed by this form (e.g., network.node_id, process, save)
+    for key in existing_user:
+        if key not in ('capture', 'location', 'truth', 'tar1090'):
+            new_user_config[key] = existing_user[key]
+
+    # Compute and add overrides for each section
+    if capture_flat:
+        capture_overrides = compute_user_overrides(capture_nested, merged_config, existing_user, 'capture')
+        if capture_overrides:
+            new_user_config['capture'] = capture_overrides
+
+    if location_flat:
+        location_overrides = compute_user_overrides(location_nested, merged_config, existing_user, 'location')
+        if location_overrides:
+            new_user_config['location'] = location_overrides
+
+    if truth_data:
+        truth_nested = {'adsb': truth_data}
+        truth_overrides = compute_user_overrides(truth_nested, merged_config, existing_user, 'truth')
+        if truth_overrides:
+            new_user_config['truth'] = truth_overrides
+
+    if tar1090_nested:
+        tar1090_overrides = compute_user_overrides(tar1090_nested, merged_config, existing_user, 'tar1090')
+        if tar1090_overrides:
+            new_user_config['tar1090'] = tar1090_overrides
+
+    save_user_config(new_user_config)
+    return redirect(url_for("config_page") + "?saved=1")
+
+
+@app.route("/config/apply", methods=["POST"])
+def apply_config():
+    """Run config-merger and restart services."""
+    if not is_retina_node_installed():
+        return jsonify({"success": False, "error": "retina-node not installed"}), 400
+
+    try:
+        # Run config-merger to merge user.yml with defaults
+        result = subprocess.run(
+            ["docker", "compose", "-p", "retina-node", "run", "--rm", "config-merger"],
+            cwd=RETINA_NODE_PATH,
+            capture_output=True,
+            text=True,
+            timeout=60
+        )
+        if result.returncode != 0:
+            return jsonify({
+                "success": False,
+                "error": f"config-merger failed: {result.stderr or result.stdout}"
+            }), 500
+
+        # Restart services with new config
+        result = subprocess.run(
+            ["docker", "compose", "-p", "retina-node", "up", "-d", "--force-recreate"],
+            cwd=RETINA_NODE_PATH,
+            capture_output=True,
+            text=True,
+            timeout=120
+        )
+        if result.returncode != 0:
+            return jsonify({
+                "success": False,
+                "error": f"restart failed: {result.stderr or result.stdout}"
+            }), 500
+
+        return jsonify({"success": True})
+
+    except subprocess.TimeoutExpired:
+        return jsonify({"success": False, "error": "Command timed out"}), 500
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
 if __name__ == "__main__":
-    app.run(host="::", port=80, debug=False)
+    port = int(os.environ.get('PORT', 80))
+    debug = os.environ.get('FLASK_DEBUG', 'false').lower() == 'true'
+    app.run(host="::", port=port, debug=debug)

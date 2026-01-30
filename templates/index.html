@@ -9,8 +9,15 @@
     <div class="container mt-4">
         <h1>Retina Node</h1>
 
+        <div class="card mb-4">
+            <div class="card-body">
+                <span class="text-muted">Node ID:</span>
+                <strong class="ms-2">{{ node_id or 'Unknown' }}</strong>
+            </div>
+        </div>
+
         <h2 class="mt-4">Services</h2>
-        <div class="list-group">
+        <div class="list-group mb-4">
             <a href="http://retina.local:49152" target="_blank" class="list-group-item list-group-item-action">
                 blah2 - Passive Radar
             </a>
@@ -19,6 +26,13 @@
             </a>
             <a href="http://retina.local:49155" target="_blank" class="list-group-item list-group-item-action">
                 adsb2dd - Delay-Doppler Truth
+            </a>
+        </div>
+
+        <h2 class="mt-4">Configuration</h2>
+        <div class="list-group">
+            <a href="/config" class="list-group-item list-group-item-action">
+                Edit Node Settings
             </a>
         </div>
 
