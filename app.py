@@ -4,6 +4,7 @@ import re
 import subprocess
 import tempfile
 import yaml
+import requests
 
 from pydantic import ValidationError
 from config_schema import (
@@ -23,6 +24,10 @@ RETINA_NODE_PATH = os.environ.get('RETINA_NODE_PATH', '/data/mender-app/retina-n
 NODE_ID_FILE = os.environ.get('NODE_ID_FILE', '/data/mender/node_id')
 
 AUTH_KEYS_FILE = os.path.join(DATA_DIR, "authorized_keys")
+
+# Mender configuration for device-initiated OTA
+MENDER_SERVER_URL = os.environ.get('MENDER_SERVER_URL', 'https://hosted.mender.io')
+MENDER_AUTH_TOKEN_PATH = os.environ.get('MENDER_AUTH_TOKEN_PATH', '/var/lib/mender/authtoken')
 
 # Valid SSH key types (exact match to prevent prefix tricks)
 VALID_KEY_TYPES = (
@@ -82,6 +87,105 @@ def get_node_id():
     except Exception as e:
         app.logger.warning(f"Could not read node_id from {NODE_ID_FILE}: {e}")
     return 'Unknown'
+
+
+def get_mender_jwt():
+    """Read device's Mender JWT token from mender-auth."""
+    try:
+        with open(MENDER_AUTH_TOKEN_PATH) as f:
+            return f.read().strip()
+    except FileNotFoundError:
+        return None
+
+
+def parse_retina_node_version(artifact_name):
+    """Extract version tuple from 'retina-node-v0.3.2' format.
+
+    Returns version tuple (0, 3, 2) for stable releases, None for
+    release candidates or non-matching names.
+    """
+    match = re.match(r'^retina-node-v(\d+)\.(\d+)\.(\d+)$', artifact_name)
+    if match:
+        return tuple(int(x) for x in match.groups())
+    return None
+
+
+def get_available_artifacts():
+    """List artifacts available for this device from Mender."""
+    jwt = get_mender_jwt()
+    if not jwt:
+        return None, "Device not authenticated with Mender"
+
+    try:
+        resp = requests.get(
+            f"{MENDER_SERVER_URL}/api/devices/v1/deployments/artifacts",
+            headers={"Authorization": f"Bearer {jwt}"},
+            timeout=30
+        )
+        if resp.status_code != 200:
+            return None, f"Mender API error: {resp.status_code}"
+        return resp.json(), None
+    except requests.RequestException as e:
+        return None, str(e)
+
+
+def find_latest_retina_node_artifact(artifacts):
+    """Find the latest stable retina-node artifact.
+
+    Filters out release candidates (rc1, rc2, etc.) and returns the
+    artifact with the highest semver version.
+    """
+    stable = []
+    for artifact in artifacts:
+        name = artifact.get('artifact_name', '')
+        version = parse_retina_node_version(name)
+        if version:
+            stable.append((artifact, version))
+
+    if not stable:
+        return None
+
+    # Sort by version tuple descending, return highest
+    stable.sort(key=lambda x: x[1], reverse=True)
+    return stable[0][0]
+
+
+def install_artifact(artifact_id):
+    """Download and install artifact via mender-update."""
+    jwt = get_mender_jwt()
+    if not jwt:
+        return False, "Device not authenticated with Mender"
+
+    try:
+        # Get download URL for artifact
+        resp = requests.get(
+            f"{MENDER_SERVER_URL}/api/devices/v1/deployments/artifacts/{artifact_id}/download",
+            headers={"Authorization": f"Bearer {jwt}"},
+            timeout=30
+        )
+        if resp.status_code != 200:
+            return False, f"Failed to get download URL: {resp.status_code}"
+
+        download_url = resp.json().get('uri')
+        if not download_url:
+            return False, "No download URL in response"
+
+        # Install via mender-update
+        result = subprocess.run(
+            ['mender-update', 'install', download_url],
+            capture_output=True, text=True, timeout=600  # 10 min timeout
+        )
+
+        if result.returncode != 0:
+            return False, result.stderr or "Install failed"
+
+        return True, None
+    except subprocess.TimeoutExpired:
+        return False, "Installation timed out"
+    except requests.RequestException as e:
+        return False, str(e)
+    except Exception as e:
+        return False, str(e)
 
 
 def is_valid_ssh_key(key):
@@ -608,6 +712,32 @@ def apply_config():
         return jsonify({"success": False, "error": "Command timed out"}), 500
     except Exception as e:
         return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route("/mender/install", methods=["POST"])
+def mender_install():
+    """Install latest stable retina-node artifact from Mender."""
+    # Check if already installed
+    _, retina_node_version = get_mender_versions()
+    if retina_node_version:
+        return jsonify({"success": False, "error": "Already installed"})
+
+    # Get available artifacts
+    artifacts, error = get_available_artifacts()
+    if error:
+        return jsonify({"success": False, "error": error})
+
+    # Find latest stable retina-node artifact
+    artifact = find_latest_retina_node_artifact(artifacts)
+    if not artifact:
+        return jsonify({"success": False, "error": "No stable retina-node artifact found"})
+
+    # Install it
+    success, error = install_artifact(artifact['id'])
+    if not success:
+        return jsonify({"success": False, "error": error})
+
+    return jsonify({"success": True})
 
 
 if __name__ == "__main__":

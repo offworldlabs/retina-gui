@@ -20,23 +20,81 @@
     </nav>
 
     <div class="container">
+        {% if not retina_node_version %}
+        <div class="alert alert-info mb-4">
+            <h5>Welcome to Retina Node</h5>
+            <p>Click below to download and install the radar software.</p>
+            <button type="button" class="btn btn-primary" id="installBtn">
+                Install Software
+            </button>
+            <span id="installStatus" class="ms-2"></span>
+        </div>
+
+        <script>
+        document.getElementById('installBtn').addEventListener('click', function() {
+            const btn = this;
+            const status = document.getElementById('installStatus');
+
+            if (btn.disabled) return;
+
+            btn.disabled = true;
+            btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Installing...';
+            status.textContent = 'This may take a few minutes';
+            status.className = 'text-muted';
+
+            fetch('/mender/install', { method: 'POST' })
+                .then(r => r.json())
+                .then(data => {
+                    if (data.success) {
+                        status.className = 'text-success';
+                        status.textContent = 'Installed! Reloading...';
+                        setTimeout(() => location.reload(), 2000);
+                    } else {
+                        status.className = 'text-danger';
+                        status.textContent = data.error || 'Installation failed';
+                        btn.disabled = false;
+                        btn.textContent = 'Install Software';
+                    }
+                })
+                .catch(e => {
+                    status.className = 'text-danger';
+                    status.textContent = 'Error: ' + e.message;
+                    btn.disabled = false;
+                    btn.textContent = 'Install Software';
+                });
+        });
+        </script>
+        {% endif %}
+
         <h4>Services</h4>
         <div class="list-group mb-4">
+            {% if retina_node_version %}
             <a href="http://retina.local:49152" target="_blank" class="list-group-item list-group-item-action">
                 blah2 - Passive Radar
             </a>
             <a href="http://retina.local:8078" target="_blank" class="list-group-item list-group-item-action">
                 tar1090 - ADS-B Map
             </a>
+            {% else %}
+            <span class="list-group-item list-group-item-action disabled text-muted">
+                blah2 - Passive Radar
+            </span>
+            <span class="list-group-item list-group-item-action disabled text-muted">
+                tar1090 - ADS-B Map
+            </span>
+            {% endif %}
         </div>
 
+        {% if retina_node_version %}
         <div class="d-flex gap-2 align-items-center mb-4">
             <button type="button" class="btn btn-outline-secondary" id="applyRestartBtn">
                 Restart Services
             </button>
             <span id="applyRestartStatus"></span>
         </div>
+        {% endif %}
 
+        {% if retina_node_version %}
         <script>
         document.getElementById('applyRestartBtn').addEventListener('click', function() {
             const btn = this;
@@ -69,6 +127,7 @@
                 });
         });
         </script>
+        {% endif %}
 
         <h4 class="mt-4">SSH Access</h4>
         <form action="/ssh-keys" method="post" class="mb-3">
