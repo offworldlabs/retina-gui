@@ -14,7 +14,10 @@ Layered Config System:
 import os
 import yaml
 from copy import deepcopy
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, VERSION
+
+# Detect Pydantic version for Field() syntax
+PYDANTIC_V2 = VERSION.startswith("2.")
 
 
 # ============================================================================
@@ -97,11 +100,22 @@ def values_differ(val1, val2):
 # ============================================================================
 # Capture Settings
 # ============================================================================
+
+# Helper for readonly fields - syntax differs between Pydantic v1 and v2
+def _readonly_field(**kwargs):
+    """Create a Field with readonly=True, compatible with Pydantic v1 and v2."""
+    if PYDANTIC_V2:
+        kwargs['json_schema_extra'] = {'readonly': True}
+    else:
+        kwargs['readonly'] = True
+    return Field(**kwargs)
+
+
 class CaptureFormConfig(BaseModel):
     """Flat capture config for form display."""
     fs: int = Field(title="Sample Rate", description="Hz")
     fc: int = Field(title="Center Frequency", description="Hz")
-    device_type: str = Field(title="Device Type", json_schema_extra={'readonly': True})
+    device_type: str = _readonly_field(title="Device Type")
     device_agcSetPoint: int = Field(le=0, title="AGC Set Point", description="dBFS")
     device_gainReduction: int = Field(ge=20, le=59, title="Gain Reduction", description="20-59 dB, higher=less gain")
     device_lnaState: int = Field(ge=1, le=9, title="LNA State", description="1=max gain, 9=min gain")
