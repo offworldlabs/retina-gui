@@ -6,9 +6,92 @@ These models define:
 - Constraints (ge, le, gt) -> HTML min/max attributes
 - Metadata (title, description) -> form labels and help text
 
-Form VALUES come from user.yml, not from schema defaults.
+Layered Config System:
+- config.yml: Merged output (default + user + forced) - READ for display values
+- user.yml: User overrides only - WRITE changes here
+- Form shows values from config.yml, but only saves changed values to user.yml
 """
+import os
+import yaml
+from copy import deepcopy
 from pydantic import BaseModel, Field
+
+
+# ============================================================================
+# Config File Loading
+# ============================================================================
+
+def load_yaml_file(path):
+    """Load YAML file, return empty dict if missing."""
+    if not os.path.exists(path):
+        return {}
+    with open(path) as f:
+        return yaml.safe_load(f) or {}
+
+
+def save_yaml_file(path, data):
+    """Save data to YAML file (atomic write)."""
+    import tempfile
+    config_dir = os.path.dirname(path)
+    os.makedirs(config_dir, exist_ok=True)
+
+    fd, tmp_path = tempfile.mkstemp(dir=config_dir)
+    with os.fdopen(fd, 'w') as f:
+        yaml.dump(data, f, default_flow_style=False, sort_keys=False)
+    os.chmod(tmp_path, 0o644)
+    os.rename(tmp_path, path)
+
+
+def deep_merge(base, override):
+    """
+    Deep merge override into base (modifies base in place).
+    - Dicts are merged recursively
+    - Other values are replaced
+    """
+    for key, value in override.items():
+        if key in base and isinstance(base[key], dict) and isinstance(value, dict):
+            deep_merge(base[key], value)
+        else:
+            base[key] = deepcopy(value)
+    return base
+
+
+def get_nested_value(data, path):
+    """Get value from nested dict using dot-separated path."""
+    keys = path.split('.')
+    current = data
+    for key in keys:
+        if not isinstance(current, dict) or key not in current:
+            return None
+        current = current[key]
+    return current
+
+
+def set_nested_value(data, path, value):
+    """Set value in nested dict using dot-separated path."""
+    keys = path.split('.')
+    current = data
+    for key in keys[:-1]:
+        if key not in current:
+            current[key] = {}
+        current = current[key]
+    current[keys[-1]] = value
+
+
+def values_differ(val1, val2):
+    """Check if two values are different (for change tracking)."""
+    # Handle None vs missing
+    if val1 is None and val2 is None:
+        return False
+    if val1 is None or val2 is None:
+        return True
+    # Compare values (handle float comparison)
+    if isinstance(val1, float) or isinstance(val2, float):
+        try:
+            return abs(float(val1) - float(val2)) > 1e-9
+        except (TypeError, ValueError):
+            return val1 != val2
+    return val1 != val2
 
 
 # ============================================================================

@@ -8,7 +8,8 @@ import yaml
 from pydantic import ValidationError
 from config_schema import (
     AdsbTruthConfig, Tar1090Config,
-    CaptureFormConfig, LocationFormConfig
+    CaptureFormConfig, LocationFormConfig,
+    load_yaml_file, save_yaml_file, values_differ
 )
 from form_utils import schema_to_form_fields
 
@@ -17,6 +18,7 @@ app = Flask(__name__)
 # Configurable paths - override via environment for local dev
 DATA_DIR = os.environ.get('DATA_DIR', '/data/retina-gui')
 USER_CONFIG_PATH = os.environ.get('USER_CONFIG_PATH', '/data/retina-node/config/user.yml')
+MERGED_CONFIG_PATH = os.environ.get('MERGED_CONFIG_PATH', '/data/retina-node/config/config.yml')
 RETINA_NODE_PATH = os.environ.get('RETINA_NODE_PATH', '/data/mender-app/retina-node/manifests')
 
 AUTH_KEYS_FILE = os.path.join(DATA_DIR, "authorized_keys")
@@ -103,7 +105,18 @@ def remove_ssh_key(key_to_remove):
 
 
 # ============================================================================
-# Config Management
+# Config Management - Layered Config System
+# ============================================================================
+#
+# Layered config flow:
+#   default.yml -> user.yml -> forced.yml -> config.yml (merged)
+#
+# This GUI:
+#   - READS from config.yml (merged) to show actual running values
+#   - WRITES to user.yml (only values that differ from merged config)
+#
+# This way users see what's actually running, but we don't bloat user.yml
+# with defaults they didn't explicitly set.
 # ============================================================================
 
 def is_retina_node_installed():
@@ -111,24 +124,19 @@ def is_retina_node_installed():
     return os.path.exists(os.path.join(RETINA_NODE_PATH, 'docker-compose.yaml'))
 
 
+def load_merged_config():
+    """Load merged config.yml (what's actually running)."""
+    return load_yaml_file(MERGED_CONFIG_PATH)
+
+
 def load_user_config():
-    """Load user config from YAML file."""
-    if not os.path.exists(USER_CONFIG_PATH):
-        return {}
-    with open(USER_CONFIG_PATH) as f:
-        return yaml.safe_load(f) or {}
+    """Load user.yml (user overrides only)."""
+    return load_yaml_file(USER_CONFIG_PATH)
 
 
 def save_user_config(config):
-    """Save user config to YAML file (atomic write)."""
-    config_dir = os.path.dirname(USER_CONFIG_PATH)
-    os.makedirs(config_dir, exist_ok=True)
-
-    fd, tmp_path = tempfile.mkstemp(dir=config_dir)
-    with os.fdopen(fd, 'w') as f:
-        yaml.dump(config, f, default_flow_style=False, sort_keys=False)
-    os.chmod(tmp_path, 0o644)
-    os.rename(tmp_path, USER_CONFIG_PATH)
+    """Save user overrides to user.yml."""
+    save_yaml_file(USER_CONFIG_PATH, config)
 
 
 def flatten_capture_for_form(nested):
@@ -206,7 +214,8 @@ def unflatten_location_from_form(flat):
 def index():
     """Home page with node ID, services, and SSH keys."""
     keys = get_ssh_keys()
-    config = load_user_config()
+    # Read from merged config to show actual running values
+    config = load_merged_config()
 
     # Get node_id from config
     node_id = config.get('network', {}).get('node_id')
@@ -241,8 +250,12 @@ def parse_tar1090_adsb_source(config):
 
 @app.route("/config")
 def config_page():
-    """Configuration page with all settings."""
-    config = load_user_config()
+    """Configuration page with all settings.
+
+    Reads from merged config.yml to display actual running values.
+    """
+    # Read merged config for display (actual running values)
+    config = load_merged_config()
     retina_installed = is_retina_node_installed()
 
     # Generate form fields from Pydantic schemas
@@ -329,10 +342,14 @@ def parse_flat_form_data(form_data):
             tar1090[key[8:]] = parsed  # Remove 'tar1090.' prefix
 
     # Handle unchecked checkboxes (they don't get submitted)
-    if 'device_dabNotch' not in capture:
-        capture['device_dabNotch'] = False
-    if 'device_rfNotch' not in capture:
-        capture['device_rfNotch'] = False
+    # Only add checkbox defaults if there's other capture data (not just checkboxes)
+    capture_has_data = any(k not in ('device_dabNotch', 'device_rfNotch') for k in capture)
+    if capture_has_data:
+        if 'device_dabNotch' not in capture:
+            capture['device_dabNotch'] = False
+        if 'device_rfNotch' not in capture:
+            capture['device_rfNotch'] = False
+
     if truth and 'enabled' not in truth:
         truth['enabled'] = False
     if tar1090 and 'adsblol_fallback' not in tar1090:
@@ -341,9 +358,63 @@ def parse_flat_form_data(form_data):
     return capture, location, truth, tar1090
 
 
+def compute_user_overrides(submitted_nested, merged_config, existing_user_config, section_key):
+    """
+    Compare submitted values against merged config, return only values that differ.
+
+    This implements Option C: only write to user.yml values that the user explicitly
+    changed from the defaults/merged config.
+
+    Args:
+        submitted_nested: The nested dict from form submission
+        merged_config: The current merged config.yml
+        existing_user_config: Current user.yml content
+        section_key: The top-level section key (e.g., 'capture', 'location')
+
+    Returns:
+        Dict with only the values that differ from merged config, or None if no changes
+    """
+    merged_section = merged_config.get(section_key, {}) or {}
+    existing_section = existing_user_config.get(section_key, {}) or {}
+
+    def find_changes(submitted, merged, existing):
+        """Recursively find changed values."""
+        changes = {}
+        for key, submitted_val in submitted.items():
+            merged_val = merged.get(key) if merged else None
+            existing_val = existing.get(key) if existing else None
+
+            if isinstance(submitted_val, dict):
+                # Recurse into nested dicts
+                nested_changes = find_changes(
+                    submitted_val,
+                    merged_val if isinstance(merged_val, dict) else {},
+                    existing_val if isinstance(existing_val, dict) else {}
+                )
+                if nested_changes:
+                    changes[key] = nested_changes
+            else:
+                # Check if value differs from merged config
+                if values_differ(submitted_val, merged_val):
+                    # User changed this value - add to overrides
+                    changes[key] = submitted_val
+                elif existing_val is not None and not values_differ(existing_val, submitted_val):
+                    # Value was already in user.yml and hasn't changed - keep it
+                    changes[key] = submitted_val
+
+        return changes
+
+    changes = find_changes(submitted_nested, merged_section, existing_section)
+    return changes if changes else None
+
+
 @app.route("/config/save", methods=["POST"])
 def save_config():
-    """Save config form data to user.yml."""
+    """Save config form data to user.yml.
+
+    Only writes values that differ from the merged config (Option C).
+    This keeps user.yml clean with just the user's explicit overrides.
+    """
     # Parse flat form data into section dicts
     capture_flat, location_flat, truth_data, tar1090_data = parse_flat_form_data(request.form.to_dict())
 
@@ -393,25 +464,50 @@ def save_config():
     location_nested = unflatten_location_from_form(location_flat)
 
     # Join tar1090 adsb_source fields
+    tar1090_nested = {}
     if tar1090_data:
         host = tar1090_data.pop('adsb_source_host', '')
         port = tar1090_data.pop('adsb_source_port', '')
         protocol = tar1090_data.pop('adsb_source_protocol', '')
         if host or port or protocol:
-            tar1090_data['adsb_source'] = f"{host},{port},{protocol}"
+            tar1090_nested['adsb_source'] = f"{host},{port},{protocol}"
+        tar1090_nested.update(tar1090_data)
 
-    # Load existing config and merge (preserves fields not in form)
-    existing = load_user_config()
+    # Load merged config (for comparison) and existing user config
+    merged_config = load_merged_config()
+    existing_user = load_user_config()
+
+    # Compute overrides - only save values that differ from merged config
+    new_user_config = {}
+
+    # Preserve fields not managed by this form (e.g., network.node_id, process, save)
+    for key in existing_user:
+        if key not in ('capture', 'location', 'truth', 'tar1090'):
+            new_user_config[key] = existing_user[key]
+
+    # Compute and add overrides for each section
     if capture_flat:
-        existing['capture'] = capture_nested
-    if location_flat:
-        existing['location'] = location_nested
-    if truth_data:
-        existing['truth'] = {'adsb': truth_data}
-    if tar1090_data:
-        existing['tar1090'] = tar1090_data
+        capture_overrides = compute_user_overrides(capture_nested, merged_config, existing_user, 'capture')
+        if capture_overrides:
+            new_user_config['capture'] = capture_overrides
 
-    save_user_config(existing)
+    if location_flat:
+        location_overrides = compute_user_overrides(location_nested, merged_config, existing_user, 'location')
+        if location_overrides:
+            new_user_config['location'] = location_overrides
+
+    if truth_data:
+        truth_nested = {'adsb': truth_data}
+        truth_overrides = compute_user_overrides(truth_nested, merged_config, existing_user, 'truth')
+        if truth_overrides:
+            new_user_config['truth'] = truth_overrides
+
+    if tar1090_nested:
+        tar1090_overrides = compute_user_overrides(tar1090_nested, merged_config, existing_user, 'tar1090')
+        if tar1090_overrides:
+            new_user_config['tar1090'] = tar1090_overrides
+
+    save_user_config(new_user_config)
     return redirect(url_for("config_page") + "?saved=1")
 
 
