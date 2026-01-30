@@ -11,8 +11,9 @@
 
         <div class="card mb-4">
             <div class="card-body">
-                <span class="text-muted">Node ID:</span>
-                <strong class="ms-2">{{ node_id or 'Unknown' }}</strong>
+                <div><span class="text-muted">Node ID:</span> <strong>{{ node_id or 'Unknown' }}</strong></div>
+                <div><span class="text-muted">owl-os:</span> <strong>{{ owl_os_version or 'Unknown' }}</strong></div>
+                <div><span class="text-muted">retina-node:</span> <strong>{{ retina_node_version or 'Not installed' }}</strong></div>
             </div>
         </div>
 

@@ -31,6 +31,38 @@ VALID_KEY_TYPES = (
 )
 
 
+def get_mender_versions():
+    """Get owl-os and retina-node versions from Mender provides.
+
+    Returns (owl_os_version, retina_node_version) tuple.
+    - owl_os_version: Version string or None if not available
+    - retina_node_version: Version string or None if not yet installed via OTA
+
+    On fresh bootstrap, only owl-os version exists. retina-node version
+    appears after the first app OTA update.
+    """
+    try:
+        result = subprocess.run(
+            ['mender-update', 'show-provides'],
+            capture_output=True, text=True, timeout=5
+        )
+        if result.returncode != 0:
+            return None, None
+        owl_os = None
+        retina_node = None
+        for line in result.stdout.splitlines():
+            if line.startswith('rootfs-image.owl-os-pi5.version='):
+                owl_os = line.split('=', 1)[1]
+            elif line.startswith('rootfs-image.retina-node.version='):
+                retina_node = line.split('=', 1)[1]
+        return owl_os, retina_node
+    except FileNotFoundError:
+        # mender-update not installed (dev environment)
+        return None, None
+    except Exception:
+        return None, None
+
+
 def is_valid_ssh_key(key):
     """Validate SSH public key format."""
     # No newlines (prevents injection of extra keys)
@@ -220,9 +252,14 @@ def index():
     # Get node_id from config
     node_id = config.get('network', {}).get('node_id')
 
+    # Get software versions from Mender
+    owl_os_version, retina_node_version = get_mender_versions()
+
     return render_template("index.html",
                            ssh_keys=keys,
-                           node_id=node_id)
+                           node_id=node_id,
+                           owl_os_version=owl_os_version,
+                           retina_node_version=retina_node_version)
 
 
 def parse_tar1090_adsb_source(config):
