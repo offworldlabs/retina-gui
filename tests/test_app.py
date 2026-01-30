@@ -48,6 +48,68 @@ class TestIndexRoute:
         assert b'SSH Access' in response.data
         assert b'Add Key' in response.data
 
+    def test_index_shows_version_labels(self, app_client):
+        """Index should show owl-os and retina-node version labels."""
+        response = app_client.get('/')
+        assert response.status_code == 200
+        assert b'owl-os:' in response.data
+        assert b'retina-node:' in response.data
+
+
+class TestMenderVersions:
+    """Test get_mender_versions() function."""
+
+    def test_versions_parsed_correctly(self):
+        """Should parse owl-os and retina-node versions from mender output."""
+        from app import get_mender_versions
+        mock_output = """rootfs-image.version=v0.5.0
+rootfs-image.owl-os-pi5.version=v0.5.0
+rootfs-image.retina-node.version=v0.3.2
+artifact_name=owl-os-pi5-v0.5.0"""
+
+        with patch('subprocess.run') as mock_run:
+            mock_run.return_value = MagicMock(returncode=0, stdout=mock_output)
+            owl_os, retina_node = get_mender_versions()
+
+        assert owl_os == 'v0.5.0'
+        assert retina_node == 'v0.3.2'
+
+    def test_retina_node_not_installed(self):
+        """Should return None for retina-node if not in mender output."""
+        from app import get_mender_versions
+        mock_output = """rootfs-image.version=v0.5.0
+rootfs-image.owl-os-pi5.version=v0.5.0
+artifact_name=owl-os-pi5-v0.5.0"""
+
+        with patch('subprocess.run') as mock_run:
+            mock_run.return_value = MagicMock(returncode=0, stdout=mock_output)
+            owl_os, retina_node = get_mender_versions()
+
+        assert owl_os == 'v0.5.0'
+        assert retina_node is None
+
+    def test_mender_not_available(self):
+        """Should return None, None if mender-update not found."""
+        from app import get_mender_versions
+
+        with patch('subprocess.run') as mock_run:
+            mock_run.side_effect = FileNotFoundError()
+            owl_os, retina_node = get_mender_versions()
+
+        assert owl_os is None
+        assert retina_node is None
+
+    def test_mender_command_fails(self):
+        """Should return None, None if mender-update returns error."""
+        from app import get_mender_versions
+
+        with patch('subprocess.run') as mock_run:
+            mock_run.return_value = MagicMock(returncode=1, stdout='', stderr='error')
+            owl_os, retina_node = get_mender_versions()
+
+        assert owl_os is None
+        assert retina_node is None
+
 
 class TestConfigPageRoute:
     """Test the config page (/config)."""
