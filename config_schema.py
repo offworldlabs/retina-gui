@@ -101,7 +101,7 @@ class CaptureFormConfig(BaseModel):
     """Flat capture config for form display."""
     fs: int = Field(title="Sample Rate", description="Hz")
     fc: int = Field(title="Center Frequency", description="Hz")
-    device_type: str = Field(title="Device Type")
+    device_type: str = Field(title="Device Type", json_schema_extra={'readonly': True})
     device_agcSetPoint: int = Field(le=0, title="AGC Set Point", description="dBFS")
     device_gainReduction: int = Field(ge=20, le=59, title="Gain Reduction", description="20-59 dB, higher=less gain")
     device_lnaState: int = Field(ge=1, le=9, title="LNA State", description="1=max gain, 9=min gain")

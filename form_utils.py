@@ -85,12 +85,17 @@ def schema_to_form_fields(model_class, values: dict):
             })
         else:
             constraints = get_field_constraints(field_info)
+            # Check for readonly in json_schema_extra
+            readonly = False
+            if field_info.json_schema_extra and isinstance(field_info.json_schema_extra, dict):
+                readonly = field_info.json_schema_extra.get('readonly', False)
             fields.append({
                 'name': name,
                 'title': field_info.title or name,
                 'description': field_info.description,
                 'type': get_field_input_type(field_info),
                 'value': values.get(name),  # From user.yml, NOT schema default
+                'readonly': readonly,
                 **constraints,
             })
     return fields

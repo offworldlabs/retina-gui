@@ -224,3 +224,20 @@ class TestSchemaToFormFields:
         assert delay_field['type'] == 'number'
         assert delay_field['value'] == 2.0
         assert delay_field.get('step') == 'any'
+
+    def test_readonly_field(self):
+        """Fields with readonly=True should have readonly in output."""
+        values = {'fs': 4000000, 'device_type': 'RspDuo'}
+        fields = schema_to_form_fields(CaptureFormConfig, values)
+
+        # device_type has readonly=True in schema
+        type_field = next(f for f in fields if f['name'] == 'device_type')
+        assert type_field.get('readonly') is True
+
+        # fs does not have readonly
+        fs_field = next(f for f in fields if f['name'] == 'fs')
+        assert fs_field.get('readonly') is False
+
+        # dabNotch does not have readonly
+        dab_field = next(f for f in fields if f['name'] == 'device_dabNotch')
+        assert dab_field.get('readonly') is False

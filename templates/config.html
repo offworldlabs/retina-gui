@@ -37,8 +37,10 @@
                 <div class="mb-2">
                     <div class="form-check">
                         <input type="checkbox" name="{{ field_name }}" class="form-check-input"
-                               id="{{ field_id }}" {% if field.value %}checked{% endif %}>
-                        <label class="form-check-label" for="{{ field_id }}">{{ field.title }}</label>
+                               id="{{ field_id }}" {% if field.value %}checked{% endif %}
+                               {% if field.readonly %}disabled{% endif %}>
+                        <label class="form-check-label{% if field.readonly %} text-muted{% endif %}" for="{{ field_id }}">{{ field.title }}</label>
+                        {% if field.readonly %}<input type="hidden" name="{{ field_name }}" value="{{ 'on' if field.value else '' }}">{% endif %}
                     </div>
                     {% if field_error %}
                     <div class="text-danger small">{{ field_error }}</div>
@@ -46,17 +48,18 @@
                 </div>
             {% else %}
                 <div class="mb-2">
-                    <label class="form-label" for="{{ field_id }}">
+                    <label class="form-label{% if field.readonly %} text-muted{% endif %}" for="{{ field_id }}">
                         {{ field.title }}
                         {% if field.description %}<small class="text-muted">({{ field.description }})</small>{% endif %}
                     </label>
                     <input type="{{ field.type }}" name="{{ field_name }}"
-                           class="form-control{% if field_error %} is-invalid{% endif %}"
+                           class="form-control{% if field_error %} is-invalid{% endif %}{% if field.readonly %} bg-light text-muted{% endif %}"
                            id="{{ field_id }}"
                            value="{{ field.value if field.value is not none else '' }}"
                            {% if field.step is defined and field.step is not none %}step="{{ field.step }}"{% endif %}
                            {% if field.min is defined and field.min is not none %}min="{{ field.min }}"{% endif %}
-                           {% if field.max is defined and field.max is not none %}max="{{ field.max }}"{% endif %}>
+                           {% if field.max is defined and field.max is not none %}max="{{ field.max }}"{% endif %}
+                           {% if field.readonly %}readonly{% endif %}>
                     <div class="invalid-feedback">{{ field_error or '' }}</div>
                 </div>
             {% endif %}
