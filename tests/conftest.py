@@ -198,11 +198,19 @@ def app_client(temp_dir, config_files, test_manifests_dir):
     """Create Flask test client with layered config environment."""
     user_path, merged_path = config_files
 
+    # Create node_id file (simulates mender-device-identity output)
+    mender_dir = os.path.join(temp_dir, 'mender')
+    os.makedirs(mender_dir, exist_ok=True)
+    node_id_file = os.path.join(mender_dir, 'node_id')
+    with open(node_id_file, 'w') as f:
+        f.write('ret7dd2cb0d')
+
     # Set environment variables before importing app
     os.environ['DATA_DIR'] = temp_dir
     os.environ['USER_CONFIG_PATH'] = user_path
     os.environ['MERGED_CONFIG_PATH'] = merged_path
     os.environ['RETINA_NODE_PATH'] = test_manifests_dir
+    os.environ['NODE_ID_FILE'] = node_id_file
 
     # Import app after setting env vars (reload to pick up new paths)
     import importlib
@@ -222,10 +230,18 @@ def app_client_no_retina(temp_dir, config_files):
     os.makedirs(manifests_dir, exist_ok=True)
     # No docker-compose.yaml = retina-node not installed
 
+    # Create node_id file
+    mender_dir = os.path.join(temp_dir, 'mender')
+    os.makedirs(mender_dir, exist_ok=True)
+    node_id_file = os.path.join(mender_dir, 'node_id')
+    with open(node_id_file, 'w') as f:
+        f.write('ret7dd2cb0d')
+
     os.environ['DATA_DIR'] = temp_dir
     os.environ['USER_CONFIG_PATH'] = user_path
     os.environ['MERGED_CONFIG_PATH'] = merged_path
     os.environ['RETINA_NODE_PATH'] = manifests_dir
+    os.environ['NODE_ID_FILE'] = node_id_file
 
     import importlib
     import app as app_module
@@ -238,13 +254,17 @@ def app_client_no_retina(temp_dir, config_files):
 
 @pytest.fixture
 def app_client_no_node_id(temp_dir, config_files_no_node_id, test_manifests_dir):
-    """Create Flask test client with config missing node_id."""
+    """Create Flask test client without node_id file."""
     user_path, merged_path = config_files_no_node_id
+
+    # Point to non-existent node_id file
+    node_id_file = os.path.join(temp_dir, 'nonexistent', 'node_id')
 
     os.environ['DATA_DIR'] = temp_dir
     os.environ['USER_CONFIG_PATH'] = user_path
     os.environ['MERGED_CONFIG_PATH'] = merged_path
     os.environ['RETINA_NODE_PATH'] = test_manifests_dir
+    os.environ['NODE_ID_FILE'] = node_id_file
 
     import importlib
     import app as app_module
