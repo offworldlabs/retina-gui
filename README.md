@@ -6,7 +6,7 @@ Lightweight web GUI for Retina radar nodes.
 
 - Service links (blah2, tar1090, adsb2dd)
 - SSH public key management
-- Future: config editing
+- Config editing
 
 ## Tech Stack
 
