@@ -13,6 +13,7 @@ from config_schema import (
     load_yaml_file, save_yaml_file, values_differ
 )
 from form_utils import schema_to_form_fields
+from mender import MenderClient, find_latest_stable
 
 app = Flask(__name__)
 
@@ -25,8 +26,12 @@ NODE_ID_FILE = os.environ.get('NODE_ID_FILE', '/data/mender/node_id')
 
 AUTH_KEYS_FILE = os.path.join(DATA_DIR, "authorized_keys")
 
-# Mender configuration for device-initiated OTA
-MENDER_SERVER_URL = os.environ.get('MENDER_SERVER_URL', 'https://hosted.mender.io')
+# Mender client for device-initiated OTA
+mender = MenderClient(
+    server_url=os.environ.get('MENDER_SERVER_URL', 'https://hosted.mender.io'),
+    release_name=os.environ.get('MENDER_RELEASE_NAME', 'retina-node'),
+    device_type=os.environ.get('MENDER_DEVICE_TYPE', 'pi5-v3-arm64'),
+)
 
 # Valid SSH key types (exact match to prevent prefix tricks)
 VALID_KEY_TYPES = (
@@ -34,38 +39,6 @@ VALID_KEY_TYPES = (
     'ecdsa-sha2-nistp256', 'ecdsa-sha2-nistp384', 'ecdsa-sha2-nistp521',
     'sk-ssh-ed25519@openssh.com', 'sk-ecdsa-sha2-nistp256@openssh.com'
 )
-
-
-def get_mender_versions():
-    """Get owl-os and retina-node versions from Mender provides.
-
-    Returns (owl_os_version, retina_node_version) tuple.
-    - owl_os_version: Version string or None if not available
-    - retina_node_version: Version string or None if not yet installed via OTA
-
-    On fresh bootstrap, only owl-os version exists. retina-node version
-    appears after the first app OTA update.
-    """
-    try:
-        result = subprocess.run(
-            ['mender-update', 'show-provides'],
-            capture_output=True, text=True, timeout=5
-        )
-        if result.returncode != 0:
-            return None, None
-        owl_os = None
-        retina_node = None
-        for line in result.stdout.splitlines():
-            if line.startswith('rootfs-image.owl-os-pi5.version='):
-                owl_os = line.split('=', 1)[1]
-            elif line.startswith('rootfs-image.retina-node.version='):
-                retina_node = line.split('=', 1)[1]
-        return owl_os, retina_node
-    except FileNotFoundError:
-        # mender-update not installed (dev environment)
-        return None, None
-    except Exception:
-        return None, None
 
 
 def get_node_id():
@@ -86,129 +59,6 @@ def get_node_id():
     except Exception as e:
         app.logger.warning(f"Could not read node_id from {NODE_ID_FILE}: {e}")
     return 'Unknown'
-
-
-def get_mender_jwt():
-    """Get device's Mender JWT token via D-Bus from mender-auth.
-
-    Returns (token, server_url) tuple, or (None, None) if not authenticated.
-    """
-    try:
-        result = subprocess.run(
-            ['busctl', 'call', 'io.mender.AuthenticationManager',
-             '/io/mender/AuthenticationManager', 'io.mender.Authentication1',
-             'GetJwtToken'],
-            capture_output=True, text=True, timeout=5
-        )
-        if result.returncode != 0:
-            return None, None
-
-        # Output format: ss "token" "server_url"
-        # Parse the two quoted strings
-        output = result.stdout.strip()
-        if not output.startswith('ss '):
-            return None, None
-
-        # Extract the two quoted strings
-        parts = output[3:].split('" "')
-        if len(parts) != 2:
-            return None, None
-
-        token = parts[0].strip('"')
-        server_url = parts[1].strip('"')
-        return token, server_url
-    except Exception:
-        return None, None
-
-
-def parse_retina_node_version(artifact_name):
-    """Extract version tuple from 'retina-node-v0.3.2' format.
-
-    Returns version tuple (0, 3, 2) for stable releases, None for
-    release candidates or non-matching names.
-    """
-    match = re.match(r'^retina-node-v(\d+)\.(\d+)\.(\d+)$', artifact_name)
-    if match:
-        return tuple(int(x) for x in match.groups())
-    return None
-
-
-def get_available_artifacts():
-    """List artifacts available for this device from Mender."""
-    token, server_url = get_mender_jwt()
-    if not token:
-        return None, "Device not authenticated with Mender"
-
-    try:
-        resp = requests.get(
-            f"{MENDER_SERVER_URL}/api/devices/v1/deployments/artifacts",
-            headers={"Authorization": f"Bearer {token}"},
-            timeout=30
-        )
-        if resp.status_code != 200:
-            return None, f"Mender API error: {resp.status_code}"
-        return resp.json(), None
-    except requests.RequestException as e:
-        return None, str(e)
-
-
-def find_latest_retina_node_artifact(artifacts):
-    """Find the latest stable retina-node artifact.
-
-    Filters out release candidates (rc1, rc2, etc.) and returns the
-    artifact with the highest semver version.
-    """
-    stable = []
-    for artifact in artifacts:
-        name = artifact.get('artifact_name', '')
-        version = parse_retina_node_version(name)
-        if version:
-            stable.append((artifact, version))
-
-    if not stable:
-        return None
-
-    # Sort by version tuple descending, return highest
-    stable.sort(key=lambda x: x[1], reverse=True)
-    return stable[0][0]
-
-
-def install_artifact(artifact_id):
-    """Download and install artifact via mender-update."""
-    token, server_url = get_mender_jwt()
-    if not token:
-        return False, "Device not authenticated with Mender"
-
-    try:
-        # Get download URL for artifact
-        resp = requests.get(
-            f"{MENDER_SERVER_URL}/api/devices/v1/deployments/artifacts/{artifact_id}/download",
-            headers={"Authorization": f"Bearer {token}"},
-            timeout=30
-        )
-        if resp.status_code != 200:
-            return False, f"Failed to get download URL: {resp.status_code}"
-
-        download_url = resp.json().get('uri')
-        if not download_url:
-            return False, "No download URL in response"
-
-        # Install via mender-update
-        result = subprocess.run(
-            ['mender-update', 'install', download_url],
-            capture_output=True, text=True, timeout=600  # 10 min timeout
-        )
-
-        if result.returncode != 0:
-            return False, result.stderr or "Install failed"
-
-        return True, None
-    except subprocess.TimeoutExpired:
-        return False, "Installation timed out"
-    except requests.RequestException as e:
-        return False, str(e)
-    except Exception as e:
-        return False, str(e)
 
 
 def is_valid_ssh_key(key):
@@ -399,7 +249,7 @@ def index():
     node_id = get_node_id()
 
     # Get software versions from Mender
-    owl_os_version, retina_node_version = get_mender_versions()
+    owl_os_version, retina_node_version = mender.get_versions()
 
     return render_template("index.html",
                            ssh_keys=keys,
@@ -741,26 +591,31 @@ def apply_config():
 def mender_install():
     """Install latest stable retina-node artifact from Mender."""
     # Check if already installed
-    _, retina_node_version = get_mender_versions()
+    _, retina_node_version = mender.get_versions()
     if retina_node_version:
         return jsonify({"success": False, "error": "Already installed"})
 
-    # Get available artifacts
-    artifacts, error = get_available_artifacts()
+    # List available artifacts
+    artifacts, error = mender.list_artifacts()
     if error:
         return jsonify({"success": False, "error": error})
 
-    # Find latest stable retina-node artifact
-    artifact = find_latest_retina_node_artifact(artifacts)
+    # Find latest stable
+    artifact = find_latest_stable(artifacts)
     if not artifact:
-        return jsonify({"success": False, "error": "No stable retina-node artifact found"})
+        return jsonify({"success": False, "error": "No stable artifact found"})
 
-    # Install it
-    success, error = install_artifact(artifact['id'])
+    # Get download URL
+    url, error = mender.get_download_url(artifact["id"])
+    if error:
+        return jsonify({"success": False, "error": error})
+
+    # Install
+    success, error = mender.install_from_url(url)
     if not success:
         return jsonify({"success": False, "error": error})
 
-    return jsonify({"success": True})
+    return jsonify({"success": True, "installed_version": artifact.get("artifact_name")})
 
 
 if __name__ == "__main__":
