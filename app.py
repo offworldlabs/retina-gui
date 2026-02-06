@@ -13,7 +13,7 @@ from config_schema import (
     load_yaml_file, save_yaml_file, values_differ
 )
 from form_utils import schema_to_form_fields
-from mender import MenderClient, find_latest_stable
+from mender import MenderClient, get_latest_stable_from_github
 
 app = Flask(__name__)
 
@@ -595,15 +595,21 @@ def mender_install():
     if retina_node_version:
         return jsonify({"success": False, "error": "Already installed"})
 
-    # List available artifacts
-    artifacts, error = mender.list_artifacts()
+    # Get latest stable version from GitHub releases
+    version_tag, error = get_latest_stable_from_github()
+    if error:
+        return jsonify({"success": False, "error": f"Failed to get version: {error}"})
+
+    # Query Mender for that specific release
+    release_name = f"retina-node-{version_tag}"
+    artifacts, error = mender.list_artifacts(release_name=release_name)
     if error:
         return jsonify({"success": False, "error": error})
 
-    # Find latest stable
-    artifact = find_latest_stable(artifacts)
-    if not artifact:
-        return jsonify({"success": False, "error": "No stable artifact found"})
+    if not artifacts:
+        return jsonify({"success": False, "error": f"No artifact found for {release_name}"})
+
+    artifact = artifacts[0]  # Should be exactly one for this release/device
 
     # Get download URL
     url, error = mender.get_download_url(artifact["id"])
@@ -615,7 +621,7 @@ def mender_install():
     if not success:
         return jsonify({"success": False, "error": error})
 
-    return jsonify({"success": True, "installed_version": artifact.get("artifact_name")})
+    return jsonify({"success": True, "installed_version": release_name})
 
 
 if __name__ == "__main__":
