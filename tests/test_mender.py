@@ -1,6 +1,7 @@
 """Tests for mender.py - version parsing and artifact selection."""
+from unittest.mock import patch, Mock
 import pytest
-from mender import parse_version, find_latest_stable
+from mender import parse_version, find_latest_stable, get_latest_stable_from_github
 
 
 class TestParseVersion:
@@ -105,3 +106,76 @@ class TestFindLatestStable:
         ]
         result = find_latest_stable(artifacts)
         assert result["id"] == "b"
+
+
+class TestGetLatestStableFromGitHub:
+    """GitHub releases version discovery."""
+
+    @patch("mender.requests.get")
+    def test_finds_latest_stable(self, mock_get):
+        mock_response = Mock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = [
+            {"tag_name": "v0.3.5"},
+            {"tag_name": "v0.3.2"},
+            {"tag_name": "v0.3.6-rc1"},
+        ]
+        mock_get.return_value = mock_response
+
+        version, error = get_latest_stable_from_github()
+        assert version == "v0.3.5"
+        assert error is None
+
+    @patch("mender.requests.get")
+    def test_excludes_rc_and_dev(self, mock_get):
+        mock_response = Mock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = [
+            {"tag_name": "v0.4.0-rc1"},
+            {"tag_name": "v0.4.0-dev"},
+            {"tag_name": "v0.3.5"},
+        ]
+        mock_get.return_value = mock_response
+
+        version, error = get_latest_stable_from_github()
+        assert version == "v0.3.5"
+        assert error is None
+
+    @patch("mender.requests.get")
+    def test_no_stable_releases(self, mock_get):
+        mock_response = Mock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = [
+            {"tag_name": "v0.4.0-rc1"},
+            {"tag_name": "dev"},
+        ]
+        mock_get.return_value = mock_response
+
+        version, error = get_latest_stable_from_github()
+        assert version is None
+        assert error == "No stable releases found"
+
+    @patch("mender.requests.get")
+    def test_api_error(self, mock_get):
+        mock_response = Mock()
+        mock_response.status_code = 403
+        mock_get.return_value = mock_response
+
+        version, error = get_latest_stable_from_github()
+        assert version is None
+        assert "GitHub API error: 403" in error
+
+    @patch("mender.requests.get")
+    def test_semver_sorting(self, mock_get):
+        mock_response = Mock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = [
+            {"tag_name": "v0.9.9"},
+            {"tag_name": "v1.0.0"},
+            {"tag_name": "v0.10.0"},
+        ]
+        mock_get.return_value = mock_response
+
+        version, error = get_latest_stable_from_github()
+        assert version == "v1.0.0"
+        assert error is None

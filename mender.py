@@ -91,8 +91,11 @@ class MenderClient:
         except Exception:
             return None, None
 
-    def list_artifacts(self) -> tuple[list[dict], str | None]:
-        """List artifacts for configured release/device type.
+    def list_artifacts(self, release_name: str | None = None) -> tuple[list[dict], str | None]:
+        """List artifacts for a release/device type.
+
+        Args:
+            release_name: Override the configured release name (e.g., "retina-node-v0.3.5")
 
         Returns (artifacts, error) tuple. On success, error is None.
         """
@@ -100,11 +103,12 @@ class MenderClient:
         if not token:
             return [], "Device not authenticated with Mender"
 
+        name = release_name or self.release_name
         try:
             resp = requests.get(
                 f"{self.server_url}/api/devices/v1/deployments/artifacts",
                 params={
-                    "release_name": self.release_name,
+                    "release_name": name,
                     "device_type": self.device_type,
                 },
                 headers={"Authorization": f"Bearer {token}"},
@@ -188,3 +192,43 @@ def find_latest_stable(artifacts: list[dict]) -> dict | None:
 
     stable.sort(key=lambda x: x[1], reverse=True)
     return stable[0][0]
+
+
+def get_latest_stable_from_github(
+    repo: str = "offworldlabs/retina-node",
+) -> tuple[str | None, str | None]:
+    """Get latest stable version tag from GitHub releases.
+
+    Queries GitHub releases API, filters to stable versions (excludes rc, dev, beta),
+    and returns the highest semver version.
+
+    Returns (version_tag, error) tuple. version_tag is like "v0.3.5".
+    """
+    try:
+        resp = requests.get(
+            f"https://api.github.com/repos/{repo}/releases",
+            headers={"Accept": "application/vnd.github+json"},
+            timeout=30,
+        )
+        if resp.status_code != 200:
+            return None, f"GitHub API error: {resp.status_code}"
+
+        releases = resp.json()
+        # Filter to stable versions using existing parse_version logic
+        stable = []
+        for release in releases:
+            tag = release.get("tag_name", "")
+            # Construct artifact name format for parsing
+            artifact_name = f"retina-node-{tag}"
+            version = parse_version(artifact_name)
+            if version:
+                stable.append((tag, version))
+
+        if not stable:
+            return None, "No stable releases found"
+
+        # Sort by version tuple, highest first
+        stable.sort(key=lambda x: x[1], reverse=True)
+        return stable[0][0], None
+    except requests.RequestException as e:
+        return None, str(e)
