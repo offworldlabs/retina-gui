@@ -14,10 +14,6 @@ Lightweight web GUI for Retina radar nodes.
 - Bootstrap 5 (CDN)
 - systemd service
 
-## Development
-
-See [.plans/001-initial-setup.md](.plans/001-initial-setup.md) for implementation details.
-
 ## Deployment
 
 Deployed as part of owl-os image to `/opt/retina-gui/`, runs as systemd service on port 80.
