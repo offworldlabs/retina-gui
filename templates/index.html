@@ -20,23 +20,122 @@
     </nav>
 
     <div class="container">
+        {% if not retina_node_version %}
+        <div class="alert alert-info mb-4" id="installSection">
+            <h5>Welcome to Retina Node</h5>
+            <p>To get started, install the Retina passive radar stack.</p>
+            <p id="versionInfo" class="text-muted small">Checking for available software...</p>
+
+            <div class="form-check mb-2">
+                <input type="checkbox" class="form-check-input" id="eulaCheck">
+                <label class="form-check-label" for="eulaCheck">
+                    I accept the <a href="/eula" target="_blank">End User License Agreement</a>
+                </label>
+            </div>
+
+            <div class="form-check mb-3">
+                <input type="checkbox" class="form-check-input" id="regionCheck">
+                <label class="form-check-label" for="regionCheck">
+                    This device will be operated in the United States
+                </label>
+            </div>
+
+            <button type="button" class="btn btn-primary" id="installBtn" disabled>
+                Install Software
+            </button>
+            <span id="installStatus" class="ms-2"></span>
+        </div>
+
+        <script>
+        // Check for available version on page load
+        fetch('/mender/check')
+            .then(r => r.json())
+            .then(data => {
+                if (data.installing) {
+                    document.getElementById('versionInfo').textContent =
+                        'Install in progress (' + data.version + ')... Please wait.';
+                    document.getElementById('installBtn').disabled = true;
+                    document.getElementById('installBtn').innerHTML =
+                        '<span class="spinner-border spinner-border-sm"></span> Installing...';
+                } else if (data.error) {
+                    document.getElementById('versionInfo').textContent =
+                        'Unable to check for updates';
+                } else {
+                    document.getElementById('versionInfo').innerHTML =
+                        'Available: <strong>' + data.latest_version + '</strong> (~600MB, takes 5-10 minutes)';
+                }
+            });
+
+        // Enable button only when both checkboxes checked
+        function updateButtonState() {
+            const eula = document.getElementById('eulaCheck').checked;
+            const region = document.getElementById('regionCheck').checked;
+            document.getElementById('installBtn').disabled = !(eula && region);
+        }
+        document.getElementById('eulaCheck').addEventListener('change', updateButtonState);
+        document.getElementById('regionCheck').addEventListener('change', updateButtonState);
+
+        // Install click handler
+        document.getElementById('installBtn').addEventListener('click', function() {
+            const btn = this;
+            const status = document.getElementById('installStatus');
+
+            if (btn.disabled) return;
+
+            btn.disabled = true;
+            btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Installing...';
+            status.innerHTML = '<span class="text-warning">This takes 5-10 minutes. Do not close this page.</span>';
+
+            fetch('/mender/install', { method: 'POST' })
+                .then(r => r.json())
+                .then(data => {
+                    if (data.success) {
+                        status.innerHTML = '<span class="text-success">Installed! Please reboot the device.</span>';
+                        btn.textContent = 'Installed';
+                    } else {
+                        status.innerHTML = '<span class="text-danger">' + data.error + '</span>';
+                        btn.disabled = false;
+                        btn.textContent = 'Install Software';
+                    }
+                })
+                .catch(e => {
+                    status.innerHTML = '<span class="text-danger">Error: ' + e.message + '</span>';
+                    btn.disabled = false;
+                    btn.textContent = 'Install Software';
+                });
+        });
+        </script>
+        {% endif %}
+
         <h4>Services</h4>
         <div class="list-group mb-4">
+            {% if retina_node_version %}
             <a href="http://retina.local:49152" target="_blank" class="list-group-item list-group-item-action">
                 blah2 - Passive Radar
             </a>
             <a href="http://retina.local:8078" target="_blank" class="list-group-item list-group-item-action">
                 tar1090 - ADS-B Map
             </a>
+            {% else %}
+            <span class="list-group-item list-group-item-action disabled text-muted">
+                blah2 - Passive Radar
+            </span>
+            <span class="list-group-item list-group-item-action disabled text-muted">
+                tar1090 - ADS-B Map
+            </span>
+            {% endif %}
         </div>
 
+        {% if retina_node_version %}
         <div class="d-flex gap-2 align-items-center mb-4">
             <button type="button" class="btn btn-outline-secondary" id="applyRestartBtn">
                 Restart Services
             </button>
             <span id="applyRestartStatus"></span>
         </div>
+        {% endif %}
 
+        {% if retina_node_version %}
         <script>
         document.getElementById('applyRestartBtn').addEventListener('click', function() {
             const btn = this;
@@ -69,6 +168,7 @@
                 });
         });
         </script>
+        {% endif %}
 
         <h4 class="mt-4">SSH Access</h4>
         <form action="/ssh-keys" method="post" class="mb-3">
