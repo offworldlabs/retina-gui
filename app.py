@@ -1,8 +1,10 @@
 from flask import Flask, render_template, request, redirect, url_for, jsonify
+import json
 import os
 import re
 import subprocess
 import tempfile
+from datetime import datetime, timedelta
 import yaml
 import requests
 
@@ -32,6 +34,49 @@ mender = MenderClient(
     release_name=os.environ.get('MENDER_RELEASE_NAME', 'retina-node'),
     device_type=os.environ.get('MENDER_DEVICE_TYPE', 'pi5-v3-arm64'),
 )
+
+# Install lock file to prevent concurrent installs
+INSTALL_LOCK_FILE = os.path.join(DATA_DIR, "install.lock")
+
+
+def is_install_locked() -> tuple[bool, dict | None]:
+    """Check if install is in progress.
+
+    Returns (is_locked, lock_info) where lock_info contains version and started_at.
+    Stale locks (>30 min) are automatically cleared.
+    """
+    if not os.path.exists(INSTALL_LOCK_FILE):
+        return False, None
+    try:
+        with open(INSTALL_LOCK_FILE) as f:
+            lock = json.load(f)
+        # Check for stale lock (30 min timeout)
+        started = datetime.fromisoformat(lock["started_at"])
+        if datetime.now() - started > timedelta(minutes=30):
+            os.remove(INSTALL_LOCK_FILE)
+            return False, None
+        return True, lock
+    except Exception:
+        return False, None
+
+
+def acquire_install_lock(version: str) -> bool:
+    """Try to acquire install lock. Returns False if already locked."""
+    locked, _ = is_install_locked()
+    if locked:
+        return False
+    lock = {"version": version, "started_at": datetime.now().isoformat()}
+    os.makedirs(os.path.dirname(INSTALL_LOCK_FILE), exist_ok=True)
+    with open(INSTALL_LOCK_FILE, "w") as f:
+        json.dump(lock, f)
+    return True
+
+
+def release_install_lock():
+    """Release install lock."""
+    if os.path.exists(INSTALL_LOCK_FILE):
+        os.remove(INSTALL_LOCK_FILE)
+
 
 # Valid SSH key types (exact match to prevent prefix tricks)
 VALID_KEY_TYPES = (
@@ -256,6 +301,12 @@ def index():
                            node_id=node_id,
                            owl_os_version=owl_os_version,
                            retina_node_version=retina_node_version)
+
+
+@app.route("/eula")
+def eula():
+    """Display EULA page."""
+    return render_template("eula.html")
 
 
 def parse_tar1090_adsb_source(config):
@@ -587,6 +638,32 @@ def apply_config():
         return jsonify({"success": False, "error": str(e)}), 500
 
 
+@app.route("/mender/check")
+def mender_check():
+    """Check for available updates and install status."""
+    _, current = mender.get_versions()
+
+    # Check if install in progress
+    locked, lock_info = is_install_locked()
+    if locked:
+        return jsonify({
+            "installing": True,
+            "version": lock_info["version"],
+            "started_at": lock_info["started_at"]
+        })
+
+    latest, error = get_latest_stable_from_github()
+    if error:
+        return jsonify({"error": error})
+
+    return jsonify({
+        "installing": False,
+        "latest_version": latest,
+        "current_version": current,
+        "update_available": current is None or latest != current
+    })
+
+
 @app.route("/mender/install", methods=["POST"])
 def mender_install():
     """Install latest stable retina-node artifact from Mender."""
@@ -595,33 +672,48 @@ def mender_install():
     if retina_node_version:
         return jsonify({"success": False, "error": "Already installed"})
 
+    # Check lock
+    locked, lock_info = is_install_locked()
+    if locked:
+        return jsonify({
+            "success": False,
+            "error": f"Install already in progress ({lock_info['version']})"
+        })
+
     # Get latest stable version from GitHub releases
     version_tag, error = get_latest_stable_from_github()
     if error:
         return jsonify({"success": False, "error": f"Failed to get version: {error}"})
 
-    # Query Mender for that specific release
+    # Acquire lock
     release_name = f"retina-node-{version_tag}"
-    artifacts, error = mender.list_artifacts(release_name=release_name)
-    if error:
-        return jsonify({"success": False, "error": error})
+    if not acquire_install_lock(release_name):
+        return jsonify({"success": False, "error": "Install already in progress"})
 
-    if not artifacts:
-        return jsonify({"success": False, "error": f"No artifact found for {release_name}"})
+    try:
+        # Query Mender for that specific release
+        artifacts, error = mender.list_artifacts(release_name=release_name)
+        if error:
+            return jsonify({"success": False, "error": error})
 
-    artifact = artifacts[0]  # Should be exactly one for this release/device
+        if not artifacts:
+            return jsonify({"success": False, "error": f"No artifact found for {release_name}"})
 
-    # Get download URL
-    url, error = mender.get_download_url(artifact["id"])
-    if error:
-        return jsonify({"success": False, "error": error})
+        artifact = artifacts[0]  # Should be exactly one for this release/device
 
-    # Install
-    success, error = mender.install_from_url(url)
-    if not success:
-        return jsonify({"success": False, "error": error})
+        # Get download URL
+        url, error = mender.get_download_url(artifact["id"])
+        if error:
+            return jsonify({"success": False, "error": error})
 
-    return jsonify({"success": True, "installed_version": release_name})
+        # Install
+        success, error = mender.install_from_url(url)
+        if not success:
+            return jsonify({"success": False, "error": error})
+
+        return jsonify({"success": True, "installed_version": release_name})
+    finally:
+        release_install_lock()
 
 
 if __name__ == "__main__":

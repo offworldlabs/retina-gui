@@ -21,16 +21,61 @@
 
     <div class="container">
         {% if not retina_node_version %}
-        <div class="alert alert-info mb-4">
+        <div class="alert alert-info mb-4" id="installSection">
             <h5>Welcome to Retina Node</h5>
-            <p>Click below to download and install the radar software.</p>
-            <button type="button" class="btn btn-primary" id="installBtn">
+            <p>To get started, install the Retina passive radar stack.</p>
+            <p id="versionInfo" class="text-muted small">Checking for available software...</p>
+
+            <div class="form-check mb-2">
+                <input type="checkbox" class="form-check-input" id="eulaCheck">
+                <label class="form-check-label" for="eulaCheck">
+                    I accept the <a href="/eula" target="_blank">End User License Agreement</a>
+                </label>
+            </div>
+
+            <div class="form-check mb-3">
+                <input type="checkbox" class="form-check-input" id="regionCheck">
+                <label class="form-check-label" for="regionCheck">
+                    This device will be operated in the United States
+                </label>
+            </div>
+
+            <button type="button" class="btn btn-primary" id="installBtn" disabled>
                 Install Software
             </button>
             <span id="installStatus" class="ms-2"></span>
         </div>
 
         <script>
+        // Check for available version on page load
+        fetch('/mender/check')
+            .then(r => r.json())
+            .then(data => {
+                if (data.installing) {
+                    document.getElementById('versionInfo').textContent =
+                        'Install in progress (' + data.version + ')... Please wait.';
+                    document.getElementById('installBtn').disabled = true;
+                    document.getElementById('installBtn').innerHTML =
+                        '<span class="spinner-border spinner-border-sm"></span> Installing...';
+                } else if (data.error) {
+                    document.getElementById('versionInfo').textContent =
+                        'Unable to check for updates';
+                } else {
+                    document.getElementById('versionInfo').innerHTML =
+                        'Available: <strong>' + data.latest_version + '</strong> (~600MB, takes 5-10 minutes)';
+                }
+            });
+
+        // Enable button only when both checkboxes checked
+        function updateButtonState() {
+            const eula = document.getElementById('eulaCheck').checked;
+            const region = document.getElementById('regionCheck').checked;
+            document.getElementById('installBtn').disabled = !(eula && region);
+        }
+        document.getElementById('eulaCheck').addEventListener('change', updateButtonState);
+        document.getElementById('regionCheck').addEventListener('change', updateButtonState);
+
+        // Install click handler
         document.getElementById('installBtn').addEventListener('click', function() {
             const btn = this;
             const status = document.getElementById('installStatus');
@@ -39,26 +84,22 @@
 
             btn.disabled = true;
             btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Installing...';
-            status.textContent = 'This may take a few minutes';
-            status.className = 'text-muted';
+            status.innerHTML = '<span class="text-warning">This takes 5-10 minutes. Do not close this page.</span>';
 
             fetch('/mender/install', { method: 'POST' })
                 .then(r => r.json())
                 .then(data => {
                     if (data.success) {
-                        status.className = 'text-success';
-                        status.textContent = 'Installed! Reloading...';
-                        setTimeout(() => location.reload(), 2000);
+                        status.innerHTML = '<span class="text-success">Installed! Please reboot the device.</span>';
+                        btn.textContent = 'Installed';
                     } else {
-                        status.className = 'text-danger';
-                        status.textContent = data.error || 'Installation failed';
+                        status.innerHTML = '<span class="text-danger">' + data.error + '</span>';
                         btn.disabled = false;
                         btn.textContent = 'Install Software';
                     }
                 })
                 .catch(e => {
-                    status.className = 'text-danger';
-                    status.textContent = 'Error: ' + e.message;
+                    status.innerHTML = '<span class="text-danger">Error: ' + e.message + '</span>';
                     btn.disabled = false;
                     btn.textContent = 'Install Software';
                 });
