@@ -84,7 +84,7 @@
 
             btn.disabled = true;
             btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Installing...';
-            status.innerHTML = '<span class="text-warning">This takes 5-10 minutes. Do not close this page.</span>';
+            status.innerHTML = '<span class="text-warning">This takes 5-10 minutes. Ensure device remains powered.</span>';
 
             fetch('/mender/install', { method: 'POST' })
                 .then(r => r.json())
