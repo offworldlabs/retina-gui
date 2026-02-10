@@ -150,6 +150,107 @@
             </div>
         </form>
 
+        <hr class="my-4">
+
+        <h5>Cloud Services</h5>
+        <div class="form-check form-switch mb-2">
+            <input class="form-check-input" type="checkbox" id="cloudServicesToggle" checked>
+            <label class="form-check-label" for="cloudServicesToggle">
+                Enable cloud services
+            </label>
+        </div>
+        <small class="text-muted d-block mb-2">
+            Automatic updates and remote support. When disabled, auth credentials are stored offline.
+        </small>
+        <span id="cloudServicesStatus"></span>
+
+        <!-- Confirmation Modal -->
+        <div class="modal fade" id="disableCloudModal" tabindex="-1">
+            <div class="modal-dialog">
+                <div class="modal-content">
+                    <div class="modal-header">
+                        <h5 class="modal-title">Disable Cloud Services?</h5>
+                        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                    </div>
+                    <div class="modal-body">
+                        <p>This will:</p>
+                        <ul>
+                            <li>Stop automatic software updates</li>
+                            <li>Disable remote support access</li>
+                            <li>Store auth credentials offline</li>
+                        </ul>
+                        <p class="mb-0">You can re-enable at any time.</p>
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                        <button type="button" class="btn btn-warning" id="confirmDisableBtn">Disable</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <script>
+        // Cloud Services toggle
+        (function() {
+            const toggle = document.getElementById('cloudServicesToggle');
+            const status = document.getElementById('cloudServicesStatus');
+
+            // Load current status
+            fetch('/mender/cloud-services')
+                .then(r => r.json())
+                .then(data => {
+                    toggle.checked = data.enabled;
+                })
+                .catch(() => {
+                    toggle.checked = true; // Default to enabled on error
+                });
+
+            // Handle toggle change
+            toggle.addEventListener('change', function() {
+                if (!this.checked) {
+                    // Show confirmation modal for disable
+                    this.checked = true; // Revert until confirmed
+                    const modal = new bootstrap.Modal(document.getElementById('disableCloudModal'));
+                    modal.show();
+                } else {
+                    // Enable directly
+                    setCloudServices(true);
+                }
+            });
+
+            // Confirm disable button
+            document.getElementById('confirmDisableBtn').addEventListener('click', function() {
+                bootstrap.Modal.getInstance(document.getElementById('disableCloudModal')).hide();
+                toggle.checked = false;
+                setCloudServices(false);
+            });
+
+            function setCloudServices(enabled) {
+                status.innerHTML = '<span class="spinner-border spinner-border-sm"></span>';
+
+                fetch('/mender/cloud-services', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({enabled: enabled})
+                })
+                .then(r => r.json())
+                .then(data => {
+                    if (data.success) {
+                        status.innerHTML = '<span class="text-success">Settings applied</span>';
+                        setTimeout(() => status.textContent = '', 3000);
+                    } else {
+                        status.innerHTML = '<span class="text-danger">' + data.error + '</span>';
+                        toggle.checked = !toggle.checked; // Revert on failure
+                    }
+                })
+                .catch(e => {
+                    status.innerHTML = '<span class="text-danger">Error: ' + e.message + '</span>';
+                    toggle.checked = !toggle.checked;
+                });
+            }
+        })();
+        </script>
+
         <script>
         // Auto-apply if we just saved successfully (redirected here with ?saved=1)
         if (window.location.search.includes('saved=1')) {

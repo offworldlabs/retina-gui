@@ -2,6 +2,7 @@ from flask import Flask, render_template, request, redirect, url_for, jsonify
 import json
 import os
 import re
+import shutil
 import subprocess
 import tempfile
 from datetime import datetime, timedelta
@@ -37,6 +38,12 @@ mender = MenderClient(
 
 # Install lock file to prevent concurrent installs
 INSTALL_LOCK_FILE = os.path.join(DATA_DIR, "install.lock")
+
+# Cloud services (Mender) toggle paths
+MENDER_SERVICES = ["mender-authd", "mender-updated", "mender-connect"]
+MENDER_TOKEN_PATH = "/data/mender/authtoken"
+MENDER_TOKEN_BACKUP_DIR = "/data/mender-cloud-disabled"
+MENDER_TOKEN_BACKUP_PATH = os.path.join(MENDER_TOKEN_BACKUP_DIR, "authtoken")
 
 
 def is_install_locked() -> tuple[bool, dict | None]:
@@ -714,6 +721,75 @@ def mender_install():
         return jsonify({"success": True, "installed_version": release_name})
     finally:
         release_install_lock()
+
+
+@app.route("/mender/cloud-services", methods=["GET"])
+def cloud_services_status():
+    """Check if Mender cloud services are enabled."""
+    service_status = {}
+
+    for service in MENDER_SERVICES:
+        try:
+            result = subprocess.run(
+                ["systemctl", "is-active", service],
+                capture_output=True,
+                text=True,
+                timeout=5
+            )
+            service_status[service] = result.returncode == 0
+        except Exception:
+            service_status[service] = False
+
+    # Check if token exists (not backed up)
+    token_exists = os.path.exists(MENDER_TOKEN_PATH)
+    any_service_active = any(service_status.values())
+
+    return jsonify({
+        "enabled": token_exists and any_service_active,
+        "services": service_status
+    })
+
+
+@app.route("/mender/cloud-services", methods=["POST"])
+def cloud_services_toggle():
+    """Enable or disable Mender cloud services."""
+    data = request.get_json()
+    if not data or "enabled" not in data:
+        return jsonify({"success": False, "error": "Missing 'enabled' field"}), 400
+
+    enabled = data["enabled"]
+
+    try:
+        if enabled:
+            # Restore token first (if backed up)
+            if os.path.exists(MENDER_TOKEN_BACKUP_PATH):
+                shutil.move(MENDER_TOKEN_BACKUP_PATH, MENDER_TOKEN_PATH)
+
+            # Enable and start services
+            for service in MENDER_SERVICES:
+                subprocess.run(["systemctl", "enable", service],
+                    capture_output=True, timeout=10)
+                subprocess.run(["systemctl", "start", service],
+                    capture_output=True, timeout=10)
+        else:
+            # Stop and disable services
+            for service in MENDER_SERVICES:
+                subprocess.run(["systemctl", "stop", service],
+                    capture_output=True, timeout=10)
+                subprocess.run(["systemctl", "disable", service],
+                    capture_output=True, timeout=10)
+
+            # Backup token
+            if os.path.exists(MENDER_TOKEN_PATH):
+                os.makedirs(MENDER_TOKEN_BACKUP_DIR, exist_ok=True)
+                shutil.move(MENDER_TOKEN_PATH, MENDER_TOKEN_BACKUP_PATH)
+
+        return jsonify({"success": True})
+
+    except subprocess.TimeoutExpired:
+        return jsonify({"success": False, "error": "Command timed out"}), 500
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
 
 
 if __name__ == "__main__":
