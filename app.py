@@ -41,9 +41,9 @@ INSTALL_LOCK_FILE = os.path.join(DATA_DIR, "install.lock")
 
 # Cloud services (Mender) toggle paths
 MENDER_SERVICES = ["mender-authd", "mender-updated", "mender-connect"]
-MENDER_TOKEN_PATH = "/data/mender/authtoken"
-MENDER_TOKEN_BACKUP_DIR = "/data/mender-cloud-disabled"
-MENDER_TOKEN_BACKUP_PATH = os.path.join(MENDER_TOKEN_BACKUP_DIR, "authtoken")
+MENDER_CONF_PATH = "/data/mender/mender.conf"
+MENDER_CONF_BACKUP_DIR = "/data/mender-cloud-disabled"
+MENDER_CONF_BACKUP_PATH = os.path.join(MENDER_CONF_BACKUP_DIR, "mender.conf")
 
 
 def is_install_locked() -> tuple[bool, dict | None]:
@@ -740,12 +740,12 @@ def cloud_services_status():
         except Exception:
             service_status[service] = False
 
-    # Check if token exists (not backed up)
-    token_exists = os.path.exists(MENDER_TOKEN_PATH)
+    # Check if mender.conf exists (not backed up)
+    conf_exists = os.path.exists(MENDER_CONF_PATH)
     any_service_active = any(service_status.values())
 
     return jsonify({
-        "enabled": token_exists and any_service_active,
+        "enabled": conf_exists and any_service_active,
         "services": service_status
     })
 
@@ -761,9 +761,9 @@ def cloud_services_toggle():
 
     try:
         if enabled:
-            # Restore token first (if backed up)
-            if os.path.exists(MENDER_TOKEN_BACKUP_PATH):
-                shutil.move(MENDER_TOKEN_BACKUP_PATH, MENDER_TOKEN_PATH)
+            # Restore mender.conf first (if backed up)
+            if os.path.exists(MENDER_CONF_BACKUP_PATH):
+                shutil.move(MENDER_CONF_BACKUP_PATH, MENDER_CONF_PATH)
 
             # Enable and start services
             for service in MENDER_SERVICES:
@@ -779,10 +779,10 @@ def cloud_services_toggle():
                 subprocess.run(["systemctl", "disable", service],
                     capture_output=True, timeout=10)
 
-            # Backup token
-            if os.path.exists(MENDER_TOKEN_PATH):
-                os.makedirs(MENDER_TOKEN_BACKUP_DIR, exist_ok=True)
-                shutil.move(MENDER_TOKEN_PATH, MENDER_TOKEN_BACKUP_PATH)
+            # Backup mender.conf (contains TenantToken)
+            if os.path.exists(MENDER_CONF_PATH):
+                os.makedirs(MENDER_CONF_BACKUP_DIR, exist_ok=True)
+                shutil.move(MENDER_CONF_PATH, MENDER_CONF_BACKUP_PATH)
 
         return jsonify({"success": True})
 
