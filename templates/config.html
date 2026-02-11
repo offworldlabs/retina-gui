@@ -160,7 +160,7 @@
             </label>
         </div>
         <small class="text-muted d-block mb-2">
-            Automatic updates and remote support. When disabled, auth credentials are stored offline.
+            Automatic software updates and remote support.
         </small>
         <span id="cloudServicesStatus"></span>
 
@@ -177,7 +177,6 @@
                         <ul>
                             <li>Stop automatic software updates</li>
                             <li>Disable remote support access</li>
-                            <li>Store auth credentials offline</li>
                         </ul>
                         <p class="mb-0">You can re-enable at any time.</p>
                     </div>
@@ -226,6 +225,7 @@
             });
 
             function setCloudServices(enabled) {
+                toggle.disabled = true;
                 status.innerHTML = '<span class="spinner-border spinner-border-sm"></span>';
 
                 fetch('/mender/cloud-services', {
@@ -240,12 +240,15 @@
                         setTimeout(() => status.textContent = '', 3000);
                     } else {
                         status.innerHTML = '<span class="text-danger">' + data.error + '</span>';
-                        toggle.checked = !toggle.checked; // Revert on failure
+                        toggle.checked = !toggle.checked;
                     }
                 })
                 .catch(e => {
                     status.innerHTML = '<span class="text-danger">Error: ' + e.message + '</span>';
                     toggle.checked = !toggle.checked;
+                })
+                .finally(() => {
+                    toggle.disabled = false;
                 });
             }
         })();
