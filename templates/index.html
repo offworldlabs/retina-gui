@@ -33,11 +33,19 @@
                 </label>
             </div>
 
-            <div class="form-check mb-3">
+            <div class="form-check mb-2">
                 <input type="checkbox" class="form-check-input" id="regionCheck">
                 <label class="form-check-label" for="regionCheck">
                     This device will be operated in the United States
                 </label>
+            </div>
+
+            <div class="form-check mb-3">
+                <input type="checkbox" class="form-check-input" id="cloudCheck">
+                <label class="form-check-label" for="cloudCheck">
+                    Enable cloud services for software updates and remote support
+                </label>
+                <small class="text-muted d-block">Required for installation. Can be disabled later in Config.</small>
             </div>
 
             <button type="button" class="btn btn-primary" id="installBtn" disabled>
@@ -66,14 +74,16 @@
                 }
             });
 
-        // Enable button only when both checkboxes checked
+        // Enable button only when all checkboxes checked
         function updateButtonState() {
             const eula = document.getElementById('eulaCheck').checked;
             const region = document.getElementById('regionCheck').checked;
-            document.getElementById('installBtn').disabled = !(eula && region);
+            const cloud = document.getElementById('cloudCheck').checked;
+            document.getElementById('installBtn').disabled = !(eula && region && cloud);
         }
         document.getElementById('eulaCheck').addEventListener('change', updateButtonState);
         document.getElementById('regionCheck').addEventListener('change', updateButtonState);
+        document.getElementById('cloudCheck').addEventListener('change', updateButtonState);
 
         // Install click handler
         document.getElementById('installBtn').addEventListener('click', function() {
@@ -83,8 +93,8 @@
             if (btn.disabled) return;
 
             btn.disabled = true;
-            btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Installing...';
-            status.innerHTML = '<span class="text-warning">This takes 5-10 minutes. Ensure device remains powered.</span>';
+            btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Connecting...';
+            status.innerHTML = '<span class="text-warning">Connecting to update server. This may take a minute...</span>';
 
             fetch('/mender/install', { method: 'POST' })
                 .then(r => r.json())

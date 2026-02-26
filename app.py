@@ -5,6 +5,7 @@ import re
 import shutil
 import subprocess
 import tempfile
+import time
 from datetime import datetime, timedelta
 import yaml
 import requests
@@ -75,6 +76,41 @@ def apply_cloud_services_preference():
 
 # Enforce cloud services preference on app startup
 apply_cloud_services_preference()
+
+
+def ensure_cloud_services_enabled() -> tuple[bool, str | None]:
+    """Enable cloud services and wait for Mender auth.
+
+    Returns (success, error). On success, error is None.
+    Enables all Mender services and polls for JWT authentication.
+    """
+    # Already enabled and authenticated?
+    if not os.path.exists(CLOUD_SERVICES_DISABLED_FLAG):
+        token, _ = mender.get_jwt()
+        if token:
+            return True, None
+
+    # Enable services using existing mechanism
+    if os.path.exists(CLOUD_SERVICES_DISABLED_FLAG):
+        os.remove(CLOUD_SERVICES_DISABLED_FLAG)
+
+    if os.path.exists(MENDER_CONF_BACKUP_PATH):
+        shutil.move(MENDER_CONF_BACKUP_PATH, MENDER_CONF_PATH)
+
+    for service in MENDER_SERVICES:
+        subprocess.run(["systemctl", "enable", service],
+            capture_output=True, timeout=10)
+        subprocess.run(["systemctl", "start", service],
+            capture_output=True, timeout=10)
+
+    # Poll for JWT (mender-authd needs time to authenticate with server)
+    for _ in range(30):  # ~60s max
+        time.sleep(2)
+        token, _ = mender.get_jwt()
+        if token:
+            return True, None
+
+    return False, "Timed out waiting for Mender authentication"
 
 
 def is_install_locked() -> tuple[bool, dict | None]:
@@ -705,6 +741,11 @@ def mender_check():
 @app.route("/mender/install", methods=["POST"])
 def mender_install():
     """Install latest stable retina-node artifact from Mender."""
+    # Ensure cloud services are enabled and authenticated
+    success, error = ensure_cloud_services_enabled()
+    if not success:
+        return jsonify({"success": False, "error": error})
+
     # Check if already installed
     _, retina_node_version = mender.get_versions()
     if retina_node_version:
