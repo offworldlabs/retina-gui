@@ -98,10 +98,13 @@ def ensure_cloud_services_enabled() -> tuple[bool, str | None]:
         shutil.move(MENDER_CONF_BACKUP_PATH, MENDER_CONF_PATH)
 
     for service in MENDER_SERVICES:
-        subprocess.run(["systemctl", "enable", service],
-            capture_output=True, timeout=10)
-        subprocess.run(["systemctl", "start", service],
-            capture_output=True, timeout=10)
+        try:
+            subprocess.run(["systemctl", "enable", service],
+                capture_output=True, timeout=10)
+            subprocess.run(["systemctl", "start", service],
+                capture_output=True, timeout=10)
+        except Exception:
+            pass  # Best effort (may not be available in dev)
 
     # Poll for JWT (mender-authd needs time to authenticate with server)
     for _ in range(30):  # ~60s max
@@ -741,7 +744,7 @@ def mender_check():
 @app.route("/mender/install", methods=["POST"])
 def mender_install():
     """Install latest stable retina-node artifact from Mender."""
-    # Ensure cloud services are enabled and authenticated
+    # Enable cloud services and wait for Mender auth
     success, error = ensure_cloud_services_enabled()
     if not success:
         return jsonify({"success": False, "error": error})
