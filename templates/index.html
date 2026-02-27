@@ -94,13 +94,20 @@
 
             btn.disabled = true;
             btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Connecting...';
-            status.innerHTML = '<span class="text-warning">Connecting to update server. This may take a minute...</span>';
+            status.innerHTML = '<span class="text-warning">Connecting to update server...</span>';
+
+            // Switch to "Installing" once auth/connection phase completes (~60s)
+            const installTimer = setTimeout(() => {
+                btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Installing...';
+                status.innerHTML = '<span class="text-warning">Installing software. Please do not power off the device...</span>';
+            }, 60000);
 
             fetch('/mender/install', { method: 'POST' })
                 .then(r => r.json())
                 .then(data => {
+                    clearTimeout(installTimer);
                     if (data.success) {
-                        status.innerHTML = '<span class="text-success">Installed! Please reboot the device.</span>';
+                        status.innerHTML = '<span class="text-success">Installed! Please refresh this page.</span>';
                         btn.textContent = 'Installed';
                     } else {
                         status.innerHTML = '<span class="text-danger">' + data.error + '</span>';
@@ -109,6 +116,7 @@
                     }
                 })
                 .catch(e => {
+                    clearTimeout(installTimer);
                     status.innerHTML = '<span class="text-danger">Error: ' + e.message + '</span>';
                     btn.disabled = false;
                     btn.textContent = 'Install Software';
