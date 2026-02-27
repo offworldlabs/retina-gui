@@ -150,11 +150,46 @@
             </div>
         </form>
 
+        <script>
+        // Auto-apply if we just saved successfully (redirected here with ?saved=1)
+        if (window.location.search.includes('saved=1')) {
+            // Clean URL
+            history.replaceState({}, '', window.location.pathname);
+
+            const btn = document.getElementById('applyBtn');
+            const status = document.getElementById('applyStatus');
+
+            btn.disabled = true;
+            btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Applying...';
+
+            fetch('/config/apply', { method: 'POST' })
+                .then(r => r.json())
+                .then(data => {
+                    if (data.success) {
+                        status.className = 'text-success';
+                        status.textContent = 'Applied successfully!';
+                    } else {
+                        status.className = 'text-danger';
+                        status.textContent = data.error || 'Failed to apply';
+                    }
+                })
+                .catch(e => {
+                    status.className = 'text-danger';
+                    status.textContent = 'Error: ' + e.message;
+                })
+                .finally(() => {
+                    btn.disabled = false;
+                    btn.textContent = 'Apply Changes';
+                });
+        }
+        </script>
+        {% endif %}
+
         <hr class="my-4">
 
         <h5>Cloud Services</h5>
         <div class="form-check form-switch mb-2">
-            <input class="form-check-input" type="checkbox" id="cloudServicesToggle" checked>
+            <input class="form-check-input" type="checkbox" id="cloudServicesToggle" disabled>
             <label class="form-check-label" for="cloudServicesToggle">
                 Enable cloud services
             </label>
@@ -194,14 +229,16 @@
             const toggle = document.getElementById('cloudServicesToggle');
             const status = document.getElementById('cloudServicesStatus');
 
-            // Load current status
+            // Load current status (toggle starts disabled until API responds)
             fetch('/mender/cloud-services')
                 .then(r => r.json())
                 .then(data => {
                     toggle.checked = data.enabled;
+                    toggle.disabled = false;
                 })
                 .catch(() => {
                     toggle.checked = true; // Default to enabled on error
+                    toggle.disabled = false;
                 });
 
             // Handle toggle change
@@ -253,41 +290,6 @@
             }
         })();
         </script>
-
-        <script>
-        // Auto-apply if we just saved successfully (redirected here with ?saved=1)
-        if (window.location.search.includes('saved=1')) {
-            // Clean URL
-            history.replaceState({}, '', window.location.pathname);
-
-            const btn = document.getElementById('applyBtn');
-            const status = document.getElementById('applyStatus');
-
-            btn.disabled = true;
-            btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Applying...';
-
-            fetch('/config/apply', { method: 'POST' })
-                .then(r => r.json())
-                .then(data => {
-                    if (data.success) {
-                        status.className = 'text-success';
-                        status.textContent = 'Applied successfully!';
-                    } else {
-                        status.className = 'text-danger';
-                        status.textContent = data.error || 'Failed to apply';
-                    }
-                })
-                .catch(e => {
-                    status.className = 'text-danger';
-                    status.textContent = 'Error: ' + e.message;
-                })
-                .finally(() => {
-                    btn.disabled = false;
-                    btn.textContent = 'Apply Changes';
-                });
-        }
-        </script>
-        {% endif %}
     </div>
 </body>
 </html>

@@ -158,18 +158,27 @@ class TestConfigPageRoute:
         assert b'beast_in' in response.data  # protocol
 
     def test_config_no_retina_node(self, app_client_no_retina):
-        """Should show message when retina-node not installed."""
+        """Should show message when retina-node not installed, but cloud services visible."""
         response = app_client_no_retina.get('/config')
         assert response.status_code == 200
         assert b'Configuration available after retina-node is deployed' in response.data
-        # Should NOT show the Apply button
+        # Should NOT show the Apply button (config form is hidden)
         assert b'Apply Changes' not in response.data
+        # Cloud Services should still be visible
+        assert b'Cloud Services' in response.data
+        assert b'cloudServicesToggle' in response.data
 
     def test_config_shows_apply_button(self, app_client):
         """Config page should have Apply Changes button when retina-node installed."""
         response = app_client.get('/config')
         assert response.status_code == 200
         assert b'Apply Changes' in response.data
+
+    def test_cloud_services_toggle_not_hardcoded_checked(self, app_client):
+        """Cloud services toggle should not hardcode checked attribute."""
+        response = app_client.get('/config')
+        assert response.status_code == 200
+        assert b'id="cloudServicesToggle" checked' not in response.data
 
 
 class TestConfigSaveRoute:
