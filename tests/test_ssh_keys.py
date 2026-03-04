@@ -1,12 +1,9 @@
 """Tests for SSH key validation."""
 import pytest
-import sys
-import os
 
-# Add parent directory to path for imports
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from ssh_keys import SSHKeyManager
 
-from app import is_valid_ssh_key
+is_valid_ssh_key = SSHKeyManager.is_valid_ssh_key
 
 # Valid test keys
 VALID_ED25519 = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIExample user@host"

@@ -624,11 +624,9 @@ class TestParseFlatFormData:
 
     def test_parse_flat_capture_fields(self):
         """Flat capture fields should be parsed correctly."""
-        import importlib
-        import app as app_module
-        importlib.reload(app_module)
+        from config_manager import ConfigManager
 
-        capture, location, truth, tar1090 = app_module.parse_flat_form_data({
+        capture, location, truth, tar1090 = ConfigManager.parse_flat_form_data({
             'capture.fs': '4000000',
             'capture.fc': '503000000',
             'capture.device_type': 'RspDuo',
@@ -642,11 +640,9 @@ class TestParseFlatFormData:
 
     def test_parse_flat_location_fields(self):
         """Flat location fields should be parsed correctly."""
-        import importlib
-        import app as app_module
-        importlib.reload(app_module)
+        from config_manager import ConfigManager
 
-        capture, location, truth, tar1090 = app_module.parse_flat_form_data({
+        capture, location, truth, tar1090 = ConfigManager.parse_flat_form_data({
             'location.rx_latitude': '37.7644',
             'location.rx_longitude': '-122.3954',
             'location.rx_altitude': '23',
@@ -660,11 +656,9 @@ class TestParseFlatFormData:
 
     def test_parse_integer_conversion(self):
         """String integers should be converted to int."""
-        import importlib
-        import app as app_module
-        importlib.reload(app_module)
+        from config_manager import ConfigManager
 
-        capture, _, _, _ = app_module.parse_flat_form_data({
+        capture, _, _, _ = ConfigManager.parse_flat_form_data({
             'capture.fs': '12345'
         })
         assert capture['fs'] == 12345
@@ -672,11 +666,9 @@ class TestParseFlatFormData:
 
     def test_parse_float_conversion(self):
         """String floats should be converted to float."""
-        import importlib
-        import app as app_module
-        importlib.reload(app_module)
+        from config_manager import ConfigManager
 
-        _, location, _, _ = app_module.parse_flat_form_data({
+        _, location, _, _ = ConfigManager.parse_flat_form_data({
             'location.rx_latitude': '37.7644'
         })
         assert location['rx_latitude'] == 37.7644
@@ -684,11 +676,9 @@ class TestParseFlatFormData:
 
     def test_parse_negative_values(self):
         """Negative values should be parsed correctly."""
-        import importlib
-        import app as app_module
-        importlib.reload(app_module)
+        from config_manager import ConfigManager
 
-        capture, location, _, _ = app_module.parse_flat_form_data({
+        capture, location, _, _ = ConfigManager.parse_flat_form_data({
             'capture.device_agcSetPoint': '-50',
             'location.rx_longitude': '-122.3954'
         })
@@ -697,22 +687,18 @@ class TestParseFlatFormData:
 
     def test_parse_boolean_true(self):
         """Boolean true values should be converted."""
-        import importlib
-        import app as app_module
-        importlib.reload(app_module)
+        from config_manager import ConfigManager
 
-        capture, _, _, _ = app_module.parse_flat_form_data({
+        capture, _, _, _ = ConfigManager.parse_flat_form_data({
             'capture.device_dabNotch': 'on'
         })
         assert capture['device_dabNotch'] is True
 
     def test_parse_empty_string_skipped(self):
         """Empty strings should be skipped."""
-        import importlib
-        import app as app_module
-        importlib.reload(app_module)
+        from config_manager import ConfigManager
 
-        capture, _, _, _ = app_module.parse_flat_form_data({
+        capture, _, _, _ = ConfigManager.parse_flat_form_data({
             'capture.fs': '123',
             'capture.fc': ''
         })
@@ -721,11 +707,9 @@ class TestParseFlatFormData:
 
     def test_parse_string_preserved(self):
         """Non-numeric strings should stay as strings."""
-        import importlib
-        import app as app_module
-        importlib.reload(app_module)
+        from config_manager import ConfigManager
 
-        capture, _, _, _ = app_module.parse_flat_form_data({
+        capture, _, _, _ = ConfigManager.parse_flat_form_data({
             'capture.device_type': 'RspDuo'
         })
         assert capture['device_type'] == 'RspDuo'

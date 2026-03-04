@@ -4,8 +4,8 @@ After=network.target
 
 [Service]
 Type=simple
-ExecStart=/usr/bin/python3 /opt/retina-gui/app.py
-WorkingDirectory=/opt/retina-gui
+ExecStart=/usr/bin/python3 /opt/retina-gui/src/app.py
+WorkingDirectory=/opt/retina-gui/src
 Restart=always
 RestartSec=5
 
