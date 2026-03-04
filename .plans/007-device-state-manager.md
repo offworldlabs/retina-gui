@@ -487,12 +487,12 @@ Add `device_state` fixture with temp directory.
 
 ### Phase 1: Create and Deploy Mender State Scripts (owl-os)
 
-- [ ] **1.1** Create state script files in `owl-os/plugins/playbooks/board_support/roles/mender/files/state-scripts/`:
+- [x] **1.1** Create state script files in `owl-os/plugins/playbooks/board_support/roles/mender/files/state-scripts/`:
   - `Download_Enter_00_retina_state`
   - `ArtifactInstall_Enter_00_retina_state`
   - `ArtifactCommit_Leave_00_retina_state`
   - `ArtifactFailure_Enter_00_retina_state`
-- [ ] **1.2** Add ansible tasks to `roles/mender/tasks/main.yml` — create `/etc/mender/scripts/` dir + copy scripts
+- [x] **1.2** Add ansible tasks to `roles/mender/tasks/main.yml` — create `/etc/mender/scripts/` dir + copy scripts
 - [ ] **1.3** Deploy test owl-os build to device
 - [ ] **1.4** Trigger server-pushed **app** update (retina-node) — verify `mender-update.status` appears during download, updates during install, disappears on completion
 - [ ] **1.5** Trigger server-pushed **OS** update (owl-os rootfs) — same verification, confirm status file survives reboot
@@ -500,31 +500,31 @@ Add `device_state` fixture with temp directory.
 
 ### Phase 2: Create DeviceState Class (retina-gui)
 
-- [ ] **2.1** Create `device_state.py` with class skeleton (init, file paths, constants)
-- [ ] **2.2** Move `is_install_locked()` / `acquire_install_lock()` / `release_install_lock()` into class
-- [ ] **2.3** Add `_is_mender_update_active()` and `_get_mender_update_status()` — reads status file
-- [ ] **2.4** Add `get_state()` — returns `"idle"`, `"updating_gui"`, or `"updating_server"`
-- [ ] **2.5** Add `is_any_update_in_progress()` — combined check with human-readable reason
-- [ ] **2.6** Add guard methods: `can_toggle_cloud_services()`, `can_start_install()`
-- [ ] **2.7** Move cloud services logic into class: `set_cloud_services()`, `apply_startup_preferences()`, `ensure_cloud_services_enabled()`
-- [ ] **2.8** Add `get_cloud_services_status()` returning full status dict
+- [x] **2.1** Create `device_state.py` with class skeleton (init, file paths, constants)
+- [x] **2.2** Move `is_install_locked()` / `acquire_install_lock()` / `release_install_lock()` into class
+- [x] **2.3** Add `_is_mender_update_active()` and `_get_mender_update_status()` — reads status file
+- [x] **2.4** Add `get_state()` — returns `"idle"`, `"updating_gui"`, or `"updating_server"`
+- [x] **2.5** Add `is_any_update_in_progress()` — combined check with human-readable reason
+- [x] **2.6** Add guard methods: `can_toggle_cloud_services()`, `can_start_install()`
+- [x] **2.7** Move cloud services logic into class: `set_cloud_services()`, `apply_startup_preferences()`, `ensure_cloud_services_enabled()`
+- [x] **2.8** Add `get_cloud_services_status()` returning full status dict
 
 ### Phase 3: Write Tests for DeviceState
 
-- [ ] **3.1** Add `device_state` fixture to `tests/conftest.py`
-- [ ] **3.2** Create `tests/test_device_state.py` with full coverage
-- [ ] **3.3** Run tests — all pass
+- [x] **3.1** Add `device_state` fixture to `tests/test_device_state.py` (pytest `tmp_path` based — no conftest change needed)
+- [x] **3.2** Create `tests/test_device_state.py` with 38 tests across 8 test classes
+- [x] **3.3** Run tests — 180 passed (38 new + 142 existing), 0 failures
 
 ### Phase 4: Refactor app.py to Use DeviceState
 
-- [ ] **4.1** Add `from device_state import DeviceState` and instantiate at module level
-- [ ] **4.2** Replace startup call with `device_state.apply_startup_preferences()`
-- [ ] **4.3** Update `GET /mender/cloud-services` → `device_state.get_cloud_services_status()`
-- [ ] **4.4** Update `POST /mender/cloud-services` → `device_state.set_cloud_services()` (409 when blocked)
-- [ ] **4.5** Update `GET /mender/check` → `device_state.is_any_update_in_progress()`
-- [ ] **4.6** Update `POST /mender/install` → `device_state.can_start_install()` + acquire/release
-- [ ] **4.7** Remove old standalone functions and orphaned constants
-- [ ] **4.8** Run full test suite — all existing + new tests pass
+- [x] **4.1** Add `from device_state import DeviceState` and instantiate at module level
+- [x] **4.2** Replace startup call with `device_state.apply_startup_preferences()`
+- [x] **4.3** Update `GET /mender/cloud-services` → `device_state.get_cloud_services_status()`
+- [x] **4.4** Update `POST /mender/cloud-services` → `device_state.set_cloud_services()` (409 when blocked)
+- [x] **4.5** Update `GET /mender/check` → `device_state.is_any_update_in_progress()`
+- [x] **4.6** Update `POST /mender/install` → `device_state.can_start_install()` + acquire/release
+- [x] **4.7** Remove old standalone functions and orphaned constants/imports (`shutil`, `time`, `datetime`/`timedelta`)
+- [x] **4.8** Run full test suite — 180 passed, 0 failures
 
 ### Phase 5: Frontend Update
 
