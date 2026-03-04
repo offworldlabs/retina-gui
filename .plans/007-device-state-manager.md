@@ -528,9 +528,9 @@ Add `device_state` fixture with temp directory.
 
 ### Phase 5: Frontend Update
 
-- [ ] **5.1** Update `config.html` JS: handle `update_in_progress` / `update_reason` in GET response
-- [ ] **5.2** Update `setCloudServices()` to handle 409 Conflict responses
-- [ ] **5.3** Verify toggle shows disabled state with warning message
+- [x] **5.1** Update `config.html` JS: handle `update_in_progress` / `update_reason` in GET response
+- [x] **5.2** Update `setCloudServices()` to handle 409 Conflict responses
+- [x] **5.3** Auto-poll every 10s while update in progress so toggle auto-unlocks
 
 ### Phase 6: End-to-End Verification
 

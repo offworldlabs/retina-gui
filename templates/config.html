@@ -230,16 +230,28 @@
             const status = document.getElementById('cloudServicesStatus');
 
             // Load current status (toggle starts disabled until API responds)
-            fetch('/mender/cloud-services')
-                .then(r => r.json())
-                .then(data => {
-                    toggle.checked = data.enabled;
-                    toggle.disabled = false;
-                })
-                .catch(() => {
-                    toggle.checked = true; // Default to enabled on error
-                    toggle.disabled = false;
-                });
+            function loadCloudStatus() {
+                fetch('/mender/cloud-services')
+                    .then(r => r.json())
+                    .then(data => {
+                        toggle.checked = data.enabled;
+                        if (data.update_in_progress) {
+                            toggle.disabled = true;
+                            status.innerHTML = '<span class="text-warning">'
+                                + data.update_reason + ' — toggle locked</span>';
+                            // Poll until update finishes
+                            setTimeout(loadCloudStatus, 10000);
+                        } else {
+                            toggle.disabled = false;
+                            status.textContent = '';
+                        }
+                    })
+                    .catch(() => {
+                        toggle.checked = true; // Default to enabled on error
+                        toggle.disabled = false;
+                    });
+            }
+            loadCloudStatus();
 
             // Handle toggle change
             toggle.addEventListener('change', function() {
@@ -270,9 +282,9 @@
                     headers: {'Content-Type': 'application/json'},
                     body: JSON.stringify({enabled: enabled})
                 })
-                .then(r => r.json())
-                .then(data => {
-                    if (data.success) {
+                .then(r => r.json().then(data => ({ok: r.ok, data})))
+                .then(({ok, data}) => {
+                    if (ok && data.success) {
                         status.innerHTML = '<span class="text-success">Settings applied</span>';
                         setTimeout(() => status.textContent = '', 3000);
                     } else {
