@@ -346,11 +346,19 @@ def _run_install(download_url):
 
     Always releases install.lock when done (success or failure).
     Stale lock timeout (40 min) in DeviceState acts as final safety net.
+
+    If mender-update signals a reboot is needed (exit code 4, rootfs updates),
+    triggers reboot automatically. After reboot, mender-updated daemon handles
+    the commit on the new rootfs.
     """
     try:
-        success, error = mender.install_from_url(download_url)
+        success, error, needs_reboot = mender.install_from_url(download_url)
         if not success:
             app.logger.error(f"Background install failed: {error}")
+        elif needs_reboot:
+            app.logger.info("Rootfs install complete, rebooting...")
+            subprocess.run(["reboot"], timeout=10)
+            return  # Don't release lock — device is rebooting
     except Exception as e:
         app.logger.error(f"Background install crashed: {e}")
     finally:
@@ -538,7 +546,7 @@ def mender_install_os():
         device_state.release_install_lock()
         return jsonify({"success": False, "error": error})
 
-    # Kick off install in background
+    # Kick off install in background (mender signals reboot via exit code 4)
     threading.Thread(target=_run_install, args=(url,), daemon=True).start()
 
     return jsonify({"success": True, "version": release_name})
