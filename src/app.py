@@ -357,7 +357,7 @@ def _run_install(download_url):
             app.logger.error(f"Background install failed: {error}")
         elif needs_reboot:
             app.logger.info("Rootfs install complete, rebooting...")
-            subprocess.run(["reboot"], timeout=10)
+            subprocess.run(["/usr/share/mender/integration/reboot"], timeout=10)
             return  # Don't release lock — device is rebooting
     except Exception as e:
         app.logger.error(f"Background install crashed: {e}")
