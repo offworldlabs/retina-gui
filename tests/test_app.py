@@ -158,18 +158,27 @@ class TestConfigPageRoute:
         assert b'beast_in' in response.data  # protocol
 
     def test_config_no_retina_node(self, app_client_no_retina):
-        """Should show message when retina-node not installed."""
+        """Should show message when retina-node not installed, but cloud services visible."""
         response = app_client_no_retina.get('/config')
         assert response.status_code == 200
         assert b'Configuration available after retina-node is deployed' in response.data
-        # Should NOT show the Apply button
+        # Should NOT show the Apply button (config form is hidden)
         assert b'Apply Changes' not in response.data
+        # Cloud Services should still be visible
+        assert b'Cloud Services' in response.data
+        assert b'cloudServicesToggle' in response.data
 
     def test_config_shows_apply_button(self, app_client):
         """Config page should have Apply Changes button when retina-node installed."""
         response = app_client.get('/config')
         assert response.status_code == 200
         assert b'Apply Changes' in response.data
+
+    def test_cloud_services_toggle_not_hardcoded_checked(self, app_client):
+        """Cloud services toggle should not hardcode checked attribute."""
+        response = app_client.get('/config')
+        assert response.status_code == 200
+        assert b'id="cloudServicesToggle" checked' not in response.data
 
 
 class TestConfigSaveRoute:
@@ -615,11 +624,9 @@ class TestParseFlatFormData:
 
     def test_parse_flat_capture_fields(self):
         """Flat capture fields should be parsed correctly."""
-        import importlib
-        import app as app_module
-        importlib.reload(app_module)
+        from config_manager import ConfigManager
 
-        capture, location, truth, tar1090 = app_module.parse_flat_form_data({
+        capture, location, truth, tar1090 = ConfigManager.parse_flat_form_data({
             'capture.fs': '4000000',
             'capture.fc': '503000000',
             'capture.device_type': 'RspDuo',
@@ -633,11 +640,9 @@ class TestParseFlatFormData:
 
     def test_parse_flat_location_fields(self):
         """Flat location fields should be parsed correctly."""
-        import importlib
-        import app as app_module
-        importlib.reload(app_module)
+        from config_manager import ConfigManager
 
-        capture, location, truth, tar1090 = app_module.parse_flat_form_data({
+        capture, location, truth, tar1090 = ConfigManager.parse_flat_form_data({
             'location.rx_latitude': '37.7644',
             'location.rx_longitude': '-122.3954',
             'location.rx_altitude': '23',
@@ -651,11 +656,9 @@ class TestParseFlatFormData:
 
     def test_parse_integer_conversion(self):
         """String integers should be converted to int."""
-        import importlib
-        import app as app_module
-        importlib.reload(app_module)
+        from config_manager import ConfigManager
 
-        capture, _, _, _ = app_module.parse_flat_form_data({
+        capture, _, _, _ = ConfigManager.parse_flat_form_data({
             'capture.fs': '12345'
         })
         assert capture['fs'] == 12345
@@ -663,11 +666,9 @@ class TestParseFlatFormData:
 
     def test_parse_float_conversion(self):
         """String floats should be converted to float."""
-        import importlib
-        import app as app_module
-        importlib.reload(app_module)
+        from config_manager import ConfigManager
 
-        _, location, _, _ = app_module.parse_flat_form_data({
+        _, location, _, _ = ConfigManager.parse_flat_form_data({
             'location.rx_latitude': '37.7644'
         })
         assert location['rx_latitude'] == 37.7644
@@ -675,11 +676,9 @@ class TestParseFlatFormData:
 
     def test_parse_negative_values(self):
         """Negative values should be parsed correctly."""
-        import importlib
-        import app as app_module
-        importlib.reload(app_module)
+        from config_manager import ConfigManager
 
-        capture, location, _, _ = app_module.parse_flat_form_data({
+        capture, location, _, _ = ConfigManager.parse_flat_form_data({
             'capture.device_agcSetPoint': '-50',
             'location.rx_longitude': '-122.3954'
         })
@@ -688,22 +687,18 @@ class TestParseFlatFormData:
 
     def test_parse_boolean_true(self):
         """Boolean true values should be converted."""
-        import importlib
-        import app as app_module
-        importlib.reload(app_module)
+        from config_manager import ConfigManager
 
-        capture, _, _, _ = app_module.parse_flat_form_data({
+        capture, _, _, _ = ConfigManager.parse_flat_form_data({
             'capture.device_dabNotch': 'on'
         })
         assert capture['device_dabNotch'] is True
 
     def test_parse_empty_string_skipped(self):
         """Empty strings should be skipped."""
-        import importlib
-        import app as app_module
-        importlib.reload(app_module)
+        from config_manager import ConfigManager
 
-        capture, _, _, _ = app_module.parse_flat_form_data({
+        capture, _, _, _ = ConfigManager.parse_flat_form_data({
             'capture.fs': '123',
             'capture.fc': ''
         })
@@ -712,11 +707,9 @@ class TestParseFlatFormData:
 
     def test_parse_string_preserved(self):
         """Non-numeric strings should stay as strings."""
-        import importlib
-        import app as app_module
-        importlib.reload(app_module)
+        from config_manager import ConfigManager
 
-        capture, _, _, _ = app_module.parse_flat_form_data({
+        capture, _, _, _ = ConfigManager.parse_flat_form_data({
             'capture.device_type': 'RspDuo'
         })
         assert capture['device_type'] == 'RspDuo'

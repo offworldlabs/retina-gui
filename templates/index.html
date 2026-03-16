@@ -33,11 +33,19 @@
                 </label>
             </div>
 
-            <div class="form-check mb-3">
+            <div class="form-check mb-2">
                 <input type="checkbox" class="form-check-input" id="regionCheck">
                 <label class="form-check-label" for="regionCheck">
-                    This device will be operated in the United States
+                    This device will not be exported or re-exported from the USA
                 </label>
+            </div>
+
+            <div class="form-check mb-3">
+                <input type="checkbox" class="form-check-input" id="cloudCheck">
+                <label class="form-check-label" for="cloudCheck">
+                    Enable cloud services for software updates and remote support
+                </label>
+                <small class="text-muted d-block">Required for installation. Can be disabled later in Config.</small>
             </div>
 
             <button type="button" class="btn btn-primary" id="installBtn" disabled>
@@ -47,58 +55,86 @@
         </div>
 
         <script>
-        // Check for available version on page load
-        fetch('/mender/check')
-            .then(r => r.json())
-            .then(data => {
-                if (data.installing) {
-                    document.getElementById('versionInfo').textContent =
-                        'Install in progress (' + data.version + ')... Please wait.';
-                    document.getElementById('installBtn').disabled = true;
-                    document.getElementById('installBtn').innerHTML =
-                        '<span class="spinner-border spinner-border-sm"></span> Installing...';
-                } else if (data.error) {
-                    document.getElementById('versionInfo').textContent =
-                        'Unable to check for updates';
-                } else {
-                    document.getElementById('versionInfo').innerHTML =
-                        'Available: <strong>' + data.latest_version + '</strong> (~600MB, takes 5-10 minutes)';
-                }
-            });
+        var pollTimer = null;
 
-        // Enable button only when both checkboxes checked
+        function checkStatus() {
+            fetch('/mender/check')
+                .then(function(r) { return r.json(); })
+                .then(function(data) {
+                    var btn = document.getElementById('installBtn');
+                    var status = document.getElementById('installStatus');
+                    var info = document.getElementById('versionInfo');
+
+                    if (data.installing) {
+                        btn.disabled = true;
+                        btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> ' + (data.stage || 'Installing') + '...';
+                        info.textContent = data.reason || 'Update in progress...';
+                        status.innerHTML = '<span class="text-warning">Please do not power off the device.</span>';
+                        startPolling();
+                    } else if (pollTimer) {
+                        // Was polling — install finished
+                        clearInterval(pollTimer);
+                        pollTimer = null;
+                        if (data.current_version) {
+                            status.innerHTML = '<span class="text-success">Installed! Refreshing...</span>';
+                            btn.textContent = 'Installed';
+                            setTimeout(function() { location.reload(); }, 2000);
+                        } else {
+                            status.innerHTML = '<span class="text-danger">Install may have failed. Please try again.</span>';
+                            btn.disabled = false;
+                            btn.textContent = 'Install Software';
+                        }
+                    } else if (data.error) {
+                        info.textContent = 'Unable to check for updates';
+                    } else {
+                        info.innerHTML = 'Available: <strong>' + data.latest_version + '</strong> (~600MB, takes 5-10 minutes)';
+                    }
+                });
+        }
+
+        function startPolling() {
+            if (!pollTimer) {
+                pollTimer = setInterval(checkStatus, 5000);
+            }
+        }
+
+        // Check on page load
+        checkStatus();
+
+        // Enable button only when all checkboxes checked
         function updateButtonState() {
-            const eula = document.getElementById('eulaCheck').checked;
-            const region = document.getElementById('regionCheck').checked;
-            document.getElementById('installBtn').disabled = !(eula && region);
+            var eula = document.getElementById('eulaCheck').checked;
+            var region = document.getElementById('regionCheck').checked;
+            var cloud = document.getElementById('cloudCheck').checked;
+            document.getElementById('installBtn').disabled = !(eula && region && cloud);
         }
         document.getElementById('eulaCheck').addEventListener('change', updateButtonState);
         document.getElementById('regionCheck').addEventListener('change', updateButtonState);
+        document.getElementById('cloudCheck').addEventListener('change', updateButtonState);
 
         // Install click handler
         document.getElementById('installBtn').addEventListener('click', function() {
-            const btn = this;
-            const status = document.getElementById('installStatus');
+            var btn = this;
+            var status = document.getElementById('installStatus');
 
             if (btn.disabled) return;
 
             btn.disabled = true;
-            btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Installing...';
-            status.innerHTML = '<span class="text-warning">This takes 5-10 minutes. Ensure device remains powered.</span>';
+            btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Connecting...';
+            status.innerHTML = '<span class="text-warning">Connecting to update server...</span>';
 
             fetch('/mender/install', { method: 'POST' })
-                .then(r => r.json())
-                .then(data => {
+                .then(function(r) { return r.json(); })
+                .then(function(data) {
                     if (data.success) {
-                        status.innerHTML = '<span class="text-success">Installed! Please reboot the device.</span>';
-                        btn.textContent = 'Installed';
+                        startPolling();
                     } else {
                         status.innerHTML = '<span class="text-danger">' + data.error + '</span>';
                         btn.disabled = false;
                         btn.textContent = 'Install Software';
                     }
                 })
-                .catch(e => {
+                .catch(function(e) {
                     status.innerHTML = '<span class="text-danger">Error: ' + e.message + '</span>';
                     btn.disabled = false;
                     btn.textContent = 'Install Software';
