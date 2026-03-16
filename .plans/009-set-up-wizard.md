@@ -306,37 +306,33 @@ File: `templates/index.html`
 - [x] Write tests: `TestSetupWizardState` (7 tests) in `tests/test_device_state.py`
 - [x] Run tests, confirm all pass (210/210)
 
-### Phase 3: Backend — API Endpoints (`src/app.py`)
-- [ ] Add `GET /set-up` route — read wizard step, render `setup.html` with `resume_step` + footer vars
-- [ ] Add `GET /mender/check-os` — mirror `/mender/check` for owl-os (GitHub version discovery, install lock check)
-- [ ] Add `POST /mender/install-os` — mirror `/mender/install` for owl-os (GitHub version → Mender artifact → background thread)
-- [ ] Add `POST /set-up/save-step` — call `device_state.save_setup_wizard_step()`
-- [ ] Add `POST /set-up/complete` — call `device_state.clear_setup_wizard()`
-- [ ] Modify `GET /` — pass `setup_in_progress` to template
-- [ ] Add imports: `parse_os_version`, `get_latest_owl_os_from_github`
-- [ ] Write tests: `TestSetupRoute`, `TestMenderCheckOs`, `TestMenderInstallOs` in `tests/test_app.py`
-- [ ] Run tests, confirm all pass
+### Phase 3: Backend — API Endpoints (`src/app.py`) ✅
+- [x] Add `GET /set-up` route — read wizard step, render `setup.html` with `resume_step` + footer vars
+- [x] Add `GET /mender/check-os` — mirror `/mender/check` for owl-os (GitHub version discovery, install lock check)
+- [x] Add `POST /mender/install-os` — mirror `/mender/install` for owl-os (GitHub version → Mender artifact → background thread)
+- [x] Add `POST /set-up/save-step` — call `device_state.save_setup_wizard_step()`
+- [x] Add `POST /set-up/complete` — call `device_state.clear_setup_wizard()`
+- [x] Modify `GET /` — pass `setup_needed` to template
+- [x] Add imports: `parse_os_version`, `get_latest_owl_os_from_github`
+- [x] Write tests: `TestSetupRoute`, `TestMenderCheckOs`, `TestMenderInstallOs`, `TestSetupWizardStepRoutes` in `tests/test_app.py`
+- [x] Run tests, confirm all pass (222/222)
 
-### Phase 4: Frontend — Setup Wizard (`templates/setup.html`)
-- [ ] Create `setup.html` with same navbar/footer as `index.html`
-- [ ] Add progress dots (4 steps) with CSS
-- [ ] Add wizard JS object: `steps[]`, `advance()`, `showStep()`, enter hooks
-- [ ] Step 1 HTML: 3 checkboxes + "Continue →" button
-- [ ] Step 1 JS: `enterAgreements()` — checkbox listeners, POST `/mender/cloud-services`, save step, advance
-- [ ] Step 2 HTML: version comparison display + "Update System" button + status span
-- [ ] Step 2 JS: `enterSystem()` — fetch `/mender/check-os`, show update or auto-advance, polling on install
-- [ ] Step 3 HTML: version comparison display + "Install Software" button + status span
-- [ ] Step 3 JS: `enterRadar()` — fetch `/mender/check`, show install or auto-advance, polling on install
-- [ ] Step 4 HTML: success message + "Go to Dashboard →" button
-- [ ] Step 4 JS: `enterComplete()` — POST `/set-up/complete`, navigate to `/`
-- [ ] Resume logic: read `resume_step` from template, start wizard at correct step on page load
-- [ ] Visual test: boot dev server, walk through wizard manually
+### Phase 4: Frontend — Setup Wizard (`templates/setup.html`) ✅
+- [x] Create `setup.html` with same navbar/footer as `index.html`
+- [x] Circle-and-line stepper with CSS (32px circles, connecting lines, active/complete states)
+- [x] Step registry pattern: steps discovered from DOM `data-step` attributes, `enterHooks` object
+- [x] Step 1: Agreements (3 checkboxes, POST `/mender/cloud-services`, advance)
+- [x] Step 2: System Update (fetch `/mender/check-os`, poll during install, "Next →" if up to date)
+- [x] Step 3: Radar Software (fetch `/mender/check`, poll during install, auto-advance on complete)
+- [x] Step 4: Complete (POST `/set-up/complete`, "Go to Dashboard →")
+- [x] Resume logic via `resume_step` template variable
+- [x] EULA back button links to `/set-up`
+- [x] Visual test: clean minimal UI, white background, centered content
 
-### Phase 5: Frontend — Homepage Update (`templates/index.html`)
-- [ ] Replace `{% if not retina_node_version %}` install section with launcher card
-- [ ] Show "Continue Setup" vs "Start Setup" based on `setup_in_progress`
-- [ ] Remove all install JS (checkStatus, startPolling, checkbox handlers)
-- [ ] Visual test: confirm launcher renders, links to `/set-up`
+### Phase 5: Frontend — Homepage Update (`templates/index.html`) ✅
+- [x] Replace install section with launcher card (`setup_needed` flag)
+- [x] Remove all install JS (checkStatus, startPolling, checkbox handlers)
+- [x] Run tests, confirm all pass (222/222)
 
 ### Phase 6: Integration Testing
 - [ ] Run full test suite — all existing + new tests pass
