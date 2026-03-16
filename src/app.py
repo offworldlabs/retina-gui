@@ -11,7 +11,7 @@ from config_schema import (
 from config_manager import ConfigManager
 from device_state import DeviceState
 from form_utils import schema_to_form_fields
-from mender import MenderClient, get_latest_stable_from_github
+from mender import MenderClient, get_latest_stable_from_github, get_latest_owl_os_from_github, parse_os_version
 from ssh_keys import SSHKeyManager
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -87,11 +87,14 @@ def index():
     # Get software versions from Mender
     owl_os_version, retina_node_version = mender.get_versions()
 
+    setup_needed = retina_node_version is None
+
     return render_template("index.html",
                            ssh_keys=keys,
                            node_id=node_id,
                            owl_os_version=owl_os_version,
-                           retina_node_version=retina_node_version)
+                           retina_node_version=retina_node_version,
+                           setup_needed=setup_needed)
 
 
 @app.route("/eula")
@@ -425,6 +428,132 @@ def cloud_services_toggle():
     if not success:
         return jsonify({"success": False, "error": error}), 409
 
+    return jsonify({"success": True})
+
+
+@app.route("/set-up")
+def setup_wizard():
+    """Setup wizard — full-page multi-step first-boot flow."""
+    resume_step = device_state.get_setup_wizard_step()
+    owl_os_version, retina_node_version = mender.get_versions()
+    node_id = get_node_id()
+    return render_template("setup.html",
+                           resume_step=resume_step,
+                           node_id=node_id,
+                           owl_os_version=owl_os_version,
+                           retina_node_version=retina_node_version)
+
+
+@app.route("/mender/check-os")
+def mender_check_os():
+    """Check for owl-os updates and install status.
+
+    Mirrors /mender/check but for the OS layer.
+    """
+    owl_os_current, _ = mender.get_versions()
+
+    # Check if any update in progress
+    in_progress, reason = device_state.is_any_update_in_progress()
+    if in_progress:
+        locked, lock_info = device_state.is_install_locked()
+        mender_status = device_state._get_mender_update_status()
+        stage = mender_status.get("state") if mender_status else "downloading"
+        return jsonify({
+            "installing": True,
+            "stage": stage,
+            "version": lock_info["version"] if lock_info else "system update",
+            "started_at": lock_info["started_at"] if lock_info else None,
+            "reason": reason,
+        })
+
+    latest, error = get_latest_owl_os_from_github()
+    if error:
+        return jsonify({"error": error})
+
+    # Compare versions — parse both to tuples for proper semver comparison
+    update_available = False
+    if latest:
+        latest_tuple = parse_os_version(latest)
+        current_tuple = parse_os_version(owl_os_current) if owl_os_current else None
+        if not current_tuple or (latest_tuple and latest_tuple > current_tuple):
+            update_available = True
+
+    return jsonify({
+        "installing": False,
+        "latest_version": latest,
+        "current_version": owl_os_current,
+        "update_available": update_available,
+    })
+
+
+@app.route("/mender/install-os", methods=["POST"])
+def mender_install_os():
+    """Install latest stable owl-os from Mender.
+
+    Returns immediately, install runs in background thread.
+    Frontend polls /mender/check-os for progress.
+    """
+    # Enable cloud services and wait for Mender auth
+    success, error = device_state.ensure_cloud_services_enabled(mender.get_jwt)
+    if not success:
+        return jsonify({"success": False, "error": error})
+
+    # Guard: block if any update is already in progress
+    can_install, reason = device_state.can_start_install()
+    if not can_install:
+        return jsonify({"success": False, "error": reason}), 409
+
+    # Get latest stable OS version from GitHub releases
+    version_tag, error = get_latest_owl_os_from_github()
+    if error:
+        return jsonify({"success": False, "error": f"Failed to get version: {error}"})
+
+    # Map tag to Mender release name: os-v0.2.0 → owl-os-pi5-v0.2.0
+    version_suffix = version_tag.replace("os-", "")  # v0.2.0
+    release_name = f"owl-os-pi5-{version_suffix}"
+
+    # Acquire lock
+    if not device_state.acquire_install_lock(release_name):
+        return jsonify({"success": False, "error": "Install already in progress"}), 409
+
+    # Query Mender for that specific release
+    artifacts, error = mender.list_artifacts(release_name=release_name)
+    if error:
+        device_state.release_install_lock()
+        return jsonify({"success": False, "error": error})
+
+    if not artifacts:
+        device_state.release_install_lock()
+        return jsonify({"success": False, "error": f"No artifact found for {release_name}"})
+
+    artifact = artifacts[0]
+
+    # Get download URL
+    url, error = mender.get_download_url(artifact["id"])
+    if error:
+        device_state.release_install_lock()
+        return jsonify({"success": False, "error": error})
+
+    # Kick off install in background
+    threading.Thread(target=_run_install, args=(url,), daemon=True).start()
+
+    return jsonify({"success": True, "version": release_name})
+
+
+@app.route("/set-up/save-step", methods=["POST"])
+def setup_save_step():
+    """Save current wizard step (persists across reboots)."""
+    data = request.get_json()
+    if not data or "step" not in data:
+        return jsonify({"success": False, "error": "Missing 'step' field"}), 400
+    device_state.save_setup_wizard_step(data["step"])
+    return jsonify({"success": True})
+
+
+@app.route("/set-up/complete", methods=["POST"])
+def setup_complete():
+    """Mark setup wizard as complete."""
+    device_state.clear_setup_wizard()
     return jsonify({"success": True})
 
 

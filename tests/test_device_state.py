@@ -7,7 +7,7 @@ from unittest.mock import patch, MagicMock
 
 import pytest
 
-from device_state import DeviceState, INSTALL_LOCK_TIMEOUT, MENDER_STATUS_TIMEOUT
+from device_state import DeviceState, INSTALL_LOCK_TIMEOUT, MENDER_STATUS_TIMEOUT, SETUP_WIZARD_TIMEOUT
 
 
 @pytest.fixture
@@ -322,3 +322,48 @@ class TestApplyStartupPreferences:
         ds.apply_startup_preferences()
         assert os.path.exists(ds.mender_conf_backup_path)
         assert not os.path.exists(ds.mender_conf_path)
+
+
+class TestSetupWizardState:
+    """Test setup wizard state persistence."""
+
+    def test_no_wizard_state(self, ds):
+        assert ds.get_setup_wizard_step() is None
+        assert ds.is_setup_wizard_in_progress() is False
+
+    def test_save_and_get_step(self, ds):
+        ds.save_setup_wizard_step("agreements")
+        assert ds.get_setup_wizard_step() == "agreements"
+        assert ds.is_setup_wizard_in_progress() is True
+
+    def test_update_step_preserves_started_at(self, ds):
+        ds.save_setup_wizard_step("agreements")
+        with open(ds.setup_wizard_file) as f:
+            first = json.load(f)
+        ds.save_setup_wizard_step("system")
+        with open(ds.setup_wizard_file) as f:
+            second = json.load(f)
+        assert second["step"] == "system"
+        assert second["started_at"] == first["started_at"]
+
+    def test_clear_wizard(self, ds):
+        ds.save_setup_wizard_step("radar")
+        ds.clear_setup_wizard()
+        assert ds.get_setup_wizard_step() is None
+        assert not os.path.exists(ds.setup_wizard_file)
+
+    def test_clear_noop_when_no_file(self, ds):
+        ds.clear_setup_wizard()  # Should not raise
+
+    def test_stale_wizard_auto_cleared(self, ds):
+        stale_time = (datetime.now() - SETUP_WIZARD_TIMEOUT - timedelta(minutes=1)).isoformat()
+        data = {"step": "system", "started_at": stale_time}
+        with open(ds.setup_wizard_file, "w") as f:
+            json.dump(data, f)
+        assert ds.get_setup_wizard_step() is None
+        assert not os.path.exists(ds.setup_wizard_file)
+
+    def test_malformed_json_returns_none(self, ds):
+        with open(ds.setup_wizard_file, "w") as f:
+            f.write("not json")
+        assert ds.get_setup_wizard_step() is None

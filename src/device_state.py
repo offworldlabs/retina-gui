@@ -23,6 +23,7 @@ from datetime import datetime, timedelta
 
 INSTALL_LOCK_TIMEOUT = timedelta(minutes=40)
 MENDER_STATUS_TIMEOUT = timedelta(hours=2)
+SETUP_WIZARD_TIMEOUT = timedelta(hours=24)
 
 
 class DeviceState:
@@ -44,6 +45,7 @@ class DeviceState:
         self.mender_conf_path = mender_conf_path
         self.mender_conf_backup_dir = mender_conf_backup_dir
         self.mender_conf_backup_path = mender_conf_backup_path
+        self.setup_wizard_file = os.path.join(data_dir, "setup-wizard.json")
 
     # ── State Queries ──────────────────────────────────────────
 
@@ -241,6 +243,51 @@ class DeviceState:
                 shutil.move(self.mender_conf_path, self.mender_conf_backup_path)
             except Exception:
                 pass  # Best effort on startup
+
+    # ── Setup Wizard State ────────────────────────────────────
+
+    def get_setup_wizard_step(self) -> str | None:
+        """Get current wizard step name, or None if not in progress.
+
+        Auto-clears if older than 24h (abandoned wizard).
+        """
+        if not os.path.exists(self.setup_wizard_file):
+            return None
+        try:
+            with open(self.setup_wizard_file) as f:
+                data = json.load(f)
+            started = datetime.fromisoformat(data["started_at"])
+            if datetime.now() - started > SETUP_WIZARD_TIMEOUT:
+                os.remove(self.setup_wizard_file)
+                return None
+            return data.get("step")
+        except Exception:
+            return None
+
+    def save_setup_wizard_step(self, step: str):
+        """Save current wizard step. Preserves original started_at timestamp."""
+        data = {}
+        if os.path.exists(self.setup_wizard_file):
+            try:
+                with open(self.setup_wizard_file) as f:
+                    data = json.load(f)
+            except Exception:
+                pass
+        if "started_at" not in data:
+            data["started_at"] = datetime.now().isoformat()
+        data["step"] = step
+        os.makedirs(os.path.dirname(self.setup_wizard_file), exist_ok=True)
+        with open(self.setup_wizard_file, "w") as f:
+            json.dump(data, f)
+
+    def clear_setup_wizard(self):
+        """Clear wizard state (called on completion)."""
+        if os.path.exists(self.setup_wizard_file):
+            os.remove(self.setup_wizard_file)
+
+    def is_setup_wizard_in_progress(self) -> bool:
+        """Check if setup wizard is active."""
+        return self.get_setup_wizard_step() is not None
 
     def ensure_cloud_services_enabled(self, get_jwt_fn) -> tuple[bool, str | None]:
         """Enable cloud services and wait for Mender auth.

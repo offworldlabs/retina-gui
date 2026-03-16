@@ -297,14 +297,14 @@ File: `templates/index.html`
 - [x] Write tests: `TestGetLatestOwlOsFromGitHub` (5 tests) in `tests/test_mender.py`
 - [x] Run tests, confirm all pass (38/38)
 
-### Phase 2: Backend — Wizard State (`src/device_state.py`)
-- [ ] Add `self.setup_wizard_file` path in `__init__`
-- [ ] Add `get_setup_wizard_step()` — read JSON, return step name or None, 24h stale timeout
-- [ ] Add `save_setup_wizard_step(step)` — write `{step, started_at}` JSON
-- [ ] Add `clear_setup_wizard()` — delete file
-- [ ] Add `is_setup_wizard_in_progress()` — bool wrapper
-- [ ] Write tests: `TestSetupWizardState` in `tests/test_device_state.py`
-- [ ] Run tests, confirm all pass
+### Phase 2: Backend — Wizard State (`src/device_state.py`) ✅
+- [x] Add `self.setup_wizard_file` path in `__init__`
+- [x] Add `get_setup_wizard_step()` — read JSON, return step name or None, 24h stale timeout
+- [x] Add `save_setup_wizard_step(step)` — write `{step, started_at}` JSON
+- [x] Add `clear_setup_wizard()` — delete file
+- [x] Add `is_setup_wizard_in_progress()` — bool wrapper
+- [x] Write tests: `TestSetupWizardState` (7 tests) in `tests/test_device_state.py`
+- [x] Run tests, confirm all pass (210/210)
 
 ### Phase 3: Backend — API Endpoints (`src/app.py`)
 - [ ] Add `GET /set-up` route — read wizard step, render `setup.html` with `resume_step` + footer vars
