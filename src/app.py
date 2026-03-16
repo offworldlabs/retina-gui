@@ -337,17 +337,16 @@ def mender_check():
 def _run_install(download_url):
     """Background worker: download and install artifact via Mender.
 
-    On failure, releases install.lock so the user can retry.
-    On success, lock is cleared by ArtifactCommit_Leave state script.
-    Stale lock timeout (30 min) in DeviceState acts as final safety net.
+    Always releases install.lock when done (success or failure).
+    Stale lock timeout (40 min) in DeviceState acts as final safety net.
     """
     try:
         success, error = mender.install_from_url(download_url)
         if not success:
             app.logger.error(f"Background install failed: {error}")
-            device_state.release_install_lock()
     except Exception as e:
         app.logger.error(f"Background install crashed: {e}")
+    finally:
         device_state.release_install_lock()
 
 
