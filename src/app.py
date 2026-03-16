@@ -10,7 +10,10 @@ from config_schema import (
 from config_manager import ConfigManager
 from device_state import DeviceState
 from form_utils import schema_to_form_fields
-from mender import MenderClient, get_latest_stable_from_github
+from mender import (
+    MenderClient, get_latest_stable_from_github,
+    parse_os_version, get_latest_owl_os_from_github,
+)
 from ssh_keys import SSHKeyManager
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -86,11 +89,24 @@ def index():
     # Get software versions from Mender
     owl_os_version, retina_node_version = mender.get_versions()
 
+    # Determine if OS update is needed (only relevant on first boot)
+    os_update_available = False
+    latest_owl_os = None
+    if retina_node_version is None:
+        latest_tag, _ = get_latest_owl_os_from_github()
+        if latest_tag:
+            latest_owl_os = latest_tag
+            current = parse_os_version(owl_os_version) if owl_os_version else None
+            latest = parse_os_version(latest_tag)
+            os_update_available = current is None or (latest and current < latest)
+
     return render_template("index.html",
                            ssh_keys=keys,
                            node_id=node_id,
                            owl_os_version=owl_os_version,
-                           retina_node_version=retina_node_version)
+                           retina_node_version=retina_node_version,
+                           os_update_available=os_update_available,
+                           latest_owl_os=latest_owl_os)
 
 
 @app.route("/eula")
@@ -374,6 +390,93 @@ def mender_install():
             return jsonify({"success": False, "error": error})
 
         return jsonify({"success": True, "installed_version": release_name})
+    finally:
+        device_state.release_install_lock()
+
+
+@app.route("/mender/check-os")
+def mender_check_os():
+    """Check owl-os version: current vs latest available."""
+    owl_os, _ = mender.get_versions()
+
+    # Check if any update in progress (GUI install lock or Mender state scripts)
+    in_progress, reason = device_state.is_any_update_in_progress()
+    if in_progress:
+        locked, lock_info = device_state.is_install_locked()
+        return jsonify({
+            "installing": True,
+            "version": lock_info["version"] if lock_info else "system update",
+            "started_at": lock_info["started_at"] if lock_info else None,
+            "reason": reason,
+        })
+
+    latest_tag, error = get_latest_owl_os_from_github()
+    if error:
+        return jsonify({"error": error})
+
+    current_ver = parse_os_version(owl_os) if owl_os else None
+    latest_ver = parse_os_version(latest_tag) if latest_tag else None
+    update_needed = current_ver is None or (latest_ver and current_ver < latest_ver)
+
+    return jsonify({
+        "current_version": owl_os,
+        "latest_version": latest_tag,
+        "update_available": update_needed,
+    })
+
+
+@app.route("/mender/install-os", methods=["POST"])
+def mender_install_os():
+    """Install latest stable owl-os update from Mender."""
+    # Enable cloud services and wait for Mender auth
+    success, error = device_state.ensure_cloud_services_enabled(mender.get_jwt)
+    if not success:
+        return jsonify({"success": False, "error": error})
+
+    # Guard: block if any update is already in progress
+    can_install, reason = device_state.can_start_install()
+    if not can_install:
+        return jsonify({"success": False, "error": reason}), 409
+
+    # Get latest stable version from GitHub releases (for version discovery)
+    version_tag, error = get_latest_owl_os_from_github()
+    if error:
+        return jsonify({"success": False, "error": f"Failed to get version: {error}"})
+
+    # Check if update is actually needed
+    owl_os, _ = mender.get_versions()
+    current_ver = parse_os_version(owl_os) if owl_os else None
+    latest_ver = parse_os_version(version_tag)
+    if current_ver and latest_ver and current_ver >= latest_ver:
+        return jsonify({"success": False, "error": "Already up to date"})
+
+    # Construct Mender release name: os-v0.2.0 -> owl-os-pi5-v0.2.0
+    release_name = f"owl-os-pi5-{version_tag.removeprefix('os-')}"
+    if not device_state.acquire_install_lock(release_name):
+        return jsonify({"success": False, "error": "Install already in progress"}), 409
+
+    try:
+        # Query Mender for that specific release
+        artifacts, error = mender.list_artifacts(release_name=release_name)
+        if error:
+            return jsonify({"success": False, "error": error})
+
+        if not artifacts:
+            return jsonify({"success": False, "error": f"No artifact found for {release_name}"})
+
+        artifact = artifacts[0]
+
+        # Get signed download URL from Mender
+        url, error = mender.get_download_url(artifact["id"])
+        if error:
+            return jsonify({"success": False, "error": error})
+
+        # Install via mender-update (Mender handles reboot for rootfs updates)
+        success, error = mender.install_from_url(url)
+        if not success:
+            return jsonify({"success": False, "error": error})
+
+        return jsonify({"success": True, "installed_version": version_tag})
     finally:
         device_state.release_install_lock()
 

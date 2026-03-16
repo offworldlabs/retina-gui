@@ -232,3 +232,88 @@ def get_latest_stable_from_github(
         return stable[0][0], None
     except requests.RequestException as e:
         return None, str(e)
+
+
+def parse_os_version(tag: str) -> tuple[int, ...] | None:
+    """Extract semver tuple from owl-os version strings.
+
+    Handles formats: 'os-v0.1.0', 'v0.1.0', '0.1.0'.
+    Returns version tuple (0, 1, 0) for stable releases.
+    Returns None for RCs, dev, or non-matching strings.
+    """
+    match = re.match(r"^(?:os-)?v?(\d+)\.(\d+)\.(\d+)$", tag)
+    if match:
+        return tuple(int(x) for x in match.groups())
+    return None
+
+
+def get_latest_owl_os_from_github(
+    repo: str = "offworldlabs/owl-os",
+) -> tuple[str | None, str | None]:
+    """Get latest stable owl-os version tag from GitHub releases.
+
+    Queries GitHub releases API, filters to stable versions
+    (tags matching os-v*.*.*), and returns the highest semver version.
+
+    Returns (version_tag, error) tuple. version_tag is like "os-v0.2.0".
+    """
+    try:
+        resp = requests.get(
+            f"https://api.github.com/repos/{repo}/releases",
+            headers={"Accept": "application/vnd.github+json"},
+            timeout=30,
+        )
+        if resp.status_code != 200:
+            return None, f"GitHub API error: {resp.status_code}"
+
+        releases = resp.json()
+        stable = []
+        for release in releases:
+            tag = release.get("tag_name", "")
+            if not tag.startswith("os-v"):
+                continue
+            version = parse_os_version(tag)
+            if version:
+                stable.append((tag, version))
+
+        if not stable:
+            return None, "No stable owl-os releases found"
+
+        stable.sort(key=lambda x: x[1], reverse=True)
+        return stable[0][0], None
+    except requests.RequestException as e:
+        return None, str(e)
+
+
+def get_owl_os_download_url(
+    version_tag: str,
+    repo: str = "offworldlabs/owl-os",
+) -> tuple[str | None, str | None]:
+    """Get .mender asset download URL from a GitHub release.
+
+    Queries the release for version_tag and finds the
+    owl-os-pi5-v{version}.mender asset.
+
+    Returns (download_url, error) tuple.
+    """
+    try:
+        resp = requests.get(
+            f"https://api.github.com/repos/{repo}/releases/tags/{version_tag}",
+            headers={"Accept": "application/vnd.github+json"},
+            timeout=30,
+        )
+        if resp.status_code != 200:
+            return None, f"GitHub API error: {resp.status_code}"
+
+        release = resp.json()
+        # version_tag is like "os-v0.2.0", strip "os-" prefix for filename
+        version = version_tag.removeprefix("os-")  # "v0.2.0"
+        mender_filename = f"owl-os-pi5-{version}.mender"
+
+        for asset in release.get("assets", []):
+            if asset.get("name") == mender_filename:
+                return asset.get("browser_download_url"), None
+
+        return None, f"No .mender asset found in release {version_tag}"
+    except requests.RequestException as e:
+        return None, str(e)

@@ -1,7 +1,10 @@
 """Tests for mender.py - version parsing and artifact selection."""
 from unittest.mock import patch, Mock
 import pytest
-from mender import parse_version, find_latest_stable, get_latest_stable_from_github
+from mender import (
+    parse_version, find_latest_stable, get_latest_stable_from_github,
+    parse_os_version, get_latest_owl_os_from_github, get_owl_os_download_url,
+)
 
 
 class TestParseVersion:
@@ -179,3 +182,147 @@ class TestGetLatestStableFromGitHub:
         version, error = get_latest_stable_from_github()
         assert version == "v1.0.0"
         assert error is None
+
+
+class TestParseOsVersion:
+    """owl-os version parsing."""
+
+    def test_full_tag(self):
+        assert parse_os_version("os-v0.1.0") == (0, 1, 0)
+
+    def test_v_prefix(self):
+        assert parse_os_version("v0.2.0") == (0, 2, 0)
+
+    def test_bare_version(self):
+        assert parse_os_version("0.1.0") == (0, 1, 0)
+
+    def test_large_numbers(self):
+        assert parse_os_version("os-v10.20.30") == (10, 20, 30)
+
+    def test_rc_excluded(self):
+        assert parse_os_version("os-v0.1.0-rc1") is None
+
+    def test_dev_excluded(self):
+        assert parse_os_version("os-v0.1.0-dev") is None
+
+    def test_empty_excluded(self):
+        assert parse_os_version("") is None
+
+    def test_non_os_tag_excluded(self):
+        assert parse_os_version("retina-node-v0.3.5") is None
+
+
+class TestGetLatestOwlOsFromGitHub:
+    """owl-os GitHub releases version discovery."""
+
+    @patch("mender.requests.get")
+    def test_finds_latest_stable(self, mock_get):
+        mock_response = Mock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = [
+            {"tag_name": "os-v0.2.0"},
+            {"tag_name": "os-v0.1.0"},
+            {"tag_name": "os-v0.3.0-rc1"},
+        ]
+        mock_get.return_value = mock_response
+
+        version, error = get_latest_owl_os_from_github()
+        assert version == "os-v0.2.0"
+        assert error is None
+
+    @patch("mender.requests.get")
+    def test_excludes_non_os_tags(self, mock_get):
+        mock_response = Mock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = [
+            {"tag_name": "v0.3.5"},
+            {"tag_name": "os-v0.1.0"},
+        ]
+        mock_get.return_value = mock_response
+
+        version, error = get_latest_owl_os_from_github()
+        assert version == "os-v0.1.0"
+        assert error is None
+
+    @patch("mender.requests.get")
+    def test_no_stable_releases(self, mock_get):
+        mock_response = Mock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = [
+            {"tag_name": "os-v0.1.0-rc1"},
+        ]
+        mock_get.return_value = mock_response
+
+        version, error = get_latest_owl_os_from_github()
+        assert version is None
+        assert "No stable owl-os releases found" in error
+
+    @patch("mender.requests.get")
+    def test_api_error(self, mock_get):
+        mock_response = Mock()
+        mock_response.status_code = 403
+        mock_get.return_value = mock_response
+
+        version, error = get_latest_owl_os_from_github()
+        assert version is None
+        assert "403" in error
+
+    @patch("mender.requests.get")
+    def test_semver_sorting(self, mock_get):
+        mock_response = Mock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = [
+            {"tag_name": "os-v0.1.0"},
+            {"tag_name": "os-v1.0.0"},
+            {"tag_name": "os-v0.10.0"},
+        ]
+        mock_get.return_value = mock_response
+
+        version, error = get_latest_owl_os_from_github()
+        assert version == "os-v1.0.0"
+        assert error is None
+
+
+class TestGetOwlOsDownloadUrl:
+    """owl-os .mender asset download URL resolution."""
+
+    @patch("mender.requests.get")
+    def test_finds_mender_asset(self, mock_get):
+        mock_response = Mock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {
+            "assets": [
+                {"name": "owl-os-pi5-v0.2.0.img.xz", "browser_download_url": "https://example.com/img"},
+                {"name": "owl-os-pi5-v0.2.0.mender", "browser_download_url": "https://example.com/mender"},
+            ]
+        }
+        mock_get.return_value = mock_response
+
+        url, error = get_owl_os_download_url("os-v0.2.0")
+        assert url == "https://example.com/mender"
+        assert error is None
+
+    @patch("mender.requests.get")
+    def test_no_mender_asset(self, mock_get):
+        mock_response = Mock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {
+            "assets": [
+                {"name": "owl-os-pi5-v0.2.0.img.xz", "browser_download_url": "https://example.com/img"},
+            ]
+        }
+        mock_get.return_value = mock_response
+
+        url, error = get_owl_os_download_url("os-v0.2.0")
+        assert url is None
+        assert "No .mender asset" in error
+
+    @patch("mender.requests.get")
+    def test_release_not_found(self, mock_get):
+        mock_response = Mock()
+        mock_response.status_code = 404
+        mock_get.return_value = mock_response
+
+        url, error = get_owl_os_download_url("os-v9.9.9")
+        assert url is None
+        assert "404" in error
