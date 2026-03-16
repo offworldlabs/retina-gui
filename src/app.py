@@ -15,7 +15,9 @@ from mender import MenderClient, get_latest_stable_from_github, get_latest_owl_o
 from ssh_keys import SSHKeyManager
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-app = Flask(__name__, template_folder=os.path.join(PROJECT_ROOT, 'templates'))
+app = Flask(__name__,
+            template_folder=os.path.join(PROJECT_ROOT, 'templates'),
+            static_folder=os.path.join(PROJECT_ROOT, 'static'))
 
 # Configurable paths - override via environment for local dev
 DATA_DIR = os.environ.get('DATA_DIR', '/data/retina-gui')
@@ -88,13 +90,15 @@ def index():
     owl_os_version, retina_node_version = mender.get_versions()
 
     setup_needed = retina_node_version is None
+    setup_in_progress = device_state.is_setup_wizard_in_progress()
 
     return render_template("index.html",
                            ssh_keys=keys,
                            node_id=node_id,
                            owl_os_version=owl_os_version,
                            retina_node_version=retina_node_version,
-                           setup_needed=setup_needed)
+                           setup_needed=setup_needed,
+                           setup_in_progress=setup_in_progress)
 
 
 @app.route("/eula")

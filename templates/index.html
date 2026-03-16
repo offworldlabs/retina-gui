@@ -1,8 +1,9 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Retina Node</title>
+    <title>OWL-OS</title>
     <meta name="viewport" content="width=device-width, initial-scale=1">
+    <link rel="icon" type="image/png" href="/static/favicon.png">
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <style>
         body { padding-bottom: 60px; }
@@ -11,7 +12,7 @@
 <body>
     <nav class="navbar navbar-expand-lg navbar-light bg-white border-bottom mb-4">
         <div class="container">
-            <a class="navbar-brand" href="/">Retina Node</a>
+            <a class="navbar-brand" href="/"><img src="/static/logo-192.png" alt="" height="32" class="me-2" style="margin-top: -9px;">OWL-OS</a>
             <ul class="navbar-nav">
                 <li class="nav-item"><a class="nav-link active" href="/">Home</a></li>
                 <li class="nav-item"><a class="nav-link" href="/config">Config</a></li>
@@ -20,11 +21,16 @@
     </nav>
 
     <div class="container">
-        {% if setup_needed %}
+        {% if setup_needed or setup_in_progress %}
         <div class="text-center py-5 mb-4 rounded-3" style="background: #e8f0fe;">
-            <h4>Welcome to Retina Node</h4>
+            <h4>Welcome to OWL-OS</h4>
+            {% if setup_in_progress %}
+            <p class="text-muted">Setup is not yet complete.</p>
+            <a href="/set-up" class="btn btn-primary btn-lg">Resume Setup</a>
+            {% else %}
             <p class="text-muted">Launch the setup wizard to get started.</p>
             <a href="/set-up" class="btn btn-primary btn-lg">Start Setup</a>
+            {% endif %}
         </div>
         {% endif %}
 

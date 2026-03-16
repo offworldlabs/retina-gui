@@ -13,7 +13,7 @@ class TestIndexRoute:
         """Index page should load successfully."""
         response = app_client.get('/')
         assert response.status_code == 200
-        assert b'Retina Node' in response.data
+        assert b'OWL-OS' in response.data
 
     def test_index_shows_node_id(self, app_client):
         """Index should display node ID from config."""
