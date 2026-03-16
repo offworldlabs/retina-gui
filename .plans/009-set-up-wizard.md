@@ -290,12 +290,12 @@ File: `templates/index.html`
 
 ## Phased Workplan
 
-### Phase 1: Backend — Version Discovery (`src/mender.py`)
-- [ ] Add `parse_os_version(tag)` — regex for `os-v*`, `v*`, bare version strings
-- [ ] Add `get_latest_owl_os_from_github(repo)` — GitHub releases API, filter `os-v*`, highest semver
-- [ ] Write tests: `TestParseOsVersion` (~8 tests) in `tests/test_mender.py`
-- [ ] Write tests: `TestGetLatestOwlOsFromGitHub` (~5 tests) in `tests/test_mender.py`
-- [ ] Run tests, confirm all pass
+### Phase 1: Backend — Version Discovery (`src/mender.py`) ✅
+- [x] Add `parse_os_version(tag)` — regex for `os-v*`, `v*`, bare version strings
+- [x] Add `get_latest_owl_os_from_github(repo)` — GitHub releases API, filter `os-v*`, highest semver
+- [x] Write tests: `TestParseOsVersion` (8 tests) in `tests/test_mender.py`
+- [x] Write tests: `TestGetLatestOwlOsFromGitHub` (5 tests) in `tests/test_mender.py`
+- [x] Run tests, confirm all pass (38/38)
 
 ### Phase 2: Backend — Wizard State (`src/device_state.py`)
 - [ ] Add `self.setup_wizard_file` path in `__init__`
