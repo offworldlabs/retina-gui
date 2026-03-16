@@ -1,6 +1,7 @@
 from flask import Flask, render_template, request, redirect, url_for, jsonify
 import os
 import subprocess
+import threading
 
 from pydantic import ValidationError
 from config_schema import (
@@ -298,18 +299,27 @@ def apply_config():
 
 @app.route("/mender/check")
 def mender_check():
-    """Check for available updates and install status."""
+    """Check for available updates and install status.
+
+    During an active install, returns state from mender-update.status
+    (written by Mender state scripts) plus install.lock metadata.
+    """
     _, current = mender.get_versions()
 
     # Check if any update in progress (GUI install or server-pushed)
     in_progress, reason = device_state.is_any_update_in_progress()
     if in_progress:
         locked, lock_info = device_state.is_install_locked()
+        mender_status = device_state._get_mender_update_status()
+        # State script has fired — use its state (e.g. "installing")
+        # Otherwise fall back to "downloading" (lock held, waiting for Mender)
+        stage = mender_status.get("state") if mender_status else "downloading"
         return jsonify({
             "installing": True,
+            "stage": stage,
             "version": lock_info["version"] if lock_info else "system update",
             "started_at": lock_info["started_at"] if lock_info else None,
-            "reason": reason
+            "reason": reason,
         })
 
     latest, error = get_latest_stable_from_github()
@@ -320,13 +330,34 @@ def mender_check():
         "installing": False,
         "latest_version": latest,
         "current_version": current,
-        "update_available": current is None or latest != current
+        "update_available": current is None or latest != current,
     })
+
+
+def _run_install(download_url):
+    """Background worker: download and install artifact via Mender.
+
+    On failure, releases install.lock so the user can retry.
+    On success, lock is cleared by ArtifactCommit_Leave state script.
+    Stale lock timeout (30 min) in DeviceState acts as final safety net.
+    """
+    try:
+        success, error = mender.install_from_url(download_url)
+        if not success:
+            app.logger.error(f"Background install failed: {error}")
+            device_state.release_install_lock()
+    except Exception as e:
+        app.logger.error(f"Background install crashed: {e}")
+        device_state.release_install_lock()
 
 
 @app.route("/mender/install", methods=["POST"])
 def mender_install():
-    """Install latest stable retina-node artifact from Mender."""
+    """Install latest stable retina-node artifact from Mender.
+
+    Returns immediately after kicking off the install in a background thread.
+    Frontend polls /mender/check for progress via mender-update.status flag file.
+    """
     # Enable cloud services and wait for Mender auth
     success, error = device_state.ensure_cloud_services_enabled(mender.get_jwt)
     if not success:
@@ -352,30 +383,28 @@ def mender_install():
     if not device_state.acquire_install_lock(release_name):
         return jsonify({"success": False, "error": "Install already in progress"}), 409
 
-    try:
-        # Query Mender for that specific release
-        artifacts, error = mender.list_artifacts(release_name=release_name)
-        if error:
-            return jsonify({"success": False, "error": error})
-
-        if not artifacts:
-            return jsonify({"success": False, "error": f"No artifact found for {release_name}"})
-
-        artifact = artifacts[0]  # Should be exactly one for this release/device
-
-        # Get download URL
-        url, error = mender.get_download_url(artifact["id"])
-        if error:
-            return jsonify({"success": False, "error": error})
-
-        # Install
-        success, error = mender.install_from_url(url)
-        if not success:
-            return jsonify({"success": False, "error": error})
-
-        return jsonify({"success": True, "installed_version": release_name})
-    finally:
+    # Query Mender for that specific release
+    artifacts, error = mender.list_artifacts(release_name=release_name)
+    if error:
         device_state.release_install_lock()
+        return jsonify({"success": False, "error": error})
+
+    if not artifacts:
+        device_state.release_install_lock()
+        return jsonify({"success": False, "error": f"No artifact found for {release_name}"})
+
+    artifact = artifacts[0]  # Should be exactly one for this release/device
+
+    # Get download URL
+    url, error = mender.get_download_url(artifact["id"])
+    if error:
+        device_state.release_install_lock()
+        return jsonify({"success": False, "error": error})
+
+    # Kick off install in background — progress tracked via mender-update.status
+    threading.Thread(target=_run_install, args=(url,), daemon=True).start()
+
+    return jsonify({"success": True, "version": release_name})
 
 
 @app.route("/mender/cloud-services", methods=["GET"])
