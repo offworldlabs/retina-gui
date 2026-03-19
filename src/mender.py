@@ -141,29 +141,28 @@ class MenderClient:
         except requests.RequestException as e:
             return None, str(e)
 
-    def install_from_url(self, url: str, timeout: int = 600) -> tuple[bool, str | None, bool]:
-        """Install artifact from URL via mender-update.
+    def install_from_url(self, url: str, timeout: int = 600) -> tuple[bool, str | None]:
+        """Install artifact from URL via mender-update (standalone).
 
-        Returns (success, error, needs_reboot) tuple.
-        Uses --reboot-exit-code so mender returns exit 4 when a manual
-        reboot is required (rootfs updates).
+        Used for app updates only (no reboot needed). OS updates use managed
+        mode via the mender-updated daemon — see /mender/install-os.
+
+        Returns (success, error) tuple.
         """
         try:
             result = subprocess.run(
-                ["mender-update", "install", "--reboot-exit-code", url],
+                ["mender-update", "install", url],
                 capture_output=True,
                 text=True,
                 timeout=timeout,
             )
-            if result.returncode == 4:
-                return True, None, True  # Success, needs reboot
             if result.returncode != 0:
-                return False, result.stderr or "Install failed", False
-            return True, None, False
+                return False, result.stderr or "Install failed"
+            return True, None
         except subprocess.TimeoutExpired:
-            return False, "Installation timed out", False
+            return False, "Installation timed out"
         except Exception as e:
-            return False, str(e), False
+            return False, str(e)
 
 
 def parse_version(artifact_name: str) -> tuple[int, ...] | None:

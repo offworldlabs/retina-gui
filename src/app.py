@@ -342,23 +342,18 @@ def mender_check():
 
 
 def _run_install(download_url):
-    """Background worker: download and install artifact via Mender.
+    """Background worker: download and install app artifact via Mender (standalone).
+
+    Used for app updates only (no reboot). OS updates use managed mode
+    via the mender-updated daemon — see /mender/install-os.
 
     Always releases install.lock when done (success or failure).
     Stale lock timeout (40 min) in DeviceState acts as final safety net.
-
-    If mender-update signals a reboot is needed (exit code 4, rootfs updates),
-    triggers reboot automatically. After reboot, mender-updated daemon handles
-    the commit on the new rootfs.
     """
     try:
-        success, error, needs_reboot = mender.install_from_url(download_url)
+        success, error = mender.install_from_url(download_url)
         if not success:
             app.logger.error(f"Background install failed: {error}")
-        elif needs_reboot:
-            app.logger.info("Rootfs install complete, rebooting...")
-            subprocess.run(["/usr/share/mender/integration/reboot"], timeout=10)
-            return  # Don't release lock — device is rebooting
     except Exception as e:
         app.logger.error(f"Background install crashed: {e}")
     finally:
@@ -461,6 +456,11 @@ def mender_check_os():
     """Check for owl-os updates and install status.
 
     Mirrors /mender/check but for the OS layer.
+
+    For managed OS updates, the install.lock is held while waiting for
+    node-infra to approve the device and the daemon to pick up the deployment.
+    The mender-update.status flag file tracks download/install progress once
+    the daemon starts. Stages: waiting → downloading → installing → (reboot) → done.
     """
     owl_os_current, _ = mender.get_versions()
 
@@ -469,7 +469,9 @@ def mender_check_os():
     if in_progress:
         locked, lock_info = device_state.is_install_locked()
         mender_status = device_state._get_mender_update_status()
-        stage = mender_status.get("state") if mender_status else "downloading"
+        # If flag file exists, daemon has started — use its state.
+        # Otherwise lock is held but daemon hasn't picked up deployment yet.
+        stage = mender_status.get("state") if mender_status else "waiting"
         return jsonify({
             "installing": True,
             "stage": stage,
@@ -500,22 +502,22 @@ def mender_check_os():
 
 @app.route("/mender/install-os", methods=["POST"])
 def mender_install_os():
-    """Install latest stable owl-os from Mender.
+    """Trigger managed OS update via Mender daemon.
 
-    Returns immediately, install runs in background thread.
-    Frontend polls /mender/check-os for progress.
+    Enables cloud services so the daemon can authenticate with the Mender server.
+    node-infra auto-approves the device and creates a per-device deployment.
+    The daemon picks it up on its next poll and handles everything: download,
+    install, config backup, tryboot reboot, config restore, commit.
+
+    Frontend polls /mender/check-os for progress via mender-update.status flag file.
+    install.lock cleared by ArtifactCommit_Leave or ArtifactFailure_Enter state scripts.
     """
-    # Enable cloud services and wait for Mender auth
-    success, error = device_state.ensure_cloud_services_enabled(mender.get_jwt)
-    if not success:
-        return jsonify({"success": False, "error": error})
-
     # Guard: block if any update is already in progress
     can_install, reason = device_state.can_start_install()
     if not can_install:
         return jsonify({"success": False, "error": reason}), 409
 
-    # Get latest stable OS version from GitHub releases
+    # Get target version for the lock
     version_tag, error = get_latest_owl_os_from_github()
     if error:
         return jsonify({"success": False, "error": f"Failed to get version: {error}"})
@@ -524,32 +526,22 @@ def mender_install_os():
     version_suffix = version_tag.replace("os-", "")  # v0.2.0
     release_name = f"owl-os-pi5-{version_suffix}"
 
-    # Acquire lock
+    # Acquire lock — prevents duplicate installs + blocks cloud toggle
     if not device_state.acquire_install_lock(release_name):
         return jsonify({"success": False, "error": "Install already in progress"}), 409
 
-    # Query Mender for that specific release
-    artifacts, error = mender.list_artifacts(release_name=release_name)
-    if error:
+    # Enable cloud services (starts daemon, begins auth with Mender server)
+    success, error = device_state.ensure_cloud_services_enabled(mender.get_jwt)
+    if not success:
         device_state.release_install_lock()
         return jsonify({"success": False, "error": error})
 
-    if not artifacts:
-        device_state.release_install_lock()
-        return jsonify({"success": False, "error": f"No artifact found for {release_name}"})
+    # Save wizard state before potential reboot
+    device_state.save_setup_wizard_step("system")
 
-    artifact = artifacts[0]
-
-    # Get download URL
-    url, error = mender.get_download_url(artifact["id"])
-    if error:
-        device_state.release_install_lock()
-        return jsonify({"success": False, "error": error})
-
-    # Kick off install in background (mender signals reboot via exit code 4)
-    threading.Thread(target=_run_install, args=(url,), daemon=True).start()
-
-    return jsonify({"success": True, "version": release_name})
+    # That's it! node-infra will auto-approve + create deployment.
+    # Daemon will find it on next poll and handle everything.
+    return jsonify({"success": True, "version": release_name, "state": "waiting"})
 
 
 @app.route("/set-up/save-step", methods=["POST"])

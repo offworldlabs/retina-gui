@@ -118,8 +118,11 @@
             <div id="systemVersionInfo" style="display:none;">
                 <p class="small"><span id="systemCurrentVersion" class="text-muted"></span> &rarr; <strong id="systemLatestVersion"></strong></p>
             </div>
-            <button type="button" class="btn btn-primary" id="systemUpdateBtn" style="display:none;">
+            <button type="button" class="btn btn-primary me-2" id="systemUpdateBtn" style="display:none;">
                 Update System
+            </button>
+            <button type="button" class="btn btn-outline-secondary" id="systemSkipBtn" style="display:none;">
+                Skip
             </button>
             <button type="button" class="btn btn-outline-primary" id="systemNextBtn" style="display:none;">
                 Next &rarr;
@@ -278,11 +281,12 @@
             });
         };
 
-        // Step 2: System Update
+        // Step 2: System Update (managed mode via Mender daemon)
         enterHooks.system = function() {
             var status = document.getElementById('systemStatus');
             var versionInfo = document.getElementById('systemVersionInfo');
             var updateBtn = document.getElementById('systemUpdateBtn');
+            var skipBtn = document.getElementById('systemSkipBtn');
             var nextBtn = document.getElementById('systemNextBtn');
             var installStatus = document.getElementById('systemInstallStatus');
 
@@ -290,7 +294,7 @@
                 .then(function(r) { return r.json(); })
                 .then(function(data) {
                     if (data.installing) {
-                        status.textContent = data.reason || 'System update in progress...';
+                        showStage(data.stage);
                         installStatus.innerHTML = '<span class="text-warning">Do not power off the device.</span>';
                         startSystemPoll();
                         return;
@@ -306,6 +310,7 @@
                         document.getElementById('systemCurrentVersion').textContent = data.current_version || 'Not detected';
                         document.getElementById('systemLatestVersion').textContent = data.latest_version;
                         updateBtn.style.display = '';
+                        skipBtn.style.display = '';
                     } else {
                         status.innerHTML = 'System is up to date &#10003;';
                         nextBtn.style.display = '';
@@ -314,25 +319,42 @@
 
             updateBtn.addEventListener('click', function() {
                 updateBtn.disabled = true;
-                updateBtn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Updating...';
+                skipBtn.style.display = 'none';
+                updateBtn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Connecting...';
                 installStatus.innerHTML = '<span class="text-warning">Do not power off the device.</span>';
 
                 fetch('/mender/install-os', {method: 'POST'})
                     .then(function(r) { return r.json(); })
                     .then(function(data) {
                         if (data.success) {
+                            updateBtn.style.display = 'none';
                             startSystemPoll();
                         } else {
                             installStatus.innerHTML = '<span class="text-danger">' + data.error + '</span>';
                             updateBtn.disabled = false;
                             updateBtn.textContent = 'Update System';
+                            skipBtn.style.display = '';
                         }
                     });
             });
 
+            skipBtn.addEventListener('click', advance);
             nextBtn.addEventListener('click', advance);
 
+            function showStage(stage) {
+                if (stage === 'waiting') {
+                    status.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Connecting to update server...';
+                } else if (stage === 'downloading') {
+                    status.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Downloading OS update...';
+                } else if (stage === 'installing') {
+                    status.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Installing OS update...';
+                } else {
+                    status.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Updating...';
+                }
+            }
+
             function startSystemPoll() {
+                showStage('waiting');
                 if (pollTimer) clearInterval(pollTimer);
                 pollTimer = setInterval(function() {
                     fetch('/mender/check-os')
@@ -341,13 +363,20 @@
                             if (!data.installing) {
                                 clearInterval(pollTimer);
                                 pollTimer = null;
-                                status.innerHTML = 'Updated. Device may reboot &mdash; reconnect to continue.';
-                                installStatus.innerHTML = '<span class="text-success">Complete!</span>';
+                                if (!data.update_available) {
+                                    status.innerHTML = 'Update complete &#10003;';
+                                    installStatus.innerHTML = '<span class="text-success">Complete!</span>';
+                                } else {
+                                    status.innerHTML = 'Device may reboot &mdash; reconnect to continue.';
+                                }
                                 nextBtn.style.display = '';
-                                updateBtn.style.display = 'none';
                             } else {
-                                status.textContent = data.reason || 'Updating...';
+                                showStage(data.stage);
                             }
+                        })
+                        .catch(function() {
+                            // Connection lost — device is likely rebooting
+                            status.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Rebooting... reconnect shortly.';
                         });
                 }, 5000);
             }

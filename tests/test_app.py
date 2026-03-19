@@ -786,39 +786,41 @@ class TestMenderCheckOs:
 class TestMenderInstallOs:
     """Test the /mender/install-os endpoint."""
 
-    @patch('app.threading.Thread')
-    @patch('app.mender')
     @patch('app.device_state')
     @patch('app.get_latest_owl_os_from_github')
-    def test_install_os_success(self, mock_github, mock_ds, mock_mender, mock_thread, app_client):
-        """Should kick off OS install and return success."""
-        mock_ds.ensure_cloud_services_enabled.return_value = (True, None)
+    def test_install_os_success(self, mock_github, mock_ds, app_client):
+        """Should enable cloud services, acquire lock, and return waiting state."""
         mock_ds.can_start_install.return_value = (True, None)
         mock_ds.acquire_install_lock.return_value = True
+        mock_ds.ensure_cloud_services_enabled.return_value = (True, None)
         mock_github.return_value = ('os-v0.2.0', None)
-        mock_mender.list_artifacts.return_value = ([{"id": "art1"}], None)
-        mock_mender.get_download_url.return_value = ('https://example.com/artifact', None)
 
         response = app_client.post('/mender/install-os')
         data = json.loads(response.data)
         assert data['success'] is True
         assert data['version'] == 'owl-os-pi5-v0.2.0'
-        mock_thread.assert_called_once()
+        assert data['state'] == 'waiting'
+        mock_ds.acquire_install_lock.assert_called_once_with('owl-os-pi5-v0.2.0')
+        mock_ds.save_setup_wizard_step.assert_called_once_with('system')
 
     @patch('app.device_state')
-    def test_install_os_not_authenticated(self, mock_ds, app_client):
-        """Should fail when cloud services can't be enabled."""
+    @patch('app.get_latest_owl_os_from_github')
+    def test_install_os_not_authenticated(self, mock_github, mock_ds, app_client):
+        """Should fail and release lock when cloud services can't be enabled."""
+        mock_ds.can_start_install.return_value = (True, None)
+        mock_ds.acquire_install_lock.return_value = True
+        mock_github.return_value = ('os-v0.2.0', None)
         mock_ds.ensure_cloud_services_enabled.return_value = (False, 'Timed out')
 
         response = app_client.post('/mender/install-os')
         data = json.loads(response.data)
         assert data['success'] is False
         assert 'Timed out' in data['error']
+        mock_ds.release_install_lock.assert_called_once()
 
     @patch('app.device_state')
     def test_install_os_already_updating(self, mock_ds, app_client):
         """Should fail when update already in progress."""
-        mock_ds.ensure_cloud_services_enabled.return_value = (True, None)
         mock_ds.can_start_install.return_value = (False, 'Installing v0.3.5')
 
         response = app_client.post('/mender/install-os')
