@@ -15,6 +15,15 @@
             padding: 2rem;
             box-shadow: 0 1px 3px rgba(0,0,0,0.08);
         }
+        .section-label {
+            font-size: 0.75rem;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            color: #6c757d;
+            margin-bottom: 0.5rem;
+        }
+        .list-group-item { font-size: 0.9rem; }
         @media (max-width: 576px) {
             body { background: #fff; }
             .main-card {
@@ -26,7 +35,7 @@
     </style>
 </head>
 <body>
-    <nav class="navbar navbar-expand-lg navbar-light bg-white border-bottom mb-4">
+    <nav class="navbar navbar-expand navbar-light bg-white border-bottom">
         <div class="container">
             <a class="navbar-brand" href="/"><img src="/static/logo-192.png" alt="" height="32" class="me-2">OWL-OS</a>
             <ul class="navbar-nav">
@@ -39,19 +48,19 @@
     <div class="main-card">
         {% if setup_needed or setup_in_progress %}
         <div class="text-center py-5 mb-4 rounded-3" style="background: #e8f0fe;">
-            <h4>Welcome to OWL-OS</h4>
+            <h5>Welcome to OWL-OS</h5>
             {% if setup_in_progress %}
             <p class="text-muted">Setup is not yet complete.</p>
-            <a href="/set-up" class="btn btn-primary btn-lg">Resume Setup</a>
+            <a href="/set-up" class="btn btn-primary">Resume Setup</a>
             {% else %}
             <p class="text-muted">Launch the setup wizard to get started.</p>
-            <a href="/set-up" class="btn btn-primary btn-lg">Start Setup</a>
+            <a href="/set-up" class="btn btn-primary">Start Setup</a>
             {% endif %}
         </div>
         {% endif %}
 
-        <h4>Services</h4>
-        <div class="list-group mb-4 w-100">
+        <div class="section-label">Services</div>
+        <div class="list-group mb-3 w-100">
             {% if retina_node_version %}
             <a href="http://retina.local:49152" target="_blank" class="list-group-item list-group-item-action">
                 blah2 - Passive Radar
@@ -71,7 +80,7 @@
 
         {% if retina_node_version %}
         <div class="d-flex gap-2 align-items-center mb-4">
-            <button type="button" class="btn btn-outline-secondary" id="applyRestartBtn">
+            <button type="button" class="btn btn-outline-secondary btn-sm" id="applyRestartBtn">
                 Restart Services
             </button>
             <span id="applyRestartStatus"></span>

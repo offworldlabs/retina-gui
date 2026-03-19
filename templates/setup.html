@@ -6,11 +6,24 @@
     <link rel="icon" type="image/png" href="/static/favicon.png">
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <style>
-        body { padding-bottom: 60px; background: #fff; }
+        body { padding-bottom: 60px; background: #f8f9fa; }
 
         .setup-card {
-            max-width: 480px;
-            margin: 0 auto;
+            max-width: 520px;
+            margin: 3rem auto 0;
+            background: #fff;
+            border-radius: 12px;
+            padding: 2rem;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+        }
+        @media (max-width: 576px) {
+            body { background: #fff; }
+            .setup-card {
+                margin: 0;
+                border-radius: 0;
+                box-shadow: none;
+                padding: 1.5rem;
+            }
         }
 
         /* Circle-and-line stepper */
@@ -45,11 +58,19 @@
         }
         .stepper-line.complete { background: #198754; }
 
-        .step-panel { min-height: 200px; margin-top: 4rem; }
+        .section-label {
+            font-size: 0.75rem;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            color: #6c757d;
+            margin-bottom: 0.75rem;
+        }
+        .step-panel { min-height: 200px; margin-top: 1.5rem; }
     </style>
 </head>
 <body>
-    <nav class="navbar navbar-expand-lg navbar-light bg-white border-bottom mb-4">
+    <nav class="navbar navbar-expand navbar-light bg-white border-bottom">
         <div class="container">
             <a class="navbar-brand" href="/"><img src="/static/logo-192.png" alt="" height="32" class="me-2">OWL-OS</a>
             <ul class="navbar-nav">
@@ -85,7 +106,7 @@
 
         <!-- Step 1: Agreements -->
         <div data-step="agreements" class="step-panel text-center">
-            <h5 class="mb-3">Agreements &amp; Cloud Services</h5>
+            <div class="section-label text-center">Agreements &amp; Cloud Services</div>
 
             <div class="text-start mx-auto" style="max-width: 360px;">
                 <div class="form-check mb-2">
@@ -111,7 +132,7 @@
 
         <!-- Step 2: System Update -->
         <div data-step="system" class="step-panel" style="display:none;">
-            <h5 class="mb-3 text-center">System Update</h5>
+            <div class="section-label text-center">System Update</div>
             <p class="text-muted small text-center mb-2">Ensure node is connected to the internet. Node will restart after update.</p>
 
             <div class="text-start mx-auto mb-3" style="max-width: 400px;">
@@ -142,7 +163,7 @@
 
         <!-- Step 3: Packages -->
         <div data-step="radar" class="step-panel" style="display:none;">
-            <h5 class="mb-3 text-center">Packages</h5>
+            <div class="section-label text-center">Packages</div>
 
             <div class="text-start mx-auto mb-3" style="max-width: 400px;">
                 <div class="form-check mb-3">
@@ -182,7 +203,7 @@
 
         <!-- Step 4: Complete -->
         <div data-step="complete" class="step-panel text-center py-5" style="display:none;">
-            <h5>Setup Complete</h5>
+            <div class="section-label text-center">Setup Complete</div>
             <p class="text-muted">Your device is ready.</p>
             <a href="/" class="btn btn-primary">Go to Dashboard &rarr;</a>
         </div>
