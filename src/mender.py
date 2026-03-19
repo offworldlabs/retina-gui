@@ -142,9 +142,12 @@ class MenderClient:
             return None, str(e)
 
     def install_from_url(self, url: str, timeout: int = 600) -> tuple[bool, str | None]:
-        """Install artifact from URL via mender-update.
+        """Install artifact from URL via mender-update (standalone).
 
-        Returns (success, error) tuple. On success, error is None.
+        Used for app updates only (no reboot needed). OS updates use managed
+        mode via the mender-updated daemon — see /mender/install-os.
+
+        Returns (success, error) tuple.
         """
         try:
             result = subprocess.run(
@@ -172,26 +175,6 @@ def parse_version(artifact_name: str) -> tuple[int, ...] | None:
     if match:
         return tuple(int(x) for x in match.groups())
     return None
-
-
-def find_latest_stable(artifacts: list[dict]) -> dict | None:
-    """Find latest stable artifact (excludes RCs, dev, beta).
-
-    Returns the artifact dict with the highest semver version,
-    or None if no stable artifacts found.
-    """
-    stable = []
-    for artifact in artifacts:
-        name = artifact.get("artifact_name", "")
-        version = parse_version(name)
-        if version:
-            stable.append((artifact, version))
-
-    if not stable:
-        return None
-
-    stable.sort(key=lambda x: x[1], reverse=True)
-    return stable[0][0]
 
 
 def get_latest_stable_from_github(
@@ -228,6 +211,57 @@ def get_latest_stable_from_github(
             return None, "No stable releases found"
 
         # Sort by version tuple, highest first
+        stable.sort(key=lambda x: x[1], reverse=True)
+        return stable[0][0], None
+    except requests.RequestException as e:
+        return None, str(e)
+
+
+def parse_os_version(tag: str) -> tuple[int, ...] | None:
+    """Extract semver tuple from owl-os version strings.
+
+    Handles formats: 'os-v0.1.0', 'v0.1.0', '0.1.0'.
+    Returns version tuple (0, 1, 0) for stable releases.
+    Returns None for RCs, dev, or non-matching strings.
+    """
+    match = re.match(r"^(?:os-)?v?(\d+)\.(\d+)\.(\d+)$", tag)
+    if match:
+        return tuple(int(x) for x in match.groups())
+    return None
+
+
+def get_latest_owl_os_from_github(
+    repo: str = "offworldlabs/owl-os",
+) -> tuple[str | None, str | None]:
+    """Get latest stable owl-os version tag from GitHub releases.
+
+    Queries GitHub releases API, filters to stable versions
+    (tags matching os-v*.*.*), and returns the highest semver version.
+
+    Returns (version_tag, error) tuple. version_tag is like 'os-v0.2.0'.
+    """
+    try:
+        resp = requests.get(
+            f"https://api.github.com/repos/{repo}/releases",
+            headers={"Accept": "application/vnd.github+json"},
+            timeout=30,
+        )
+        if resp.status_code != 200:
+            return None, f"GitHub API error: {resp.status_code}"
+
+        releases = resp.json()
+        stable = []
+        for release in releases:
+            tag = release.get("tag_name", "")
+            if not tag.startswith("os-v"):
+                continue
+            version = parse_os_version(tag)
+            if version:
+                stable.append((tag, version))
+
+        if not stable:
+            return None, "No stable owl-os releases found"
+
         stable.sort(key=lambda x: x[1], reverse=True)
         return stable[0][0], None
     except requests.RequestException as e:

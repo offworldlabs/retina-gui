@@ -1,17 +1,34 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Retina Node</title>
+    <title>OWL-OS</title>
     <meta name="viewport" content="width=device-width, initial-scale=1">
+    <link rel="icon" type="image/png" href="/static/favicon.png">
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <style>
-        body { padding-bottom: 60px; }
+        body { padding-bottom: 60px; background: #f8f9fa; }
+        .main-card {
+            max-width: 520px;
+            margin: 3rem auto 0;
+            background: #fff;
+            border-radius: 12px;
+            padding: 2rem;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+        }
+        @media (max-width: 576px) {
+            body { background: #fff; }
+            .main-card {
+                margin: 0;
+                border-radius: 0;
+                box-shadow: none;
+            }
+        }
     </style>
 </head>
 <body>
     <nav class="navbar navbar-expand-lg navbar-light bg-white border-bottom mb-4">
         <div class="container">
-            <a class="navbar-brand" href="/">Retina Node</a>
+            <a class="navbar-brand" href="/"><img src="/static/logo-192.png" alt="" height="32" class="me-2">OWL-OS</a>
             <ul class="navbar-nav">
                 <li class="nav-item"><a class="nav-link active" href="/">Home</a></li>
                 <li class="nav-item"><a class="nav-link" href="/config">Config</a></li>
@@ -19,132 +36,22 @@
         </div>
     </nav>
 
-    <div class="container">
-        {% if not retina_node_version %}
-        <div class="alert alert-info mb-4" id="installSection">
-            <h5>Welcome to Retina Node</h5>
-            <p>To get started, install the Retina passive radar stack.</p>
-            <p id="versionInfo" class="text-muted small">Checking for available software...</p>
-
-            <div class="form-check mb-2">
-                <input type="checkbox" class="form-check-input" id="eulaCheck">
-                <label class="form-check-label" for="eulaCheck">
-                    I accept the <a href="/eula" target="_blank">End User License Agreement</a>
-                </label>
-            </div>
-
-            <div class="form-check mb-2">
-                <input type="checkbox" class="form-check-input" id="regionCheck">
-                <label class="form-check-label" for="regionCheck">
-                    This device will not be exported or re-exported from the USA
-                </label>
-            </div>
-
-            <div class="form-check mb-3">
-                <input type="checkbox" class="form-check-input" id="cloudCheck">
-                <label class="form-check-label" for="cloudCheck">
-                    Enable cloud services for software updates and remote support
-                </label>
-                <small class="text-muted d-block">Required for installation. Can be disabled later in Config.</small>
-            </div>
-
-            <button type="button" class="btn btn-primary" id="installBtn" disabled>
-                Install Software
-            </button>
-            <span id="installStatus" class="ms-2"></span>
+    <div class="main-card">
+        {% if setup_needed or setup_in_progress %}
+        <div class="text-center py-5 mb-4 rounded-3" style="background: #e8f0fe;">
+            <h4>Welcome to OWL-OS</h4>
+            {% if setup_in_progress %}
+            <p class="text-muted">Setup is not yet complete.</p>
+            <a href="/set-up" class="btn btn-primary btn-lg">Resume Setup</a>
+            {% else %}
+            <p class="text-muted">Launch the setup wizard to get started.</p>
+            <a href="/set-up" class="btn btn-primary btn-lg">Start Setup</a>
+            {% endif %}
         </div>
-
-        <script>
-        var pollTimer = null;
-
-        function checkStatus() {
-            fetch('/mender/check')
-                .then(function(r) { return r.json(); })
-                .then(function(data) {
-                    var btn = document.getElementById('installBtn');
-                    var status = document.getElementById('installStatus');
-                    var info = document.getElementById('versionInfo');
-
-                    if (data.installing) {
-                        btn.disabled = true;
-                        btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> ' + (data.stage || 'Installing') + '...';
-                        info.textContent = data.reason || 'Update in progress...';
-                        status.innerHTML = '<span class="text-warning">Please do not power off the device.</span>';
-                        startPolling();
-                    } else if (pollTimer) {
-                        // Was polling — install finished
-                        clearInterval(pollTimer);
-                        pollTimer = null;
-                        if (data.current_version) {
-                            status.innerHTML = '<span class="text-success">Installed! Refreshing...</span>';
-                            btn.textContent = 'Installed';
-                            setTimeout(function() { location.reload(); }, 2000);
-                        } else {
-                            status.innerHTML = '<span class="text-danger">Install may have failed. Please try again.</span>';
-                            btn.disabled = false;
-                            btn.textContent = 'Install Software';
-                        }
-                    } else if (data.error) {
-                        info.textContent = 'Unable to check for updates';
-                    } else {
-                        info.innerHTML = 'Available: <strong>' + data.latest_version + '</strong> (~600MB, takes 5-10 minutes)';
-                    }
-                });
-        }
-
-        function startPolling() {
-            if (!pollTimer) {
-                pollTimer = setInterval(checkStatus, 5000);
-            }
-        }
-
-        // Check on page load
-        checkStatus();
-
-        // Enable button only when all checkboxes checked
-        function updateButtonState() {
-            var eula = document.getElementById('eulaCheck').checked;
-            var region = document.getElementById('regionCheck').checked;
-            var cloud = document.getElementById('cloudCheck').checked;
-            document.getElementById('installBtn').disabled = !(eula && region && cloud);
-        }
-        document.getElementById('eulaCheck').addEventListener('change', updateButtonState);
-        document.getElementById('regionCheck').addEventListener('change', updateButtonState);
-        document.getElementById('cloudCheck').addEventListener('change', updateButtonState);
-
-        // Install click handler
-        document.getElementById('installBtn').addEventListener('click', function() {
-            var btn = this;
-            var status = document.getElementById('installStatus');
-
-            if (btn.disabled) return;
-
-            btn.disabled = true;
-            btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Connecting...';
-            status.innerHTML = '<span class="text-warning">Connecting to update server...</span>';
-
-            fetch('/mender/install', { method: 'POST' })
-                .then(function(r) { return r.json(); })
-                .then(function(data) {
-                    if (data.success) {
-                        startPolling();
-                    } else {
-                        status.innerHTML = '<span class="text-danger">' + data.error + '</span>';
-                        btn.disabled = false;
-                        btn.textContent = 'Install Software';
-                    }
-                })
-                .catch(function(e) {
-                    status.innerHTML = '<span class="text-danger">Error: ' + e.message + '</span>';
-                    btn.disabled = false;
-                    btn.textContent = 'Install Software';
-                });
-        });
-        </script>
         {% endif %}
 
         <h4>Services</h4>
-        <div class="list-group mb-4">
+        <div class="list-group mb-4 w-100">
             {% if retina_node_version %}
             <a href="http://retina.local:49152" target="_blank" class="list-group-item list-group-item-action">
                 blah2 - Passive Radar
@@ -206,34 +113,6 @@
         </script>
         {% endif %}
 
-        <h4 class="mt-4">SSH Access</h4>
-        <form action="/ssh-keys" method="post" class="mb-3">
-            <div class="input-group">
-                <input type="text" name="ssh_key" class="form-control"
-                       placeholder="ssh-ed25519 AAAA... user@host">
-                <button type="submit" class="btn btn-primary">Add Key</button>
-            </div>
-        </form>
-
-        {% if error %}
-        <div class="alert alert-danger mt-2">{{ error }}</div>
-        {% endif %}
-
-        {% if ssh_keys %}
-        <ul class="list-group">
-            {% for key in ssh_keys %}
-            <li class="list-group-item d-flex justify-content-between align-items-center">
-                <span class="text-truncate" style="max-width: 80%;">{{ key }}</span>
-                <form action="/ssh-keys/delete" method="post" class="m-0">
-                    <input type="hidden" name="ssh_key" value="{{ key }}">
-                    <button type="submit" class="btn btn-sm btn-outline-danger">Delete</button>
-                </form>
-            </li>
-            {% endfor %}
-        </ul>
-        {% else %}
-        <p class="text-muted">No SSH keys configured</p>
-        {% endif %}
     </div>
 
     <footer class="fixed-bottom bg-light border-top py-2">

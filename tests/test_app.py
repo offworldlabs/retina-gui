@@ -13,7 +13,7 @@ class TestIndexRoute:
         """Index page should load successfully."""
         response = app_client.get('/')
         assert response.status_code == 200
-        assert b'Retina Node' in response.data
+        assert b'OWL-OS' in response.data
 
     def test_index_shows_node_id(self, app_client):
         """Index should display node ID from config."""
@@ -41,9 +41,9 @@ class TestIndexRoute:
         assert b'blah2' in response.data
         assert b'tar1090' in response.data
 
-    def test_ssh_keys_section(self, app_client):
-        """Index should show SSH keys section."""
-        response = app_client.get('/')
+    def test_ssh_keys_on_config_page(self, app_client):
+        """SSH keys should be on config page, not index."""
+        response = app_client.get('/config')
         assert response.status_code == 200
         assert b'SSH Access' in response.data
         assert b'Add Key' in response.data
@@ -580,13 +580,11 @@ class TestSSHKeysRoutes:
         assert valid_key in content
 
     def test_add_invalid_ssh_key(self, app_client):
-        """Invalid SSH key should show error."""
+        """Invalid SSH key should redirect back to config."""
         response = app_client.post('/ssh-keys', data={
             'ssh_key': 'not-a-valid-key'
         })
-
-        assert response.status_code == 200
-        assert b'Invalid SSH key format' in response.data
+        assert response.status_code == 302
 
     def test_add_ssh_key_with_shell_chars(self, app_client):
         """SSH key with shell metacharacters should be rejected."""
@@ -595,9 +593,7 @@ class TestSSHKeysRoutes:
         response = app_client.post('/ssh-keys', data={
             'ssh_key': malicious_key
         })
-
-        assert response.status_code == 200
-        assert b'Invalid SSH key format' in response.data
+        assert response.status_code == 302
 
     def test_delete_ssh_key(self, app_client, temp_dir):
         """SSH key should be deletable."""
@@ -714,3 +710,139 @@ class TestParseFlatFormData:
         })
         assert capture['device_type'] == 'RspDuo'
         assert isinstance(capture['device_type'], str)
+
+
+class TestSetupRoute:
+    """Test the /set-up wizard route."""
+
+    def test_setup_page_loads(self, app_client):
+        """Setup page should load successfully."""
+        response = app_client.get('/set-up')
+        assert response.status_code == 200
+        assert b'Setup' in response.data
+
+    def test_setup_page_no_retina(self, app_client_no_retina):
+        """Setup page should load even when retina-node not installed."""
+        response = app_client_no_retina.get('/set-up')
+        assert response.status_code == 200
+
+
+class TestMenderCheckOs:
+    """Test the /mender/check-os endpoint."""
+
+    @patch('app.get_latest_owl_os_from_github')
+    @patch('app.mender')
+    def test_check_os_idle(self, mock_mender, mock_github, app_client):
+        """Should return version info when idle."""
+        mock_mender.get_versions.return_value = ('v0.1.0', 'v0.3.5')
+        mock_github.return_value = ('os-v0.2.0', None)
+
+        response = app_client.get('/mender/check-os')
+        data = json.loads(response.data)
+        assert data['installing'] is False
+        assert data['current_version'] == 'v0.1.0'
+        assert data['latest_version'] == 'os-v0.2.0'
+        assert data['update_available'] is True
+
+    @patch('app.get_latest_owl_os_from_github')
+    @patch('app.mender')
+    def test_check_os_up_to_date(self, mock_mender, mock_github, app_client):
+        """Should show no update when versions match."""
+        mock_mender.get_versions.return_value = ('os-v0.2.0', 'v0.3.5')
+        mock_github.return_value = ('os-v0.2.0', None)
+
+        response = app_client.get('/mender/check-os')
+        data = json.loads(response.data)
+        assert data['installing'] is False
+        assert data['update_available'] is False
+
+    @patch('app.get_latest_owl_os_from_github')
+    @patch('app.mender')
+    def test_check_os_no_current_version(self, mock_mender, mock_github, app_client):
+        """Should show update available when no current version."""
+        mock_mender.get_versions.return_value = (None, None)
+        mock_github.return_value = ('os-v0.2.0', None)
+
+        response = app_client.get('/mender/check-os')
+        data = json.loads(response.data)
+        assert data['update_available'] is True
+
+    @patch('app.get_latest_owl_os_from_github')
+    @patch('app.mender')
+    def test_check_os_github_error(self, mock_mender, mock_github, app_client):
+        """Should return error when GitHub fails."""
+        mock_mender.get_versions.return_value = ('v0.1.0', None)
+        mock_github.return_value = (None, 'GitHub API error: 403')
+
+        response = app_client.get('/mender/check-os')
+        data = json.loads(response.data)
+        assert 'error' in data
+
+
+class TestMenderInstallOs:
+    """Test the /mender/install-os endpoint."""
+
+    @patch('app.device_state')
+    @patch('app.get_latest_owl_os_from_github')
+    def test_install_os_success(self, mock_github, mock_ds, app_client):
+        """Should enable cloud services, acquire lock, and return waiting state."""
+        mock_ds.can_start_install.return_value = (True, None)
+        mock_ds.acquire_install_lock.return_value = True
+        mock_ds.ensure_cloud_services_enabled.return_value = (True, None)
+        mock_github.return_value = ('os-v0.2.0', None)
+
+        response = app_client.post('/mender/install-os')
+        data = json.loads(response.data)
+        assert data['success'] is True
+        assert data['version'] == 'owl-os-pi5-v0.2.0'
+        assert data['state'] == 'waiting'
+        mock_ds.acquire_install_lock.assert_called_once_with('owl-os-pi5-v0.2.0')
+        mock_ds.save_setup_wizard_step.assert_called_once_with('system')
+
+    @patch('app.device_state')
+    @patch('app.get_latest_owl_os_from_github')
+    def test_install_os_not_authenticated(self, mock_github, mock_ds, app_client):
+        """Should fail and release lock when cloud services can't be enabled."""
+        mock_ds.can_start_install.return_value = (True, None)
+        mock_ds.acquire_install_lock.return_value = True
+        mock_github.return_value = ('os-v0.2.0', None)
+        mock_ds.ensure_cloud_services_enabled.return_value = (False, 'Timed out')
+
+        response = app_client.post('/mender/install-os')
+        data = json.loads(response.data)
+        assert data['success'] is False
+        assert 'Timed out' in data['error']
+        mock_ds.release_install_lock.assert_called_once()
+
+    @patch('app.device_state')
+    def test_install_os_already_updating(self, mock_ds, app_client):
+        """Should fail when update already in progress."""
+        mock_ds.can_start_install.return_value = (False, 'Installing v0.3.5')
+
+        response = app_client.post('/mender/install-os')
+        assert response.status_code == 409
+
+
+class TestSetupWizardStepRoutes:
+    """Test /set-up/save-step and /set-up/complete endpoints."""
+
+    def test_save_step(self, app_client):
+        """Should save wizard step."""
+        response = app_client.post('/set-up/save-step',
+                                   data=json.dumps({"step": "system"}),
+                                   content_type='application/json')
+        data = json.loads(response.data)
+        assert data['success'] is True
+
+    def test_save_step_missing_field(self, app_client):
+        """Should fail without step field."""
+        response = app_client.post('/set-up/save-step',
+                                   data=json.dumps({}),
+                                   content_type='application/json')
+        assert response.status_code == 400
+
+    def test_complete_wizard(self, app_client):
+        """Should clear wizard state."""
+        response = app_client.post('/set-up/complete')
+        data = json.loads(response.data)
+        assert data['success'] is True

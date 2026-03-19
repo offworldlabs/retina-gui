@@ -1,7 +1,10 @@
 """Tests for mender.py - version parsing and artifact selection."""
 from unittest.mock import patch, Mock
 import pytest
-from mender import parse_version, find_latest_stable, get_latest_stable_from_github
+from mender import (
+    parse_version, get_latest_stable_from_github,
+    parse_os_version, get_latest_owl_os_from_github,
+)
 
 
 class TestParseVersion:
@@ -42,70 +45,6 @@ class TestParseVersion:
 
     def test_empty_excluded(self):
         assert parse_version("") is None
-
-
-class TestFindLatestStable:
-    """Finding latest stable from artifact list."""
-
-    def test_finds_latest(self):
-        artifacts = [
-            {"artifact_name": "retina-node-v0.3.2", "id": "a"},
-            {"artifact_name": "retina-node-v0.3.5", "id": "b"},
-            {"artifact_name": "retina-node-v0.3.3", "id": "c"},
-        ]
-        result = find_latest_stable(artifacts)
-        assert result["id"] == "b"
-        assert result["artifact_name"] == "retina-node-v0.3.5"
-
-    def test_excludes_rc(self):
-        artifacts = [
-            {"artifact_name": "retina-node-v0.3.2", "id": "a"},
-            {"artifact_name": "retina-node-v0.3.6-rc1", "id": "b"},
-        ]
-        result = find_latest_stable(artifacts)
-        assert result["id"] == "a"
-
-    def test_excludes_dev(self):
-        artifacts = [
-            {"artifact_name": "retina-node-v0.3.2", "id": "a"},
-            {"artifact_name": "retina-node-v0.4.0-dev", "id": "b"},
-        ]
-        result = find_latest_stable(artifacts)
-        assert result["id"] == "a"
-
-    def test_empty_list(self):
-        assert find_latest_stable([]) is None
-
-    def test_no_stable(self):
-        artifacts = [
-            {"artifact_name": "retina-node-v0.3.6-rc1", "id": "a"},
-            {"artifact_name": "retina-node-dev", "id": "b"},
-        ]
-        assert find_latest_stable(artifacts) is None
-
-    def test_major_version_wins(self):
-        artifacts = [
-            {"artifact_name": "retina-node-v0.9.9", "id": "a"},
-            {"artifact_name": "retina-node-v1.0.0", "id": "b"},
-        ]
-        result = find_latest_stable(artifacts)
-        assert result["id"] == "b"
-
-    def test_minor_version_wins(self):
-        artifacts = [
-            {"artifact_name": "retina-node-v1.0.9", "id": "a"},
-            {"artifact_name": "retina-node-v1.1.0", "id": "b"},
-        ]
-        result = find_latest_stable(artifacts)
-        assert result["id"] == "b"
-
-    def test_patch_version_wins(self):
-        artifacts = [
-            {"artifact_name": "retina-node-v1.1.0", "id": "a"},
-            {"artifact_name": "retina-node-v1.1.1", "id": "b"},
-        ]
-        result = find_latest_stable(artifacts)
-        assert result["id"] == "b"
 
 
 class TestGetLatestStableFromGitHub:
@@ -178,4 +117,104 @@ class TestGetLatestStableFromGitHub:
 
         version, error = get_latest_stable_from_github()
         assert version == "v1.0.0"
+        assert error is None
+
+
+class TestParseOsVersion:
+    """owl-os version parsing — accepts os-v*, v*, and bare versions."""
+
+    def test_full_tag(self):
+        assert parse_os_version("os-v0.1.0") == (0, 1, 0)
+
+    def test_v_prefix(self):
+        assert parse_os_version("v0.2.0") == (0, 2, 0)
+
+    def test_bare_version(self):
+        assert parse_os_version("0.3.0") == (0, 3, 0)
+
+    def test_large_numbers(self):
+        assert parse_os_version("os-v10.20.30") == (10, 20, 30)
+
+    def test_rc_excluded(self):
+        assert parse_os_version("os-v0.1.0-rc1") is None
+
+    def test_dev_excluded(self):
+        assert parse_os_version("os-v0.1.0-dev") is None
+
+    def test_empty(self):
+        assert parse_os_version("") is None
+
+    def test_non_os_tag(self):
+        assert parse_os_version("retina-node-v0.3.5") is None
+
+
+class TestGetLatestOwlOsFromGitHub:
+    """owl-os GitHub releases version discovery."""
+
+    @patch("mender.requests.get")
+    def test_finds_latest_stable(self, mock_get):
+        mock_response = Mock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = [
+            {"tag_name": "os-v0.2.0"},
+            {"tag_name": "os-v0.1.0"},
+            {"tag_name": "os-v0.3.0-rc1"},
+        ]
+        mock_get.return_value = mock_response
+
+        version, error = get_latest_owl_os_from_github()
+        assert version == "os-v0.2.0"
+        assert error is None
+
+    @patch("mender.requests.get")
+    def test_excludes_non_os_tags(self, mock_get):
+        mock_response = Mock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = [
+            {"tag_name": "v0.9.0"},
+            {"tag_name": "os-v0.1.0"},
+        ]
+        mock_get.return_value = mock_response
+
+        version, error = get_latest_owl_os_from_github()
+        assert version == "os-v0.1.0"
+        assert error is None
+
+    @patch("mender.requests.get")
+    def test_no_stable_releases(self, mock_get):
+        mock_response = Mock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = [
+            {"tag_name": "os-v0.1.0-rc1"},
+            {"tag_name": "v1.0.0"},
+        ]
+        mock_get.return_value = mock_response
+
+        version, error = get_latest_owl_os_from_github()
+        assert version is None
+        assert "No stable owl-os releases found" in error
+
+    @patch("mender.requests.get")
+    def test_api_error(self, mock_get):
+        mock_response = Mock()
+        mock_response.status_code = 403
+        mock_get.return_value = mock_response
+
+        version, error = get_latest_owl_os_from_github()
+        assert version is None
+        assert "GitHub API error: 403" in error
+
+    @patch("mender.requests.get")
+    def test_semver_sorting(self, mock_get):
+        mock_response = Mock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = [
+            {"tag_name": "os-v0.9.0"},
+            {"tag_name": "os-v1.0.0"},
+            {"tag_name": "os-v0.10.0"},
+        ]
+        mock_get.return_value = mock_response
+
+        version, error = get_latest_owl_os_from_github()
+        assert version == "os-v1.0.0"
         assert error is None
