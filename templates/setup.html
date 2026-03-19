@@ -110,51 +110,74 @@
         </div>
 
         <!-- Step 2: System Update -->
-        <div data-step="system" class="step-panel text-center" style="display:none;">
-            <h5 class="mb-3">System Update</h5>
-            <p class="text-muted small mb-1">Ensure node is connected to the internet.</p>
-            <p class="text-muted small mb-2">Node will restart after update. Navigate back to this page to continue setup.</p>
-            <p id="systemStatus" class="text-muted">Checking for updates...</p>
-            <div id="systemVersionInfo" style="display:none;">
-                <p class="small"><span id="systemCurrentVersion" class="text-muted"></span> &rarr; <strong id="systemLatestVersion"></strong></p>
+        <div data-step="system" class="step-panel" style="display:none;">
+            <h5 class="mb-3 text-center">System Update</h5>
+            <p class="text-muted small text-center mb-2">Ensure node is connected to the internet. Node will restart after update.</p>
+
+            <div class="text-start mx-auto mb-3" style="max-width: 400px;">
+                <div class="card mb-2">
+                    <div class="card-body d-flex align-items-center py-2 px-3">
+                        <div class="flex-grow-1">
+                            <strong>OWL-OS</strong>
+                            <span id="systemCurrentVersion" class="text-muted small ms-1"></span>
+                            <span id="systemVersionArrow" style="display:none;"> &rarr; <strong id="systemLatestVersion"></strong></span>
+                            <br><small class="text-muted">Operating system update</small>
+                        </div>
+                        <span id="systemCardStatus" class="ms-2"></span>
+                    </div>
+                </div>
             </div>
-            <button type="button" class="btn btn-primary me-2" id="systemUpdateBtn" style="display:none;">
-                Update System
-            </button>
-            <button type="button" class="btn btn-outline-secondary" id="systemSkipBtn" style="display:none;">
-                Skip
-            </button>
-            <button type="button" class="btn btn-outline-primary" id="systemNextBtn" style="display:none;">
-                Next &rarr;
-            </button>
-            <div id="systemInstallStatus" class="small mt-2"></div>
+
+            <div class="text-center">
+                <p id="systemStatus" class="text-muted">Checking for updates...</p>
+                <button type="button" class="btn btn-primary" id="systemUpdateBtn" style="display:none;">
+                    Update System
+                </button>
+                <button type="button" class="btn btn-outline-primary" id="systemNextBtn" style="display:none;">
+                    Next &rarr;
+                </button>
+                <div id="systemInstallStatus" class="small mt-2"></div>
+            </div>
         </div>
 
         <!-- Step 3: Packages -->
-        <div data-step="radar" class="step-panel text-center" style="display:none;">
-            <h5 class="mb-3">Packages</h5>
+        <div data-step="radar" class="step-panel" style="display:none;">
+            <h5 class="mb-3 text-center">Packages</h5>
 
-            <div class="text-start mx-auto mb-3" style="max-width: 360px;">
-                <div class="form-check mb-2">
+            <div class="text-start mx-auto mb-3" style="max-width: 400px;">
+                <div class="form-check mb-3">
                     <input type="checkbox" class="form-check-input" id="regionCheck">
                     <label class="form-check-label" for="regionCheck">
                         This device will not be exported from the USA
                     </label>
                 </div>
+
+                <!-- Package selection -->
+                <div id="radarPackageList">
+                    <div class="card mb-2" id="radarPackageCard">
+                        <div class="card-body d-flex align-items-center py-2 px-3">
+                            <input type="radio" class="form-check-input me-3" name="packageSelect" id="packageRetina" value="retina-node" checked>
+                            <label class="form-check-label flex-grow-1" for="packageRetina">
+                                <strong>Retina Passive Radar</strong>
+                                <span id="radarLatestVersion" class="text-muted small ms-1"></span>
+                                <br><small class="text-muted">~600MB, takes 5-10 minutes</small>
+                            </label>
+                            <span id="radarPackageStatus" class="ms-2"></span>
+                        </div>
+                    </div>
+                </div>
             </div>
 
-            <p id="radarStatus" class="text-muted">Checking for software...</p>
-            <div id="radarVersionInfo" style="display:none;">
-                <p class="small text-muted">~600MB, takes 5-10 minutes</p>
-                <p><strong id="radarLatestVersion"></strong></p>
+            <div class="text-center">
+                <p id="radarStatus" class="text-muted">Checking for software...</p>
+                <button type="button" class="btn btn-primary" id="radarInstallBtn" style="display:none;">
+                    Install Selected
+                </button>
+                <button type="button" class="btn btn-outline-primary" id="radarNextBtn" style="display:none;">
+                    Next &rarr;
+                </button>
+                <div id="radarInstallStatus" class="small mt-2"></div>
             </div>
-            <button type="button" class="btn btn-primary" id="radarInstallBtn" style="display:none;">
-                Install Software
-            </button>
-            <button type="button" class="btn btn-outline-primary" id="radarNextBtn" style="display:none;">
-                Next &rarr;
-            </button>
-            <div id="radarInstallStatus" class="small mt-2"></div>
         </div>
 
         <!-- Step 4: Complete -->
@@ -284,17 +307,21 @@
         // Step 2: System Update (managed mode via Mender daemon)
         enterHooks.system = function() {
             var status = document.getElementById('systemStatus');
-            var versionInfo = document.getElementById('systemVersionInfo');
             var updateBtn = document.getElementById('systemUpdateBtn');
-            var skipBtn = document.getElementById('systemSkipBtn');
             var nextBtn = document.getElementById('systemNextBtn');
             var installStatus = document.getElementById('systemInstallStatus');
+            var cardStatus = document.getElementById('systemCardStatus');
+            var versionArrow = document.getElementById('systemVersionArrow');
 
             fetch('/mender/check-os')
                 .then(function(r) { return r.json(); })
                 .then(function(data) {
+                    if (data.current_version) {
+                        document.getElementById('systemCurrentVersion').textContent = data.current_version;
+                    }
                     if (data.installing) {
                         showStage(data.stage);
+                        cardStatus.innerHTML = '<span class="spinner-border spinner-border-sm text-primary"></span>';
                         installStatus.innerHTML = '<span class="text-warning">Do not power off the device.</span>';
                         startSystemPoll();
                         return;
@@ -306,20 +333,19 @@
                     }
                     if (data.update_available) {
                         status.textContent = '';
-                        versionInfo.style.display = '';
-                        document.getElementById('systemCurrentVersion').textContent = data.current_version || 'Not detected';
+                        versionArrow.style.display = '';
                         document.getElementById('systemLatestVersion').textContent = data.latest_version;
                         updateBtn.style.display = '';
-                        skipBtn.style.display = '';
                     } else {
                         status.innerHTML = 'System is up to date &#10003;';
+                        cardStatus.innerHTML = '<span class="text-success">&#10003;</span>';
                         nextBtn.style.display = '';
+                        nextBtn.textContent = 'Skip \u2192';
                     }
                 });
 
             updateBtn.addEventListener('click', function() {
                 updateBtn.disabled = true;
-                skipBtn.style.display = 'none';
                 updateBtn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Connecting...';
                 installStatus.innerHTML = '<span class="text-warning">Do not power off the device.</span>';
 
@@ -338,7 +364,6 @@
                     });
             });
 
-            skipBtn.addEventListener('click', advance);
             nextBtn.addEventListener('click', advance);
 
             function showStage(stage) {
@@ -385,11 +410,12 @@
         // Step 3: Packages
         enterHooks.radar = function() {
             var status = document.getElementById('radarStatus');
-            var versionInfo = document.getElementById('radarVersionInfo');
             var installBtn = document.getElementById('radarInstallBtn');
             var nextBtn = document.getElementById('radarNextBtn');
             var installStatus = document.getElementById('radarInstallStatus');
             var regionCheck = document.getElementById('regionCheck');
+            var packageCard = document.getElementById('radarPackageCard');
+            var packageStatus = document.getElementById('radarPackageStatus');
 
             // Gate install button on export checkbox
             function updateInstallGate() {
@@ -405,6 +431,7 @@
                     if (data.installing) {
                         status.textContent = data.reason || 'Installation in progress...';
                         installStatus.innerHTML = '<span class="text-warning">Do not power off the device.</span>';
+                        packageStatus.innerHTML = '<span class="spinner-border spinner-border-sm text-primary"></span>';
                         startRadarPoll();
                         return;
                     }
@@ -414,10 +441,11 @@
                     }
                     if (data.current_version) {
                         status.innerHTML = 'Packages are up to date &#10003;';
+                        packageStatus.innerHTML = '<span class="text-success">&#10003;</span>';
+                        document.getElementById('radarLatestVersion').textContent = data.current_version;
                         nextBtn.style.display = '';
                     } else {
                         status.textContent = '';
-                        versionInfo.style.display = '';
                         document.getElementById('radarLatestVersion').textContent = data.latest_version;
                         installBtn.style.display = '';
                         updateInstallGate();
