@@ -6,7 +6,23 @@
     <link rel="icon" type="image/png" href="/static/favicon.png">
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <style>
-        body { padding-bottom: 60px; }
+        body { padding-bottom: 60px; background: #f8f9fa; }
+        .main-card {
+            max-width: 520px;
+            margin: 3rem auto 0;
+            background: #fff;
+            border-radius: 12px;
+            padding: 2rem;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+        }
+        @media (max-width: 576px) {
+            body { background: #fff; }
+            .main-card {
+                margin: 0;
+                border-radius: 0;
+                box-shadow: none;
+            }
+        }
     </style>
 </head>
 <body>
@@ -20,7 +36,7 @@
         </div>
     </nav>
 
-    <div class="container">
+    <div class="main-card">
         {% if setup_needed or setup_in_progress %}
         <div class="text-center py-5 mb-4 rounded-3" style="background: #e8f0fe;">
             <h4>Welcome to OWL-OS</h4>
@@ -35,7 +51,7 @@
         {% endif %}
 
         <h4>Services</h4>
-        <div class="list-group mb-4">
+        <div class="list-group mb-4 w-100">
             {% if retina_node_version %}
             <a href="http://retina.local:49152" target="_blank" class="list-group-item list-group-item-action">
                 blah2 - Passive Radar
