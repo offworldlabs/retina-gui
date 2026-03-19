@@ -310,7 +310,7 @@
 
             btn.addEventListener('click', function() {
                 btn.disabled = true;
-                btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Connecting...';
+                btn.textContent = 'Connecting...';
                 fetch('/mender/cloud-services', {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
@@ -366,21 +366,19 @@
                 });
 
             updateBtn.addEventListener('click', function() {
-                updateBtn.disabled = true;
-                updateBtn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Connecting...';
+                updateBtn.style.display = 'none';
+                cardStatus.innerHTML = '<span class="spinner-border spinner-border-sm text-primary"></span>';
                 installStatus.innerHTML = '<span class="text-warning">Do not power off the device.</span>';
 
                 fetch('/mender/install-os', {method: 'POST'})
                     .then(function(r) { return r.json(); })
                     .then(function(data) {
                         if (data.success) {
-                            updateBtn.style.display = 'none';
                             startSystemPoll();
                         } else {
                             installStatus.innerHTML = '<span class="text-danger">' + data.error + '</span>';
-                            updateBtn.disabled = false;
-                            updateBtn.textContent = 'Update System';
-                            skipBtn.style.display = '';
+                            cardStatus.innerHTML = '';
+                            updateBtn.style.display = '';
                         }
                     });
             });
@@ -389,14 +387,15 @@
 
             function showStage(stage) {
                 if (stage === 'waiting') {
-                    status.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Connecting to update server...';
+                    status.textContent = 'Connecting to update server...';
                 } else if (stage === 'downloading') {
-                    status.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Downloading OS update...';
+                    status.textContent = 'Downloading OS update...';
                 } else if (stage === 'installing') {
-                    status.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Installing OS update...';
+                    status.textContent = 'Installing OS update...';
                 } else {
-                    status.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Updating...';
+                    status.textContent = 'Updating...';
                 }
+                cardStatus.innerHTML = '<span class="spinner-border spinner-border-sm text-primary"></span>';
             }
 
             function startSystemPoll() {
@@ -422,7 +421,7 @@
                         })
                         .catch(function() {
                             // Connection lost — device is likely rebooting
-                            status.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Rebooting... reconnect shortly.';
+                            status.textContent = 'Rebooting... reconnect shortly.';
                         });
                 }, 5000);
             }
@@ -474,8 +473,9 @@
                 });
 
             installBtn.addEventListener('click', function() {
-                installBtn.disabled = true;
-                installBtn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Installing...';
+                installBtn.style.display = 'none';
+                packageStatus.innerHTML = '<span class="spinner-border spinner-border-sm text-primary"></span>';
+                status.textContent = 'Installing...';
                 installStatus.innerHTML = '<span class="text-warning">Do not power off the device.</span>';
 
                 fetch('/mender/install', {method: 'POST'})
@@ -485,8 +485,10 @@
                             startRadarPoll();
                         } else {
                             installStatus.innerHTML = '<span class="text-danger">' + data.error + '</span>';
-                            installBtn.disabled = false;
-                            installBtn.textContent = 'Install Software';
+                            packageStatus.innerHTML = '';
+                            status.textContent = '';
+                            installBtn.style.display = '';
+                            updateInstallGate();
                         }
                     });
             });
@@ -503,11 +505,16 @@
                                 clearInterval(pollTimer);
                                 pollTimer = null;
                                 if (data.current_version) {
+                                    packageStatus.innerHTML = '<span class="text-success">&#10003;</span>';
+                                    status.textContent = '';
+                                    installStatus.innerHTML = '';
                                     advance();
                                 } else {
                                     installStatus.innerHTML = '<span class="text-danger">Install may have failed. Try again.</span>';
-                                    installBtn.disabled = false;
-                                    installBtn.textContent = 'Install Software';
+                                    packageStatus.innerHTML = '';
+                                    status.textContent = '';
+                                    installBtn.style.display = '';
+                                    updateInstallGate();
                                 }
                             } else {
                                 status.textContent = (data.stage || 'Installing') + '...';
