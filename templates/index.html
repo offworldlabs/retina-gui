@@ -97,34 +97,6 @@
         </script>
         {% endif %}
 
-        <h4 class="mt-4">SSH Access</h4>
-        <form action="/ssh-keys" method="post" class="mb-3">
-            <div class="input-group">
-                <input type="text" name="ssh_key" class="form-control"
-                       placeholder="ssh-ed25519 AAAA... user@host">
-                <button type="submit" class="btn btn-primary">Add Key</button>
-            </div>
-        </form>
-
-        {% if error %}
-        <div class="alert alert-danger mt-2">{{ error }}</div>
-        {% endif %}
-
-        {% if ssh_keys %}
-        <ul class="list-group">
-            {% for key in ssh_keys %}
-            <li class="list-group-item d-flex justify-content-between align-items-center">
-                <span class="text-truncate" style="max-width: 80%;">{{ key }}</span>
-                <form action="/ssh-keys/delete" method="post" class="m-0">
-                    <input type="hidden" name="ssh_key" value="{{ key }}">
-                    <button type="submit" class="btn btn-sm btn-outline-danger">Delete</button>
-                </form>
-            </li>
-            {% endfor %}
-        </ul>
-        {% else %}
-        <p class="text-muted">No SSH keys configured</p>
-        {% endif %}
     </div>
 
     <footer class="fixed-bottom bg-light border-top py-2">

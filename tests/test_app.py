@@ -41,9 +41,9 @@ class TestIndexRoute:
         assert b'blah2' in response.data
         assert b'tar1090' in response.data
 
-    def test_ssh_keys_section(self, app_client):
-        """Index should show SSH keys section."""
-        response = app_client.get('/')
+    def test_ssh_keys_on_config_page(self, app_client):
+        """SSH keys should be on config page, not index."""
+        response = app_client.get('/config')
         assert response.status_code == 200
         assert b'SSH Access' in response.data
         assert b'Add Key' in response.data
@@ -580,13 +580,11 @@ class TestSSHKeysRoutes:
         assert valid_key in content
 
     def test_add_invalid_ssh_key(self, app_client):
-        """Invalid SSH key should show error."""
+        """Invalid SSH key should redirect back to config."""
         response = app_client.post('/ssh-keys', data={
             'ssh_key': 'not-a-valid-key'
         })
-
-        assert response.status_code == 200
-        assert b'Invalid SSH key format' in response.data
+        assert response.status_code == 302
 
     def test_add_ssh_key_with_shell_chars(self, app_client):
         """SSH key with shell metacharacters should be rejected."""
@@ -595,9 +593,7 @@ class TestSSHKeysRoutes:
         response = app_client.post('/ssh-keys', data={
             'ssh_key': malicious_key
         })
-
-        assert response.status_code == 200
-        assert b'Invalid SSH key format' in response.data
+        assert response.status_code == 302
 
     def test_delete_ssh_key(self, app_client, temp_dir):
         """SSH key should be deletable."""

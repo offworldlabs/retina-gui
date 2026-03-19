@@ -135,7 +135,8 @@ def config_page():
                            capture_fields=capture_fields,
                            location_fields=location_fields,
                            truth_fields=truth_fields,
-                           tar1090_fields=tar1090_fields)
+                           tar1090_fields=tar1090_fields,
+                           ssh_keys=ssh_keys.get_keys())
 
 
 @app.route("/ssh-keys", methods=["POST"])
@@ -143,11 +144,9 @@ def add_key():
     key = request.form.get("ssh_key", "").strip()
     if key and SSHKeyManager.is_valid_ssh_key(key):
         ssh_keys.add_key(key)
-        return redirect(url_for("index"))
+        return redirect(url_for("config_page"))
     else:
-        keys = ssh_keys.get_keys()
-        return render_template("index.html", ssh_keys=keys,
-                               error="Invalid SSH key format")
+        return redirect(url_for("config_page"))
 
 
 @app.route("/ssh-keys/delete", methods=["POST"])
@@ -155,7 +154,7 @@ def delete_key():
     key = request.form.get("ssh_key", "")
     if key:
         ssh_keys.remove_key(key)
-    return redirect(url_for("index"))
+    return redirect(url_for("config_page"))
 
 
 @app.route("/config/save", methods=["POST"])
