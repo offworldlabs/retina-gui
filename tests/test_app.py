@@ -730,7 +730,7 @@ class TestSetupRoute:
 class TestMenderCheckOs:
     """Test the /mender/check-os endpoint."""
 
-    @patch('app.get_latest_owl_os_from_github')
+    @patch('mender.get_latest_owl_os_from_github')
     @patch('app.mender')
     def test_check_os_idle(self, mock_mender, mock_github, app_client):
         """Should return version info when idle."""
@@ -744,7 +744,7 @@ class TestMenderCheckOs:
         assert data['latest_version'] == 'os-v0.2.0'
         assert data['update_available'] is True
 
-    @patch('app.get_latest_owl_os_from_github')
+    @patch('mender.get_latest_owl_os_from_github')
     @patch('app.mender')
     def test_check_os_up_to_date(self, mock_mender, mock_github, app_client):
         """Should show no update when versions match."""
@@ -756,7 +756,7 @@ class TestMenderCheckOs:
         assert data['installing'] is False
         assert data['update_available'] is False
 
-    @patch('app.get_latest_owl_os_from_github')
+    @patch('mender.get_latest_owl_os_from_github')
     @patch('app.mender')
     def test_check_os_no_current_version(self, mock_mender, mock_github, app_client):
         """Should show update available when no current version."""
@@ -767,7 +767,7 @@ class TestMenderCheckOs:
         data = json.loads(response.data)
         assert data['update_available'] is True
 
-    @patch('app.get_latest_owl_os_from_github')
+    @patch('mender.get_latest_owl_os_from_github')
     @patch('app.mender')
     def test_check_os_github_error(self, mock_mender, mock_github, app_client):
         """Should return error when GitHub fails."""
@@ -783,7 +783,7 @@ class TestMenderInstallOs:
     """Test the /mender/install-os endpoint."""
 
     @patch('app.device_state')
-    @patch('app.get_latest_owl_os_from_github')
+    @patch('mender.get_latest_owl_os_from_github')
     def test_install_os_success(self, mock_github, mock_ds, app_client):
         """Should enable cloud services, acquire lock, and return waiting state."""
         mock_ds.can_start_install.return_value = (True, None)
@@ -800,7 +800,7 @@ class TestMenderInstallOs:
         mock_ds.save_setup_wizard_step.assert_called_once_with('system')
 
     @patch('app.device_state')
-    @patch('app.get_latest_owl_os_from_github')
+    @patch('mender.get_latest_owl_os_from_github')
     def test_install_os_not_authenticated(self, mock_github, mock_ds, app_client):
         """Should fail and release lock when cloud services can't be enabled."""
         mock_ds.can_start_install.return_value = (True, None)

@@ -1,0 +1,51 @@
+<!-- Step 5: Tower Selection (wide, map + table) -->
+<div data-step="towers" class="step-panel" style="display:none;">
+    <!-- Loading -->
+    <div id="towerLoading" class="text-center py-4">
+        <div class="spinner-border text-primary"></div>
+        <p class="text-muted small mt-2">Querying broadcast licence database &mdash; this may take up to a minute&hellip;</p>
+    </div>
+
+    <!-- Error -->
+    <div id="towerError" class="alert alert-danger small" style="display:none;"></div>
+
+    <!-- Results (shown when loaded) -->
+    <div id="towerResults" style="display:none;">
+        <div class="summary-strip" id="towerSummary"></div>
+
+        <div id="towerMap"></div>
+
+        <div class="tower-table-wrap mt-3">
+            <table class="tower-table">
+                <thead>
+                    <tr>
+                        <th>#</th>
+                        <th>Callsign</th>
+                        <th class="hide-mobile">Lat</th>
+                        <th class="hide-mobile">Long</th>
+                        <th>Freq</th>
+                        <th class="hide-mobile">Band</th>
+                        <th>Dist</th>
+                        <th class="hide-mobile">Bearing</th>
+                        <th class="hide-mobile">Rx Power</th>
+                        <th>Suit.</th>
+                        <th></th>
+                    </tr>
+                </thead>
+                <tbody id="towerTableBody"></tbody>
+            </table>
+        </div>
+
+        <!-- Selected tower confirmation -->
+        <div id="selectedTowerCard" class="selected-tower-card" style="display:none;">
+            <div class="tower-name" id="selectedTowerName"></div>
+            <div class="tower-detail" id="selectedTowerDetail"></div>
+        </div>
+    </div>
+
+    <div class="text-center mt-3">
+        <button type="button" class="btn btn-primary" id="towerSaveBtn" disabled>Save &amp; Continue</button>
+        <button type="button" class="btn btn-link btn-sm text-muted ms-2" id="towerSkipBtn">Skip &rarr;</button>
+        <div id="towerSaveStatus" class="small mt-2"></div>
+    </div>
+</div>

@@ -1,0 +1,169 @@
+/* ── Design tokens ─────────────────────────────── */
+/* Based on retina.fm brand — warm neutrals, blue accent */
+/* See STYLING.md for full reference */
+:root {
+    /* ── Fonts ────────────────────── */
+    --font-body:  -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    --font-mono:  'SF Mono', 'Menlo', 'Consolas', monospace;
+
+    /* ── Core palette (warm) ─────── */
+    --color-text:           #1a1a18;
+    --color-muted:          #6b6b63;
+    --color-light:          #9c9c93;
+    --color-border:         #e8e8e3;
+    --color-border-light:   #f0f0eb;
+    --color-bg:             #fafaf9;
+    --color-bg-warm:        #f5f4f0;
+    --color-card:           #ffffff;
+
+    /* ── Accent (retina blue) ────── */
+    --color-primary:        #2563eb;
+    --color-primary-light:  #3b82f6;
+    --color-primary-wash:   rgba(37, 99, 235, 0.06);
+    --color-primary-border: rgba(37, 99, 235, 0.15);
+
+    /* ── Semantic: status ────────── */
+    --color-success:        #16a34a;
+    --color-success-dark:   #166534;
+    --color-success-mid:    #15803d;
+    --color-success-bg:     #f0fdf4;
+    --color-success-border: #bbf7d0;
+    --color-danger:         #ef4444;
+    --color-warning:        #d97706;
+    --color-warning-wash:   rgba(217, 119, 6, 0.08);
+    --color-info-bg:        #e8f0fe;
+
+    /* ── Semantic: tower bands ───── */
+    --color-band-vhf:       #7c3aed;
+    --color-band-vhf-bg:    rgba(124, 58, 237, 0.08);
+    --color-band-uhf:       #0891b2;
+    --color-band-uhf-bg:    rgba(8, 145, 178, 0.08);
+    --color-band-fm:        #db2777;
+    --color-band-fm-bg:     rgba(219, 39, 119, 0.08);
+
+    /* ── Semantic: tower suitability */
+    --color-suit-ideal:     #16a34a;
+    --color-suit-ideal-bg:  rgba(22, 163, 74, 0.08);
+    --color-suit-good:      #ca8a04;
+    --color-suit-good-bg:   rgba(202, 138, 4, 0.08);
+    --color-suit-far:       #94a3b8;
+    --color-suit-far-bg:    rgba(107, 114, 128, 0.08);
+    --color-suit-close:     #ef4444;
+    --color-suit-close-bg:  rgba(220, 38, 38, 0.08);
+
+    /* ── Radii ───────────────────── */
+    --radius:           12px;
+    --radius-lg:        20px;
+    --radius-sm:        8px;
+}
+
+/* ── Base ──────────────────────────────────────── */
+body {
+    background: var(--color-bg);
+    color: var(--color-text);
+    font-family: var(--font-body);
+    font-size: 0.95rem;
+    line-height: 1.6;
+}
+
+/* ── Headings ──────────────────────────────────── */
+h1, h2, h3, h4, h5, h6 {
+    font-family: var(--font-body);
+    color: var(--color-text);
+    letter-spacing: -0.01em;
+}
+
+/* ── Navbar ────────────────────────────────────── */
+.navbar-brand img { border-radius: 6px; }
+
+/* ── Card shell ────────────────────────────────── */
+.main-card {
+    max-width: 600px;
+    margin: 2rem auto 0;
+    background: var(--color-card);
+    border-radius: var(--radius);
+    padding: 2rem;
+    box-shadow: none;
+}
+@media (max-width: 576px) {
+    body { background: var(--color-card); }
+    .main-card {
+        margin: 0;
+        border-radius: 0;
+        box-shadow: none;
+        padding: 1.25rem;
+    }
+}
+
+/* ── Section headings ──────────────────────────── */
+.section-heading {
+    font-size: 1.05rem;
+    font-weight: 600;
+    color: var(--color-text);
+    margin-bottom: 0.75rem;
+}
+
+/* ── Shared form / button sizes ────────────────── */
+.form-label {
+    font-size: 0.85rem;
+    font-weight: 500;
+    color: var(--color-muted);
+}
+.form-control-sm { font-size: 0.9rem; }
+.btn { font-size: 0.9rem; border-radius: var(--radius-sm); }
+.btn-sm { font-size: 0.85rem; }
+
+/* ── Button overrides ──────────────────────────── */
+.btn-primary {
+    background: var(--color-primary);
+    border-color: var(--color-primary);
+}
+.btn-outline-secondary {
+    color: var(--color-muted);
+    border-color: var(--color-border);
+}
+.btn-outline-secondary:hover {
+    color: var(--color-text);
+    border-color: var(--color-muted);
+}
+
+/* ── Accordion ─────────────────────────────────── */
+.accordion-button {
+    font-size: 0.95rem;
+    font-weight: 400;
+    color: var(--color-text);
+    padding: 0.85rem 1.1rem;
+}
+.accordion-button:not(.collapsed) {
+    color: var(--color-text);
+    background: var(--color-bg);
+}
+.accordion-button:focus {
+    box-shadow: none;
+    border-color: var(--color-border);
+}
+.accordion-body {
+    font-size: 0.9rem;
+    color: var(--color-text);
+}
+.accordion-item {
+    border-color: var(--color-border);
+}
+
+/* ── Monospace data ────────────────────────────── */
+.mono, .font-mono {
+    font-family: var(--font-mono);
+    font-variant-numeric: tabular-nums;
+}
+
+/* ── Footer ────────────────────────────────────── */
+.site-footer {
+    position: fixed;
+    bottom: 0; left: 0; right: 0;
+    background: var(--color-bg);
+    border-top: none;
+    padding: 0.5rem 0;
+    font-size: 0.78rem;
+    color: var(--color-muted);
+    text-align: center;
+}
