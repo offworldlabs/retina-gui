@@ -309,8 +309,9 @@ class DeviceState:
             os.remove(self.setup_wizard_file)
 
     def is_setup_wizard_in_progress(self) -> bool:
-        """Check if setup wizard is active."""
-        return self.get_setup_wizard_step() is not None
+        """Check if setup wizard is active (not completed)."""
+        step = self.get_setup_wizard_step()
+        return step is not None and step != "complete"
 
     def ensure_cloud_services_enabled(self, get_jwt_fn) -> tuple[bool, str | None]:
         """Enable cloud services and wait for Mender auth.
