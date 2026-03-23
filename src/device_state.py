@@ -264,8 +264,23 @@ class DeviceState:
         except Exception:
             return None
 
+    def get_setup_wizard_highest_step(self) -> str | None:
+        """Get the furthest step reached in the wizard."""
+        if not os.path.exists(self.setup_wizard_file):
+            return None
+        try:
+            with open(self.setup_wizard_file) as f:
+                data = json.load(f)
+            return data.get("highest_step")
+        except Exception:
+            return None
+
     def save_setup_wizard_step(self, step: str):
-        """Save current wizard step. Preserves original started_at timestamp."""
+        """Save current wizard step. Preserves original started_at timestamp.
+
+        Also tracks highest_step so the UI knows which steps were
+        completed (for back-navigation after page reload).
+        """
         data = {}
         if os.path.exists(self.setup_wizard_file):
             try:
@@ -276,6 +291,14 @@ class DeviceState:
         if "started_at" not in data:
             data["started_at"] = datetime.now().isoformat()
         data["step"] = step
+
+        # Track the furthest step reached
+        step_order = ["agreements", "system", "radar", "location", "towers", "complete"]
+        current_idx = step_order.index(step) if step in step_order else 0
+        highest = data.get("highest_step", "agreements")
+        highest_idx = step_order.index(highest) if highest in step_order else 0
+        data["highest_step"] = step_order[max(current_idx, highest_idx)]
+
         os.makedirs(os.path.dirname(self.setup_wizard_file), exist_ok=True)
         with open(self.setup_wizard_file, "w") as f:
             json.dump(data, f)

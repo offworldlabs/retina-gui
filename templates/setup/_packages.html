@@ -1,0 +1,36 @@
+<!-- Step 3: Packages -->
+<div data-step="radar" class="step-panel" style="display:none;">
+    <div class="text-start mx-auto mb-3" style="max-width: 400px;">
+        <div class="form-check mb-3">
+            <input type="checkbox" class="form-check-input" id="regionCheck">
+            <label class="form-check-label" for="regionCheck">
+                This device will not be exported from the USA
+            </label>
+        </div>
+
+        <div id="radarPackageList">
+            <div class="card mb-2" id="radarPackageCard">
+                <div class="card-body d-flex align-items-center py-2 px-3">
+                    <input type="radio" class="form-check-input me-3" name="packageSelect" id="packageRetina" value="retina-node" checked>
+                    <label class="form-check-label flex-grow-1" for="packageRetina">
+                        <strong>Retina Passive Radar</strong>
+                        <span id="radarLatestVersion" class="text-muted small ms-1"></span>
+                        <br><small class="text-muted">~600MB, takes 5-10 minutes</small>
+                    </label>
+                    <span id="radarPackageStatus" class="ms-2"></span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="text-center">
+        <p id="radarStatus" class="text-muted">Checking for software...</p>
+        <button type="button" class="btn btn-primary" id="radarInstallBtn" style="display:none;">
+            Install Selected
+        </button>
+        <button type="button" class="btn btn-outline-primary" id="radarNextBtn" style="display:none;">
+            Next &rarr;
+        </button>
+        <div id="radarInstallStatus" class="small mt-2"></div>
+    </div>
+</div>

@@ -218,6 +218,7 @@ def app_client(temp_dir, config_files, test_manifests_dir):
     importlib.reload(app_module)
 
     app_module.app.config['TESTING'] = True
+    app_module.app.config['WTF_CSRF_ENABLED'] = False
     with app_module.app.test_client() as client:
         yield client
 
@@ -248,6 +249,7 @@ def app_client_no_retina(temp_dir, config_files):
     importlib.reload(app_module)
 
     app_module.app.config['TESTING'] = True
+    app_module.app.config['WTF_CSRF_ENABLED'] = False
     with app_module.app.test_client() as client:
         yield client
 
@@ -271,5 +273,6 @@ def app_client_no_node_id(temp_dir, config_files_no_node_id, test_manifests_dir)
     importlib.reload(app_module)
 
     app_module.app.config['TESTING'] = True
+    app_module.app.config['WTF_CSRF_ENABLED'] = False
     with app_module.app.test_client() as client:
         yield client

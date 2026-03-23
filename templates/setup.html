@@ -1,547 +1,220 @@
-<!DOCTYPE html>
-<html>
-<head>
-    <title>OWL-OS Setup</title>
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <link rel="icon" type="image/png" href="/static/favicon.png">
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
-    <style>
-        body { padding-bottom: 60px; background: #f8f9fa; }
+{% extends "base.html" %}
+{% block title %}OWL-OS Setup{% endblock %}
 
+{% block head %}
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+{% endblock %}
+
+{% block style %}
+        /* ── Setup card (extends .main-card) ───────────── */
         .setup-card {
             max-width: 520px;
-            margin: 3rem auto 0;
-            background: #fff;
-            border-radius: 12px;
+            margin: 2rem auto 0;
+            background: var(--color-card);
+            border-radius: var(--radius);
             padding: 2rem;
-            box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+            box-shadow: 0 1px 3px rgba(0,0,0,0.06);
+            transition: max-width 0.3s;
+        }
+        .setup-card.wide { max-width: 900px; }
+        @media (max-width: 576px) {
+            .setup-card, .setup-card.wide {
+                margin: 0; border-radius: 0;
+                box-shadow: none; padding: 1.25rem;
+                max-width: 100%;
+            }
+        }
+
+        /* ── Progress indicator ────────────────────────── */
+        .progress-header { margin-bottom: 2.5rem; }
+        .progress-label {
+            font-size: 1.25rem;
+            font-weight: 600;
+            color: var(--color-text);
+            margin-bottom: 1rem;
+            text-align: center;
+            letter-spacing: -0.01em;
+        }
+        .progress-track {
+            position: relative;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            height: 12px;
+        }
+        .progress-track-line {
+            position: absolute;
+            top: 50%; left: 0; right: 0;
+            height: 2px;
+            background: var(--color-border);
+            transform: translateY(-50%);
+        }
+        .progress-track-fill {
+            position: absolute;
+            top: 50%; left: 0;
+            height: 2px;
+            background: var(--color-primary);
+            transform: translateY(-50%);
+            transition: width 0.4s ease;
+        }
+        .progress-dot {
+            width: 10px; height: 10px;
+            border-radius: 50%;
+            background: var(--color-border);
+            position: relative;
+            z-index: 1;
+            transition: all 0.3s;
+            border: 2px solid var(--color-card);
+            box-shadow: 0 0 0 1px var(--color-border);
+        }
+        .progress-dot.active {
+            background: var(--color-primary);
+            box-shadow: 0 0 0 1px var(--color-primary);
+        }
+        .progress-dot.complete {
+            background: var(--color-primary);
+            box-shadow: 0 0 0 1px var(--color-primary);
+            cursor: pointer;
+        }
+        .progress-dot.complete:hover { transform: scale(1.3); }
+
+        /* ── Step panels ───────────────────────────────── */
+        .step-panel { min-height: 120px; }
+
+        /* ── Tower finder map ──────────────────────────── */
+        #towerMap {
+            height: 380px;
+            width: 100%;
+            border-radius: var(--radius-sm);
+            overflow: hidden;
+            box-shadow: 0 1px 4px rgba(0,0,0,0.06);
         }
         @media (max-width: 576px) {
-            body { background: #fff; }
-            .setup-card {
-                margin: 0;
-                border-radius: 0;
-                box-shadow: none;
-                padding: 1.5rem;
-            }
+            #towerMap { height: 260px; }
         }
+        .tower-marker, .user-marker { background: none; border: none; }
+        .leaflet-popup-content-wrapper {
+            border-radius: 10px !important;
+            box-shadow: 0 4px 16px rgba(0,0,0,0.12) !important;
+            padding: 0 !important;
+        }
+        .leaflet-popup-content {
+            margin: 12px 14px !important;
+            font-size: 0.82rem !important;
+            line-height: 1.5 !important;
+            color: var(--color-text) !important;
+        }
+        .popup-callsign { font-weight: 700; font-size: 0.88rem; color: var(--color-text); }
+        .popup-detail { color: var(--color-muted); font-size: 0.78rem; }
+        .popup-freq { font-family: "SF Mono", "Fira Code", monospace; font-size: 0.78rem; }
 
-        /* Circle-and-line stepper */
-        .stepper {
-            display: flex;
-            align-items: center;
-            margin-bottom: 2rem;
-            padding: 0 1rem;
+        /* ── Tower results table ───────────────────────── */
+        .tower-table-wrap {
+            overflow-x: auto;
+            margin-top: 0.75rem;
+            -webkit-overflow-scrolling: touch;
         }
-        .stepper-step {
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            gap: 0.4rem;
+        .tower-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 0.82rem;
         }
-        .stepper-circle {
-            width: 32px; height: 32px; border-radius: 50%;
-            display: flex; align-items: center; justify-content: center;
-            font-weight: 600; font-size: 0.8rem;
-            border: 2px solid #dee2e6; color: #6c757d; background: #fff;
-            transition: all 0.3s;
-        }
-        .stepper-circle.active { border-color: #0d6efd; color: #0d6efd; }
-        .stepper-circle.complete { border-color: #198754; background: #198754; color: #fff; }
-        .stepper-label { font-size: 0.75rem; color: #adb5bd; white-space: nowrap; }
-        .stepper-label.active { color: #0d6efd; font-weight: 600; }
-        .stepper-label.complete { color: #198754; }
-        .stepper-line {
-            flex: 1; height: 2px; background: #dee2e6;
-            margin: 0 0.5rem; margin-bottom: 1.2rem;
-            transition: background 0.3s;
-        }
-        .stepper-line.complete { background: #198754; }
-
-        .section-label {
-            font-size: 0.75rem;
-            font-weight: 600;
+        .tower-table th {
+            text-align: left;
+            padding: 8px 8px;
+            color: var(--color-light);
+            font-weight: 500;
+            font-size: 0.7rem;
             text-transform: uppercase;
-            letter-spacing: 0.05em;
-            color: #6c757d;
+            letter-spacing: 0.04em;
+            border-bottom: 1px solid var(--color-border);
+            white-space: nowrap;
+            position: sticky; top: 0;
+            background: var(--color-card);
+        }
+        .tower-table td {
+            padding: 8px 8px;
+            border-bottom: 1px solid var(--color-bg);
+            white-space: nowrap;
+            color: var(--color-text);
+        }
+        .tower-table tbody tr { transition: background 0.15s; cursor: pointer; }
+        .tower-table tbody tr:hover { background: var(--color-bg); }
+        .tower-table .rank { font-weight: 700; width: 2em; }
+        .tower-table .callsign { font-weight: 600; }
+        .tower-table .mono {
+            font-variant-numeric: tabular-nums;
+            font-family: "SF Mono", "Fira Code", monospace;
+            font-size: 0.78rem;
+        }
+        .tower-table .cardinal { color: var(--color-light); font-size: 0.74rem; }
+        .tower-badge {
+            display: inline-block;
+            padding: 2px 8px;
+            border-radius: 6px;
+            font-size: 0.7rem;
+            font-weight: 600;
+            letter-spacing: 0.02em;
+        }
+        @media (max-width: 700px) {
+            .tower-table .hide-mobile,
+            .tower-table th.hide-mobile { display: none; }
+        }
+
+        /* ── Summary strip ─────────────────────────────── */
+        .summary-strip {
+            display: flex;
+            gap: 0.5rem;
             margin-bottom: 0.75rem;
+            flex-wrap: wrap;
         }
-        .step-panel { min-height: 200px; margin-top: 1.5rem; }
-    </style>
-</head>
-<body>
-    <nav class="navbar navbar-expand navbar-light bg-white border-bottom">
-        <div class="container">
-            <a class="navbar-brand" href="/"><img src="/static/logo-192.png" alt="" height="32" class="me-2">OWL-OS</a>
-            <ul class="navbar-nav">
-                <li class="nav-item"><a class="nav-link" href="/">Home</a></li>
-                <li class="nav-item"><a class="nav-link" href="/config">Config</a></li>
-            </ul>
-        </div>
-    </nav>
+        .stat-card {
+            flex: 1;
+            min-width: 80px;
+            background: var(--color-bg);
+            border-radius: var(--radius-sm);
+            padding: 0.5rem 0.75rem;
+            text-align: center;
+        }
+        .stat-card .stat-value { display: block; font-weight: 700; font-size: 1rem; color: var(--color-text); }
+        .stat-card .stat-label { display: block; font-size: 0.65rem; color: var(--color-light); text-transform: uppercase; letter-spacing: 0.04em; }
 
+        /* ── Selected tower card ───────────────────────── */
+        .selected-tower-card {
+            background: var(--color-success-bg);
+            border: 1px solid var(--color-success-border);
+            border-radius: var(--radius-sm);
+            padding: 0.75rem 1rem;
+            margin-top: 0.75rem;
+        }
+        .selected-tower-card .tower-name { font-weight: 700; color: var(--color-success-dark); font-size: 0.9rem; }
+        .selected-tower-card .tower-detail { font-size: 0.82rem; color: var(--color-success-mid); }
+{% endblock %}
+
+{% block content %}
     <div class="container setup-card">
-        <!-- Stepper -->
-        <div class="stepper">
-            <div class="stepper-step">
-                <div class="stepper-circle" data-indicator="agreements">1</div>
-                <span class="stepper-label" data-label="agreements">Agreements</span>
-            </div>
-            <div class="stepper-line" data-line="0"></div>
-            <div class="stepper-step">
-                <div class="stepper-circle" data-indicator="system">2</div>
-                <span class="stepper-label" data-label="system">System</span>
-            </div>
-            <div class="stepper-line" data-line="1"></div>
-            <div class="stepper-step">
-                <div class="stepper-circle" data-indicator="radar">3</div>
-                <span class="stepper-label" data-label="radar">Packages</span>
-            </div>
-            <div class="stepper-line" data-line="2"></div>
-            <div class="stepper-step">
-                <div class="stepper-circle" data-indicator="complete">4</div>
-                <span class="stepper-label" data-label="complete">Done</span>
+        <!-- Progress indicator -->
+        <div class="progress-header">
+            <div class="progress-label" id="progressLabel"></div>
+            <div class="progress-track" id="progressTrack">
+                <div class="progress-track-line"></div>
+                <div class="progress-track-fill" id="progressFill"></div>
             </div>
         </div>
 
-        <!-- Step 1: Agreements -->
-        <div data-step="agreements" class="step-panel text-center">
-            <div class="section-label text-center">Agreements &amp; Cloud Services</div>
-
-            <div class="text-start mx-auto" style="max-width: 360px;">
-                <div class="form-check mb-2">
-                    <input type="checkbox" class="form-check-input" id="eulaCheck">
-                    <label class="form-check-label" for="eulaCheck">
-                        I accept the <a href="/eula" target="_blank">EULA</a>
-                    </label>
-                </div>
-
-                <div class="form-check mb-3">
-                    <input type="checkbox" class="form-check-input" id="cloudCheck">
-                    <label class="form-check-label" for="cloudCheck">
-                        Enable cloud services
-                    </label>
-                    <small class="text-muted d-block">Required for updates. Can be disabled later.</small>
-                </div>
-            </div>
-
-            <button type="button" class="btn btn-primary" id="agreementsContinueBtn" disabled>
-                Continue
-            </button>
-        </div>
-
-        <!-- Step 2: System Update -->
-        <div data-step="system" class="step-panel" style="display:none;">
-            <div class="section-label text-center">System Update</div>
-            <p class="text-muted small text-center mb-2">Ensure node is connected to the internet. Node will restart after update.</p>
-
-            <div class="text-start mx-auto mb-3" style="max-width: 400px;">
-                <div class="card mb-2">
-                    <div class="card-body d-flex align-items-center py-2 px-3">
-                        <div class="flex-grow-1">
-                            <strong>OWL-OS</strong>
-                            <span id="systemCurrentVersion" class="text-muted small ms-1"></span>
-                            <span id="systemVersionArrow" style="display:none;"> &rarr; <strong id="systemLatestVersion"></strong></span>
-                            <br><small class="text-muted">Operating system update</small>
-                        </div>
-                        <span id="systemCardStatus" class="ms-2"></span>
-                    </div>
-                </div>
-            </div>
-
-            <div class="text-center">
-                <p id="systemStatus" class="text-muted">Checking for updates...</p>
-                <button type="button" class="btn btn-primary" id="systemUpdateBtn" style="display:none;">
-                    Update System
-                </button>
-                <button type="button" class="btn btn-outline-primary" id="systemNextBtn" style="display:none;">
-                    Next &rarr;
-                </button>
-                <div id="systemInstallStatus" class="small mt-2"></div>
-            </div>
-        </div>
-
-        <!-- Step 3: Packages -->
-        <div data-step="radar" class="step-panel" style="display:none;">
-            <div class="section-label text-center">Packages</div>
-
-            <div class="text-start mx-auto mb-3" style="max-width: 400px;">
-                <div class="form-check mb-3">
-                    <input type="checkbox" class="form-check-input" id="regionCheck">
-                    <label class="form-check-label" for="regionCheck">
-                        This device will not be exported from the USA
-                    </label>
-                </div>
-
-                <!-- Package selection -->
-                <div id="radarPackageList">
-                    <div class="card mb-2" id="radarPackageCard">
-                        <div class="card-body d-flex align-items-center py-2 px-3">
-                            <input type="radio" class="form-check-input me-3" name="packageSelect" id="packageRetina" value="retina-node" checked>
-                            <label class="form-check-label flex-grow-1" for="packageRetina">
-                                <strong>Retina Passive Radar</strong>
-                                <span id="radarLatestVersion" class="text-muted small ms-1"></span>
-                                <br><small class="text-muted">~600MB, takes 5-10 minutes</small>
-                            </label>
-                            <span id="radarPackageStatus" class="ms-2"></span>
-                        </div>
-                    </div>
-                </div>
-            </div>
-
-            <div class="text-center">
-                <p id="radarStatus" class="text-muted">Checking for software...</p>
-                <button type="button" class="btn btn-primary" id="radarInstallBtn" style="display:none;">
-                    Install Selected
-                </button>
-                <button type="button" class="btn btn-outline-primary" id="radarNextBtn" style="display:none;">
-                    Next &rarr;
-                </button>
-                <div id="radarInstallStatus" class="small mt-2"></div>
-            </div>
-        </div>
-
-        <!-- Step 4: Complete -->
-        <div data-step="complete" class="step-panel text-center py-5" style="display:none;">
-            <div class="section-label text-center">Setup Complete</div>
-            <p class="text-muted">Your device is ready.</p>
-            <a href="/" class="btn btn-primary">Go to Dashboard &rarr;</a>
-        </div>
+        {% include "setup/_agreements.html" %}
+        {% include "setup/_system.html" %}
+        {% include "setup/_packages.html" %}
+        {% include "setup/_location.html" %}
+        {% include "setup/_towers.html" %}
+        {% include "setup/_complete.html" %}
     </div>
+{% endblock %}
 
-    <footer class="fixed-bottom bg-light border-top py-2">
-        <div class="container text-center text-muted small">
-            Node: {{ node_id or 'Unknown' }} &bull;
-            owl-os: {{ owl_os_version or 'Unknown' }} &bull;
-            retina-node: {{ retina_node_version or 'Not installed' }}
-        </div>
-    </footer>
-
+{% block scripts %}
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script src="/static/setup.js"></script>
     <script>
-    (function() {
-        var resumeStep = {{ resume_step|tojson }};
-        var steps = [];
-        var currentIndex = 0;
-        var pollTimer = null;
-
-        // Discover steps from DOM
-        document.querySelectorAll('[data-step]').forEach(function(el) {
-            steps.push({
-                name: el.getAttribute('data-step'),
-                el: el
-            });
-        });
-
-        function updateStepper(index) {
-            steps.forEach(function(s, i) {
-                var circle = document.querySelector('[data-indicator="' + s.name + '"]');
-                var label = document.querySelector('[data-label="' + s.name + '"]');
-                if (!circle) return;
-
-                circle.className = 'stepper-circle';
-                label.className = 'stepper-label';
-
-                if (i < index) {
-                    circle.classList.add('complete');
-                    circle.innerHTML = '&#10003;';
-                    label.classList.add('complete');
-                } else if (i === index) {
-                    circle.classList.add('active');
-                    circle.textContent = String(i + 1);
-                    label.classList.add('active');
-                } else {
-                    circle.textContent = String(i + 1);
-                }
-
-                // Lines between steps
-                if (i < steps.length - 1) {
-                    var line = document.querySelector('[data-line="' + i + '"]');
-                    if (line) {
-                        line.className = 'stepper-line' + (i < index ? ' complete' : '');
-                    }
-                }
-            });
-        }
-
-        function showStep(index) {
-            steps.forEach(function(s, i) {
-                s.el.style.display = (i === index) ? '' : 'none';
-            });
-            currentIndex = index;
-            updateStepper(index);
-
-            // Save step to server
-            fetch('/set-up/save-step', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({step: steps[index].name})
-            });
-
-            // Call enter hook
-            var enterFn = enterHooks[steps[index].name];
-            if (enterFn) enterFn();
-        }
-
-        function advance() {
-            if (currentIndex < steps.length - 1) {
-                showStep(currentIndex + 1);
-            }
-        }
-
-        // ── Enter hooks ──────────────────────────────────────
-
-        var enterHooks = {};
-
-        // Step 1: Agreements
-        enterHooks.agreements = function() {
-            var boxes = ['eulaCheck', 'cloudCheck'];
-            var btn = document.getElementById('agreementsContinueBtn');
-
-            function update() {
-                var allChecked = boxes.every(function(id) {
-                    return document.getElementById(id).checked;
-                });
-                btn.disabled = !allChecked;
-            }
-
-            boxes.forEach(function(id) {
-                document.getElementById(id).addEventListener('change', update);
-            });
-
-            btn.addEventListener('click', function() {
-                btn.disabled = true;
-                btn.textContent = 'Connecting...';
-                fetch('/mender/cloud-services', {
-                    method: 'POST',
-                    headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({enabled: true})
-                })
-                .then(function(r) { return r.json(); })
-                .then(function() { advance(); })
-                .catch(function() {
-                    btn.disabled = false;
-                    btn.textContent = 'Continue';
-                });
-            });
-        };
-
-        // Step 2: System Update (managed mode via Mender daemon)
-        enterHooks.system = function() {
-            var status = document.getElementById('systemStatus');
-            var updateBtn = document.getElementById('systemUpdateBtn');
-            var nextBtn = document.getElementById('systemNextBtn');
-            var installStatus = document.getElementById('systemInstallStatus');
-            var cardStatus = document.getElementById('systemCardStatus');
-            var versionArrow = document.getElementById('systemVersionArrow');
-
-            fetch('/mender/check-os')
-                .then(function(r) { return r.json(); })
-                .then(function(data) {
-                    if (data.current_version) {
-                        document.getElementById('systemCurrentVersion').textContent = data.current_version;
-                    }
-                    if (data.installing) {
-                        showStage(data.stage);
-                        cardStatus.innerHTML = '<span class="spinner-border spinner-border-sm text-primary"></span>';
-                        installStatus.innerHTML = '<span class="text-warning">Do not power off the device.</span>';
-                        startSystemPoll();
-                        return;
-                    }
-                    if (data.error) {
-                        status.textContent = 'Unable to check: ' + data.error;
-                        nextBtn.style.display = '';
-                        return;
-                    }
-                    if (data.update_available) {
-                        status.textContent = '';
-                        versionArrow.style.display = '';
-                        document.getElementById('systemLatestVersion').textContent = data.latest_version;
-                        updateBtn.style.display = '';
-                    } else {
-                        status.innerHTML = 'System is up to date &#10003;';
-                        cardStatus.innerHTML = '<span class="text-success">&#10003;</span>';
-                        nextBtn.style.display = '';
-                        nextBtn.textContent = 'Skip \u2192';
-                    }
-                });
-
-            updateBtn.addEventListener('click', function() {
-                updateBtn.style.display = 'none';
-                cardStatus.innerHTML = '<span class="spinner-border spinner-border-sm text-primary"></span>';
-                installStatus.innerHTML = '<span class="text-warning">Do not power off the device.</span>';
-
-                fetch('/mender/install-os', {method: 'POST'})
-                    .then(function(r) { return r.json(); })
-                    .then(function(data) {
-                        if (data.success) {
-                            startSystemPoll();
-                        } else {
-                            installStatus.innerHTML = '<span class="text-danger">' + data.error + '</span>';
-                            cardStatus.innerHTML = '';
-                            updateBtn.style.display = '';
-                        }
-                    });
-            });
-
-            nextBtn.addEventListener('click', advance);
-
-            function showStage(stage) {
-                if (stage === 'waiting') {
-                    status.textContent = 'Connecting to update server...';
-                } else if (stage === 'downloading') {
-                    status.textContent = 'Downloading OS update...';
-                } else if (stage === 'installing') {
-                    status.textContent = 'Installing OS update...';
-                } else {
-                    status.textContent = 'Updating...';
-                }
-                cardStatus.innerHTML = '<span class="spinner-border spinner-border-sm text-primary"></span>';
-            }
-
-            function startSystemPoll() {
-                showStage('waiting');
-                if (pollTimer) clearInterval(pollTimer);
-                pollTimer = setInterval(function() {
-                    fetch('/mender/check-os')
-                        .then(function(r) { return r.json(); })
-                        .then(function(data) {
-                            if (!data.installing) {
-                                clearInterval(pollTimer);
-                                pollTimer = null;
-                                if (!data.update_available) {
-                                    status.innerHTML = 'Update complete &#10003;';
-                                    installStatus.innerHTML = '<span class="text-success">Complete!</span>';
-                                } else {
-                                    status.innerHTML = 'Device may reboot &mdash; reconnect to continue.';
-                                }
-                                nextBtn.style.display = '';
-                            } else {
-                                showStage(data.stage);
-                            }
-                        })
-                        .catch(function() {
-                            // Connection lost — device is likely rebooting
-                            status.textContent = 'Rebooting... reconnect shortly.';
-                        });
-                }, 5000);
-            }
-        };
-
-        // Step 3: Packages
-        enterHooks.radar = function() {
-            var status = document.getElementById('radarStatus');
-            var installBtn = document.getElementById('radarInstallBtn');
-            var nextBtn = document.getElementById('radarNextBtn');
-            var installStatus = document.getElementById('radarInstallStatus');
-            var regionCheck = document.getElementById('regionCheck');
-            var packageCard = document.getElementById('radarPackageCard');
-            var packageStatus = document.getElementById('radarPackageStatus');
-
-            // Gate install button on export checkbox
-            function updateInstallGate() {
-                if (installBtn.style.display !== 'none') {
-                    installBtn.disabled = !regionCheck.checked;
-                }
-            }
-            regionCheck.addEventListener('change', updateInstallGate);
-
-            fetch('/mender/check')
-                .then(function(r) { return r.json(); })
-                .then(function(data) {
-                    if (data.installing) {
-                        status.textContent = data.reason || 'Installation in progress...';
-                        installStatus.innerHTML = '<span class="text-warning">Do not power off the device.</span>';
-                        packageStatus.innerHTML = '<span class="spinner-border spinner-border-sm text-primary"></span>';
-                        startRadarPoll();
-                        return;
-                    }
-                    if (data.error) {
-                        status.textContent = 'Unable to check: ' + data.error;
-                        return;
-                    }
-                    if (data.current_version) {
-                        status.innerHTML = 'Packages are up to date &#10003;';
-                        packageStatus.innerHTML = '<span class="text-success">&#10003;</span>';
-                        document.getElementById('radarLatestVersion').textContent = data.current_version;
-                        nextBtn.style.display = '';
-                    } else {
-                        status.textContent = '';
-                        document.getElementById('radarLatestVersion').textContent = data.latest_version;
-                        installBtn.style.display = '';
-                        updateInstallGate();
-                    }
-                });
-
-            installBtn.addEventListener('click', function() {
-                installBtn.style.display = 'none';
-                packageStatus.innerHTML = '<span class="spinner-border spinner-border-sm text-primary"></span>';
-                status.textContent = 'Installing...';
-                installStatus.innerHTML = '<span class="text-warning">Do not power off the device.</span>';
-
-                fetch('/mender/install', {method: 'POST'})
-                    .then(function(r) { return r.json(); })
-                    .then(function(data) {
-                        if (data.success) {
-                            startRadarPoll();
-                        } else {
-                            installStatus.innerHTML = '<span class="text-danger">' + data.error + '</span>';
-                            packageStatus.innerHTML = '';
-                            status.textContent = '';
-                            installBtn.style.display = '';
-                            updateInstallGate();
-                        }
-                    });
-            });
-
-            nextBtn.addEventListener('click', advance);
-
-            function startRadarPoll() {
-                if (pollTimer) clearInterval(pollTimer);
-                pollTimer = setInterval(function() {
-                    fetch('/mender/check')
-                        .then(function(r) { return r.json(); })
-                        .then(function(data) {
-                            if (!data.installing) {
-                                clearInterval(pollTimer);
-                                pollTimer = null;
-                                if (data.current_version) {
-                                    packageStatus.innerHTML = '<span class="text-success">&#10003;</span>';
-                                    status.textContent = '';
-                                    installStatus.innerHTML = '';
-                                    advance();
-                                } else {
-                                    installStatus.innerHTML = '<span class="text-danger">Install may have failed. Try again.</span>';
-                                    packageStatus.innerHTML = '';
-                                    status.textContent = '';
-                                    installBtn.style.display = '';
-                                    updateInstallGate();
-                                }
-                            } else {
-                                status.textContent = (data.stage || 'Installing') + '...';
-                            }
-                        });
-                }, 5000);
-            }
-        };
-
-        // Step 4: Complete
-        enterHooks.complete = function() {
-            fetch('/set-up/complete', {method: 'POST'});
-        };
-
-        // ── Init ─────────────────────────────────────────────
-
-        var startIndex = 0;
-        if (resumeStep) {
-            for (var i = 0; i < steps.length; i++) {
-                if (steps[i].name === resumeStep) {
-                    startIndex = i;
-                    break;
-                }
-            }
-        }
-        showStep(startIndex);
-    })();
+        initSetupWizard({{ resume_step|tojson }}, {{ highest_step|default(none)|tojson }}, {{ dev_mode|default(false)|tojson }}, {{ is_rerun|default(false)|tojson }});
     </script>
-</body>
-</html>
+{% endblock %}

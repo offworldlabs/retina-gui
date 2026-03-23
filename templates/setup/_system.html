@@ -1,0 +1,29 @@
+<!-- Step 2: System Update -->
+<div data-step="system" class="step-panel" style="display:none;">
+    <p class="text-muted small text-center mb-3">Ensure your node is connected to Wi-Fi. It will reboot after updating &mdash; just come back to this page.</p>
+
+    <div class="text-start mx-auto mb-3" style="max-width: 400px;">
+        <div class="card mb-2">
+            <div class="card-body d-flex align-items-center py-2 px-3">
+                <div class="flex-grow-1">
+                    <strong>OWL-OS</strong>
+                    <span id="systemCurrentVersion" class="text-muted small ms-1"></span>
+                    <span id="systemVersionArrow" style="display:none;"> &rarr; <strong id="systemLatestVersion"></strong></span>
+                    <br><small class="text-muted">Operating system update</small>
+                </div>
+                <span id="systemCardStatus" class="ms-2"></span>
+            </div>
+        </div>
+    </div>
+
+    <div class="text-center">
+        <p id="systemStatus" class="text-muted">Checking for updates...</p>
+        <button type="button" class="btn btn-primary" id="systemUpdateBtn" style="display:none;">
+            Update System
+        </button>
+        <button type="button" class="btn btn-outline-primary" id="systemNextBtn" style="display:none;">
+            Next &rarr;
+        </button>
+        <div id="systemInstallStatus" class="small mt-2"></div>
+    </div>
+</div>
