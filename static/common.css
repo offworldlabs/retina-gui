@@ -74,7 +74,47 @@ h1, h2, h3, h4, h5, h6 {
 }
 
 /* ── Navbar ────────────────────────────────────── */
-.navbar-brand img { border-radius: 6px; }
+.navbar {
+    padding: 0.4rem 0;
+    border-bottom: 1px solid var(--color-border);
+}
+.navbar .container {
+    padding-left: 1.5rem;
+    padding-right: 1.5rem;
+    max-width: 100%;
+}
+.site-brand {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    text-decoration: none;
+    color: var(--color-text);
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.95rem;
+    font-weight: 400;
+    letter-spacing: 0.06em;
+}
+.site-brand:hover {
+    color: var(--color-text);
+    text-decoration: none;
+}
+.site-brand img {
+    border-radius: 6px;
+}
+.navbar-nav .nav-link {
+    font-size: 0.9rem;
+    font-weight: 400;
+    color: var(--color-muted);
+    padding: 0.5rem 0.75rem;
+    transition: color 0.15s;
+}
+.navbar-nav .nav-link:hover {
+    color: var(--color-text);
+}
+.navbar-nav .nav-link.active {
+    color: var(--color-text);
+    font-weight: 500;
+}
 
 /* ── Card shell ────────────────────────────────── */
 .main-card {
@@ -97,9 +137,10 @@ h1, h2, h3, h4, h5, h6 {
 
 /* ── Section headings ──────────────────────────── */
 .section-heading {
-    font-size: 1.05rem;
+    font-size: 0.85rem;
     font-weight: 600;
-    color: var(--color-text);
+    letter-spacing: 0.01em;
+    color: var(--color-light);
     margin-bottom: 0.75rem;
 }
 
@@ -109,7 +150,15 @@ h1, h2, h3, h4, h5, h6 {
     font-weight: 500;
     color: var(--color-muted);
 }
-.form-control-sm { font-size: 0.9rem; }
+.form-control-sm {
+    font-size: 0.85rem;
+    border-color: var(--color-border);
+    padding: 0.4rem 0.65rem;
+}
+.form-control-sm:focus {
+    border-color: var(--color-primary);
+    box-shadow: 0 0 0 2px var(--color-primary-wash);
+}
 .btn { font-size: 0.9rem; border-radius: var(--radius-sm); }
 .btn-sm { font-size: 0.85rem; }
 
@@ -128,26 +177,73 @@ h1, h2, h3, h4, h5, h6 {
 }
 
 /* ── Accordion ─────────────────────────────────── */
+.accordion {
+    --bs-accordion-border-color: var(--color-border);
+    --bs-accordion-btn-icon-width: 0.85rem;
+}
+.accordion-item {
+    border: none;
+}
 .accordion-button {
-    font-size: 0.95rem;
-    font-weight: 400;
+    font-size: 0.88rem;
+    font-weight: 500;
     color: var(--color-text);
-    padding: 0.85rem 1.1rem;
+    padding: 0.75rem 0.25rem;
+    background: transparent;
 }
 .accordion-button:not(.collapsed) {
     color: var(--color-text);
-    background: var(--color-bg);
+    background: transparent;
+    box-shadow: none;
 }
 .accordion-button:focus {
     box-shadow: none;
-    border-color: var(--color-border);
+    border-color: transparent;
+}
+.accordion-button::after {
+    opacity: 0.4;
 }
 .accordion-body {
     font-size: 0.9rem;
     color: var(--color-text);
+    padding: 0 0.25rem 1rem;
 }
-.accordion-item {
-    border-color: var(--color-border);
+
+/* ── Link cards ───────────────────────────────── */
+.link-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0.5rem;
+}
+@media (max-width: 500px) {
+    .link-grid { grid-template-columns: 1fr; }
+}
+.link-card {
+    display: flex;
+    flex-direction: column;
+    padding: 0.85rem 1rem;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-sm);
+    text-decoration: none;
+    transition: border-color 0.15s, background 0.15s;
+}
+.link-card:hover {
+    border-color: var(--color-light);
+    background: var(--color-bg-warm);
+}
+.link-card.disabled {
+    opacity: 0.5;
+    pointer-events: none;
+}
+.link-title {
+    font-size: 0.88rem;
+    font-weight: 500;
+    color: var(--color-text);
+}
+.link-desc {
+    font-size: 0.75rem;
+    color: var(--color-light);
+    margin-top: 0.15rem;
 }
 
 /* ── Monospace data ────────────────────────────── */

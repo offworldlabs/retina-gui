@@ -24,21 +24,25 @@
         {% endif %}
 
         <div class="section-heading">Services</div>
-        <div class="list-group mb-3 w-100">
+        <div class="link-grid mb-3">
             {% if retina_node_version %}
-            <a href="http://retina.local:49152" target="_blank" class="list-group-item list-group-item-action">
-                blah2 - Passive Radar
+            <a class="link-card" href="http://owl.local:49152" target="_blank">
+                <span class="link-title">Passive Radar</span>
+                <span class="link-desc">blah2 delay-Doppler display</span>
             </a>
-            <a href="http://retina.local:8078" target="_blank" class="list-group-item list-group-item-action">
-                tar1090 - ADS-B Map
+            <a class="link-card" href="http://owl.local:8078" target="_blank">
+                <span class="link-title">ADS-B Map</span>
+                <span class="link-desc">tar1090 live aircraft map</span>
             </a>
             {% else %}
-            <span class="list-group-item list-group-item-action disabled text-muted">
-                blah2 - Passive Radar
-            </span>
-            <span class="list-group-item list-group-item-action disabled text-muted">
-                tar1090 - ADS-B Map
-            </span>
+            <div class="link-card disabled">
+                <span class="link-title">Passive Radar</span>
+                <span class="link-desc">Not yet deployed</span>
+            </div>
+            <div class="link-card disabled">
+                <span class="link-title">ADS-B Map</span>
+                <span class="link-desc">Not yet deployed</span>
+            </div>
             {% endif %}
         </div>
 

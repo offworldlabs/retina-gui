@@ -11,10 +11,13 @@
         <div class="section-heading">Configuration</div>
 
         {% if not retina_installed %}
-        <div class="alert alert-secondary">
-            Configuration available after retina-node is deployed via Mender.
+        <div class="d-flex align-items-center mb-3 p-2 rounded" style="background: var(--color-bg-warm);">
+            <span style="font-size: 0.82rem; color: var(--color-muted);">Passive radar not yet deployed. Configuration will be available after retina-node is installed.</span>
         </div>
-        {% else %}
+        <div class="opacity-50" style="pointer-events: none;">
+        {% endif %}
+
+        {% if retina_installed %}
 
         {# Macro to render form fields - supports flat fields and nested groups #}
         {% macro render_field(field, section, prefix='') %}
@@ -23,9 +26,8 @@
             {% set field_error = config_errors.get(field_name) if config_errors else none %}
 
             {% if field.type == 'group' %}
-                {# Nested group - render as visual section with heading #}
-                <div class="mb-3 ps-3 border-start">
-                    <h6 class="fw-bold">{{ field.title }}</h6>
+                <div class="mb-3 ms-1 ps-3" style="border-left: 2px solid var(--color-border);">
+                    <div style="font-size: 0.8rem; font-weight: 600; color: var(--color-muted); margin-bottom: 0.4rem;">{{ field.title }}</div>
                     {% for subfield in field.fields %}
                         {{ render_field(subfield, section, prefix ~ field.name ~ '.') }}
                     {% endfor %}
@@ -36,28 +38,28 @@
                         <input type="checkbox" name="{{ field_name }}" class="form-check-input"
                                id="{{ field_id }}" {% if field.value %}checked{% endif %}
                                {% if field.readonly %}disabled{% endif %}>
-                        <label class="form-check-label{% if field.readonly %} text-muted{% endif %}" for="{{ field_id }}">{{ field.title }}</label>
+                        <label class="form-check-label{% if field.readonly %} text-muted{% endif %}" for="{{ field_id }}" style="font-size: 0.85rem;">{{ field.title }}</label>
                         {% if field.readonly %}<input type="hidden" name="{{ field_name }}" value="{{ 'on' if field.value else '' }}">{% endif %}
                     </div>
                     {% if field_error %}
-                    <div class="text-danger small">{{ field_error }}</div>
+                    <div class="text-danger" style="font-size: 0.78rem;">{{ field_error }}</div>
                     {% endif %}
                 </div>
             {% else %}
                 <div class="mb-2">
-                    <label class="form-label{% if field.readonly %} text-muted{% endif %}" for="{{ field_id }}">
+                    <label class="form-label mb-1{% if field.readonly %} text-muted{% endif %}" for="{{ field_id }}">
                         {{ field.title }}
-                        {% if field.description %}<small class="text-muted">({{ field.description }})</small>{% endif %}
+                        {% if field.description %}<span style="font-size: 0.75rem; color: var(--color-light);">{{ field.description }}</span>{% endif %}
                     </label>
                     <input type="{{ field.type }}" name="{{ field_name }}"
-                           class="form-control{% if field_error %} is-invalid{% endif %}{% if field.readonly %} bg-light text-muted{% endif %}"
+                           class="form-control form-control-sm{% if field_error %} is-invalid{% endif %}"
                            id="{{ field_id }}"
                            value="{{ field.value if field.value is not none else '' }}"
                            {% if field.step is defined and field.step is not none %}step="{{ field.step }}"{% endif %}
                            {% if field.min is defined and field.min is not none %}min="{{ field.min }}"{% endif %}
                            {% if field.max is defined and field.max is not none %}max="{{ field.max }}"{% endif %}
-                           {% if field.readonly %}readonly{% endif %}>
-                    <div class="invalid-feedback">{{ field_error or '' }}</div>
+                           {% if field.readonly %}readonly style="background: var(--color-bg-warm); color: var(--color-muted);"{% endif %}>
+                    <div class="invalid-feedback" style="font-size: 0.78rem;">{{ field_error or '' }}</div>
                 </div>
             {% endif %}
         {% endmacro %}
@@ -174,6 +176,36 @@
                 });
         }
         </script>
+        {% endif %}
+
+        {% if not retina_installed %}
+        {# Show placeholder accordion when not installed #}
+        <div class="accordion" id="configAccordion">
+            <div class="accordion-item">
+                <h2 class="accordion-header">
+                    <button class="accordion-button collapsed" type="button">Location Settings</button>
+                </h2>
+            </div>
+            <div class="accordion-item">
+                <h2 class="accordion-header">
+                    <button class="accordion-button collapsed" type="button">Capture Settings</button>
+                </h2>
+            </div>
+            <div class="accordion-item">
+                <h2 class="accordion-header">
+                    <button class="accordion-button collapsed" type="button">ADS-B Truth Settings</button>
+                </h2>
+            </div>
+            <div class="accordion-item">
+                <h2 class="accordion-header">
+                    <button class="accordion-button collapsed" type="button">tar1090 Settings</button>
+                </h2>
+            </div>
+        </div>
+        <div class="mt-3">
+            <button class="btn btn-primary" disabled>Apply Changes</button>
+        </div>
+        </div>{# close opacity wrapper #}
         {% endif %}
 
         <div class="section-heading mt-4">Administration</div>
