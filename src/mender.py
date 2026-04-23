@@ -82,8 +82,9 @@ class MenderClient:
             for line in result.stdout.splitlines():
                 if line.startswith("rootfs-image.owl-os-pi5.version="):
                     owl_os = line.split("=", 1)[1]
-                elif line.startswith("rootfs-image.retina-node.version="):
-                    retina_node = line.split("=", 1)[1]
+                elif line.startswith("data-docker.mender-docker-compose.retina-node.version="):
+                    raw = line.split("=", 1)[1]
+                    retina_node = raw.removeprefix("retina-node-")
             return owl_os, retina_node
         except FileNotFoundError:
             # mender-update not installed (dev environment)
