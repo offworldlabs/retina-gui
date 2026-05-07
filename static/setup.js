@@ -1,4 +1,4 @@
-function initSetupWizard(resumeStep, highestStepName, devMode, isRerun) {
+function initSetupWizard(resumeStep, highestStepName, devMode, isRerun, demoMode) {
     var steps = [];
     var currentIndex = 0;
     var highestStep = 0;
@@ -55,7 +55,6 @@ function initSetupWizard(resumeStep, highestStepName, devMode, isRerun) {
         highestStep = Math.max(highestStep, index);
         var label = document.getElementById('progressLabel');
         var fill = document.getElementById('progressFill');
-        var name = stepNames[steps[index].name] || '';
         var total = steps.length;
 
         label.textContent = 'Step ' + (index + 1) + ' of ' + total;
@@ -147,6 +146,27 @@ function initSetupWizard(resumeStep, highestStepName, devMode, isRerun) {
         });
     }
 
+    // ── Demo mode: mock all API calls ────────────────────
+    if (demoMode) {
+        var _realFetch = window.fetch;
+        window.fetch = function(url, opts) {
+            var path = url.split('?')[0];
+            function ok(body) {
+                return Promise.resolve({ ok: true, json: function() { return Promise.resolve(body); } });
+            }
+            if (path === '/mender/cloud-services')  return ok({ success: true, enabled: true });
+            if (path === '/mender/check-os')         return ok({ current_version: '2.4.1-demo', update_available: false });
+            if (path === '/mender/install-os')       return ok({ success: true });
+            if (path === '/mender/check')            return ok({ current_version: '0.9.0-demo' });
+            if (path === '/mender/install')          return ok({ success: true });
+            if (path === '/towers/select')           return ok({ success: true, applied: false });
+            if (path === '/set-up/save-step')        return ok({ success: true });
+            if (path === '/set-up/complete')         return ok({ success: true });
+            return _realFetch(url, opts);
+        };
+
+    }
+
     // ── Enter hooks ──────────────────────────────────────
 
     var enterHooks = {};
@@ -169,6 +189,14 @@ function initSetupWizard(resumeStep, highestStepName, devMode, isRerun) {
         boxes.forEach(function(id) {
             document.getElementById(id).addEventListener('change', update);
         });
+
+        if (demoMode) {
+            boxes.forEach(function(id) {
+                var el = document.getElementById(id);
+                if (el) el.checked = true;
+            });
+            btn.disabled = false;
+        }
 
         btn.addEventListener('click', function() {
             btn.disabled = true;
@@ -424,6 +452,15 @@ function initSetupWizard(resumeStep, highestStepName, devMode, isRerun) {
         var rxLat = document.getElementById('rxLat');
         var rxLon = document.getElementById('rxLon');
         var rxAlt = document.getElementById('rxAlt');
+
+        if (demoMode) {
+            rxLat.value = '37.7749';
+            rxLon.value = '-122.4194';
+            rxAlt.value = '16';
+            // Fire input events so dependent listeners (find button gate) update
+            rxLat.dispatchEvent(new Event('input'));
+            rxLon.dispatchEvent(new Event('input'));
+        }
         var useMyLocBtn = document.getElementById('useMyLocationBtn');
         var findBtn = document.getElementById('findTowersBtn');
         var geoError = document.getElementById('locationGeoError');
@@ -597,10 +634,10 @@ function initSetupWizard(resumeStep, highestStepName, devMode, isRerun) {
         var cs = getComputedStyle(document.documentElement);
         function cv(name) { return cs.getPropertyValue(name).trim(); }
 
-        var CLASS_COLORS = { Ideal: cv('--color-suit-ideal'), Good: cv('--color-suit-good'), Far: cv('--color-suit-far'), 'Too Close': cv('--color-suit-close') };
-        var CLASS_BG = { Ideal: cv('--color-suit-ideal-bg'), Good: cv('--color-suit-good-bg'), Far: cv('--color-suit-far-bg'), 'Too Close': cv('--color-suit-close-bg') };
-        var BAND_COLORS = { VHF: cv('--color-band-vhf'), UHF: cv('--color-band-uhf'), FM: cv('--color-band-fm') };
-        var BAND_BG = { VHF: cv('--color-band-vhf-bg'), UHF: cv('--color-band-uhf-bg'), FM: cv('--color-band-fm-bg') };
+        var CLASS_COLORS = { Ideal: cv('--suit-ideal'), Good: cv('--suit-good'), Far: cv('--suit-far'), 'Too Close': cv('--suit-close') };
+        var CLASS_BG = { Ideal: cv('--suit-ideal-bg'), Good: cv('--suit-good-bg'), Far: cv('--suit-far-bg'), 'Too Close': cv('--suit-close-bg') };
+        var BAND_COLORS = { VHF: cv('--band-vhf'), UHF: cv('--band-uhf'), FM: cv('--band-fm') };
+        var BAND_BG = { VHF: cv('--band-vhf-bg'), UHF: cv('--band-uhf-bg'), FM: cv('--band-fm-bg') };
 
         function makeTowerIcon(distClass, highlighted) {
             var color = CLASS_COLORS[distClass] || '#94a3b8';
@@ -742,13 +779,13 @@ function initSetupWizard(resumeStep, highestStepName, devMode, isRerun) {
                     '<td class="mono hide-mobile">' + esc(t.latitude) + '</td>' +
                     '<td class="mono hide-mobile">' + esc(t.longitude) + '</td>' +
                     '<td class="mono">' + esc(t.frequency_mhz) + '</td>' +
-                    '<td class="hide-mobile"><span class="tower-badge" style="color:' + bandColor + ';background:' + bandBg + ';">' + esc(t.band) + '</span></td>' +
+                    '<td><span class="tower-badge" style="color:' + bandColor + ';background:' + bandBg + ';">' + esc(t.band) + '</span></td>' +
                     '<td class="mono">' + esc(t.distance_km) + '</td>' +
-                    '<td class="hide-mobile">' + esc(t.bearing_deg) + '\u00b0 <span class="cardinal">' + esc(t.bearing_cardinal) + '</span></td>' +
+                    '<td>' + esc(t.bearing_deg) + '\u00b0 <span class="cardinal">' + esc(t.bearing_cardinal) + '</span></td>' +
                     '<td class="mono hide-mobile">' + esc(t.received_power_dbm) + '</td>' +
-                    '<td><span class="tower-badge" style="color:' + classColor + ';background:' + classBg + ';">' + esc(t.distance_class) + '</span></td>' +
-                    '<td><button type="button" class="btn btn-outline-primary btn-sm py-0 px-2">Select</button></td>';
+                    '<td><span class="tower-badge" style="color:' + classColor + ';background:' + classBg + ';">' + esc(t.distance_class) + '</span></td>';
 
+                tr._tower = t;
                 tr.addEventListener('mouseenter', function() {
                     towerMarkers.forEach(function(m) {
                         if (m.tower === t) m.marker.setIcon(makeTowerIcon(t.distance_class, true));
@@ -760,9 +797,8 @@ function initSetupWizard(resumeStep, highestStepName, devMode, isRerun) {
                     });
                 });
 
-                tr.querySelector('button').addEventListener('click', function() {
-                    selectTower(t);
-                });
+                tr.style.cursor = 'pointer';
+                tr.addEventListener('click', function() { selectTower(t); });
 
                 tableBody.appendChild(tr);
             });
@@ -774,6 +810,11 @@ function initSetupWizard(resumeStep, highestStepName, devMode, isRerun) {
             selectedName.textContent = (t.callsign || 'Unknown') + ' \u2014 ' + t.frequency_mhz + ' MHz ' + t.band;
             selectedDetail.textContent = t.distance_km + ' km ' + t.bearing_cardinal + ' \u00b7 ' + (t.name || '') + (t.state ? ', ' + t.state : '');
             saveBtn.disabled = false;
+
+            // Highlight selected row, clear others
+            tableBody.querySelectorAll('tr').forEach(function(row) {
+                row.classList.toggle('selected', row._tower === t);
+            });
 
             towerMarkers.forEach(function(m) {
                 var hl = (m.tower === t);
@@ -852,7 +893,11 @@ function initSetupWizard(resumeStep, highestStepName, devMode, isRerun) {
 
     var startIndex = 0;
 
-    if (devMode) {
+    if (demoMode) {
+        // Demo: start from the top, seed tower search params so towers step works
+        window._towerSearchParams = { lat: 37.7749, lon: -122.4194, alt: 16, frequencies: [] };
+        startIndex = 0;
+    } else if (devMode) {
         for (var i = 0; i < steps.length; i++) {
             if (steps[i].name === 'location') { startIndex = i; break; }
         }
