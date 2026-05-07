@@ -1,4 +1,4 @@
-from flask import Blueprint, render_template
+from flask import Blueprint, render_template, request
 
 bp = Blueprint('home', __name__)
 
@@ -21,6 +21,13 @@ def index():
     tx_name = tx.get('name', '')
     rx = location.get('rx', {}) or {}
     rx_name = rx.get('name', '')
+
+    if request.args.get('demo') == '1':
+        retina_node_version = retina_node_version or '0.9.0-demo'
+        setup_needed = False
+        setup_in_progress = False
+        tx_name = tx_name or 'KPIX — 706 MHz UHF'
+        rx_name = rx_name or 'San Francisco, CA'
 
     return render_template("index.html",
                            ssh_keys=keys,
