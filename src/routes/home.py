@@ -13,7 +13,7 @@ def index():
     owl_os_version, retina_node_version = mender.get_versions()
 
     setup_needed = retina_node_version is None
-    setup_in_progress = device_state.is_setup_wizard_in_progress()
+    setup_in_progress = setup_needed and device_state.is_setup_wizard_in_progress()
 
     config = config_mgr.load_merged_config()
     location = config.get('location', {}) or {}
