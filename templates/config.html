@@ -121,19 +121,19 @@
                     {% if loc.rx_latitude %}
                     <div class="cfg-row" style="padding:0;border:0;">
                         <div class="label-col"><label>Latitude</label><span class="help">{{ loc.rx_latitude.description }}</span></div>
-                        <div><input type="number" name="location.rx_latitude" class="ds-input mono" step="any" min="-90" max="90" value="{{ loc.rx_latitude.value or '' }}"></div>
+                        <div><input type="number" name="location.rx_latitude" class="ds-input mono" step="any" min="-90" max="90" value="{{ loc.rx_latitude.value if loc.rx_latitude.value is not none else '' }}"></div>
                     </div>
                     {% endif %}
                     {% if loc.rx_longitude %}
                     <div class="cfg-row" style="padding:0;border:0;">
                         <div class="label-col"><label>Longitude</label><span class="help">{{ loc.rx_longitude.description }}</span></div>
-                        <div><input type="number" name="location.rx_longitude" class="ds-input mono" step="any" min="-180" max="180" value="{{ loc.rx_longitude.value or '' }}"></div>
+                        <div><input type="number" name="location.rx_longitude" class="ds-input mono" step="any" min="-180" max="180" value="{{ loc.rx_longitude.value if loc.rx_longitude.value is not none else '' }}"></div>
                     </div>
                     {% endif %}
                     {% if loc.rx_altitude %}
                     <div class="cfg-row" style="padding:0;border:0;">
                         <div class="label-col"><label>Altitude</label><span class="help">{{ loc.rx_altitude.description }}</span></div>
-                        <div class="cfg-input-row"><input type="number" name="location.rx_altitude" class="ds-input mono" step="any" value="{{ loc.rx_altitude.value or '' }}"><span class="unit">m</span></div>
+                        <div class="cfg-input-row"><input type="number" name="location.rx_altitude" class="ds-input mono" step="any" value="{{ loc.rx_altitude.value if loc.rx_altitude.value is not none else '' }}"><span class="unit">m</span></div>
                     </div>
                     {% endif %}
                 </div>
@@ -149,19 +149,19 @@
                     {% if loc.tx_latitude %}
                     <div class="cfg-row" style="padding:0;border:0;">
                         <div class="label-col"><label>Latitude</label><span class="help">{{ loc.tx_latitude.description }}</span></div>
-                        <div><input type="number" name="location.tx_latitude" class="ds-input mono" step="any" min="-90" max="90" value="{{ loc.tx_latitude.value or '' }}"></div>
+                        <div><input type="number" name="location.tx_latitude" class="ds-input mono" step="any" min="-90" max="90" value="{{ loc.tx_latitude.value if loc.tx_latitude.value is not none else '' }}"></div>
                     </div>
                     {% endif %}
                     {% if loc.tx_longitude %}
                     <div class="cfg-row" style="padding:0;border:0;">
                         <div class="label-col"><label>Longitude</label><span class="help">{{ loc.tx_longitude.description }}</span></div>
-                        <div><input type="number" name="location.tx_longitude" class="ds-input mono" step="any" min="-180" max="180" value="{{ loc.tx_longitude.value or '' }}"></div>
+                        <div><input type="number" name="location.tx_longitude" class="ds-input mono" step="any" min="-180" max="180" value="{{ loc.tx_longitude.value if loc.tx_longitude.value is not none else '' }}"></div>
                     </div>
                     {% endif %}
                     {% if loc.tx_altitude %}
                     <div class="cfg-row" style="padding:0;border:0;">
                         <div class="label-col"><label>Altitude</label><span class="help">{{ loc.tx_altitude.description }}</span></div>
-                        <div class="cfg-input-row"><input type="number" name="location.tx_altitude" class="ds-input mono" step="any" value="{{ loc.tx_altitude.value or '' }}"><span class="unit">m</span></div>
+                        <div class="cfg-input-row"><input type="number" name="location.tx_altitude" class="ds-input mono" step="any" value="{{ loc.tx_altitude.value if loc.tx_altitude.value is not none else '' }}"><span class="unit">m</span></div>
                     </div>
                     {% endif %}
                 </div>
@@ -209,7 +209,7 @@
                     {% if fname in t %}
                     <div>
                         <div class="ds-label-micro" style="margin-bottom:6px;">{{ t[fname].title }}</div>
-                        <input type="{{ t[fname].type }}" name="tar1090.{{ fname }}" class="ds-input mono" value="{{ t[fname].value or '' }}">
+                        <input type="{{ t[fname].type }}" name="tar1090.{{ fname }}" class="ds-input mono" value="{{ t[fname].value if t[fname].value is not none else '' }}">
                     </div>
                     {% endif %}
                     {% endfor %}
@@ -227,7 +227,7 @@
                     </div>
                     {% if 'adsblol_radius' in t %}
                     <div class="cfg-input-row" style="width:180px;flex-shrink:0;">
-                        <input type="number" name="tar1090.adsblol_radius" class="ds-input mono" min="1" max="500" value="{{ t['adsblol_radius'].value or '' }}">
+                        <input type="number" name="tar1090.adsblol_radius" class="ds-input mono" min="1" max="500" value="{{ t['adsblol_radius'].value if t['adsblol_radius'].value is not none else '' }}">
                         <span class="unit">nm</span>
                     </div>
                     {% endif %}
@@ -365,11 +365,23 @@ if (window.location.search.includes('saved=1')) {
         fetch('/config/apply', { method: 'POST', headers: {'X-CSRFToken': document.querySelector('meta[name="csrf-token"]').content} })
             .then(r => r.json())
             .then(data => {
-                if (data.success) { status.style.color = 'var(--ok)';     status.textContent = 'Applied successfully!'; }
-                else              { status.style.color = 'var(--danger)'; status.textContent = data.error || 'Failed to apply'; }
+                if (data.success) {
+                    status.style.color = 'var(--ok)';
+                    status.textContent = 'Applied successfully!';
+                    setTimeout(() => { window.location.href = '/config'; }, 800);
+                } else {
+                    status.style.color = 'var(--danger)';
+                    status.textContent = data.error || 'Failed to apply';
+                    btn.disabled = false;
+                    btn.textContent = 'Apply changes';
+                }
             })
-            .catch(e => { status.style.color = 'var(--danger)'; status.textContent = 'Error: ' + e.message; })
-            .finally(() => { btn.disabled = false; btn.textContent = 'Apply changes'; });
+            .catch(e => {
+                status.style.color = 'var(--danger)';
+                status.textContent = 'Error: ' + e.message;
+                btn.disabled = false;
+                btn.textContent = 'Apply changes';
+            });
     }
 }
 
