@@ -34,8 +34,22 @@ function initSetupWizard(resumeStep, highestStepName, devMode, isRerun) {
         dot.addEventListener('click', function() {
             if (i <= highestStep && i !== currentIndex) showStep(i);
         });
-        track.appendChild(dot);
+        // Insert before progressLabel so dots appear left of the label
+        var lbl = document.getElementById('progressLabel');
+        if (lbl) { track.insertBefore(dot, lbl); } else { track.appendChild(dot); }
     });
+
+    // Wire back/exit button
+    var backBtn = document.getElementById('wizBackBtn');
+    if (backBtn) {
+        backBtn.addEventListener('click', function() {
+            if (currentIndex === 0) {
+                window.location.href = '/';
+            } else {
+                showStep(currentIndex - 1);
+            }
+        });
+    }
 
     function updateProgress(index) {
         highestStep = Math.max(highestStep, index);
@@ -44,7 +58,7 @@ function initSetupWizard(resumeStep, highestStepName, devMode, isRerun) {
         var name = stepNames[steps[index].name] || '';
         var total = steps.length;
 
-        label.textContent = name;
+        label.textContent = 'Step ' + (index + 1) + ' of ' + total;
 
         // Fill width: from first dot to current dot
         var pct = total > 1 ? (index / (total - 1)) * 100 : 0;
@@ -85,6 +99,20 @@ function initSetupWizard(resumeStep, highestStepName, devMode, isRerun) {
         });
         currentIndex = index;
         updateProgress(index);
+
+        // Back/Exit button — always visible; label changes based on step
+        var backBtn = document.getElementById('wizBackBtn');
+        if (backBtn) {
+            backBtn.style.display = '';
+            backBtn.textContent = (index === 0) ? 'Exit' : '← Back';
+        }
+
+        // Switch active footer button group
+        document.querySelectorAll('.step-foot-btns').forEach(function(el) {
+            el.style.display = 'none';
+        });
+        var activeBtns = document.getElementById('stepBtns-' + steps[index].name);
+        if (activeBtns) activeBtns.style.display = '';
 
         postJSON('/set-up/save-step', {step: steps[index].name});
 

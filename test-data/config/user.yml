@@ -2,7 +2,7 @@ network:
   node_id: ret7dd2cb0d
 capture:
   device:
-    gainReduction: 30
+    agcSetPoint: -50
 location:
   rx:
     latitude: 37.7644
@@ -13,8 +13,5 @@ location:
     latitude: 37.49917
     longitude: -121.87222
     altitude: 783
-truth:
-  adsb:
-    tar1090: sfo1.retnode.com
 tar1090:
   adsb_source: 192.168.8.183,30005,beast_in

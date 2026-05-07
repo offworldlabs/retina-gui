@@ -7,40 +7,49 @@
     <link rel="icon" type="image/png" href="/static/favicon.png">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <link href="/static/common.css" rel="stylesheet">
     {% block head %}{% endblock %}
-    <style>
-        body { padding-bottom: 60px; }
-        {% block style %}{% endblock %}
-    </style>
+    <style>{% block style %}{% endblock %}</style>
 </head>
 <body>
+<div class="page">
+
     {% block navbar %}
-    <nav class="navbar navbar-expand">
-        <div class="container">
-            <a class="navbar-brand site-brand" href="/"><img src="/static/logo-192.png" alt="" height="28" class="me-2">OWL-OS</a>
-            <ul class="navbar-nav">
-                <li class="nav-item"><a class="nav-link{% if active_page == 'home' %} active{% endif %}" href="/">Home</a></li>
-                <li class="nav-item"><a class="nav-link{% if active_page == 'config' %} active{% endif %}" href="/config">Config</a></li>
-            </ul>
+    <nav class="nav">
+        <a href="/" style="text-decoration:none;color:inherit;">
+        <div class="ds-brand">
+            <div class="ds-brand-logo" style="background:transparent;border:0;padding:0;">
+                <img src="/static/logo-192.png" alt="OWL-OS" width="28" height="28" style="display:block;" />
+            </div>
+            <div class="ds-brand-text">
+                <div class="ds-brand-name">OWL-OS</div>
+                <div class="ds-brand-node">Node <span class="mono">{{ node_id or '—' }}</span></div>
+            </div>
         </div>
+        </a>
+        <div class="nav-tabs">
+            <a class="nav-tab{% if active_page == 'home' %} active{% endif %}" href="/">Home</a>
+            <a class="nav-tab{% if active_page == 'config' %} active{% endif %}" href="/config">Config</a>
+        </div>
+        <div class="nav-spacer"></div>
     </nav>
     {% endblock %}
 
     {% block content %}{% endblock %}
 
     {% block footer %}
-    <footer class="site-footer">
-        <div class="container">
-            Node: {{ node_id or 'Unknown' }} &bull;
-            owl-os: {{ owl_os_version or 'Unknown' }} &bull;
-            retina-node: {{ retina_node_version or 'Not installed' }}
-        </div>
+    <footer class="foot">
+        <span>Node <span class="mono">{{ node_id or '—' }}</span></span>
+        <span>owl-os <span class="mono">{{ owl_os_version or '—' }}</span></span>
+        <span>retina-node <span class="mono">{{ retina_node_version or 'Not installed' }}</span></span>
+        <div class="foot-spacer"></div>
     </footer>
     {% endblock %}
 
-    {% block scripts %}{% endblock %}
+</div>
+
+{% block scripts %}{% endblock %}
 </body>
 </html>

@@ -1,29 +1,18 @@
 <!-- Step 2: System Update -->
 <div data-step="system" class="step-panel" style="display:none;">
-    <p class="text-muted small text-center mb-3">Ensure your node is connected to Wi-Fi. It will reboot after updating &mdash; just come back to this page.</p>
-
-    <div class="text-start mx-auto mb-3" style="max-width: 400px;">
-        <div class="card mb-2">
-            <div class="card-body d-flex align-items-center py-2 px-3">
-                <div class="flex-grow-1">
-                    <strong>OWL-OS</strong>
-                    <span id="systemCurrentVersion" class="text-muted small ms-1"></span>
-                    <span id="systemVersionArrow" style="display:none;"> &rarr; <strong id="systemLatestVersion"></strong></span>
-                    <br><small class="text-muted">Operating system update</small>
-                </div>
-                <span id="systemCardStatus" class="ms-2"></span>
+    <div class="wiz-title-row">
+        <h1>System update</h1>
+        <p>Keep OWL-OS up to date before installing the radar stack.</p>
+    </div>
+    <div class="step-stack">
+        <div class="step-card">
+            <div class="step-card-body">
+                <div class="step-card-title">OWL-OS <span id="systemCurrentVersion" style="font-weight:400;color:var(--ink-3);font-size:13px;margin-left:4px;"></span><span id="systemVersionArrow" style="display:none;color:var(--ink-3);"> → <strong id="systemLatestVersion"></strong></span></div>
+                <div class="step-card-sub">Operating system update</div>
             </div>
+            <span id="systemCardStatus"></span>
         </div>
     </div>
 
-    <div class="text-center">
-        <p id="systemStatus" class="text-muted">Checking for updates...</p>
-        <button type="button" class="btn btn-primary" id="systemUpdateBtn" style="display:none;">
-            Update System
-        </button>
-        <button type="button" class="btn btn-outline-primary" id="systemNextBtn" style="display:none;">
-            Next &rarr;
-        </button>
-        <div id="systemInstallStatus" class="small mt-2"></div>
-    </div>
+    <p id="systemStatus" style="color:var(--ink-3);font-size:13.5px;margin:16px 0 0;">Checking for updates…</p>
 </div>

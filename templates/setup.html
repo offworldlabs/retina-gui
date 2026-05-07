@@ -5,210 +5,99 @@
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
 {% endblock %}
 
-{% block style %}
-        /* ── Setup card (extends .main-card) ───────────── */
-        .setup-card {
-            max-width: 520px;
-            margin: 2rem auto 0;
-            background: var(--color-card);
-            border-radius: var(--radius);
-            padding: 2rem;
-            box-shadow: 0 1px 3px rgba(0,0,0,0.06);
-            transition: max-width 0.3s;
-        }
-        .setup-card.wide { max-width: 900px; }
-        @media (max-width: 576px) {
-            .setup-card, .setup-card.wide {
-                margin: 0; border-radius: 0;
-                box-shadow: none; padding: 1.25rem;
-                max-width: 100%;
-            }
-        }
-
-        /* ── Progress indicator ────────────────────────── */
-        .progress-header { margin-bottom: 2.5rem; }
-        .progress-label {
-            font-size: 1.25rem;
-            font-weight: 600;
-            color: var(--color-text);
-            margin-bottom: 1.5rem;
-            text-align: center;
-            letter-spacing: -0.01em;
-        }
-        .progress-track {
-            position: relative;
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            height: 12px;
-        }
-        .progress-track-line {
-            position: absolute;
-            top: 50%; left: 0; right: 0;
-            height: 2px;
-            background: var(--color-border);
-            transform: translateY(-50%);
-        }
-        .progress-track-fill {
-            position: absolute;
-            top: 50%; left: 0;
-            height: 2px;
-            background: var(--color-primary);
-            transform: translateY(-50%);
-            transition: width 0.4s ease;
-        }
-        .progress-dot {
-            width: 10px; height: 10px;
-            border-radius: 50%;
-            background: var(--color-border);
-            position: relative;
-            z-index: 1;
-            transition: all 0.3s;
-            border: 2px solid var(--color-card);
-            box-shadow: 0 0 0 1px var(--color-border);
-        }
-        .progress-dot.active {
-            background: var(--color-primary);
-            box-shadow: 0 0 0 1px var(--color-primary);
-        }
-        .progress-dot.complete {
-            background: var(--color-primary);
-            box-shadow: 0 0 0 1px var(--color-primary);
-            cursor: pointer;
-        }
-        .progress-dot.complete:hover { transform: scale(1.3); }
-
-        /* ── Step panels ───────────────────────────────── */
-        .step-panel { min-height: 120px; }
-
-        /* ── Tower finder map ──────────────────────────── */
-        #towerMap {
-            height: 380px;
-            width: 100%;
-            border-radius: var(--radius-sm);
-            overflow: hidden;
-            box-shadow: 0 1px 4px rgba(0,0,0,0.06);
-        }
-        @media (max-width: 576px) {
-            #towerMap { height: 260px; }
-        }
-        .tower-marker, .user-marker { background: none; border: none; }
-        .leaflet-popup-content-wrapper {
-            border-radius: 10px !important;
-            box-shadow: 0 4px 16px rgba(0,0,0,0.12) !important;
-            padding: 0 !important;
-        }
-        .leaflet-popup-content {
-            margin: 12px 14px !important;
-            font-size: 0.82rem !important;
-            line-height: 1.5 !important;
-            color: var(--color-text) !important;
-        }
-        .popup-callsign { font-weight: 700; font-size: 0.88rem; color: var(--color-text); }
-        .popup-detail { color: var(--color-muted); font-size: 0.78rem; }
-        .popup-freq { font-family: "SF Mono", "Fira Code", monospace; font-size: 0.78rem; }
-
-        /* ── Tower results table ───────────────────────── */
-        .tower-table-wrap {
-            overflow-x: auto;
-            margin-top: 0.75rem;
-            -webkit-overflow-scrolling: touch;
-        }
-        .tower-table {
-            width: 100%;
-            border-collapse: collapse;
-            font-size: 0.82rem;
-        }
-        .tower-table th {
-            text-align: left;
-            padding: 8px 8px;
-            color: var(--color-light);
-            font-weight: 500;
-            font-size: 0.7rem;
-            text-transform: uppercase;
-            letter-spacing: 0.04em;
-            border-bottom: 1px solid var(--color-border);
-            white-space: nowrap;
-            position: sticky; top: 0;
-            background: var(--color-card);
-        }
-        .tower-table td {
-            padding: 8px 8px;
-            border-bottom: 1px solid var(--color-bg);
-            white-space: nowrap;
-            color: var(--color-text);
-        }
-        .tower-table tbody tr { transition: background 0.15s; cursor: pointer; }
-        .tower-table tbody tr:hover { background: var(--color-bg); }
-        .tower-table .rank { font-weight: 700; width: 2em; }
-        .tower-table .callsign { font-weight: 600; }
-        .tower-table .mono {
-            font-variant-numeric: tabular-nums;
-            font-family: "SF Mono", "Fira Code", monospace;
-            font-size: 0.78rem;
-        }
-        .tower-table .cardinal { color: var(--color-light); font-size: 0.74rem; }
-        .tower-badge {
-            display: inline-block;
-            padding: 2px 8px;
-            border-radius: 6px;
-            font-size: 0.7rem;
-            font-weight: 600;
-            letter-spacing: 0.02em;
-        }
-        @media (max-width: 700px) {
-            .tower-table .hide-mobile,
-            .tower-table th.hide-mobile { display: none; }
-        }
-
-        /* ── Summary strip ─────────────────────────────── */
-        .summary-strip {
-            display: flex;
-            gap: 0.5rem;
-            margin-bottom: 0.75rem;
-            flex-wrap: wrap;
-        }
-        .stat-card {
-            flex: 1;
-            min-width: 80px;
-            background: var(--color-bg);
-            border-radius: var(--radius-sm);
-            padding: 0.5rem 0.75rem;
-            text-align: center;
-        }
-        .stat-card .stat-value { display: block; font-weight: 700; font-size: 1rem; color: var(--color-text); }
-        .stat-card .stat-label { display: block; font-size: 0.65rem; color: var(--color-light); text-transform: uppercase; letter-spacing: 0.04em; }
-
-        /* ── Selected tower card ───────────────────────── */
-        .selected-tower-card {
-            background: var(--color-success-bg);
-            border: 1px solid var(--color-success-border);
-            border-radius: var(--radius-sm);
-            padding: 0.75rem 1rem;
-            margin-top: 0.75rem;
-        }
-        .selected-tower-card .tower-name { font-weight: 700; color: var(--color-success-dark); font-size: 0.9rem; }
-        .selected-tower-card .tower-detail { font-size: 0.82rem; color: var(--color-success-mid); }
-{% endblock %}
+{# Override the full navbar/footer — wizard has its own chrome #}
+{% block navbar %}{% endblock %}
+{% block footer %}{% endblock %}
 
 {% block content %}
-    <div class="container setup-card">
-        <!-- Progress indicator -->
-        <div class="progress-header">
-            <div class="progress-label" id="progressLabel"></div>
-            <div class="progress-track" id="progressTrack">
-                <div class="progress-track-line"></div>
-                <div class="progress-track-fill" id="progressFill"></div>
+<div class="wiz">
+
+    {# ── Wizard header: brand left, step indicator right ── #}
+    <div class="wiz-head">
+        <div class="wiz-head-inner">
+            <a href="/" style="text-decoration:none;color:inherit;">
+            <div class="ds-brand">
+                <div class="ds-brand-logo" style="background:transparent;border:0;padding:0;">
+                    <img src="/static/logo-192.png" alt="OWL-OS" width="28" height="28" style="display:block;" />
+                </div>
+                <div class="ds-brand-text">
+                    <div class="ds-brand-name">OWL-OS Setup</div>
+                    <div class="ds-brand-node">Node <span class="mono">{{ node_id or '—' }}</span></div>
+                </div>
+                <div class="ds-brand-text-mobile">Setup</div>
+            </div>
+            </a>
+
+            {# Progress indicator — JS populates dots into #progressTrack #}
+            <div id="progressTrack" style="display:inline-flex;align-items:center;gap:6px;position:relative;">
+                {# JS appends .progress-dot elements here #}
+                <span id="progressLabel"></span>
+            </div>
+            {# Hidden fill line (required by setup.js but not shown) #}
+            <div id="progressFill" style="display:none;"></div>
+        </div>
+    </div>
+
+    {# ── Wizard body ── #}
+    <div class="wiz-body">
+        <div class="wiz-body-inner setup-card">
+
+            {% include "setup/_agreements.html" %}
+            {% include "setup/_system.html" %}
+            {% include "setup/_packages.html" %}
+            {% include "setup/_location.html" %}
+            {% include "setup/_towers.html" %}
+            {% include "setup/_complete.html" %}
+
+        </div>
+    </div>
+
+    {# ── Wizard footer: back + per-step action buttons ── #}
+    <div class="wiz-foot">
+        <div class="wiz-foot-inner">
+            <button type="button" class="ds-btn ghost" id="wizBackBtn" style="display:none;">← Back</button>
+            <div class="foot-spacer"></div>
+
+            {# Agreements #}
+            <div id="stepBtns-agreements" class="step-foot-btns">
+                <button type="button" class="ds-btn primary" id="agreementsContinueBtn" disabled>Continue</button>
+            </div>
+
+            {# System update #}
+            <div id="stepBtns-system" class="step-foot-btns" style="display:none;">
+                <span id="systemInstallStatus" style="font-size:13px;color:var(--ink-3);"></span>
+                <button type="button" class="ds-btn primary" id="systemUpdateBtn" style="display:none;">Update system</button>
+                <button type="button" class="ds-btn ghost"   id="systemNextBtn"   style="display:none;">Next →</button>
+            </div>
+
+            {# Packages #}
+            <div id="stepBtns-radar" class="step-foot-btns" style="display:none;">
+                <span id="radarInstallStatus" style="font-size:13px;color:var(--ink-3);"></span>
+                <button type="button" class="ds-btn primary" id="radarInstallBtn" style="display:none;">Install selected</button>
+                <button type="button" class="ds-btn ghost"   id="radarNextBtn"   style="display:none;">Next →</button>
+            </div>
+
+            {# Location #}
+            <div id="stepBtns-location" class="step-foot-btns" style="display:none;">
+                <button type="button" class="ds-btn ghost"   id="locationSkipBtn">Skip →</button>
+                <button type="button" class="ds-btn primary" id="findTowersBtn" disabled>Find towers →</button>
+            </div>
+
+            {# Towers #}
+            <div id="stepBtns-towers" class="step-foot-btns" style="display:none;">
+                <span id="towerSaveStatus" style="font-size:13px;color:var(--ink-3);"></span>
+                <button type="button" class="ds-btn ghost"   id="towerSkipBtn">Skip →</button>
+                <button type="button" class="ds-btn primary" id="towerSaveBtn" disabled>Save &amp; continue</button>
+            </div>
+
+            {# Complete #}
+            <div id="stepBtns-complete" class="step-foot-btns" style="display:none;">
+                <a href="/" class="ds-btn primary">Go to dashboard →</a>
             </div>
         </div>
-
-        {% include "setup/_agreements.html" %}
-        {% include "setup/_system.html" %}
-        {% include "setup/_packages.html" %}
-        {% include "setup/_location.html" %}
-        {% include "setup/_towers.html" %}
-        {% include "setup/_complete.html" %}
     </div>
+
+</div>
 {% endblock %}
 
 {% block scripts %}

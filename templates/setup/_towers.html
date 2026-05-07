@@ -1,21 +1,26 @@
-<!-- Step 5: Tower Selection (wide, map + table) -->
+<!-- Step 5: Tower Selection -->
 <div data-step="towers" class="step-panel" style="display:none;">
+    <div class="wiz-title-row">
+        <h1>Choose a tower</h1>
+        <p>Select a broadcast transmitter to use as the passive radar illuminator.</p>
+    </div>
+
     <!-- Loading -->
-    <div id="towerLoading" class="text-center py-4">
-        <div class="spinner-border text-primary"></div>
-        <p class="text-muted small mt-2">Querying broadcast licence database &mdash; this may take up to a minute&hellip;</p>
+    <div id="towerLoading" style="padding:24px 0;text-align:center;">
+        <div class="spinner-border" style="width:1.5rem;height:1.5rem;border-width:2px;color:var(--accent);"></div>
+        <p style="color:var(--ink-3);font-size:13px;margin-top:12px;">Querying broadcast licence database — this may take up to a minute…</p>
     </div>
 
     <!-- Error -->
-    <div id="towerError" class="alert alert-danger small" style="display:none;"></div>
+    <div id="towerError" style="display:none;background:oklch(0.96 0.04 25);border:1px solid var(--danger);border-radius:var(--r-md);padding:12px 16px;font-size:13px;color:var(--danger);"></div>
 
-    <!-- Results (shown when loaded) -->
+    <!-- Results -->
     <div id="towerResults" style="display:none;">
-        <div class="summary-strip" id="towerSummary"></div>
+        <div class="scan-summary" id="towerSummary"></div>
 
-        <div id="towerMap"></div>
+        <div id="towerMap" class="tower-map"></div>
 
-        <div class="tower-table-wrap mt-3">
+        <div style="overflow-x:auto;margin-top:14px;">
             <table class="tower-table">
                 <thead>
                     <tr>
@@ -36,16 +41,10 @@
             </table>
         </div>
 
-        <!-- Selected tower confirmation -->
         <div id="selectedTowerCard" class="selected-tower-card" style="display:none;">
-            <div class="tower-name" id="selectedTowerName"></div>
+            <div class="tower-name"  id="selectedTowerName"></div>
             <div class="tower-detail" id="selectedTowerDetail"></div>
         </div>
     </div>
 
-    <div class="text-center mt-3">
-        <button type="button" class="btn btn-primary" id="towerSaveBtn" disabled>Save &amp; Continue</button>
-        <button type="button" class="btn btn-link btn-sm text-muted ms-2" id="towerSkipBtn">Skip &rarr;</button>
-        <div id="towerSaveStatus" class="small mt-2"></div>
-    </div>
 </div>

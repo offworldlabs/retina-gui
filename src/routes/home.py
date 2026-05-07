@@ -19,6 +19,8 @@ def index():
     location = config.get('location', {}) or {}
     tx = location.get('tx', {}) or {}
     tx_name = tx.get('name', '')
+    rx = location.get('rx', {}) or {}
+    rx_name = rx.get('name', '')
 
     return render_template("index.html",
                            ssh_keys=keys,
@@ -27,7 +29,8 @@ def index():
                            retina_node_version=retina_node_version,
                            setup_needed=setup_needed,
                            setup_in_progress=setup_in_progress,
-                           tx_name=tx_name)
+                           tx_name=tx_name,
+                           rx_name=rx_name)
 
 
 @bp.route("/eula")
