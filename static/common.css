@@ -412,7 +412,8 @@ h1, h2, h3, h4, h5, h6 {
     --wiz-col: 560px;
     display: flex;
     flex-direction: column;
-    min-height: calc(100vh - 0px);
+    height: 100vh;
+    height: 100dvh;
     background: var(--bg);
     color: var(--ink);
     font-size: 14px;
@@ -439,6 +440,7 @@ h1, h2, h3, h4, h5, h6 {
 }
 .wiz-body {
     flex: 1;
+    min-height: 0;
     padding: 48px var(--wiz-pad) 32px;
     overflow: auto;
 }
@@ -494,6 +496,8 @@ h1, h2, h3, h4, h5, h6 {
     .wiz-foot-inner .foot-spacer { display: none; }
     /* Slightly smaller buttons */
     .wiz-foot-inner .ds-btn { padding: 8px 12px; font-size: 13px; }
+    /* Prevent iOS auto-zoom on input focus (triggers below 16px) */
+    .wiz input, .wiz select, .wiz textarea { font-size: 16px; }
 }
 
 /* Step content — initial hide is via inline style="display:none" on each panel;
