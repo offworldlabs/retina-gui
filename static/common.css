@@ -777,9 +777,10 @@ h1, h2, h3, h4, h5, h6 {
     display: flex; align-items: center; gap: 14px;
     box-shadow: var(--shadow-md);
 }
-.savebar .changes { color: var(--ink-2); font-size: 13px; }
+.savebar .changes { color: var(--ink-2); font-size: 13px; flex-shrink: 0; }
 .savebar .changes b { color: var(--ink); }
-.savebar .right { margin-left: auto; display: flex; gap: 8px; }
+.savebar .right { margin-left: auto; display: flex; gap: 8px; align-items: center; flex-shrink: 0; white-space: nowrap; }
+@media (max-width: 600px) { .savebar .savebar-label { display: none; } }
 
 /* Config page head */
 .config-page-head {

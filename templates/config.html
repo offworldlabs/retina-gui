@@ -317,12 +317,14 @@
         {# ── Save bar (bottom of all sections) ── #}
         {% if retina_installed %}
         <div class="savebar">
-            <span id="configChangesPill"></span>
+            <div class="changes" id="configChangesPill" style="display:none;white-space:nowrap;">
+                <b id="configChangesCount">0</b><span class="savebar-label"> unsaved change<span id="configChangesPlural">s</span></span>
+            </div>
             <div class="right">
+                <span id="applyStatus" style="font-size:13px;"></span>
                 <button type="button" class="ds-btn ghost" id="discardBtn">Discard</button>
                 <button type="submit" form="configForm" class="ds-btn primary" id="applyBtn">Apply changes</button>
             </div>
-            <span id="applyStatus" style="font-size:13px;margin-left:8px;"></span>
         </div>
         {% endif %}
 
@@ -370,6 +372,48 @@ if (window.location.search.includes('saved=1')) {
             .finally(() => { btn.disabled = false; btn.textContent = 'Apply changes'; });
     }
 }
+
+// Unsaved changes tracker
+(function() {
+    const pill = document.getElementById('configChangesPill');
+    const countEl = document.getElementById('configChangesCount');
+    const pluralEl = document.getElementById('configChangesPlural');
+    if (!pill) return;
+
+    const form = document.getElementById('configForm');
+    if (!form) return;
+
+    // Snapshot initial values
+    const initial = {};
+    form.querySelectorAll('input, select, textarea').forEach(function(el) {
+        const key = el.name + '||' + el.type;
+        initial[key] = el.type === 'checkbox' ? el.checked : el.value;
+    });
+
+    function countChanges() {
+        let n = 0;
+        form.querySelectorAll('input, select, textarea').forEach(function(el) {
+            const key = el.name + '||' + el.type;
+            const cur = el.type === 'checkbox' ? el.checked : el.value;
+            if (initial[key] !== undefined && cur !== initial[key]) n++;
+        });
+        return n;
+    }
+
+    function update() {
+        const n = countChanges();
+        if (n > 0) {
+            countEl.textContent = n;
+            pluralEl.style.display = n === 1 ? 'none' : '';
+            pill.style.display = '';
+        } else {
+            pill.style.display = 'none';
+        }
+    }
+
+    form.addEventListener('input', update);
+    form.addEventListener('change', update);
+})();
 
 // Discard button reloads page
 const discardBtn = document.getElementById('discardBtn');
