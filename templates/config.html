@@ -1,322 +1,437 @@
 {% extends "base.html" %}
 {% set active_page = 'config' %}
-{% block title %}Configuration - OWL-OS{% endblock %}
+{% block title %}Configuration — OWL-OS{% endblock %}
 
 {% block head %}
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
 {% endblock %}
 
-{% block content %}
-    <div class="main-card">
-        <div class="section-heading">Configuration</div>
+{# ── Macro: render a single form field as a cfg-row ─────────────────────── #}
+{% macro render_field(field, section, prefix='') %}
+    {% set field_name = section ~ '.' ~ (prefix ~ field.name if prefix else field.name) %}
+    {% set field_id   = field_name | replace('.', '_') %}
+    {% set field_err  = config_errors.get(field_name) if config_errors else none %}
 
-        {% if not retina_installed %}
-        <div class="d-flex align-items-center mb-3 p-2 rounded" style="background: var(--color-bg-warm);">
-            <span style="font-size: 0.82rem; color: var(--color-muted);">Passive radar not yet deployed. Configuration will be available after retina-node is installed.</span>
+    {% if field.type == 'group' %}
+        <div class="divider"></div>
+        <div class="ds-label-micro" style="margin-bottom:14px;">{{ field.title }}</div>
+        {% for subfield in field.fields %}
+            {{ render_field(subfield, section, prefix ~ field.name ~ '.') }}
+        {% endfor %}
+    {% elif field.type == 'checkbox' %}
+        <div class="toggle-row">
+            <label class="ds-switch">
+                <input type="checkbox" name="{{ field_name }}" id="{{ field_id }}"
+                       {% if field.value %}checked{% endif %}
+                       {% if field.readonly %}disabled{% endif %}>
+                <span class="ds-switch-track"></span>
+            </label>
+            {% if field.readonly %}
+                <input type="hidden" name="{{ field_name }}" value="{{ 'on' if field.value else '' }}">
+            {% endif %}
+            <div class="body">
+                <div class="name">{{ field.title }}</div>
+                {% if field.description %}<div class="desc">{{ field.description }}</div>{% endif %}
+                {% if field_err %}<div style="color:var(--danger);font-size:12px;margin-top:2px;">{{ field_err }}</div>{% endif %}
+            </div>
         </div>
-        <div class="opacity-50" style="pointer-events: none;">
-        {% endif %}
-
-        {% if retina_installed %}
-
-        {# Macro to render form fields - supports flat fields and nested groups #}
-        {% macro render_field(field, section, prefix='') %}
-            {% set field_name = section ~ '.' ~ (prefix ~ field.name if prefix else field.name) %}
-            {% set field_id = field_name | replace('.', '_') %}
-            {% set field_error = config_errors.get(field_name) if config_errors else none %}
-
-            {% if field.type == 'group' %}
-                <div class="mb-3 ms-1 ps-3" style="border-left: 2px solid var(--color-border);">
-                    <div style="font-size: 0.8rem; font-weight: 600; color: var(--color-muted); margin-bottom: 0.4rem;">{{ field.title }}</div>
-                    {% for subfield in field.fields %}
-                        {{ render_field(subfield, section, prefix ~ field.name ~ '.') }}
-                    {% endfor %}
-                </div>
-            {% elif field.type == 'checkbox' %}
-                <div class="mb-2">
-                    <div class="form-check">
-                        <input type="checkbox" name="{{ field_name }}" class="form-check-input"
-                               id="{{ field_id }}" {% if field.value %}checked{% endif %}
-                               {% if field.readonly %}disabled{% endif %}>
-                        <label class="form-check-label{% if field.readonly %} text-muted{% endif %}" for="{{ field_id }}" style="font-size: 0.85rem;">{{ field.title }}</label>
-                        {% if field.readonly %}<input type="hidden" name="{{ field_name }}" value="{{ 'on' if field.value else '' }}">{% endif %}
+    {% else %}
+        <div class="cfg-row">
+            <div class="label-col">
+                <label for="{{ field_id }}">{{ field.title }}</label>
+                {% if field.description %}<span class="help">{{ field.description }}</span>{% endif %}
+            </div>
+            <div>
+                {% if field.readonly %}
+                    <div class="cfg-readonly">
+                        <svg class="lock ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="3" y="11" width="18" height="11" rx="2"></rect><path d="M7 11V7a5 5 0 0 1 10 0v4"></path></svg>
+                        {{ field.value if field.value is not none else '' }}
+                        <input type="hidden" name="{{ field_name }}" value="{{ field.value if field.value is not none else '' }}">
                     </div>
-                    {% if field_error %}
-                    <div class="text-danger" style="font-size: 0.78rem;">{{ field_error }}</div>
-                    {% endif %}
-                </div>
-            {% else %}
-                <div class="mb-2">
-                    <label class="form-label mb-1{% if field.readonly %} text-muted{% endif %}" for="{{ field_id }}">
-                        {{ field.title }}
-                        {% if field.description %}<span style="font-size: 0.75rem; color: var(--color-light);">{{ field.description }}</span>{% endif %}
-                    </label>
-                    <input type="{{ field.type }}" name="{{ field_name }}"
-                           class="form-control form-control-sm{% if field_error %} is-invalid{% endif %}"
-                           id="{{ field_id }}"
+                {% else %}
+                    <input type="{{ field.type }}" name="{{ field_name }}" id="{{ field_id }}"
+                           class="ds-input{% if field.type == 'number' %} mono{% endif %}{% if field_err %} is-invalid{% endif %}"
                            value="{{ field.value if field.value is not none else '' }}"
                            {% if field.step is defined and field.step is not none %}step="{{ field.step }}"{% endif %}
-                           {% if field.min is defined and field.min is not none %}min="{{ field.min }}"{% endif %}
-                           {% if field.max is defined and field.max is not none %}max="{{ field.max }}"{% endif %}
-                           {% if field.readonly %}readonly style="background: var(--color-bg-warm); color: var(--color-muted);"{% endif %}>
-                    <div class="invalid-feedback" style="font-size: 0.78rem;">{{ field_error or '' }}</div>
-                </div>
-            {% endif %}
-        {% endmacro %}
-
-        <form action="/config/save" method="post" id="configForm" novalidate>
-            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-            <div class="accordion" id="configAccordion">
-                {# Location Settings #}
-                <div class="accordion-item">
-                    <h2 class="accordion-header">
-                        <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#locationSection">
-                            Location Settings
-                        </button>
-                    </h2>
-                    <div id="locationSection" class="accordion-collapse collapse" >
-                        <div class="accordion-body">
-                            {% for field in location_fields %}
-                                {{ render_field(field, 'location') }}
-                            {% endfor %}
-                        </div>
-                    </div>
-                </div>
-
-                {# Capture Settings #}
-                <div class="accordion-item">
-                    <h2 class="accordion-header">
-                        <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#captureSection">
-                            Capture Settings
-                        </button>
-                    </h2>
-                    <div id="captureSection" class="accordion-collapse collapse" >
-                        <div class="accordion-body">
-                            {% for field in capture_fields %}
-                                {{ render_field(field, 'capture') }}
-                            {% endfor %}
-                        </div>
-                    </div>
-                </div>
-
-                {# ADS-B Truth Settings #}
-                <div class="accordion-item">
-                    <h2 class="accordion-header">
-                        <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#truthSection">
-                            ADS-B Truth Settings
-                        </button>
-                    </h2>
-                    <div id="truthSection" class="accordion-collapse collapse" >
-                        <div class="accordion-body">
-                            {% for field in truth_fields %}
-                                {{ render_field(field, 'truth') }}
-                            {% endfor %}
-                        </div>
-                    </div>
-                </div>
-
-                {# tar1090 Settings #}
-                <div class="accordion-item">
-                    <h2 class="accordion-header">
-                        <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#tar1090Section">
-                            tar1090 Settings
-                        </button>
-                    </h2>
-                    <div id="tar1090Section" class="accordion-collapse collapse" >
-                        <div class="accordion-body">
-                            {% for field in tar1090_fields %}
-                                {{ render_field(field, 'tar1090') }}
-                            {% endfor %}
-                        </div>
-                    </div>
-                </div>
-            </div>
-
-            <div class="mt-3 d-flex gap-2 align-items-center">
-                <button type="submit" class="btn btn-primary" id="applyBtn">
-                    Apply Changes
-                </button>
-                <span id="applyStatus"></span>
-                {% if config_errors %}
-                <span class="text-danger">Incorrect formatting, please check fields above</span>
+                           {% if field.min  is defined and field.min  is not none %}min="{{ field.min }}"{% endif %}
+                           {% if field.max  is defined and field.max  is not none %}max="{{ field.max }}"{% endif %}>
+                    {% if field_err %}<div style="color:var(--danger);font-size:12px;margin-top:4px;">{{ field_err }}</div>{% endif %}
                 {% endif %}
             </div>
-        </form>
+        </div>
+    {% endif %}
+{% endmacro %}
 
-        <script>
-        // Auto-apply if we just saved successfully (redirected here with ?saved=1)
-        if (window.location.search.includes('saved=1')) {
-            // Clean URL
-            history.replaceState({}, '', window.location.pathname);
+{% block content %}
+<div class="shell">
 
-            const btn = document.getElementById('applyBtn');
-            const status = document.getElementById('applyStatus');
+    {# ── Side nav ── #}
+    <aside class="side">
+        <h3>Radar</h3>
+        <a href="#location">Location</a>
+        <a href="#capture">Capture</a>
+        <a href="#truth">ADS-B truth</a>
+        <a href="#tar1090">tar1090</a>
+        <h3>Administration</h3>
+        <a href="#ssh">SSH access</a>
+        <a href="#cloud">Cloud services</a>
+        <a href="#wizard">Setup wizard</a>
+    </aside>
 
-            btn.disabled = true;
-            btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Applying...';
-
-            fetch('/config/apply', { method: 'POST', headers: {'X-CSRFToken': document.querySelector('meta[name="csrf-token"]').content} })
-                .then(r => r.json())
-                .then(data => {
-                    if (data.success) {
-                        status.className = 'text-success';
-                        status.textContent = 'Applied successfully!';
-                    } else {
-                        status.className = 'text-danger';
-                        status.textContent = data.error || 'Failed to apply';
-                    }
-                })
-                .catch(e => {
-                    status.className = 'text-danger';
-                    status.textContent = 'Error: ' + e.message;
-                })
-                .finally(() => {
-                    btn.disabled = false;
-                    btn.textContent = 'Apply Changes';
-                });
-        }
-        </script>
-        {% endif %}
+    {# ── Main ── #}
+    <main>
+        <div class="config-page-head">
+            <div>
+                <h1>Configuration</h1>
+                <div class="sub">Tune the radar pipeline and manage the device. Changes apply on save.</div>
+            </div>
+        </div>
 
         {% if not retina_installed %}
-        {# Show placeholder accordion when not installed #}
-        <div class="accordion" id="configAccordion">
-            <div class="accordion-item">
-                <h2 class="accordion-header">
-                    <button class="accordion-button collapsed" type="button">Location Settings</button>
-                </h2>
-            </div>
-            <div class="accordion-item">
-                <h2 class="accordion-header">
-                    <button class="accordion-button collapsed" type="button">Capture Settings</button>
-                </h2>
-            </div>
-            <div class="accordion-item">
-                <h2 class="accordion-header">
-                    <button class="accordion-button collapsed" type="button">ADS-B Truth Settings</button>
-                </h2>
-            </div>
-            <div class="accordion-item">
-                <h2 class="accordion-header">
-                    <button class="accordion-button collapsed" type="button">tar1090 Settings</button>
-                </h2>
-            </div>
+        <div style="background:var(--surface-2);border:1px solid var(--line);border-radius:var(--r-md);padding:14px 18px;margin-bottom:18px;font-size:13px;color:var(--ink-2);">
+            Passive radar not yet deployed — configuration will be available after retina-node is installed.
         </div>
-        <div class="mt-3">
-            <button class="btn btn-primary" disabled>Apply Changes</button>
-        </div>
-        </div>{# close opacity wrapper #}
         {% endif %}
 
-        <div class="section-heading mt-4">Administration</div>
+        <form action="/config/save" method="post" id="configForm" novalidate>
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
 
-        <div class="accordion" id="adminAccordion">
-            {# SSH Access #}
-            <div class="accordion-item">
-                <h2 class="accordion-header">
-                    <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#sshSection">
-                        SSH Access
-                    </button>
-                </h2>
-                <div id="sshSection" class="accordion-collapse collapse">
-                    <div class="accordion-body">
-                        <form action="/ssh-keys" method="post" class="mb-3">
-                            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                            <div class="input-group">
-                                <input type="text" name="ssh_key" class="form-control"
-                                       placeholder="ssh-ed25519 AAAA... user@host">
-                                <button type="submit" class="btn btn-primary">Add Key</button>
-                            </div>
-                        </form>
+        {% if config_errors %}
+        <div style="background:oklch(0.96 0.04 25);border:1px solid var(--danger);border-radius:var(--r-md);padding:12px 16px;margin-bottom:18px;font-size:13px;color:var(--danger);">
+            Please fix the highlighted fields below.
+        </div>
+        {% endif %}
 
-                        {% if ssh_keys %}
-                        <ul class="list-group">
-                            {% for key in ssh_keys %}
-                            <li class="list-group-item d-flex justify-content-between align-items-center">
-                                <span class="text-truncate" style="max-width: 80%;">{{ key }}</span>
-                                <form action="/ssh-keys/delete" method="post" class="m-0">
-                                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                                    <input type="hidden" name="ssh_key" value="{{ key }}">
-                                    <button type="submit" class="btn btn-sm btn-outline-danger">Delete</button>
-                                </form>
-                            </li>
-                            {% endfor %}
-                        </ul>
-                        {% else %}
-                        <p class="text-muted mb-0">No SSH keys configured</p>
-                        {% endif %}
+        {# ── Location ── #}
+        {# Build field lookup for location #}
+        {% set loc = {} %}
+        {% for f in location_fields %}{% set _ = loc.update({f.name: f}) %}{% endfor %}
+        <section id="location" class="cfg-section">
+            <div class="cfg-section-head">
+                <h2>Location</h2>
+                <span class="desc">Receiver and transmitter coordinates used by the geometry solver.</span>
+            </div>
+            <div class="cfg-body" {% if not retina_installed %}style="opacity:.5;pointer-events:none;"{% endif %}>
+                <div class="ds-label-micro" style="margin-bottom:10px;">Receiver</div>
+                <div class="cfg-grid" style="margin-bottom:0;">
+                    <div style="grid-column:1/-1;" class="cfg-row" style="padding:0;border:0;">
+                        <div class="label-col"><label>Name</label><span class="help">{{ loc.rx_name.description if loc.rx_name else '' }}</span></div>
+                        <div><input type="text" name="location.rx_name" class="ds-input" value="{{ loc.rx_name.value or '' if loc.rx_name else '' }}"></div>
                     </div>
+                    {% if loc.rx_latitude %}
+                    <div class="cfg-row" style="padding:0;border:0;">
+                        <div class="label-col"><label>Latitude</label><span class="help">{{ loc.rx_latitude.description }}</span></div>
+                        <div><input type="number" name="location.rx_latitude" class="ds-input mono" step="any" min="-90" max="90" value="{{ loc.rx_latitude.value if loc.rx_latitude.value is not none else '' }}"></div>
+                    </div>
+                    {% endif %}
+                    {% if loc.rx_longitude %}
+                    <div class="cfg-row" style="padding:0;border:0;">
+                        <div class="label-col"><label>Longitude</label><span class="help">{{ loc.rx_longitude.description }}</span></div>
+                        <div><input type="number" name="location.rx_longitude" class="ds-input mono" step="any" min="-180" max="180" value="{{ loc.rx_longitude.value if loc.rx_longitude.value is not none else '' }}"></div>
+                    </div>
+                    {% endif %}
+                    {% if loc.rx_altitude %}
+                    <div class="cfg-row" style="padding:0;border:0;">
+                        <div class="label-col"><label>Altitude</label><span class="help">{{ loc.rx_altitude.description }}</span></div>
+                        <div class="cfg-input-row"><input type="number" name="location.rx_altitude" class="ds-input mono" step="any" value="{{ loc.rx_altitude.value if loc.rx_altitude.value is not none else '' }}"><span class="unit">m</span></div>
+                    </div>
+                    {% endif %}
+                </div>
+
+                <div class="divider"></div>
+
+                <div class="ds-label-micro" style="margin-bottom:10px;">Transmitter</div>
+                <div class="cfg-grid">
+                    <div style="grid-column:1/-1;" class="cfg-row" style="padding:0;border:0;">
+                        <div class="label-col"><label>Name</label><span class="help">{{ loc.tx_name.description if loc.tx_name else '' }}</span></div>
+                        <div><input type="text" name="location.tx_name" class="ds-input" value="{{ loc.tx_name.value or '' if loc.tx_name else '' }}"></div>
+                    </div>
+                    {% if loc.tx_latitude %}
+                    <div class="cfg-row" style="padding:0;border:0;">
+                        <div class="label-col"><label>Latitude</label><span class="help">{{ loc.tx_latitude.description }}</span></div>
+                        <div><input type="number" name="location.tx_latitude" class="ds-input mono" step="any" min="-90" max="90" value="{{ loc.tx_latitude.value if loc.tx_latitude.value is not none else '' }}"></div>
+                    </div>
+                    {% endif %}
+                    {% if loc.tx_longitude %}
+                    <div class="cfg-row" style="padding:0;border:0;">
+                        <div class="label-col"><label>Longitude</label><span class="help">{{ loc.tx_longitude.description }}</span></div>
+                        <div><input type="number" name="location.tx_longitude" class="ds-input mono" step="any" min="-180" max="180" value="{{ loc.tx_longitude.value if loc.tx_longitude.value is not none else '' }}"></div>
+                    </div>
+                    {% endif %}
+                    {% if loc.tx_altitude %}
+                    <div class="cfg-row" style="padding:0;border:0;">
+                        <div class="label-col"><label>Altitude</label><span class="help">{{ loc.tx_altitude.description }}</span></div>
+                        <div class="cfg-input-row"><input type="number" name="location.tx_altitude" class="ds-input mono" step="any" value="{{ loc.tx_altitude.value if loc.tx_altitude.value is not none else '' }}"><span class="unit">m</span></div>
+                    </div>
+                    {% endif %}
                 </div>
             </div>
+        </section>
 
-            {# Cloud Services #}
-            <div class="accordion-item">
-                <h2 class="accordion-header">
-                    <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#cloudSection">
-                        Cloud Services
-                    </button>
-                </h2>
-                <div id="cloudSection" class="accordion-collapse collapse">
-                    <div class="accordion-body">
-                        <div class="form-check form-switch mb-2">
-                            <input class="form-check-input" type="checkbox" id="cloudServicesToggle" disabled>
-                            <label class="form-check-label" for="cloudServicesToggle">
-                                Enable cloud services
-                            </label>
+        {# ── Capture ── #}
+        <section id="capture" class="cfg-section">
+            <div class="cfg-section-head">
+                <h2>Capture</h2>
+                <span class="desc">SDR sampling and gain. Touch with care — affects data quality.</span>
+            </div>
+            <div class="cfg-body" {% if not retina_installed %}style="opacity:.5;pointer-events:none;"{% endif %}>
+                {% for field in capture_fields %}
+                    {{ render_field(field, 'capture') }}
+                {% endfor %}
+            </div>
+        </section>
+
+        {# ── ADS-B truth ── #}
+        <section id="truth" class="cfg-section">
+            <div class="cfg-section-head">
+                <h2>ADS-B truth</h2>
+                <span class="desc">Match radar detections against known aircraft to validate accuracy.</span>
+            </div>
+            <div class="cfg-body" {% if not retina_installed %}style="opacity:.5;pointer-events:none;"{% endif %}>
+                {% for field in truth_fields %}
+                    {{ render_field(field, 'truth') }}
+                {% endfor %}
+            </div>
+        </section>
+
+        {# ── tar1090 ── #}
+        {# Build field lookup for tar1090 #}
+        {% set t = {} %}
+        {% for f in tar1090_fields %}{% set _ = t.update({f.name: f}) %}{% endfor %}
+        <section id="tar1090" class="cfg-section">
+            <div class="cfg-section-head">
+                <h2>tar1090</h2>
+                <span class="desc">ADS-B viewer configuration.</span>
+            </div>
+            <div class="cfg-body" {% if not retina_installed %}style="opacity:.5;pointer-events:none;"{% endif %}>
+                <div class="cfg-grid three">
+                    {% for fname in ['adsb_source_host', 'adsb_source_port', 'adsb_source_protocol'] %}
+                    {% if fname in t %}
+                    <div>
+                        <div class="ds-label-micro" style="margin-bottom:6px;">{{ t[fname].title }}</div>
+                        <input type="{{ t[fname].type }}" name="tar1090.{{ fname }}" class="ds-input mono" value="{{ t[fname].value if t[fname].value is not none else '' }}">
+                    </div>
+                    {% endif %}
+                    {% endfor %}
+                </div>
+                <div class="divider"></div>
+                {% if 'adsblol_fallback' in t %}
+                <div class="toggle-row" style="border:0;padding:0;">
+                    <label class="ds-switch">
+                        <input type="checkbox" name="tar1090.adsblol_fallback" {% if t['adsblol_fallback'].value %}checked{% endif %}>
+                        <span class="ds-switch-track"></span>
+                    </label>
+                    <div class="body">
+                        <div class="name">{{ t['adsblol_fallback'].title }}</div>
+                        <div class="desc">Use the public adsb.lol feed if no local ADS-B receiver is reachable.</div>
+                    </div>
+                    {% if 'adsblol_radius' in t %}
+                    <div class="cfg-input-row" style="width:180px;flex-shrink:0;">
+                        <input type="number" name="tar1090.adsblol_radius" class="ds-input mono" min="1" max="500" value="{{ t['adsblol_radius'].value if t['adsblol_radius'].value is not none else '' }}">
+                        <span class="unit">nm</span>
+                    </div>
+                    {% endif %}
+                </div>
+                {% endif %}
+            </div>
+        </section>
+
+        </form>
+
+        {# ── SSH access ── #}
+        <section id="ssh" class="cfg-section" style="margin-top:12px;">
+            <div class="cfg-section-head">
+                <h2>SSH access</h2>
+                <span class="desc">Public keys allowed to SSH into this node.</span>
+            </div>
+            <div class="cfg-body">
+                <form action="/ssh-keys" method="post">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <div style="display:flex;gap:8px;">
+                        <input type="text" name="ssh_key" class="ds-input mono" placeholder="ssh-ed25519 AAAA…" style="min-width:0;" />
+                        <button type="submit" class="ds-btn primary" style="flex-shrink:0;">
+                            <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M12 5v14M5 12h14"></path></svg>
+                            Add key
+                        </button>
+                    </div>
+                </form>
+
+                {% if ssh_keys %}
+                <div class="ssh-list">
+                    {% for key in ssh_keys %}
+                    <div class="ssh-item">
+                        <div class="ssh-fp">
+                            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path></svg>
                         </div>
-                        <small class="text-muted d-block mb-2">
-                            Automatic software updates and remote support.
-                        </small>
-                        <span id="cloudServicesStatus"></span>
+                        <div class="ssh-meta">
+                            <div class="ssh-key">{{ key }}</div>
+                        </div>
+                        <form action="/ssh-keys/delete" method="post" style="flex-shrink:0;">
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                            <input type="hidden" name="ssh_key" value="{{ key }}">
+                            <button type="submit" class="ds-btn danger-ghost sm">Remove</button>
+                        </form>
+                    </div>
+                    {% endfor %}
+                </div>
+                {% else %}
+                <p style="color:var(--ink-3);font-size:13px;margin:14px 0 0;">No SSH keys configured.</p>
+                {% endif %}
+            </div>
+        </section>
+
+        {# ── Cloud services ── #}
+        <section id="cloud" class="cfg-section">
+            <div class="cfg-section-head">
+                <h2>Cloud services</h2>
+                <span class="desc">Automatic OS &amp; package updates and remote support.</span>
+            </div>
+            <div class="cfg-body">
+                <div class="toggle-row" style="padding:0;border:0;">
+                    <label class="ds-switch">
+                        <input type="checkbox" id="cloudServicesToggle" disabled>
+                        <span class="ds-switch-track"></span>
+                    </label>
+                    <div class="body">
+                        <div class="name">Enable cloud services</div>
+                        <div class="desc" id="cloudServicesStatus">Automatic software updates and remote support.</div>
                     </div>
                 </div>
             </div>
+        </section>
 
-            {# Setup Wizard #}
-            <div class="accordion-item">
-                <h2 class="accordion-header">
-                    <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#wizardSection">
-                        Setup Wizard
-                    </button>
-                </h2>
-                <div id="wizardSection" class="accordion-collapse collapse">
-                    <div class="accordion-body">
-                        <p class="text-muted small mb-2">Re-run the first-boot setup wizard.</p>
-                        <a href="/set-up" class="btn btn-outline-primary">Launch Setup Wizard</a>
-                    </div>
-                </div>
+        {# ── Setup wizard ── #}
+        <section id="wizard" class="cfg-section">
+            <div class="cfg-section-head">
+                <h2>Setup wizard</h2>
+                <span class="desc">Re-run the first-boot wizard to reconfigure the node.</span>
+            </div>
+            <div class="cfg-body" style="display:flex;align-items:center;gap:14px;">
+                <a href="/set-up" class="ds-btn ghost">
+                    <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="M13 5l7 7-7 7"/></svg>
+                    Launch setup wizard
+                </a>
+            </div>
+        </section>
+
+        {# ── Save bar (bottom of all sections) ── #}
+        {% if retina_installed %}
+        <div class="savebar">
+            <div class="changes" id="configChangesPill" style="display:none;white-space:nowrap;">
+                <b id="configChangesCount">0</b><span class="savebar-label"> unsaved change<span id="configChangesPlural">s</span></span>
+            </div>
+            <div class="right">
+                <span id="applyStatus" style="font-size:13px;"></span>
+                <button type="button" class="ds-btn ghost" id="discardBtn">Discard</button>
+                <button type="submit" form="configForm" class="ds-btn primary" id="applyBtn">Apply changes</button>
             </div>
         </div>
+        {% endif %}
 
-        <!-- Confirmation Modal -->
-        <div class="modal fade" id="disableCloudModal" tabindex="-1">
-            <div class="modal-dialog">
-                <div class="modal-content">
-                    <div class="modal-header">
-                        <h5 class="modal-title">Disable Cloud Services?</h5>
-                        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
-                    </div>
-                    <div class="modal-body">
-                        <p>This will:</p>
-                        <ul>
-                            <li>Stop automatic software updates</li>
-                            <li>Disable remote support access</li>
-                        </ul>
-                        <p class="mb-0">You can re-enable at any time.</p>
-                    </div>
-                    <div class="modal-footer">
-                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
-                        <button type="button" class="btn btn-warning" id="confirmDisableBtn">Disable</button>
-                    </div>
-                </div>
+    </main>
+</div>
+
+{# Bootstrap modal for cloud services disable confirmation #}
+<div class="modal fade" id="disableCloudModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Disable Cloud Services?</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body" style="font-size:13.5px;color:var(--ink-2);">
+                <p>This will stop automatic software updates and disable remote support access.</p>
+                <p class="mb-0">You can re-enable at any time.</p>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="ds-btn ghost" data-bs-dismiss="modal">Cancel</button>
+                <button type="button" class="ds-btn danger-ghost" id="confirmDisableBtn">Disable</button>
             </div>
         </div>
     </div>
+</div>
 {% endblock %}
 
 {% block scripts %}
 <script>
-// Cloud Services toggle
+// Auto-apply after successful save redirect
+if (window.location.search.includes('saved=1')) {
+    history.replaceState({}, '', window.location.pathname);
+    const btn = document.getElementById('applyBtn');
+    const status = document.getElementById('applyStatus');
+    if (btn) {
+        btn.disabled = true;
+        btn.innerHTML = '<span class="spinner-border spinner-border-sm" style="width:.8em;height:.8em;border-width:1.5px;"></span> Applying…';
+        fetch('/config/apply', { method: 'POST', headers: {'X-CSRFToken': document.querySelector('meta[name="csrf-token"]').content} })
+            .then(r => r.json())
+            .then(data => {
+                if (data.success) {
+                    status.style.color = 'var(--ok)';
+                    status.textContent = 'Applied successfully!';
+                    setTimeout(() => { window.location.href = '/config'; }, 800);
+                } else {
+                    status.style.color = 'var(--danger)';
+                    status.textContent = data.error || 'Failed to apply';
+                    btn.disabled = false;
+                    btn.textContent = 'Apply changes';
+                }
+            })
+            .catch(e => {
+                status.style.color = 'var(--danger)';
+                status.textContent = 'Error: ' + e.message;
+                btn.disabled = false;
+                btn.textContent = 'Apply changes';
+            });
+    }
+}
+
+// Unsaved changes tracker
+(function() {
+    const pill = document.getElementById('configChangesPill');
+    const countEl = document.getElementById('configChangesCount');
+    const pluralEl = document.getElementById('configChangesPlural');
+    if (!pill) return;
+
+    const form = document.getElementById('configForm');
+    if (!form) return;
+
+    // Snapshot initial values
+    const initial = {};
+    form.querySelectorAll('input, select, textarea').forEach(function(el) {
+        const key = el.name + '||' + el.type;
+        initial[key] = el.type === 'checkbox' ? el.checked : el.value;
+    });
+
+    function countChanges() {
+        let n = 0;
+        form.querySelectorAll('input, select, textarea').forEach(function(el) {
+            const key = el.name + '||' + el.type;
+            const cur = el.type === 'checkbox' ? el.checked : el.value;
+            if (initial[key] !== undefined && cur !== initial[key]) n++;
+        });
+        return n;
+    }
+
+    function update() {
+        const n = countChanges();
+        if (n > 0) {
+            countEl.textContent = n;
+            pluralEl.style.display = n === 1 ? 'none' : '';
+            pill.style.display = '';
+        } else {
+            pill.style.display = 'none';
+        }
+    }
+
+    form.addEventListener('input', update);
+    form.addEventListener('change', update);
+})();
+
+// Discard button reloads page
+const discardBtn = document.getElementById('discardBtn');
+if (discardBtn) discardBtn.addEventListener('click', () => location.reload());
+
+// Cloud services toggle
 (function() {
     const toggle = document.getElementById('cloudServicesToggle');
     const status = document.getElementById('cloudServicesStatus');
@@ -328,26 +443,21 @@
                 toggle.checked = data.enabled;
                 if (data.update_in_progress) {
                     toggle.disabled = true;
-                    status.innerHTML = '<span class="text-warning">'
-                        + data.update_reason + ' — toggle locked</span>';
+                    status.textContent = data.update_reason + ' — toggle locked';
                     setTimeout(loadCloudStatus, 10000);
                 } else {
                     toggle.disabled = false;
-                    status.textContent = '';
+                    status.textContent = 'Automatic software updates and remote support.';
                 }
             })
-            .catch(() => {
-                toggle.checked = true;
-                toggle.disabled = false;
-            });
+            .catch(() => { toggle.checked = true; toggle.disabled = false; });
     }
     loadCloudStatus();
 
     toggle.addEventListener('change', function() {
         if (!this.checked) {
             this.checked = true;
-            const modal = new bootstrap.Modal(document.getElementById('disableCloudModal'));
-            modal.show();
+            new bootstrap.Modal(document.getElementById('disableCloudModal')).show();
         } else {
             setCloudServices(true);
         }
@@ -361,31 +471,70 @@
 
     function setCloudServices(enabled) {
         toggle.disabled = true;
-        status.innerHTML = '<span class="spinner-border spinner-border-sm"></span>';
-
+        status.textContent = 'Saving…';
         fetch('/mender/cloud-services', {
             method: 'POST',
             headers: {'Content-Type': 'application/json', 'X-CSRFToken': document.querySelector('meta[name="csrf-token"]').content},
-            body: JSON.stringify({enabled: enabled})
+            body: JSON.stringify({enabled})
         })
         .then(r => r.json().then(data => ({ok: r.ok, data})))
         .then(({ok, data}) => {
-            if (ok && data.success) {
-                status.innerHTML = '<span class="text-success">Settings applied</span>';
-                setTimeout(() => status.textContent = '', 3000);
-            } else {
-                status.innerHTML = '<span class="text-danger">' + data.error + '</span>';
-                toggle.checked = !toggle.checked;
-            }
+            if (ok && data.success) { status.textContent = 'Settings applied'; setTimeout(() => { status.textContent = 'Automatic software updates and remote support.'; }, 3000); }
+            else { status.textContent = data.error; toggle.checked = !toggle.checked; }
         })
-        .catch(e => {
-            status.innerHTML = '<span class="text-danger">Error: ' + e.message + '</span>';
-            toggle.checked = !toggle.checked;
-        })
-        .finally(() => {
-            toggle.disabled = false;
-        });
+        .catch(e => { status.textContent = 'Error: ' + e.message; toggle.checked = !toggle.checked; })
+        .finally(() => { toggle.disabled = false; });
     }
+})();
+
+// Side-nav scrollspy
+(function() {
+    var sectionIds = ['location','capture','truth','tar1090','ssh','cloud','wizard'];
+    var links = {};
+    sectionIds.forEach(function(id) {
+        var a = document.querySelector('.side a[href="#' + id + '"]');
+        if (a) links[id] = a;
+    });
+
+    var active = null;
+    function setActive(id) {
+        if (id === active) return;
+        active = id;
+        Object.values(links).forEach(function(a) { a.classList.remove('active'); });
+        if (id && links[id]) links[id].classList.add('active');
+    }
+
+    var observer = new IntersectionObserver(function(entries) {
+        // Pick the topmost visible section
+        var visible = [];
+        entries.forEach(function(e) { if (e.isIntersecting) visible.push(e); });
+        // We track all currently intersecting sections via a Set
+        entries.forEach(function(e) {
+            if (e.isIntersecting) { visibleSet.add(e.target.id); }
+            else { visibleSet.delete(e.target.id); }
+        });
+        // Highlight the first (topmost) visible section
+        var top = null;
+        sectionIds.forEach(function(id) { if (!top && visibleSet.has(id)) top = id; });
+        if (top) setActive(top);
+    }, { rootMargin: '-10% 0px -60% 0px', threshold: 0 });
+
+    var visibleSet = new Set();
+    sectionIds.forEach(function(id) {
+        var el = document.getElementById(id);
+        if (el) observer.observe(el);
+    });
+
+    // Smooth scroll on click, update active immediately
+    Object.entries(links).forEach(function(entry) {
+        var id = entry[0], a = entry[1];
+        a.addEventListener('click', function(e) {
+            e.preventDefault();
+            setActive(id);
+            var el = document.getElementById(id);
+            if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        });
+    });
 })();
 </script>
 {% endblock %}

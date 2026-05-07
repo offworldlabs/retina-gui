@@ -1,23 +1,24 @@
 <!-- Step 1: Agreements -->
-<div data-step="agreements" class="step-panel text-center">
-    <div class="text-start mx-auto" style="max-width: 360px;">
-        <div class="form-check mb-2">
-            <input type="checkbox" class="form-check-input" id="eulaCheck">
-            <label class="form-check-label" for="eulaCheck">
-                I accept the <a href="/eula" target="_blank">EULA</a>
-            </label>
-        </div>
+<div data-step="agreements" class="step-panel">
+    <div class="wiz-title-row">
+        <h1>Let's get started</h1>
+        <p>Before we begin, please review and accept the terms below.</p>
+    </div>
+    <div class="step-stack">
+        <label class="step-check">
+            <input type="checkbox" id="eulaCheck">
+            <div>
+                <div class="step-check-text">I accept the <a href="/eula" target="_blank" style="color:var(--accent);">End User Licence Agreement</a></div>
+            </div>
+        </label>
 
-        <div class="form-check mb-3">
-            <input type="checkbox" class="form-check-input" id="cloudCheck">
-            <label class="form-check-label" for="cloudCheck">
-                Enable cloud services
-            </label>
-            <small class="text-muted d-block">Required for updates. Can be disabled later.</small>
-        </div>
+        <label class="step-check">
+            <input type="checkbox" id="cloudCheck">
+            <div>
+                <div class="step-check-text">Enable cloud services</div>
+                <div class="step-check-help">Required for automatic updates. Can be disabled later in Settings.</div>
+            </div>
+        </label>
     </div>
 
-    <button type="button" class="btn btn-primary" id="agreementsContinueBtn" disabled>
-        Continue
-    </button>
 </div>

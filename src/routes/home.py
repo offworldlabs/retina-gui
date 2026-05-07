@@ -1,4 +1,4 @@
-from flask import Blueprint, render_template
+from flask import Blueprint, render_template, request
 
 bp = Blueprint('home', __name__)
 
@@ -13,12 +13,21 @@ def index():
     owl_os_version, retina_node_version = mender.get_versions()
 
     setup_needed = retina_node_version is None
-    setup_in_progress = device_state.is_setup_wizard_in_progress()
+    setup_in_progress = setup_needed and device_state.is_setup_wizard_in_progress()
 
     config = config_mgr.load_merged_config()
     location = config.get('location', {}) or {}
     tx = location.get('tx', {}) or {}
     tx_name = tx.get('name', '')
+    rx = location.get('rx', {}) or {}
+    rx_name = rx.get('name', '')
+
+    if request.args.get('demo') == '1':
+        retina_node_version = retina_node_version or '0.9.0-demo'
+        setup_needed = False
+        setup_in_progress = False
+        tx_name = tx_name or 'KPIX — 706 MHz UHF'
+        rx_name = rx_name or 'San Francisco, CA'
 
     return render_template("index.html",
                            ssh_keys=keys,
@@ -27,7 +36,8 @@ def index():
                            retina_node_version=retina_node_version,
                            setup_needed=setup_needed,
                            setup_in_progress=setup_in_progress,
-                           tx_name=tx_name)
+                           tx_name=tx_name,
+                           rx_name=rx_name)
 
 
 @bp.route("/eula")

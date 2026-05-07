@@ -14,6 +14,8 @@ def wizard():
     highest_step = device_state.get_setup_wizard_highest_step()
     is_rerun = retina_node_version is not None
 
+    demo_mode = request.args.get('demo') == '1'
+
     return render_template("setup.html",
                            resume_step=resume_step,
                            highest_step=highest_step,
@@ -21,7 +23,8 @@ def wizard():
                            owl_os_version=owl_os_version,
                            retina_node_version=retina_node_version,
                            is_rerun=is_rerun,
-                           dev_mode=DEV_MODE)
+                           dev_mode=DEV_MODE,
+                           demo_mode=demo_mode)
 
 
 @bp.route("/set-up/save-step", methods=["POST"])

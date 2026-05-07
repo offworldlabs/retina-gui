@@ -209,8 +209,11 @@ class DeviceState:
                         capture_output=True, timeout=10)
 
                 if os.path.exists(self.mender_conf_path):
-                    os.makedirs(self.mender_conf_backup_dir, exist_ok=True)
-                    shutil.move(self.mender_conf_path, self.mender_conf_backup_path)
+                    try:
+                        os.makedirs(self.mender_conf_backup_dir, exist_ok=True)
+                        shutil.move(self.mender_conf_path, self.mender_conf_backup_path)
+                    except Exception as e:
+                        print(f"[device_state] Warning: failed to back up mender conf: {e}")
 
             return True, None
 
