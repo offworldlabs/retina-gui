@@ -663,7 +663,7 @@ h1, h2, h3, h4, h5, h6 {
 .side a.active { background: var(--surface-2); color: var(--ink); font-weight: 500; box-shadow: inset 2px 0 0 var(--ink); }
 
 @media (max-width: 960px) {
-    .shell { grid-template-columns: 1fr; gap: 20px; }
+    .shell { grid-template-columns: minmax(0, 1fr); gap: 20px; }
     .side  { display: none; }
 }
 
@@ -755,6 +755,7 @@ h1, h2, h3, h4, h5, h6 {
     background: var(--surface);
     border: 1px solid var(--line);
     border-radius: 8px;
+    min-width: 0;
 }
 .ssh-fp {
     width: 26px; height: 26px; border-radius: 6px;
@@ -841,6 +842,6 @@ h1, h2, h3, h4, h5, h6 {
 @media (max-width: 576px) {
     .main  { padding: 24px 16px 36px; }
     .nav   { padding: 8px 16px; }
-    .foot  { padding: 8px 16px; }
+    .foot  { padding: 8px 16px; gap: 8px; font-size: 11px; }
     .shell { padding: 20px 16px 36px; }
 }

@@ -189,7 +189,7 @@
             </div>
             <div class="cfg-body" {% if not retina_installed %}style="opacity:.5;pointer-events:none;"{% endif %}>
                 {% for field in truth_fields %}
-                    {{ render_field(field, 'truth.adsb') }}
+                    {{ render_field(field, 'truth') }}
                 {% endfor %}
             </div>
         </section>
@@ -248,7 +248,7 @@
                 <form action="/ssh-keys" method="post">
                     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                     <div style="display:flex;gap:8px;">
-                        <input type="text" name="ssh_key" class="ds-input mono" placeholder="ssh-ed25519 AAAA… user@host" />
+                        <input type="text" name="ssh_key" class="ds-input mono" placeholder="ssh-ed25519 AAAA…" style="min-width:0;" />
                         <button type="submit" class="ds-btn primary" style="flex-shrink:0;">
                             <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M12 5v14M5 12h14"></path></svg>
                             Add key
