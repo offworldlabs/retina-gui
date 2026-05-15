@@ -2,7 +2,7 @@
 {% set active_page = 'home' %}
 
 {% block content %}
-<main class="main">
+<main class="main{% if mode == 'spectrum' %} spectrum-mode{% endif %}">
 
     <div class="page-head">
         <div>
@@ -52,6 +52,14 @@
     </div>
     {% endif %}
 
+    {% if mode == 'spectrum' %}
+    <section class="spectrum-section">
+        <div class="section-head"><h2>Spectrum</h2></div>
+        <div class="spectrum-frame-wrap">
+            <iframe id="spectrumFrame" class="spectrum-frame" src="" frameborder="0"></iframe>
+        </div>
+    </section>
+    {% else %}
     <section>
         <div class="section-head"><h2>Services</h2></div>
         <div class="svc-grid">
@@ -122,11 +130,17 @@
             {% endif %}
         </div>
     </section>
+    {% endif %}
 
 </main>
 {% endblock %}
 
 {% block scripts %}
+{% if mode == 'spectrum' %}
+<script>
+document.getElementById('spectrumFrame').src = 'http://' + window.location.hostname + ':3020';
+</script>
+{% endif %}
 {% if retina_node_version %}
 <script>
 document.getElementById('applyRestartBtn').addEventListener('click', function() {
