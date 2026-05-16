@@ -33,73 +33,8 @@
             <a class="nav-tab{% if active_page == 'home' %} active{% endif %}" href="/">Home</a>
             <a class="nav-tab{% if active_page == 'config' %} active{% endif %}" href="/config">Config</a>
         </div>
-        <div class="nav-divider"></div>
-        <div class="nav-mode-toggle">
-            <span class="nav-mode-label" id="navModeRadar">Radar</span>
-            <label class="ds-switch">
-                <input type="checkbox" id="navModeSwitch">
-                <span class="ds-switch-track"></span>
-            </label>
-            <span class="nav-mode-label" id="navModeSpectrum">Spectrum</span>
-            <span class="nav-mode-spinner" id="navModeSpinner" style="display:none;"></span>
-        </div>
         <div class="nav-spacer"></div>
     </nav>
-    <script>
-    (function () {
-        var sw      = document.getElementById('navModeSwitch');
-        var lRadar  = document.getElementById('navModeRadar');
-        var lSpec   = document.getElementById('navModeSpectrum');
-        var spinner = document.getElementById('navModeSpinner');
-        var csrf    = document.querySelector('meta[name="csrf-token"]').content;
-
-        function updateLabels(checked) {
-            lRadar.classList.toggle('active', !checked);
-            lSpec.classList.toggle('active', checked);
-        }
-
-        function setLoading(on) {
-            sw.disabled = on;
-            spinner.style.display = on ? 'inline-block' : 'none';
-        }
-
-        // Sync toggle position from server on every page load
-        fetch('/api/mode')
-            .then(function(r) { return r.json(); })
-            .then(function(d) { sw.checked = d.mode === 'spectrum'; updateLabels(sw.checked); })
-            .catch(function() {
-                var saved = localStorage.getItem('navMode');
-                if (saved === 'spectrum') { sw.checked = true; }
-                updateLabels(sw.checked);
-            });
-
-        sw.addEventListener('change', function () {
-            var newMode = sw.checked ? 'spectrum' : 'radar';
-            setLoading(true);
-            fetch('/api/mode', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrf },
-                body: JSON.stringify({ mode: newMode })
-            })
-            .then(function(r) { return r.json(); })
-            .then(function(d) {
-                if (d.success) {
-                    localStorage.setItem('navMode', newMode);
-                    window.location.reload();
-                } else {
-                    sw.checked = !sw.checked;
-                    updateLabels(sw.checked);
-                    console.error('Mode switch failed:', d.error);
-                }
-            })
-            .catch(function() {
-                sw.checked = !sw.checked;
-                updateLabels(sw.checked);
-            })
-            .finally(function() { setLoading(false); });
-        });
-    })();
-    </script>
     {% endblock %}
 
     {% block content %}{% endblock %}

@@ -145,34 +145,6 @@ h1, h2, h3, h4, h5, h6 {
 .nav-tab:hover  { color: var(--ink); background: var(--surface-2); }
 .nav-tab.active { color: var(--ink); background: var(--surface-2); }
 .nav-spacer { flex: 1; }
-.nav-divider { width: 1px; height: 18px; background: var(--line); flex-shrink: 0; }
-.nav-mode-toggle {
-    display: inline-flex;
-    align-items: center;
-    gap: 7px;
-    flex-shrink: 0;
-}
-.nav-mode-label {
-    font-size: 13px;
-    font-weight: 400;
-    color: var(--ink-3);
-    transition: color .15s, font-weight .15s;
-    user-select: none;
-}
-.nav-mode-label.active {
-    font-weight: 500;
-    color: var(--ink);
-}
-@keyframes nav-spin { to { transform: rotate(360deg); } }
-.nav-mode-spinner {
-    width: 13px; height: 13px;
-    border: 2px solid var(--line);
-    border-top-color: var(--accent);
-    border-radius: 50%;
-    animation: nav-spin .6s linear infinite;
-    flex-shrink: 0;
-}
-
 /* ── Spectrum mode overrides ──────────────────── */
 .main.spectrum-mode { max-width: 1200px; }
 .spectrum-section { display: flex; flex-direction: column; flex: 1; }
