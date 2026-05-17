@@ -145,6 +145,23 @@ h1, h2, h3, h4, h5, h6 {
 .nav-tab:hover  { color: var(--ink); background: var(--surface-2); }
 .nav-tab.active { color: var(--ink); background: var(--surface-2); }
 .nav-spacer { flex: 1; }
+/* ── Spectrum mode overrides ──────────────────── */
+.main.spectrum-mode { max-width: 1200px; }
+.spectrum-section { display: flex; flex-direction: column; flex: 1; }
+.spectrum-frame-wrap {
+    border: 1px solid var(--line);
+    border-radius: var(--r-md);
+    overflow: hidden;
+    height: calc(100vh - 160px);
+    min-height: 400px;
+}
+.spectrum-frame {
+    width: 100%;
+    height: 100%;
+    border: none;
+    display: block;
+    background: var(--surface-2);
+}
 /* Nav meta (Config page right side) */
 .nav-meta {
     display: flex; align-items: center; gap: 18px;

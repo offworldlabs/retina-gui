@@ -67,6 +67,8 @@
 
     {# ── Side nav ── #}
     <aside class="side">
+        <h3>Node</h3>
+        <a href="#mode">Mode</a>
         <h3>Radar</h3>
         <a href="#location">Location</a>
         <a href="#capture">Capture</a>
@@ -101,6 +103,27 @@
             Please fix the highlighted fields below.
         </div>
         {% endif %}
+
+        {# ── Mode ── #}
+        <section id="mode" class="cfg-section">
+            <div class="cfg-section-head">
+                <h2>Mode</h2>
+                <span class="desc">Switch the node between passive radar and spectrum analysis.</span>
+            </div>
+            <div class="cfg-body">
+                <div class="toggle-row" style="padding:0;border:0;">
+                    <label class="ds-switch">
+                        <input type="checkbox" id="modeToggle">
+                        <span class="ds-switch-track"></span>
+                    </label>
+                    <div class="body">
+                        <div class="name" id="modeLabel">Radar</div>
+                        <div class="desc">Radar runs the blah2 passive radar pipeline. Spectrum stops blah2 and starts retina-spectrum.</div>
+                    </div>
+                    <span class="spinner-border spinner-border-sm" id="modeSpinner" style="display:none;width:.9em;height:.9em;border-width:1.5px;flex-shrink:0;"></span>
+                </div>
+            </div>
+        </section>
 
         {# ── Location ── #}
         {# Build field lookup for location #}
@@ -354,6 +377,51 @@
 
 {% block scripts %}
 <script>
+// Mode toggle
+(function() {
+    var toggle  = document.getElementById('modeToggle');
+    var label   = document.getElementById('modeLabel');
+    var spinner = document.getElementById('modeSpinner');
+    var csrf    = document.querySelector('meta[name="csrf-token"]').content;
+
+    function setLabel(mode) {
+        label.textContent = mode === 'spectrum' ? 'Spectrum' : 'Radar';
+    }
+
+    fetch('/api/mode')
+        .then(function(r) { return r.json(); })
+        .then(function(d) { toggle.checked = d.mode === 'spectrum'; setLabel(d.mode); })
+        .catch(function() {});
+
+    toggle.addEventListener('change', function() {
+        var newMode = toggle.checked ? 'spectrum' : 'radar';
+        toggle.disabled = true;
+        spinner.style.display = 'inline-block';
+        fetch('/api/mode', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrf },
+            body: JSON.stringify({ mode: newMode })
+        })
+        .then(function(r) { return r.json(); })
+        .then(function(d) {
+            if (d.success) {
+                setLabel(newMode);
+            } else {
+                toggle.checked = !toggle.checked;
+                setLabel(toggle.checked ? 'spectrum' : 'radar');
+            }
+        })
+        .catch(function() {
+            toggle.checked = !toggle.checked;
+            setLabel(toggle.checked ? 'spectrum' : 'radar');
+        })
+        .finally(function() {
+            toggle.disabled = false;
+            spinner.style.display = 'none';
+        });
+    });
+})();
+
 // Auto-apply after successful save redirect
 if (window.location.search.includes('saved=1')) {
     history.replaceState({}, '', window.location.pathname);
@@ -489,7 +557,7 @@ if (discardBtn) discardBtn.addEventListener('click', () => location.reload());
 
 // Side-nav scrollspy
 (function() {
-    var sectionIds = ['location','capture','truth','tar1090','ssh','cloud','wizard'];
+    var sectionIds = ['mode','location','capture','truth','tar1090','ssh','cloud','wizard'];
     var links = {};
     sectionIds.forEach(function(id) {
         var a = document.querySelector('.side a[href="#' + id + '"]');
