@@ -19,6 +19,7 @@ DATA_DIR = os.environ.get('DATA_DIR', '/data/retina-gui')
 USER_CONFIG_PATH = os.environ.get('USER_CONFIG_PATH', '/data/retina-node/config/user.yml')
 MERGED_CONFIG_PATH = os.environ.get('MERGED_CONFIG_PATH', '/data/retina-node/config/config.yml')
 RETINA_NODE_PATH = os.environ.get('RETINA_NODE_PATH', '/data/mender-docker-compose/current/manifests')
+RETINA_SPECTRUM_PATH = os.environ.get('RETINA_SPECTRUM_PATH', os.path.join(PROJECT_ROOT, 'spectrum'))
 NODE_ID_FILE = os.environ.get('NODE_ID_FILE', '/data/mender/node_id')
 TOWER_FINDER_URL = os.environ.get('TOWER_FINDER_URL', 'https://api.retina.fm')
 DEV_MODE = os.environ.get('DEV_MODE', '').lower() in ('1', 'true', 'yes')
@@ -82,12 +83,14 @@ from routes.config import bp as config_bp
 from routes.mender_routes import bp as mender_bp
 from routes.setup import bp as setup_bp
 from routes.towers import bp as towers_bp
+from routes.mode import bp as mode_bp
 
 app.register_blueprint(home_bp)
 app.register_blueprint(config_bp)
 app.register_blueprint(mender_bp)
 app.register_blueprint(setup_bp)
 app.register_blueprint(towers_bp)
+app.register_blueprint(mode_bp)
 
 
 if __name__ == "__main__":

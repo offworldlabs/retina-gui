@@ -1,4 +1,5 @@
 from flask import Blueprint, render_template, request
+from routes.mode import get_current_mode
 
 bp = Blueprint('home', __name__)
 
@@ -37,7 +38,8 @@ def index():
                            setup_needed=setup_needed,
                            setup_in_progress=setup_in_progress,
                            tx_name=tx_name,
-                           rx_name=rx_name)
+                           rx_name=rx_name,
+                           mode=get_current_mode())
 
 
 @bp.route("/eula")
