@@ -468,30 +468,91 @@ function initSetupWizard(resumeStep, highestStepName, devMode, isRerun, demoMode
         var altManual = false;
         var elevTimer = null;
 
-        // Frequency inputs
-        var freqToggle = document.getElementById('freqToggle');
-        var freqSection = document.getElementById('freqSection');
-        var freqInputs = document.getElementById('freqInputs');
-        var addFreqBtn = document.getElementById('addFreqBtn');
-        var freqVisible = false;
+        // RF scan — SSE connected immediately on step entry; button sets 'waiting' phase
+        // and the next sweep 'start' event begins accumulation (mirrors retina-spectrum wizard.html).
+        var scanBtn = document.getElementById('scanRfBtn');
+        var scanStatus = document.getElementById('scanStatus');
+        var scanResult = document.getElementById('scanResult');
+        var rfMeasurements = [];
+        var rfPhase = 'idle'; // idle | waiting | scanning | done
+        var rfSse = null;
+        var rfHwReady = false;
 
-        freqToggle.addEventListener('click', function(e) {
-            e.preventDefault();
-            freqVisible = !freqVisible;
-            freqSection.style.display = freqVisible ? '' : 'none';
-            freqToggle.textContent = freqVisible ? 'Hide Measured Frequencies' : '+ Add Measured Frequencies';
+        function normaliseBand(id) {
+            if (id === 'fm') return 'FM';
+            if (id === 'vhf_hi' || id === 'vhf_lo') return 'VHF';
+            if (id === 'uhf') return 'UHF';
+            return id.toUpperCase();
+        }
+
+        function updateRfUI() {
+            var n = rfMeasurements.length;
+            if (rfPhase === 'idle' || rfPhase === 'waiting') {
+                scanStatus.textContent = rfPhase === 'waiting' ? 'Waiting for sweep to start…' : '';
+                scanStatus.style.display = rfPhase === 'waiting' ? '' : 'none';
+                scanResult.style.display = 'none';
+                scanBtn.disabled = !rfHwReady;
+                scanBtn.textContent = 'Scan RF signals';
+            } else if (rfPhase === 'scanning') {
+                scanStatus.textContent = 'Scanning…' + (n > 0 ? ' — ' + n + ' signal' + (n !== 1 ? 's' : '') + ' found' : '');
+                scanStatus.style.display = '';
+                scanResult.style.display = 'none';
+                scanBtn.disabled = true;
+                scanBtn.textContent = 'Scanning…';
+            } else if (rfPhase === 'done') {
+                scanStatus.style.display = 'none';
+                scanResult.textContent = n + ' signal' + (n !== 1 ? 's' : '') + ' detected';
+                scanResult.style.display = '';
+                scanBtn.disabled = false;
+                scanBtn.textContent = 'Rescan';
+            }
+        }
+
+        function connectRfSse() {
+            if (rfSse) return;
+            rfSse = new EventSource('/towers/spectrum/events');
+            rfSse.onmessage = function(e) {
+                var msg = JSON.parse(e.data);
+                if (msg.type === 'start') {
+                    if (rfPhase !== 'waiting') return;
+                    rfMeasurements = [];
+                    rfPhase = 'scanning';
+                    updateRfUI();
+                } else if (msg.type === 'step') {
+                    if (!rfHwReady) { rfHwReady = true; updateRfUI(); }
+                    if (rfPhase !== 'scanning') return;
+                    if (msg.channels) {
+                        msg.channels.forEach(function(ch) {
+                            if (rfMeasurements.some(function(m) { return m.freq_mhz === ch.fc_mhz; })) return;
+                            var m = { freq_mhz: ch.fc_mhz, band: normaliseBand(ch.band), score: ch.score || 0, snr_db: null, obw_fraction: null, power_db: null };
+                            if (ch.pilot_mhz == null) {
+                                m.snr_db = ch.snr_db != null ? ch.snr_db : null;
+                                m.obw_fraction = ch.obw_fraction != null ? ch.obw_fraction : null;
+                            } else {
+                                var pilot = ch.peaks && ch.peaks.find(function(p) { return p.is_pilot; });
+                                if (pilot) m.power_db = pilot.power_db;
+                            }
+                            rfMeasurements.push(m);
+                        });
+                        updateRfUI();
+                    }
+                } else if (msg.type === 'complete') {
+                    if (rfPhase !== 'scanning') return;
+                    rfPhase = 'done';
+                    updateRfUI();
+                }
+            };
+            rfSse.onerror = function() { rfSse.close(); rfSse = null; setTimeout(connectRfSse, 3000); };
+        }
+
+        scanBtn.disabled = true;
+        scanBtn.addEventListener('click', function() {
+            rfMeasurements = [];
+            rfPhase = 'waiting';
+            updateRfUI();
         });
 
-        addFreqBtn.addEventListener('click', function() {
-            var count = freqInputs.querySelectorAll('input').length;
-            if (count >= 10) return;
-            var div = document.createElement('div');
-            div.className = 'input-group input-group-sm mb-1';
-            div.innerHTML = '<input type="number" class="form-control" step="any" min="0" placeholder="Freq ' + (count + 1) + ' (MHz)">' +
-                '<button type="button" class="btn btn-outline-secondary" title="Remove">&times;</button>';
-            div.querySelector('button').addEventListener('click', function() { div.remove(); });
-            freqInputs.appendChild(div);
-        });
+        connectRfSse();
 
         // Enable Find Towers when lat/lon filled
         function updateFindBtn() {
@@ -565,16 +626,11 @@ function initSetupWizard(resumeStep, highestStepName, devMode, isRerun, demoMode
 
         // Find Towers → advance to towers step and trigger search
         findBtn.addEventListener('click', function() {
-            var freqs = [];
-            freqInputs.querySelectorAll('input').forEach(function(inp) {
-                var v = parseFloat(inp.value);
-                if (!isNaN(v) && v > 0) freqs.push(v);
-            });
             window._towerSearchParams = {
                 lat: parseFloat(rxLat.value),
                 lon: parseFloat(rxLon.value),
                 alt: parseFloat(rxAlt.value) || 0,
-                frequencies: freqs
+                measurements: rfMeasurements
             };
             advance();
         });
@@ -676,10 +732,11 @@ function initSetupWizard(resumeStep, highestStepName, devMode, isRerun, demoMode
         errorEl.style.display = 'none';
         resultsEl.style.display = 'none';
 
-        var url = '/towers/search?lat=' + params.lat + '&lon=' + params.lon + '&altitude=' + params.alt + '&limit=20';
-        if (params.frequencies.length > 0) url += '&frequencies=' + params.frequencies.join(',');
-
-        fetch(url)
+        postJSON('/towers/search', {
+            lat: params.lat,
+            lon: params.lon,
+            measurements: params.measurements || []
+        })
             .then(function(r) { return r.json(); })
             .then(function(data) {
                 loadingEl.style.display = 'none';
@@ -755,6 +812,7 @@ function initSetupWizard(resumeStep, highestStepName, devMode, isRerun, demoMode
                     '<span style="color:' + (CLASS_COLORS[t.distance_class] || '#6b7280') +
                     ';font-weight:600;font-size:0.78rem;">' + esc(t.distance_class) + '</span>'
                 );
+                marker.on('click', function() { selectTower(t); });
                 towerMarkers.push({ marker: marker, tower: t });
             });
 
@@ -895,7 +953,7 @@ function initSetupWizard(resumeStep, highestStepName, devMode, isRerun, demoMode
 
     if (demoMode) {
         // Demo: start from the top, seed tower search params so towers step works
-        window._towerSearchParams = { lat: 37.7749, lon: -122.4194, alt: 16, frequencies: [] };
+        window._towerSearchParams = { lat: 37.7749, lon: -122.4194, alt: 16, measurements: [] };
         startIndex = 0;
     } else if (devMode) {
         for (var i = 0; i < steps.length; i++) {

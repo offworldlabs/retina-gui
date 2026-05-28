@@ -1,4 +1,4 @@
-from flask import Blueprint, jsonify, request
+from flask import Blueprint, jsonify, request, Response, stream_with_context
 import subprocess
 
 import requests as http_requests
@@ -9,43 +9,22 @@ from config_manager import ConfigManager
 bp = Blueprint('towers', __name__, url_prefix='/towers')
 
 
-@bp.route("/search")
+@bp.route("/search", methods=["POST"])
 def search():
-    """Proxy tower search to Tower-Finder API."""
+    """Proxy RF-profile tower search to Tower-Finder API."""
     from app import app, TOWER_FINDER_URL
 
-    lat = request.args.get("lat")
-    lon = request.args.get("lon")
-    if not lat or not lon:
+    body = request.get_json()
+    if not body:
+        return jsonify({"error": "Missing JSON body"}), 400
+
+    if body.get("lat") is None or body.get("lon") is None:
         return jsonify({"error": "lat and lon are required"}), 400
 
     try:
-        lat_f = float(lat)
-        lon_f = float(lon)
-    except (ValueError, TypeError):
-        return jsonify({"error": "lat and lon must be numbers"}), 400
-
-    if not (-90 <= lat_f <= 90) or not (-180 <= lon_f <= 180):
-        return jsonify({"error": "lat must be -90..90 and lon must be -180..180"}), 400
-
-    params = {
-        "lat": lat,
-        "lon": lon,
-        "altitude": request.args.get("altitude", "0"),
-        "limit": request.args.get("limit", "20"),
-        "source": request.args.get("source", "auto"),
-    }
-    radius_km = request.args.get("radius_km")
-    if radius_km:
-        params["radius_km"] = radius_km
-    frequencies = request.args.get("frequencies")
-    if frequencies:
-        params["frequencies"] = frequencies
-
-    try:
-        resp = http_requests.get(
+        resp = http_requests.post(
             f"{TOWER_FINDER_URL}/api/towers",
-            params=params,
+            json=body,
             timeout=90,
         )
         resp.raise_for_status()
@@ -55,6 +34,31 @@ def search():
     except http_requests.RequestException as e:
         app.logger.warning(f"Tower search failed: {e}")
         return jsonify({"error": "Unable to reach tower finder service"}), 502
+
+
+@bp.route("/spectrum/events")
+def spectrum_events():
+    """Proxy SSE stream from retina-spectrum."""
+    from app import RETINA_SPECTRUM_URL
+
+    def generate():
+        try:
+            with http_requests.get(
+                f"{RETINA_SPECTRUM_URL}/api/events",
+                stream=True,
+                timeout=(5, None),
+            ) as r:
+                for chunk in r.iter_content(chunk_size=None):
+                    if chunk:
+                        yield chunk
+        except Exception:
+            yield b'data: {"type":"error"}\n\n'
+
+    return Response(
+        stream_with_context(generate()),
+        content_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
 
 
 @bp.route("/elevation")
