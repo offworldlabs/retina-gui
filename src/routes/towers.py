@@ -34,6 +34,9 @@ def search():
     except http_requests.RequestException as e:
         app.logger.warning(f"Tower search failed: {e}")
         return jsonify({"error": "Unable to reach tower finder service"}), 502
+    except Exception as e:
+        app.logger.error(f"Tower search unexpected error: {e}")
+        return jsonify({"error": "Tower search failed — check server logs"}), 500
 
 
 @bp.route("/spectrum/events")
@@ -82,6 +85,9 @@ def elevation():
     except http_requests.RequestException as e:
         app.logger.warning(f"Elevation lookup failed: {e}")
         return jsonify({"error": "Elevation lookup failed"}), 502
+    except Exception as e:
+        app.logger.error(f"Elevation lookup unexpected error: {e}")
+        return jsonify({"error": "Elevation lookup failed — check server logs"}), 500
 
 
 @bp.route("/select", methods=["POST"])
