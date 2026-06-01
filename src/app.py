@@ -20,6 +20,7 @@ USER_CONFIG_PATH = os.environ.get('USER_CONFIG_PATH', '/data/retina-node/config/
 MERGED_CONFIG_PATH = os.environ.get('MERGED_CONFIG_PATH', '/data/retina-node/config/config.yml')
 RETINA_NODE_PATH = os.environ.get('RETINA_NODE_PATH', '/data/mender-docker-compose/current/manifests')
 RETINA_SPECTRUM_PATH = os.environ.get('RETINA_SPECTRUM_PATH', os.path.join(PROJECT_ROOT, 'spectrum'))
+RETINA_SPECTRUM_URL = os.environ.get('RETINA_SPECTRUM_URL', 'http://localhost:3020')
 NODE_ID_FILE = os.environ.get('NODE_ID_FILE', '/data/mender/node_id')
 TOWER_FINDER_URL = os.environ.get('TOWER_FINDER_URL', 'https://api.retina.fm')
 DEV_MODE = os.environ.get('DEV_MODE', '').lower() in ('1', 'true', 'yes')
