@@ -15,6 +15,8 @@ def wizard():
     is_rerun = retina_node_version is not None
 
     demo_mode = request.args.get('demo') == '1'
+    if demo_mode:
+        is_rerun = True
 
     return render_template("setup.html",
                            resume_step=resume_step,

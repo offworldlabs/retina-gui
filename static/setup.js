@@ -148,6 +148,7 @@ function initSetupWizard(resumeStep, highestStepName, devMode, isRerun, demoMode
 
     // ── Demo mode: mock all API calls ────────────────────
     if (demoMode) {
+        var _demoNodeInstalling = false;
         var _realFetch = window.fetch;
         window.fetch = function(url, opts) {
             var path = url.split('?')[0];
@@ -157,8 +158,22 @@ function initSetupWizard(resumeStep, highestStepName, devMode, isRerun, demoMode
             if (path === '/mender/cloud-services')  return ok({ success: true, enabled: true });
             if (path === '/mender/check-os')         return ok({ current_version: '2.4.1-demo', update_available: false });
             if (path === '/mender/install-os')       return ok({ success: true });
-            if (path === '/mender/check')            return ok({ current_version: '0.9.0-demo' });
-            if (path === '/mender/install')          return ok({ success: true });
+            if (path === '/mender/check') {
+                if (_demoNodeInstalling) {
+                    return ok({ installing: true, stage: 'pulling', reason: 'Installing retina-node-v1.0.0-demo' });
+                }
+                return ok({
+                    current_version: 'v0.9.0-demo',
+                    latest_version: 'v1.0.0-demo',
+                    update_available: true,
+                    available_updates: ['v1.0.0-demo', 'v0.9.5-demo'],
+                });
+            }
+            if (path === '/mender/install') {
+                _demoNodeInstalling = true;
+                setTimeout(function() { _demoNodeInstalling = false; }, 8000);
+                return ok({ success: true });
+            }
             if (path === '/towers/select')           return ok({ success: true, applied: false });
             if (path === '/set-up/save-step')        return ok({ success: true });
             if (path === '/set-up/complete')         return ok({ success: true });
@@ -342,19 +357,86 @@ function initSetupWizard(resumeStep, highestStepName, devMode, isRerun, demoMode
         var regionCheck = document.getElementById('regionCheck');
         var packageStatus = document.getElementById('radarPackageStatus');
 
-        // On re-run, skip updates — package updates are managed remotely after onboarding
+        // On re-run, package is already installed \u2014 show available updates as cards, don't require action
         if (isRerun) {
+            function rerunUpdateGate() {
+                if (installBtn.style.display !== 'none') {
+                    installBtn.disabled = !regionCheck.checked;
+                }
+            }
+            regionCheck.addEventListener('change', rerunUpdateGate);
+
             fetch('/mender/check')
                 .then(function(r) { return r.json(); })
                 .then(function(data) {
-                    if (data.current_version) {
-                        document.getElementById('radarLatestVersion').textContent = data.current_version;
+                    var updates = data.available_updates || [];
+                    var packageList = document.getElementById('radarPackageList');
+
+                    if (updates.length > 0) {
+                        var cards = updates.map(function(v, i) {
+                            var safeId = 'pkg-' + v.replace(/[^a-z0-9]/gi, '-');
+                            return '<div class="step-card">' +
+                                '<div><input type="radio" name="packageSelect" id="' + safeId + '" value="' + v + '"' +
+                                (i === 0 ? ' checked' : '') +
+                                ' style="accent-color:var(--ink);margin-right:12px;"></div>' +
+                                '<label class="step-card-body" for="' + safeId + '" style="cursor:pointer;">' +
+                                '<div class="step-card-title">Retina Passive Radar <span style="font-weight:400;color:var(--ink-3);font-size:13px;margin-left:4px;">' + v + '</span></div>' +
+                                '<div class="step-card-sub">~600 MB \u00b7 5\u201310 minutes</div>' +
+                                '</label></div>';
+                        });
+                        if (data.current_version) {
+                            var cur = data.current_version;
+                            var safeId = 'pkg-' + cur.replace(/[^a-z0-9]/gi, '-');
+                            cards.push(
+                                '<div class="step-card">' +
+                                '<div><input type="radio" name="packageSelect" id="' + safeId + '" value="' + cur + '"' +
+                                ' style="accent-color:var(--ink);margin-right:12px;"></div>' +
+                                '<label class="step-card-body" for="' + safeId + '" style="cursor:pointer;">' +
+                                '<div class="step-card-title">Retina Passive Radar <span style="font-weight:400;color:var(--ink-3);font-size:13px;margin-left:4px;">' + cur + '</span>' +
+                                '<span style="font-size:11px;color:var(--ink-3);margin-left:6px;">(installed)</span></div>' +
+                                '<div class="step-card-sub">Reinstall \u00b7 ~600 MB \u00b7 5\u201310 minutes</div>' +
+                                '</label></div>'
+                            );
+                        }
+                        packageList.innerHTML = cards.join('');
+                        installBtn.textContent = 'Install selected';
+                        installBtn.style.display = '';
+                        rerunUpdateGate();
+                        nextBtn.textContent = 'Skip \u2192';
+                    } else {
+                        if (data.current_version) {
+                            document.getElementById('radarLatestVersion').textContent = data.current_version;
+                        }
+                        packageStatus.innerHTML = '<span class="text-success">&#10003;</span>';
+                        status.innerHTML = 'Packages are up to date &#10003;';
+                        nextBtn.textContent = 'Continue \u2192';
                     }
-                    status.innerHTML = 'Package updates are managed remotely &#10003;';
-                    packageStatus.innerHTML = '<span class="text-success">&#10003;</span>';
+
                     nextBtn.style.display = '';
-                    nextBtn.textContent = 'Continue \u2192';
                 });
+
+            installBtn.addEventListener('click', function() {
+                var selected = document.querySelector('input[name="packageSelect"]:checked');
+                installBtn.style.display = 'none';
+                nextBtn.style.display = 'none';
+                status.textContent = 'Installing...';
+                installStatus.innerHTML = '<span class="text-warning">Do not power off the device.</span>';
+
+                postJSON('/mender/install', selected ? {version: selected.value} : undefined)
+                    .then(function(r) { return r.json(); })
+                    .then(function(data) {
+                        if (data.success) {
+                            startRadarPoll();
+                        } else {
+                            installStatus.innerHTML = '<span class="text-danger">' + data.error + '</span>';
+                            status.textContent = '';
+                            installBtn.style.display = '';
+                            nextBtn.style.display = '';
+                            rerunUpdateGate();
+                        }
+                    });
+            });
+
             nextBtn.addEventListener('click', advance);
             return;
         }
