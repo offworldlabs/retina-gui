@@ -45,7 +45,6 @@ def check():
         "installing": False,
         "latest_version": latest,
         "current_version": current,
-        "update_available": bool(available_updates),
         "available_updates": available_updates,
     })
 
@@ -68,7 +67,7 @@ def install():
         return jsonify({"success": False, "error": error})
 
     _, retina_node_version = mender.get_versions()
-    is_reinstall = retina_node_version is not None
+    already_installed = retina_node_version is not None
 
     can_install, reason = device_state.can_start_install()
     if not can_install:
@@ -102,7 +101,7 @@ def install():
 
     def _run_install(download_url):
         try:
-            if is_reinstall:
+            if already_installed:
                 subprocess.run(
                     ["docker", "compose", "-p", "retina-node", "down"],
                     capture_output=True, timeout=60

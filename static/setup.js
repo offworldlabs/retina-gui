@@ -165,7 +165,6 @@ function initSetupWizard(resumeStep, highestStepName, devMode, isRerun, demoMode
                 return ok({
                     current_version: 'v0.9.0-demo',
                     latest_version: 'v1.0.0-demo',
-                    update_available: true,
                     available_updates: ['v1.0.0-demo', 'v0.9.5-demo'],
                 });
             }
