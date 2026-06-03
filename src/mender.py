@@ -177,9 +177,12 @@ class MenderClient:
 def get_retina_node_version_from_docker() -> str | None:
     """Get retina-node version from running blah2 Docker containers.
 
-    Inspects 'docker ps' output for any offworldlabs/blah2 image and
-    extracts the image tag (e.g. 'v0.3.10').  Used as a fallback when
-    mender-update show-provides has not yet committed the artifact provides.
+    Inspects 'docker ps' output for any offworldlabs/blah2 image and extracts
+    the image tag. Used as a fallback when mender-update show-provides has not
+    yet committed the artifact provides.
+
+    Returns the image tag string (e.g. 'v0.3.10'), or None if no blah2
+    containers are running or docker is unavailable.
     """
     try:
         result = subprocess.run(
@@ -215,7 +218,10 @@ def get_all_stable_versions_from_github(
 ) -> tuple[list[str], str | None]:
     """Get all stable version tags from GitHub releases, newest first.
 
-    Returns (versions, error) where versions is a list like ["v0.3.5", "v0.3.4"].
+    Queries GitHub releases API, filters to stable versions (excludes rc, dev, beta),
+    and returns all matching tags sorted by semver descending.
+
+    Returns (versions, error) tuple. versions is a list like ["v0.3.5", "v0.3.4"].
     """
     try:
         resp = requests.get(

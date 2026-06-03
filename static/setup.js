@@ -472,6 +472,8 @@ function initSetupWizard(resumeStep, highestStepName, devMode, isRerun, demoMode
                     document.getElementById('radarLatestVersion').textContent = data.latest_version;
                     installBtn.style.display = '';
                     updateInstallGate();
+                    nextBtn.style.display = '';
+                    nextBtn.textContent = 'Skip →';
                 }
             });
 
