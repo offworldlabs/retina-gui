@@ -1,4 +1,5 @@
 from flask import Blueprint, jsonify, request
+import subprocess
 import threading
 
 bp = Blueprint('mender', __name__, url_prefix='/mender')
@@ -8,7 +9,7 @@ bp = Blueprint('mender', __name__, url_prefix='/mender')
 def check():
     """Check for available retina-node updates and install status."""
     from app import mender, device_state
-    from mender import get_latest_stable_from_github
+    from mender import get_all_stable_versions_from_github, parse_version
 
     _, current = mender.get_versions()
 
@@ -25,39 +26,59 @@ def check():
             "reason": reason,
         })
 
-    latest, error = get_latest_stable_from_github()
+    all_versions, error = get_all_stable_versions_from_github()
     if error:
         return jsonify({"error": error})
+
+    latest = all_versions[0] if all_versions else None
+
+    if current:
+        current_tuple = parse_version(f"retina-node-{current}")
+        available_updates = [
+            v for v in all_versions
+            if (vt := parse_version(f"retina-node-{v}")) and current_tuple and vt > current_tuple
+        ]
+    else:
+        available_updates = list(all_versions)
 
     return jsonify({
         "installing": False,
         "latest_version": latest,
         "current_version": current,
-        "update_available": current is None or latest != current,
+        "available_updates": available_updates,
     })
 
 
 @bp.route("/install", methods=["POST"])
 def install():
-    """Install latest stable retina-node artifact from Mender."""
+    """Install a retina-node artifact from Mender.
+
+    Accepts an optional 'version' in the JSON body (e.g. {"version": "v0.3.11"}).
+    Defaults to the latest stable release if omitted.
+    """
     from app import mender, device_state, app
     from mender import get_latest_stable_from_github
+
+    body = request.get_json() or {}
+    requested_version = body.get("version")
 
     success, error = device_state.ensure_cloud_services_enabled(mender.get_jwt)
     if not success:
         return jsonify({"success": False, "error": error})
 
     _, retina_node_version = mender.get_versions()
-    if retina_node_version:
-        return jsonify({"success": False, "error": "Already installed"})
+    already_installed = retina_node_version is not None
 
     can_install, reason = device_state.can_start_install()
     if not can_install:
         return jsonify({"success": False, "error": reason}), 409
 
-    version_tag, error = get_latest_stable_from_github()
-    if error:
-        return jsonify({"success": False, "error": f"Failed to get version: {error}"})
+    if requested_version:
+        version_tag = requested_version
+    else:
+        version_tag, error = get_latest_stable_from_github()
+        if error:
+            return jsonify({"success": False, "error": f"Failed to get version: {error}"})
 
     release_name = f"retina-node-{version_tag}"
     if not device_state.acquire_install_lock(release_name):
@@ -80,6 +101,11 @@ def install():
 
     def _run_install(download_url):
         try:
+            if already_installed:
+                subprocess.run(
+                    ["docker", "compose", "-p", "retina-node", "down"],
+                    capture_output=True, timeout=60
+                )
             success, error = mender.install_from_url(download_url)
             if not success:
                 app.logger.error(f"Background install failed: {error}")

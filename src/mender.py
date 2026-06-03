@@ -61,7 +61,11 @@ class MenderClient:
             return None, None
 
     def get_versions(self) -> tuple[str | None, str | None]:
-        """Get owl-os and retina-node versions from Mender provides.
+        """Get owl-os and retina-node versions.
+
+        Checks mender-update show-provides first; falls back to inspecting
+        running Docker containers if mender hasn't committed provides yet
+        (e.g. when install_from_url succeeded but provides lag behind).
 
         Returns (owl_os_version, retina_node_version) tuple.
         On fresh bootstrap, only owl-os version exists. retina-node version
@@ -75,7 +79,7 @@ class MenderClient:
                 timeout=5,
             )
             if result.returncode != 0:
-                return None, None
+                return None, get_retina_node_version_from_docker()
 
             owl_os = None
             retina_node = None
@@ -85,12 +89,16 @@ class MenderClient:
                 elif line.startswith("data-docker.mender-docker-compose.retina-node.version="):
                     raw = line.split("=", 1)[1]
                     retina_node = raw.removeprefix("retina-node-")
+
+            if retina_node is None:
+                retina_node = get_retina_node_version_from_docker()
+
             return owl_os, retina_node
         except FileNotFoundError:
             # mender-update not installed (dev environment)
-            return None, None
+            return None, get_retina_node_version_from_docker()
         except Exception:
-            return None, None
+            return None, get_retina_node_version_from_docker()
 
     def list_artifacts(self, release_name: str | None = None) -> tuple[list[dict], str | None]:
         """List artifacts for a release/device type.
@@ -166,6 +174,33 @@ class MenderClient:
             return False, str(e)
 
 
+def get_retina_node_version_from_docker() -> str | None:
+    """Get retina-node version from running blah2 Docker containers.
+
+    Inspects 'docker ps' output for any offworldlabs/blah2 image and extracts
+    the image tag. Used as a fallback when mender-update show-provides has not
+    yet committed the artifact provides.
+
+    Returns the image tag string (e.g. 'v0.3.10'), or None if no blah2
+    containers are running or docker is unavailable.
+    """
+    try:
+        result = subprocess.run(
+            ["docker", "ps", "--format", "{{.Image}}"],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        if result.returncode != 0:
+            return None
+        for image in result.stdout.splitlines():
+            if "/blah2:" in image:
+                return image.rsplit(":", 1)[-1]
+        return None
+    except Exception:
+        return None
+
+
 def parse_version(artifact_name: str) -> tuple[int, ...] | None:
     """Extract semver tuple from 'retina-node-v0.3.2' format.
 
@@ -176,6 +211,37 @@ def parse_version(artifact_name: str) -> tuple[int, ...] | None:
     if match:
         return tuple(int(x) for x in match.groups())
     return None
+
+
+def get_all_stable_versions_from_github(
+    repo: str = "offworldlabs/retina-node",
+) -> tuple[list[str], str | None]:
+    """Get all stable version tags from GitHub releases, newest first.
+
+    Queries GitHub releases API, filters to stable versions (excludes rc, dev, beta),
+    and returns all matching tags sorted by semver descending.
+
+    Returns (versions, error) tuple. versions is a list like ["v0.3.5", "v0.3.4"].
+    """
+    try:
+        resp = requests.get(
+            f"https://api.github.com/repos/{repo}/releases",
+            headers={"Accept": "application/vnd.github+json"},
+            timeout=30,
+        )
+        if resp.status_code != 200:
+            return [], f"GitHub API error: {resp.status_code}"
+
+        stable = []
+        for release in resp.json():
+            tag = release.get("tag_name", "")
+            if parse_version(f"retina-node-{tag}"):
+                stable.append(tag)
+
+        stable.sort(key=lambda t: parse_version(f"retina-node-{t}"), reverse=True)
+        return stable, None
+    except requests.RequestException as e:
+        return [], str(e)
 
 
 def get_latest_stable_from_github(
