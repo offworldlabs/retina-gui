@@ -37,7 +37,7 @@ def get_mode():
 
 @bp.route('/api/mode', methods=['POST'])
 def set_mode():
-    from app import RETINA_NODE_PATH, RETINA_SPECTRUM_PATH, config_mgr
+    from app import RETINA_NODE_PATH, config_mgr
 
     data = request.get_json(silent=True) or {}
     mode = data.get('mode')
@@ -64,8 +64,8 @@ def set_mode():
                                 'error': f'Failed to stop blah2: {result.stderr or result.stdout}'}), 500
 
             result = subprocess.run(
-                ['docker', 'compose', '-p', 'retina-spectrum', 'up', '-d'],
-                cwd=RETINA_SPECTRUM_PATH,
+                ['docker', 'compose', '-p', 'retina-node', '--profile', 'spectrum', 'up', '-d'],
+                cwd=RETINA_NODE_PATH,
                 capture_output=True, text=True, timeout=120
             )
             if result.returncode != 0:
@@ -74,8 +74,8 @@ def set_mode():
 
         else:  # radar
             result = subprocess.run(
-                ['docker', 'compose', '-p', 'retina-spectrum', 'down'],
-                cwd=RETINA_SPECTRUM_PATH,
+                ['docker', 'compose', '-p', 'retina-node', 'stop', 'retina-spectrum'],
+                cwd=RETINA_NODE_PATH,
                 capture_output=True, text=True, timeout=60
             )
             if result.returncode != 0:

@@ -93,7 +93,9 @@ class TestSetMode:
             assert svc in stop_args
 
         up_args = mock_run.call_args_list[1][0][0]
-        assert up_args[:4] == ['docker', 'compose', '-p', 'retina-spectrum']
+        assert up_args[:4] == ['docker', 'compose', '-p', 'retina-node']
+        assert '--profile' in up_args
+        assert 'spectrum' in up_args
         assert 'up' in up_args
         assert '-d' in up_args
 
@@ -113,9 +115,10 @@ class TestSetMode:
         assert json.loads(response.data)['success'] is True
         assert mock_run.call_count == 2
 
-        down_args = mock_run.call_args_list[0][0][0]
-        assert down_args[:4] == ['docker', 'compose', '-p', 'retina-spectrum']
-        assert 'down' in down_args
+        stop_spectrum_args = mock_run.call_args_list[0][0][0]
+        assert stop_spectrum_args[:4] == ['docker', 'compose', '-p', 'retina-node']
+        assert 'stop' in stop_spectrum_args
+        assert 'retina-spectrum' in stop_spectrum_args
 
         start_args = mock_run.call_args_list[1][0][0]
         assert start_args[:4] == ['docker', 'compose', '-p', 'retina-node']
