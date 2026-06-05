@@ -153,8 +153,13 @@ def save_config():
 
 @bp.route("/config/apply", methods=["POST"])
 def apply_config():
-    """Run config-merger and restart services."""
+    """Run config-merger and restart services.
+
+    In spectrum mode only config-merger runs — blah2 is intentionally stopped
+    and must not be restarted until the user switches back to radar mode.
+    """
     from app import config_mgr, RETINA_NODE_PATH
+    from routes.mode import get_current_mode
 
     if not config_mgr.is_retina_node_installed():
         return jsonify({"success": False, "error": "retina-node not installed"}), 400
@@ -167,6 +172,9 @@ def apply_config():
         )
         if result.returncode != 0:
             return jsonify({"success": False, "error": f"config-merger failed: {result.stderr or result.stdout}"}), 500
+
+        if get_current_mode() == 'spectrum':
+            return jsonify({"success": True})
 
         result = subprocess.run(
             ["docker", "compose", "-p", "retina-node", "up", "-d", "--force-recreate"],
