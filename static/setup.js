@@ -75,6 +75,10 @@ function initSetupWizard(resumeStep, highestStepName, devMode, isRerun, demoMode
     }
 
     function showStep(index) {
+        // Call leave hook for the step we're navigating away from
+        var leaveFn = leaveHooks[steps[currentIndex].name];
+        if (leaveFn) leaveFn();
+
         // Clear any active polling timer when leaving a step
         if (pollTimer) {
             clearInterval(pollTimer);
@@ -173,18 +177,26 @@ function initSetupWizard(resumeStep, highestStepName, devMode, isRerun, demoMode
                 setTimeout(function() { _demoNodeInstalling = false; }, 8000);
                 return ok({ success: true });
             }
-            if (path === '/towers/select')           return ok({ success: true, applied: false });
-            if (path === '/set-up/save-step')        return ok({ success: true });
-            if (path === '/set-up/complete')         return ok({ success: true });
+            if (path === '/towers/select')               return ok({ success: true, applied: false });
+            if (path === '/api/spectrum/temp-start')   return ok({ success: true, was_mode: 'spectrum' });
+            if (path === '/api/spectrum/temp-restore') return ok({ success: true });
+            if (path === '/set-up/save-step')          return ok({ success: true });
+            if (path === '/set-up/complete')           return ok({ success: true });
             return _realFetch(url, opts);
         };
 
     }
 
-    // ── Enter hooks ──────────────────────────────────────
+    // ── Enter / leave hooks ──────────────────────────────
 
     var enterHooks = {};
+    var leaveHooks = {};
     var hookInitialized = {};
+
+    // Shared state for spectrum wizard activation (location step)
+    var rfSse = null;
+    var wizardWasMode = null;
+    var connectRfSse = null; // defined inside enterHooks.location on first entry
 
     // Step 1: Agreements
     enterHooks.agreements = function() {
@@ -529,9 +541,41 @@ function initSetupWizard(resumeStep, highestStepName, devMode, isRerun, demoMode
     };
 
     // Step 4: Location input
+    leaveHooks.location = function() {
+        if (rfSse) { rfSse.close(); rfSse = null; }
+        if (!demoMode) {
+            postJSON('/api/spectrum/temp-restore', { was_mode: wizardWasMode });
+        }
+        wizardWasMode = null;
+    };
+
     enterHooks.location = function() {
+        // Start retina-spectrum on every entry (idempotent — no-op if already in
+        // spectrum mode or if retina-node is not yet installed).
+        var scanBtn = document.getElementById('scanRfBtn');
+        var scanStatus = document.getElementById('scanStatus');
+        if (!demoMode) {
+            wizardWasMode = 'radar'; // safe default — overwritten by temp-start response
+            scanBtn.disabled = true;
+            scanBtn.textContent = 'Starting scanner…';
+            scanStatus.textContent = 'Starting spectrum scanner…';
+            scanStatus.style.display = '';
+            postJSON('/api/spectrum/temp-start', {})
+                .then(function(r) { return r.json(); })
+                .then(function(d) {
+                    wizardWasMode = d.was_mode || 'radar';
+                    if (connectRfSse) connectRfSse();
+                })
+                .catch(function() {
+                    wizardWasMode = 'radar';
+                    scanStatus.textContent = 'Scanner unavailable — RF scan disabled';
+                });
+        }
+
+        // Event listeners and inner state set up only once
         if (hookInitialized.location) return;
         hookInitialized.location = true;
+
         var rxLat = document.getElementById('rxLat');
         var rxLon = document.getElementById('rxLon');
         var rxAlt = document.getElementById('rxAlt');
@@ -551,14 +595,11 @@ function initSetupWizard(resumeStep, highestStepName, devMode, isRerun, demoMode
         var altManual = false;
         var elevTimer = null;
 
-        // RF scan — SSE connected immediately on step entry; button sets 'waiting' phase
-        // and the next sweep 'start' event begins accumulation (mirrors retina-spectrum wizard.html).
-        var scanBtn = document.getElementById('scanRfBtn');
-        var scanStatus = document.getElementById('scanStatus');
+        // RF scan — SSE connected after retina-spectrum starts; button sets 'waiting'
+        // phase and the next sweep 'start' event begins accumulation.
         var scanResult = document.getElementById('scanResult');
         var rfMeasurements = [];
         var rfPhase = 'idle'; // idle | waiting | scanning | done
-        var rfSse = null;
         var rfHwReady = false;
 
         function normaliseBand(id) {
@@ -591,7 +632,8 @@ function initSetupWizard(resumeStep, highestStepName, devMode, isRerun, demoMode
             }
         }
 
-        function connectRfSse() {
+        // Assign to outer-scope var so leaveHooks.location and re-entries can reach it
+        connectRfSse = function() {
             if (rfSse) return;
             rfSse = new EventSource('/towers/spectrum/events');
             rfSse.onmessage = function(e) {
@@ -626,16 +668,16 @@ function initSetupWizard(resumeStep, highestStepName, devMode, isRerun, demoMode
                 }
             };
             rfSse.onerror = function() { rfSse.close(); rfSse = null; setTimeout(connectRfSse, 3000); };
-        }
+        };
 
-        scanBtn.disabled = true;
+        // In demo mode temp-start is skipped, so connect SSE directly
+        if (demoMode) connectRfSse();
+
         scanBtn.addEventListener('click', function() {
             rfMeasurements = [];
             rfPhase = 'waiting';
             updateRfUI();
         });
-
-        connectRfSse();
 
         // Enable Find Towers when lat/lon filled
         function updateFindBtn() {
