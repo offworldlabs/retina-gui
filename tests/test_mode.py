@@ -98,6 +98,7 @@ class TestSetMode:
         assert 'spectrum' in up_args
         assert 'up' in up_args
         assert '-d' in up_args
+        assert 'retina-spectrum' in up_args
 
     @patch('subprocess.run')
     def test_switch_to_radar_calls_correct_docker_commands(self, mock_run, app_client, temp_dir):

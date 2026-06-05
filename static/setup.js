@@ -178,8 +178,8 @@ function initSetupWizard(resumeStep, highestStepName, devMode, isRerun, demoMode
                 return ok({ success: true });
             }
             if (path === '/towers/select')               return ok({ success: true, applied: false });
-            if (path === '/api/spectrum/temp-start')   return ok({ success: true, was_mode: 'spectrum' });
-            if (path === '/api/spectrum/temp-restore') return ok({ success: true });
+            if (path === '/api/mode' && (!opts || opts.method !== 'POST')) return ok({ mode: 'spectrum' });
+            if (path === '/api/mode') return ok({ success: true, mode: 'spectrum' });
             if (path === '/set-up/save-step')          return ok({ success: true });
             if (path === '/set-up/complete')           return ok({ success: true });
             return _realFetch(url, opts);
@@ -543,8 +543,8 @@ function initSetupWizard(resumeStep, highestStepName, devMode, isRerun, demoMode
     // Step 4: Location input
     leaveHooks.location = function() {
         if (rfSse) { rfSse.close(); rfSse = null; }
-        if (!demoMode) {
-            postJSON('/api/spectrum/temp-restore', { was_mode: wizardWasMode });
+        if (wizardWasMode && wizardWasMode !== 'spectrum') {
+            postJSON('/api/mode', { mode: wizardWasMode });
         }
         wizardWasMode = null;
     };
@@ -554,23 +554,27 @@ function initSetupWizard(resumeStep, highestStepName, devMode, isRerun, demoMode
         // spectrum mode or if retina-node is not yet installed).
         var scanBtn = document.getElementById('scanRfBtn');
         var scanStatus = document.getElementById('scanStatus');
-        if (!demoMode) {
-            wizardWasMode = 'radar'; // safe default — overwritten by temp-start response
-            scanBtn.disabled = true;
-            scanBtn.textContent = 'Starting scanner…';
-            scanStatus.textContent = 'Starting spectrum scanner…';
-            scanStatus.style.display = '';
-            postJSON('/api/spectrum/temp-start', {})
-                .then(function(r) { return r.json(); })
-                .then(function(d) {
-                    wizardWasMode = d.was_mode || 'radar';
+        wizardWasMode = 'radar'; // safe default — overwritten by mode fetch
+        scanBtn.disabled = true;
+        scanBtn.textContent = 'Starting analyser…';
+        scanStatus.textContent = 'Starting spectrum analyser…';
+        scanStatus.style.display = '';
+        fetch('/api/mode')
+            .then(function(r) { return r.json(); })
+            .then(function(d) {
+                wizardWasMode = d.mode || 'radar';
+                if (d.mode === 'spectrum') {
                     if (connectRfSse) connectRfSse();
-                })
-                .catch(function() {
-                    wizardWasMode = 'radar';
-                    scanStatus.textContent = 'Scanner unavailable — RF scan disabled';
-                });
-        }
+                    return;
+                }
+                return postJSON('/api/mode', { mode: 'spectrum' })
+                    .then(function(r) { return r.json(); })
+                    .then(function() { if (connectRfSse) connectRfSse(); });
+            })
+            .catch(function() {
+                wizardWasMode = 'radar';
+                scanStatus.textContent = 'Analyser unavailable — RF scan disabled';
+            });
 
         // Event listeners and inner state set up only once
         if (hookInitialized.location) return;
@@ -669,9 +673,6 @@ function initSetupWizard(resumeStep, highestStepName, devMode, isRerun, demoMode
             };
             rfSse.onerror = function() { rfSse.close(); rfSse = null; setTimeout(connectRfSse, 3000); };
         };
-
-        // In demo mode temp-start is skipped, so connect SSE directly
-        if (demoMode) connectRfSse();
 
         scanBtn.addEventListener('click', function() {
             rfMeasurements = [];
