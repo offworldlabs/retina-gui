@@ -377,12 +377,13 @@
 
 {% block scripts %}
 <script>
-// Mode toggle
+// Mode toggle — change is staged; applied when user clicks Apply changes
 (function() {
     var toggle  = document.getElementById('modeToggle');
     var label   = document.getElementById('modeLabel');
     var spinner = document.getElementById('modeSpinner');
     var csrf    = document.querySelector('meta[name="csrf-token"]').content;
+    var loadedMode = 'radar'; // the mode currently active on the device
 
     function setLabel(mode) {
         label.textContent = mode === 'spectrum' ? 'Spectrum' : 'Radar';
@@ -390,36 +391,51 @@
 
     fetch('/api/mode')
         .then(function(r) { return r.json(); })
-        .then(function(d) { toggle.checked = d.mode === 'spectrum'; setLabel(d.mode); })
+        .then(function(d) {
+            loadedMode = d.mode || 'radar';
+            toggle.checked = loadedMode === 'spectrum';
+            setLabel(loadedMode);
+        })
         .catch(function() {});
 
     toggle.addEventListener('change', function() {
-        var newMode = toggle.checked ? 'spectrum' : 'radar';
-        toggle.disabled = true;
-        spinner.style.display = 'inline-block';
-        fetch('/api/mode', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrf },
-            body: JSON.stringify({ mode: newMode })
-        })
-        .then(function(r) { return r.json(); })
-        .then(function(d) {
-            if (d.success) {
-                setLabel(newMode);
-            } else {
-                toggle.checked = !toggle.checked;
-                setLabel(toggle.checked ? 'spectrum' : 'radar');
-            }
-        })
-        .catch(function() {
-            toggle.checked = !toggle.checked;
-            setLabel(toggle.checked ? 'spectrum' : 'radar');
-        })
-        .finally(function() {
-            toggle.disabled = false;
-            spinner.style.display = 'none';
-        });
+        setLabel(toggle.checked ? 'spectrum' : 'radar');
     });
+
+    // Apply mode change as part of the form submit triggered by Apply changes
+    var form = document.getElementById('configForm');
+    if (form) {
+        form.addEventListener('submit', function(e) {
+            var newMode = toggle.checked ? 'spectrum' : 'radar';
+            if (newMode === loadedMode) return; // no mode change — let form submit normally
+            e.preventDefault();
+            toggle.disabled = true;
+            spinner.style.display = 'inline-block';
+            fetch('/api/mode', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrf },
+                body: JSON.stringify({ mode: newMode })
+            })
+            .then(function(r) { return r.json(); })
+            .then(function(d) {
+                if (d.success) {
+                    loadedMode = newMode;
+                    form.submit(); // HTMLFormElement.submit() bypasses the submit event
+                } else {
+                    toggle.checked = loadedMode === 'spectrum';
+                    setLabel(loadedMode);
+                }
+            })
+            .catch(function() {
+                toggle.checked = loadedMode === 'spectrum';
+                setLabel(loadedMode);
+            })
+            .finally(function() {
+                toggle.disabled = false;
+                spinner.style.display = 'none';
+            });
+        });
+    }
 })();
 
 // Auto-apply after successful save redirect
