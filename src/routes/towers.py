@@ -73,7 +73,7 @@ def select():
     and must not be restarted until the user switches back to radar mode.
     """
     from app import config_mgr, get_node_id, RETINA_NODE_PATH
-    from routes.mode import get_current_mode
+    from routes.mode import run_config_merger_and_restart
 
     data = request.get_json()
     if not data:
@@ -118,27 +118,9 @@ def select():
 
     if config_mgr.is_retina_node_installed():
         try:
-            result = subprocess.run(
-                ["docker", "compose", "-p", "retina-node", "run", "--rm", "config-merger"],
-                cwd=RETINA_NODE_PATH,
-                capture_output=True, text=True, timeout=60
-            )
-            if result.returncode != 0:
-                return jsonify({"success": True, "applied": False,
-                                "error": f"config-merger failed: {result.stderr or result.stdout}"})
-
-            if get_current_mode() == 'spectrum':
-                return jsonify({"success": True, "applied": True})
-
-            result = subprocess.run(
-                ["docker", "compose", "-p", "retina-node", "up", "-d", "--force-recreate"],
-                cwd=RETINA_NODE_PATH,
-                capture_output=True, text=True, timeout=120
-            )
-            if result.returncode != 0:
-                return jsonify({"success": True, "applied": False,
-                                "error": f"restart failed: {result.stderr or result.stdout}"})
-
+            error = run_config_merger_and_restart(RETINA_NODE_PATH)
+            if error:
+                return jsonify({"success": True, "applied": False, "error": error})
             return jsonify({"success": True, "applied": True})
 
         except subprocess.TimeoutExpired:
