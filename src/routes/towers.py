@@ -64,31 +64,6 @@ def spectrum_events():
     )
 
 
-@bp.route("/elevation")
-def elevation():
-    """Proxy elevation lookup to Tower-Finder API."""
-    from app import app, TOWER_FINDER_URL
-
-    lat = request.args.get("lat")
-    lon = request.args.get("lon")
-    if not lat or not lon:
-        return jsonify({"error": "lat and lon are required"}), 400
-
-    try:
-        resp = http_requests.get(
-            f"{TOWER_FINDER_URL}/api/elevation",
-            params={"lat": lat, "lon": lon},
-            timeout=15,
-        )
-        resp.raise_for_status()
-        return jsonify(resp.json())
-    except http_requests.RequestException as e:
-        app.logger.warning(f"Elevation lookup failed: {e}")
-        return jsonify({"error": "Elevation lookup failed"}), 502
-    except Exception as e:
-        app.logger.error(f"Elevation lookup unexpected error: {e}")
-        return jsonify({"error": "Elevation lookup failed — check server logs"}), 500
-
 
 @bp.route("/select", methods=["POST"])
 def select():

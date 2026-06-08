@@ -594,8 +594,7 @@ function initSetupWizard(resumeStep, highestStepName, devMode, isRerun, demoMode
         var findBtn = document.getElementById('findTowersBtn');
         var geoError = document.getElementById('locationGeoError');
         var skipBtn = document.getElementById('locationSkipBtn');
-        var altManual = false;
-        var elevTimer = null;
+
 
         // RF scan — SSE connected after retina-spectrum starts; button sets 'waiting'
         // phase and the next sweep 'start' event begins accumulation.
@@ -687,29 +686,6 @@ function initSetupWizard(resumeStep, highestStepName, devMode, isRerun, demoMode
         rxLat.addEventListener('input', updateFindBtn);
         rxLon.addEventListener('input', updateFindBtn);
 
-        // Auto-lookup elevation (debounced)
-        function lookupElevation() {
-            if (altManual) return;
-            var lat = parseFloat(rxLat.value);
-            var lon = parseFloat(rxLon.value);
-            if (isNaN(lat) || isNaN(lon)) return;
-            fetch('/towers/elevation?lat=' + lat + '&lon=' + lon)
-                .then(function(r) { return r.json(); })
-                .then(function(data) {
-                    if (data.elevation_m != null && !altManual) {
-                        rxAlt.value = Math.round(data.elevation_m);
-                    }
-                })
-                .catch(function() {});
-        }
-        function debouncedElevation() {
-            clearTimeout(elevTimer);
-            elevTimer = setTimeout(lookupElevation, 800);
-        }
-        rxLat.addEventListener('input', debouncedElevation);
-        rxLon.addEventListener('input', debouncedElevation);
-        rxAlt.addEventListener('input', function() { altManual = rxAlt.value !== ''; });
-
         // Use My Location
         useMyLocBtn.addEventListener('click', function() {
             if (!navigator.geolocation) {
@@ -728,10 +704,8 @@ function initSetupWizard(resumeStep, highestStepName, devMode, isRerun, demoMode
                     rxLon.value = pos.coords.longitude.toFixed(6);
                     if (pos.coords.altitude != null) {
                         rxAlt.value = Math.round(pos.coords.altitude);
-                        altManual = true;
                     }
                     updateFindBtn();
-                    lookupElevation();
                 },
                 function(err) {
                     useMyLocBtn.disabled = false;
