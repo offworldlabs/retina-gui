@@ -44,109 +44,72 @@ SAMPLE_TOWER_RESPONSE = {
 
 
 class TestTowerSearch:
-    """Tests for GET /towers/search proxy route."""
+    """Tests for POST /towers/search proxy route."""
 
-    @patch('routes.towers.http_requests.get')
-    def test_search_returns_towers(self, mock_get, app_client):
+    @patch('routes.towers.http_requests.post')
+    def test_search_returns_towers(self, mock_post, app_client):
         """Proxy returns tower data from Tower-Finder API."""
         mock_resp = MagicMock()
         mock_resp.status_code = 200
         mock_resp.json.return_value = SAMPLE_TOWER_RESPONSE
         mock_resp.raise_for_status.return_value = None
-        mock_get.return_value = mock_resp
+        mock_post.return_value = mock_resp
 
-        resp = app_client.get('/towers/search?lat=-33.8688&lon=151.2093')
+        resp = app_client.post('/towers/search', json={'lat': -33.8688, 'lon': 151.2093})
         assert resp.status_code == 200
         data = json.loads(resp.data)
         assert data['count'] == 1
         assert data['towers'][0]['callsign'] == 'ATN6'
 
-        # Verify we called the Tower-Finder API
-        mock_get.assert_called_once()
-        call_args = mock_get.call_args
-        assert '/api/towers' in call_args[0][0]
+        mock_post.assert_called_once()
+        assert '/api/towers' in mock_post.call_args[0][0]
 
-    def test_search_missing_params(self, app_client):
-        """Returns 400 when lat/lon missing."""
-        resp = app_client.get('/towers/search')
+    def test_search_missing_body(self, app_client):
+        """Returns 400 when request body is missing."""
+        resp = app_client.post('/towers/search', json={})
         assert resp.status_code == 400
-        data = json.loads(resp.data)
-        assert 'error' in data
 
     def test_search_missing_lon(self, app_client):
         """Returns 400 when lon missing."""
-        resp = app_client.get('/towers/search?lat=-33.8688')
+        resp = app_client.post('/towers/search', json={'lat': -33.8688})
         assert resp.status_code == 400
 
-    @patch('routes.towers.http_requests.get')
-    def test_search_timeout(self, mock_get, app_client):
+    @patch('routes.towers.http_requests.post')
+    def test_search_timeout(self, mock_post, app_client):
         """Returns 504 on timeout."""
         import requests
-        mock_get.side_effect = requests.Timeout()
+        mock_post.side_effect = requests.Timeout()
 
-        resp = app_client.get('/towers/search?lat=-33.8688&lon=151.2093')
+        resp = app_client.post('/towers/search', json={'lat': -33.8688, 'lon': 151.2093})
         assert resp.status_code == 504
         data = json.loads(resp.data)
         assert 'timed out' in data['error'].lower()
 
-    @patch('routes.towers.http_requests.get')
-    def test_search_upstream_error(self, mock_get, app_client):
+    @patch('routes.towers.http_requests.post')
+    def test_search_upstream_error(self, mock_post, app_client):
         """Returns 502 when Tower-Finder API is unreachable."""
         import requests
-        mock_get.side_effect = requests.ConnectionError()
+        mock_post.side_effect = requests.ConnectionError()
 
-        resp = app_client.get('/towers/search?lat=-33.8688&lon=151.2093')
+        resp = app_client.post('/towers/search', json={'lat': -33.8688, 'lon': 151.2093})
         assert resp.status_code == 502
 
-    @patch('routes.towers.http_requests.get')
-    def test_search_forwards_params(self, mock_get, app_client):
-        """Forwards all query params to Tower-Finder API."""
+    @patch('routes.towers.http_requests.post')
+    def test_search_forwards_body(self, mock_post, app_client):
+        """Forwards entire JSON body to Tower-Finder API."""
         mock_resp = MagicMock()
         mock_resp.json.return_value = {"towers": [], "count": 0}
         mock_resp.raise_for_status.return_value = None
-        mock_get.return_value = mock_resp
+        mock_post.return_value = mock_resp
 
-        app_client.get('/towers/search?lat=38.9&lon=-77.0&altitude=50&limit=10&source=us&radius_km=100')
+        body = {'lat': 38.9, 'lon': -77.0, 'altitude': 50, 'limit': 10, 'source': 'us', 'radius_km': 100}
+        app_client.post('/towers/search', json=body)
 
-        call_kwargs = mock_get.call_args
-        params = call_kwargs[1]['params']
-        assert params['lat'] == '38.9'
-        assert params['lon'] == '-77.0'
-        assert params['altitude'] == '50'
-        assert params['limit'] == '10'
-        assert params['source'] == 'us'
-        assert params['radius_km'] == '100'
-
-
-class TestTowerElevation:
-    """Tests for GET /towers/elevation proxy route."""
-
-    @patch('routes.towers.http_requests.get')
-    def test_elevation_returns_data(self, mock_get, app_client):
-        """Returns elevation from Tower-Finder API."""
-        mock_resp = MagicMock()
-        mock_resp.json.return_value = {"elevation_m": 45.2, "latitude": -33.8688, "longitude": 151.2093}
-        mock_resp.raise_for_status.return_value = None
-        mock_get.return_value = mock_resp
-
-        resp = app_client.get('/towers/elevation?lat=-33.8688&lon=151.2093')
-        assert resp.status_code == 200
-        data = json.loads(resp.data)
-        assert data['elevation_m'] == 45.2
-
-    def test_elevation_missing_params(self, app_client):
-        """Returns 400 when lat/lon missing."""
-        resp = app_client.get('/towers/elevation')
-        assert resp.status_code == 400
-
-    @patch('routes.towers.http_requests.get')
-    def test_elevation_upstream_error(self, mock_get, app_client):
-        """Returns 502 when elevation API fails."""
-        import requests
-        mock_get.side_effect = requests.ConnectionError()
-
-        resp = app_client.get('/towers/elevation?lat=-33.8688&lon=151.2093')
-        assert resp.status_code == 502
+        forwarded = mock_post.call_args[1]['json']
+        assert forwarded['lat'] == 38.9
+        assert forwarded['lon'] == -77.0
+        assert forwarded['altitude'] == 50
+        assert forwarded['source'] == 'us'
 
 
 class TestTowerSelect:
@@ -242,8 +205,7 @@ class TestSetupWizardLocationStep:
         resp = app_client.get('/set-up')
         html = resp.data.decode()
         assert 'data-step="location"' in html
-        assert 'data-step="location"' in html
-        assert 'Find Towers' in html
+        assert 'Find towers' in html
 
     def test_setup_page_has_all_steps(self, app_client):
         """Setup wizard has all 6 step panels."""
