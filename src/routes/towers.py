@@ -92,8 +92,13 @@ def elevation():
 
 @bp.route("/select", methods=["POST"])
 def select():
-    """Save RX + TX location to user.yml, run config-merger, and restart services."""
+    """Save RX + TX location to user.yml, run config-merger, and restart services.
+
+    In spectrum mode only config-merger runs — blah2 is intentionally stopped
+    and must not be restarted until the user switches back to radar mode.
+    """
     from app import config_mgr, get_node_id, RETINA_NODE_PATH
+    from routes.mode import get_current_mode
 
     data = request.get_json()
     if not data:
@@ -146,6 +151,9 @@ def select():
             if result.returncode != 0:
                 return jsonify({"success": True, "applied": False,
                                 "error": f"config-merger failed: {result.stderr or result.stdout}"})
+
+            if get_current_mode() == 'spectrum':
+                return jsonify({"success": True, "applied": True})
 
             result = subprocess.run(
                 ["docker", "compose", "-p", "retina-node", "up", "-d", "--force-recreate"],
