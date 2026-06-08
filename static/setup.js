@@ -370,7 +370,8 @@ function initSetupWizard(resumeStep, highestStepName, devMode, isRerun, demoMode
         var regionCheck = document.getElementById('regionCheck');
         var packageStatus = document.getElementById('radarPackageStatus');
 
-        // On re-run, package is already installed \u2014 show available updates as cards, don't require action
+        // Re-run: RETINA is already installed — show current version in its own section,
+        // and any available updates in a separate section below.
         if (isRerun) {
             function rerunUpdateGate() {
                 if (installBtn.style.display !== 'none') {
@@ -384,47 +385,54 @@ function initSetupWizard(resumeStep, highestStepName, devMode, isRerun, demoMode
                 .then(function(data) {
                     var updates = data.available_updates || [];
                     var packageList = document.getElementById('radarPackageList');
+                    var currentSection = document.getElementById('radarCurrentSection');
+                    var currentList = document.getElementById('radarCurrentList');
+                    var availableSection = document.getElementById('radarAvailableSection');
+                    var availableHeading = document.getElementById('radarAvailableHeading');
+                    var description = document.getElementById('radarDescription');
+
+                    // Always render the installed version in its own section
+                    if (data.current_version) {
+                        var cur = data.current_version;
+                        var curId = 'pkg-' + cur.replace(/[^a-z0-9]/gi, '-');
+                        currentList.innerHTML =
+                            '<div class="step-card">' +
+                            '<div><input type="radio" name="packageSelect" id="' + curId + '" value="' + esc(cur) + '"' +
+                            (updates.length === 0 ? ' checked' : '') +
+                            ' style="accent-color:var(--ink);margin-right:12px;"></div>' +
+                            '<label class="step-card-body" for="' + curId + '" style="cursor:pointer;">' +
+                            '<div class="step-card-title">Retina Passive Radar <span style="font-weight:400;color:var(--ink-3);font-size:13px;margin-left:4px;">' + esc(cur) + '</span></div>' +
+                            '<div class="step-card-sub">Reinstall \u00b7 ~600 MB \u00b7 5\u201310 minutes</div>' +
+                            '</label></div>';
+                        currentSection.style.display = '';
+                    }
 
                     if (updates.length > 0) {
+                        description.textContent = 'RETINA is installed. You can upgrade to a newer version, or reinstall your current one.';
                         var cards = updates.map(function(v, i) {
                             var safeId = 'pkg-' + v.replace(/[^a-z0-9]/gi, '-');
                             return '<div class="step-card">' +
-                                '<div><input type="radio" name="packageSelect" id="' + safeId + '" value="' + v + '"' +
+                                '<div><input type="radio" name="packageSelect" id="' + safeId + '" value="' + esc(v) + '"' +
                                 (i === 0 ? ' checked' : '') +
                                 ' style="accent-color:var(--ink);margin-right:12px;"></div>' +
                                 '<label class="step-card-body" for="' + safeId + '" style="cursor:pointer;">' +
-                                '<div class="step-card-title">Retina Passive Radar <span style="font-weight:400;color:var(--ink-3);font-size:13px;margin-left:4px;">' + v + '</span></div>' +
+                                '<div class="step-card-title">Retina Passive Radar <span style="font-weight:400;color:var(--ink-3);font-size:13px;margin-left:4px;">' + esc(v) + '</span></div>' +
                                 '<div class="step-card-sub">~600 MB \u00b7 5\u201310 minutes</div>' +
                                 '</label></div>';
                         });
-                        if (data.current_version) {
-                            var cur = data.current_version;
-                            var safeId = 'pkg-' + cur.replace(/[^a-z0-9]/gi, '-');
-                            cards.push(
-                                '<div class="step-card">' +
-                                '<div><input type="radio" name="packageSelect" id="' + safeId + '" value="' + cur + '"' +
-                                ' style="accent-color:var(--ink);margin-right:12px;"></div>' +
-                                '<label class="step-card-body" for="' + safeId + '" style="cursor:pointer;">' +
-                                '<div class="step-card-title">Retina Passive Radar <span style="font-weight:400;color:var(--ink-3);font-size:13px;margin-left:4px;">' + cur + '</span>' +
-                                '<span style="font-size:11px;color:var(--ink-3);margin-left:6px;">(installed)</span></div>' +
-                                '<div class="step-card-sub">Reinstall \u00b7 ~600 MB \u00b7 5\u201310 minutes</div>' +
-                                '</label></div>'
-                            );
-                        }
                         packageList.innerHTML = cards.join('');
+                        availableHeading.textContent = 'Available updates';
+                        availableHeading.style.display = '';
                         installBtn.textContent = 'Install selected';
-                        installBtn.style.display = '';
-                        rerunUpdateGate();
-                        nextBtn.textContent = 'Skip \u2192';
                     } else {
-                        if (data.current_version) {
-                            document.getElementById('radarLatestVersion').textContent = data.current_version;
-                        }
-                        packageStatus.innerHTML = '<span class="text-success">&#10003;</span>';
-                        status.innerHTML = 'Packages are up to date &#10003;';
-                        nextBtn.textContent = 'Continue \u2192';
+                        description.textContent = 'RETINA is up to date. You can reinstall your current version if needed.';
+                        availableSection.style.display = 'none';
+                        installBtn.textContent = 'Reinstall';
                     }
 
+                    installBtn.style.display = '';
+                    rerunUpdateGate();
+                    nextBtn.textContent = 'Skip \u2192';
                     nextBtn.style.display = '';
                 });
 
@@ -454,6 +462,11 @@ function initSetupWizard(resumeStep, highestStepName, devMode, isRerun, demoMode
             return;
         }
 
+        // Fresh install — RETINA is not yet on this node, installation is required.
+        document.getElementById('radarDescription').textContent = 'RETINA is not yet installed on this node. Select a version below to continue.';
+        installBtn.classList.remove('ghost');
+        installBtn.classList.add('primary');
+
         function updateInstallGate() {
             if (installBtn.style.display !== 'none') {
                 installBtn.disabled = !regionCheck.checked;
@@ -481,12 +494,10 @@ function initSetupWizard(resumeStep, highestStepName, devMode, isRerun, demoMode
                     document.getElementById('radarLatestVersion').textContent = data.current_version;
                     nextBtn.style.display = '';
                 } else {
-                    status.textContent = '';
                     document.getElementById('radarLatestVersion').textContent = data.latest_version;
                     installBtn.style.display = '';
                     updateInstallGate();
-                    nextBtn.style.display = '';
-                    nextBtn.textContent = 'Skip →';
+                    // No skip — installation is required on a fresh node
                 }
             });
 
