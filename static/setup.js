@@ -195,6 +195,7 @@ function initSetupWizard(resumeStep, highestStepName, devMode, isRerun, demoMode
 
     // Shared state for spectrum wizard activation (location step)
     var rfSse = null;
+    var rfSseReconnectTimer = null;
     var wizardWasMode = null;
     var connectRfSse = null; // defined inside enterHooks.location on first entry
     var locationActive = false; // guards against dangling fetch resolving after leave
@@ -544,6 +545,7 @@ function initSetupWizard(resumeStep, highestStepName, devMode, isRerun, demoMode
     // Step 4: Location input
     leaveHooks.location = function() {
         locationActive = false;
+        clearTimeout(rfSseReconnectTimer); rfSseReconnectTimer = null;
         if (rfSse) { rfSse.close(); rfSse = null; }
         if (wizardWasMode && wizardWasMode !== 'spectrum') {
             postJSON('/api/mode', { mode: wizardWasMode });
@@ -673,7 +675,10 @@ function initSetupWizard(resumeStep, highestStepName, devMode, isRerun, demoMode
                     updateRfUI();
                 }
             };
-            rfSse.onerror = function() { rfSse.close(); rfSse = null; setTimeout(connectRfSse, 3000); };
+            rfSse.onerror = function() {
+                rfSse.close(); rfSse = null;
+                if (locationActive) rfSseReconnectTimer = setTimeout(connectRfSse, 3000);
+            };
         };
 
         scanBtn.addEventListener('click', function() {
