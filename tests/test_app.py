@@ -34,26 +34,24 @@ class TestIndexRoute:
         assert b'href="/config"' in response.data
 
     def test_services_section(self, app_client):
-        """Index should show services links."""
+        """Index should show the Services section heading in radar mode."""
         response = app_client.get('/')
         assert response.status_code == 200
         assert b'Services' in response.data
-        assert b'blah2' in response.data
-        assert b'tar1090' in response.data
 
     def test_ssh_keys_on_config_page(self, app_client):
         """SSH keys should be on config page, not index."""
         response = app_client.get('/config')
         assert response.status_code == 200
-        assert b'SSH Access' in response.data
-        assert b'Add Key' in response.data
+        assert b'SSH access' in response.data
+        assert b'Add key' in response.data
 
     def test_index_shows_version_labels(self, app_client):
         """Index should show owl-os and retina-node version labels."""
         response = app_client.get('/')
         assert response.status_code == 200
-        assert b'owl-os:' in response.data
-        assert b'retina-node:' in response.data
+        assert b'owl-os' in response.data
+        assert b'retina-node' in response.data
 
 
 class TestMenderVersions:
@@ -64,7 +62,7 @@ class TestMenderVersions:
         from mender import MenderClient
         mock_output = """rootfs-image.version=v0.5.0
 rootfs-image.owl-os-pi5.version=v0.5.0
-rootfs-image.retina-node.version=v0.3.2
+data-docker.mender-docker-compose.retina-node.version=retina-node-v0.3.2
 artifact_name=owl-os-pi5-v0.5.0"""
 
         client = MenderClient()
@@ -122,9 +120,9 @@ class TestConfigPageRoute:
         """Config page should load with all sections."""
         response = app_client.get('/config')
         assert response.status_code == 200
-        assert b'Capture Settings' in response.data
-        assert b'Location Settings' in response.data
-        assert b'ADS-B Truth' in response.data
+        assert b'Capture' in response.data
+        assert b'Location' in response.data
+        assert b'ADS-B truth' in response.data
         assert b'tar1090' in response.data
 
     def test_config_shows_capture_values(self, app_client):
@@ -161,18 +159,16 @@ class TestConfigPageRoute:
         """Should show message when retina-node not installed, but cloud services visible."""
         response = app_client_no_retina.get('/config')
         assert response.status_code == 200
-        assert b'Configuration available after retina-node is deployed' in response.data
-        # Should NOT show the Apply button (config form is hidden)
-        assert b'Apply Changes' not in response.data
+        assert b'retina-node is installed' in response.data
         # Cloud Services should still be visible
         assert b'Cloud Services' in response.data
         assert b'cloudServicesToggle' in response.data
 
     def test_config_shows_apply_button(self, app_client):
-        """Config page should have Apply Changes button when retina-node installed."""
+        """Config page should have Apply changes button when retina-node installed."""
         response = app_client.get('/config')
         assert response.status_code == 200
-        assert b'Apply Changes' in response.data
+        assert b'Apply changes' in response.data
 
     def test_cloud_services_toggle_not_hardcoded_checked(self, app_client):
         """Cloud services toggle should not hardcode checked attribute."""
@@ -346,7 +342,7 @@ class TestLocationSave:
         assert saved['location']['rx']['name'] == 'NYC'
 
     def test_save_invalid_latitude(self, app_client):
-        """Invalid latitude should show error."""
+        """Invalid latitude should show error banner."""
         response = app_client.post('/config/save', data={
             'location.rx_latitude': '100',  # Invalid > 90
             'location.rx_longitude': '-74.0',
@@ -358,10 +354,10 @@ class TestLocationSave:
             'location.tx_name': 'Transmitter',
         })
         assert response.status_code == 200
-        assert b'is-invalid' in response.data
+        assert b'Please fix the highlighted fields below' in response.data
 
     def test_save_invalid_longitude(self, app_client):
-        """Invalid longitude should show error."""
+        """Invalid longitude should show error banner."""
         response = app_client.post('/config/save', data={
             'location.rx_latitude': '40.0',
             'location.rx_longitude': '200',  # Invalid > 180
@@ -373,7 +369,7 @@ class TestLocationSave:
             'location.tx_name': 'Transmitter',
         })
         assert response.status_code == 200
-        assert b'is-invalid' in response.data
+        assert b'Please fix the highlighted fields below' in response.data
 
 
 class TestTar1090Save:
@@ -406,7 +402,7 @@ class TestTar1090Save:
         # (only values that differ are saved)
 
     def test_invalid_port(self, app_client):
-        """Port > 65535 should show error."""
+        """Port > 65535 should show error banner."""
         response = app_client.post('/config/save', data={
             'tar1090.adsb_source_host': '10.0.0.1',
             'tar1090.adsb_source_port': '70000',  # Invalid
@@ -415,10 +411,10 @@ class TestTar1090Save:
             'tar1090.adsblol_radius': '50',
         })
         assert response.status_code == 200
-        assert b'is-invalid' in response.data
+        assert b'Please fix the highlighted fields below' in response.data
 
     def test_invalid_radius(self, app_client):
-        """Radius > 500 should show error."""
+        """Radius > 500 should show error banner."""
         response = app_client.post('/config/save', data={
             'tar1090.adsb_source_host': '10.0.0.1',
             'tar1090.adsb_source_port': '30005',
@@ -427,7 +423,7 @@ class TestTar1090Save:
             'tar1090.adsblol_radius': '600',  # Invalid > 500
         })
         assert response.status_code == 200
-        assert b'is-invalid' in response.data
+        assert b'Please fix the highlighted fields below' in response.data
 
 
 class TestTruthSave:

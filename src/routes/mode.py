@@ -4,7 +4,7 @@ from flask import Blueprint, jsonify, request
 
 bp = Blueprint('mode', __name__)
 
-_mode_cache = 'radar'  # in-memory fallback when DATA_DIR is not writable (dev)
+_mode_cache = 'radar'  # default mode if file read fails (e.g. dev environment without /data OR on startup before mode is set at least once)
 
 
 def get_current_mode():
@@ -28,6 +28,34 @@ def _write_mode(mode):
             f.write(mode)
     except OSError:
         pass  # dev: no /data — in-memory cache is the fallback
+
+
+def run_config_merger_and_restart(retina_node_path: str) -> str | None:
+    """Run config-merger then, in radar mode, restart services.
+
+    Returns an error string on failure, None on success.
+    Lets TimeoutExpired and FileNotFoundError propagate — callers handle them.
+    """
+    result = subprocess.run(
+        ['docker', 'compose', '-p', 'retina-node', 'run', '--rm', 'config-merger'],
+        cwd=retina_node_path,
+        capture_output=True, text=True, timeout=60
+    )
+    if result.returncode != 0:
+        return f'config-merger failed: {result.stderr or result.stdout}'
+
+    if get_current_mode() == 'spectrum':
+        return None
+
+    result = subprocess.run(
+        ['docker', 'compose', '-p', 'retina-node', 'up', '-d', '--force-recreate'],
+        cwd=retina_node_path,
+        capture_output=True, text=True, timeout=120
+    )
+    if result.returncode != 0:
+        return f'restart failed: {result.stderr or result.stdout}'
+
+    return None
 
 
 @bp.route('/api/mode', methods=['GET'])

@@ -202,14 +202,14 @@ def get_retina_node_version_from_docker() -> str | None:
 
 
 def parse_version(artifact_name: str) -> tuple[int, ...] | None:
-    """Extract semver tuple from 'retina-node-v0.3.2' format.
+    """Extract version tuple from 'retina-node-v0.4.0.2' (or 3-part) format.
 
-    Returns version tuple (0, 3, 2) for stable releases.
+    Returns version tuple e.g. (0, 4, 0, 2) for stable releases.
     Returns None for RCs, dev, beta, or non-matching names.
     """
-    match = re.match(r"^retina-node-v(\d+)\.(\d+)\.(\d+)$", artifact_name)
+    match = re.match(r"^retina-node-v(\d+)\.(\d+)\.(\d+)(?:\.(\d+))?$", artifact_name)
     if match:
-        return tuple(int(x) for x in match.groups())
+        return tuple(int(x) for x in match.groups() if x is not None)
     return None
 
 

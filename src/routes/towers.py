@@ -64,36 +64,16 @@ def spectrum_events():
     )
 
 
-@bp.route("/elevation")
-def elevation():
-    """Proxy elevation lookup to Tower-Finder API."""
-    from app import app, TOWER_FINDER_URL
-
-    lat = request.args.get("lat")
-    lon = request.args.get("lon")
-    if not lat or not lon:
-        return jsonify({"error": "lat and lon are required"}), 400
-
-    try:
-        resp = http_requests.get(
-            f"{TOWER_FINDER_URL}/api/elevation",
-            params={"lat": lat, "lon": lon},
-            timeout=15,
-        )
-        resp.raise_for_status()
-        return jsonify(resp.json())
-    except http_requests.RequestException as e:
-        app.logger.warning(f"Elevation lookup failed: {e}")
-        return jsonify({"error": "Elevation lookup failed"}), 502
-    except Exception as e:
-        app.logger.error(f"Elevation lookup unexpected error: {e}")
-        return jsonify({"error": "Elevation lookup failed — check server logs"}), 500
-
 
 @bp.route("/select", methods=["POST"])
 def select():
-    """Save RX + TX location to user.yml, run config-merger, and restart services."""
+    """Save RX + TX location to user.yml, run config-merger, and restart services.
+
+    In spectrum mode only config-merger runs — blah2 is intentionally stopped
+    and must not be restarted until the user switches back to radar mode.
+    """
     from app import config_mgr, get_node_id, RETINA_NODE_PATH
+    from routes.mode import run_config_merger_and_restart
 
     data = request.get_json()
     if not data:
@@ -138,24 +118,9 @@ def select():
 
     if config_mgr.is_retina_node_installed():
         try:
-            result = subprocess.run(
-                ["docker", "compose", "-p", "retina-node", "run", "--rm", "config-merger"],
-                cwd=RETINA_NODE_PATH,
-                capture_output=True, text=True, timeout=60
-            )
-            if result.returncode != 0:
-                return jsonify({"success": True, "applied": False,
-                                "error": f"config-merger failed: {result.stderr or result.stdout}"})
-
-            result = subprocess.run(
-                ["docker", "compose", "-p", "retina-node", "up", "-d", "--force-recreate"],
-                cwd=RETINA_NODE_PATH,
-                capture_output=True, text=True, timeout=120
-            )
-            if result.returncode != 0:
-                return jsonify({"success": True, "applied": False,
-                                "error": f"restart failed: {result.stderr or result.stdout}"})
-
+            error = run_config_merger_and_restart(RETINA_NODE_PATH)
+            if error:
+                return jsonify({"success": True, "applied": False, "error": error})
             return jsonify({"success": True, "applied": True})
 
         except subprocess.TimeoutExpired:

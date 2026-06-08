@@ -159,31 +159,15 @@ def apply_config():
     and must not be restarted until the user switches back to radar mode.
     """
     from app import config_mgr, RETINA_NODE_PATH
-    from routes.mode import get_current_mode
+    from routes.mode import run_config_merger_and_restart
 
     if not config_mgr.is_retina_node_installed():
         return jsonify({"success": False, "error": "retina-node not installed"}), 400
 
     try:
-        result = subprocess.run(
-            ["docker", "compose", "-p", "retina-node", "run", "--rm", "config-merger"],
-            cwd=RETINA_NODE_PATH,
-            capture_output=True, text=True, timeout=60
-        )
-        if result.returncode != 0:
-            return jsonify({"success": False, "error": f"config-merger failed: {result.stderr or result.stdout}"}), 500
-
-        if get_current_mode() == 'spectrum':
-            return jsonify({"success": True})
-
-        result = subprocess.run(
-            ["docker", "compose", "-p", "retina-node", "up", "-d", "--force-recreate"],
-            cwd=RETINA_NODE_PATH,
-            capture_output=True, text=True, timeout=120
-        )
-        if result.returncode != 0:
-            return jsonify({"success": False, "error": f"restart failed: {result.stderr or result.stdout}"}), 500
-
+        error = run_config_merger_and_restart(RETINA_NODE_PATH)
+        if error:
+            return jsonify({"success": False, "error": error}), 500
         return jsonify({"success": True})
 
     except subprocess.TimeoutExpired:
