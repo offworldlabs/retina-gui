@@ -554,7 +554,6 @@ function initSetupWizard(resumeStep, highestStepName, devMode, isRerun, demoMode
         // spectrum mode or if retina-node is not yet installed).
         var scanBtn = document.getElementById('scanRfBtn');
         var scanStatus = document.getElementById('scanStatus');
-        wizardWasMode = 'radar'; // safe default — overwritten by mode fetch
         scanBtn.disabled = true;
         scanBtn.textContent = 'Starting analyser…';
         scanStatus.textContent = 'Starting spectrum analyser…';
@@ -572,7 +571,6 @@ function initSetupWizard(resumeStep, highestStepName, devMode, isRerun, demoMode
                     .then(function() { if (connectRfSse) connectRfSse(); });
             })
             .catch(function() {
-                wizardWasMode = 'radar';
                 scanStatus.textContent = 'Analyser unavailable — RF scan disabled';
             });
 
