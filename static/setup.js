@@ -197,6 +197,7 @@ function initSetupWizard(resumeStep, highestStepName, devMode, isRerun, demoMode
     var rfSse = null;
     var wizardWasMode = null;
     var connectRfSse = null; // defined inside enterHooks.location on first entry
+    var locationActive = false; // guards against dangling fetch resolving after leave
 
     // Step 1: Agreements
     enterHooks.agreements = function() {
@@ -542,6 +543,7 @@ function initSetupWizard(resumeStep, highestStepName, devMode, isRerun, demoMode
 
     // Step 4: Location input
     leaveHooks.location = function() {
+        locationActive = false;
         if (rfSse) { rfSse.close(); rfSse = null; }
         if (wizardWasMode && wizardWasMode !== 'spectrum') {
             postJSON('/api/mode', { mode: wizardWasMode });
@@ -552,6 +554,7 @@ function initSetupWizard(resumeStep, highestStepName, devMode, isRerun, demoMode
     enterHooks.location = function() {
         // Start retina-spectrum on every entry (idempotent — no-op if already in
         // spectrum mode or if retina-node is not yet installed).
+        locationActive = true;
         var scanBtn = document.getElementById('scanRfBtn');
         var scanStatus = document.getElementById('scanStatus');
         scanBtn.disabled = true;
@@ -561,6 +564,7 @@ function initSetupWizard(resumeStep, highestStepName, devMode, isRerun, demoMode
         fetch('/api/mode')
             .then(function(r) { return r.json(); })
             .then(function(d) {
+                if (!locationActive) return;
                 wizardWasMode = d.mode || 'radar';
                 if (d.mode === 'spectrum') {
                     if (connectRfSse) connectRfSse();
@@ -571,6 +575,7 @@ function initSetupWizard(resumeStep, highestStepName, devMode, isRerun, demoMode
                     .then(function() { if (connectRfSse) connectRfSse(); });
             })
             .catch(function() {
+                if (!locationActive) return;
                 scanStatus.textContent = 'Analyser unavailable — RF scan disabled';
             });
 
