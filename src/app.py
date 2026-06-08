@@ -51,6 +51,12 @@ device_state = DeviceState(
 
 device_state.apply_startup_preferences()
 
+# Always boot into radar mode — delete any persisted spectrum state
+try:
+    os.remove(os.path.join(DATA_DIR, 'mode.txt'))
+except OSError:
+    pass
+
 
 def get_node_id():
     """Get node_id from Mender device identity file."""

@@ -4,7 +4,7 @@ from flask import Blueprint, jsonify, request
 
 bp = Blueprint('mode', __name__)
 
-_mode_cache = 'radar'  # in-memory fallback when DATA_DIR is not writable (dev)
+_mode_cache = 'radar'  # default mode if file read fails (e.g. dev environment without /data OR on startup before mode is set at least once)
 
 
 def get_current_mode():
