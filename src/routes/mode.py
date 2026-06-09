@@ -57,6 +57,12 @@ def run_config_merger_and_restart(retina_node_path: str) -> str | None:
     except Exception:
         pass
 
+    # Force a clean sdrplay_apiService restart so the USB device is properly
+    # re-initialised before blah2 claims it.  Mirrors what the watchdog does.
+    # Non-fatal: no-op on dev machines without sdrplay.service.
+    subprocess.run(['systemctl', 'restart', 'sdrplay.service'],
+                   capture_output=True, timeout=30)
+
     result = subprocess.run(
         ['docker', 'compose', '-p', 'retina-node', 'up', '-d', '--force-recreate'],
         cwd=retina_node_path,
@@ -91,6 +97,9 @@ def set_mode():
             return jsonify({'success': True, 'mode': mode})
 
         if mode == 'spectrum':
+            # Write mode first so the watchdog guard fires immediately and cannot
+            # see blah2 stopped mid-transition and trigger a spurious stack restart.
+            _write_mode(mode)
             result = subprocess.run(
                 ['docker', 'compose', '-p', 'retina-node', 'stop',
                  'blah2', 'blah2_api', 'blah2_web', 'blah2_host'],
@@ -128,6 +137,11 @@ def set_mode():
                 capture_output=True, text=True, timeout=30
             )
 
+            # Force a clean sdrplay_apiService restart so the USB device is
+            # properly re-initialised before blah2 claims it.  Non-fatal.
+            subprocess.run(['systemctl', 'restart', 'sdrplay.service'],
+                           capture_output=True, timeout=30)
+
             result = subprocess.run(
                 ['docker', 'compose', '-p', 'retina-node', 'up', '-d', '--force-recreate',
                  'blah2', 'blah2_api', 'blah2_web', 'blah2_host'],
@@ -138,7 +152,8 @@ def set_mode():
                 return jsonify({'success': False,
                                 'error': f'Failed to start blah2: {result.stderr or result.stdout}'}), 500
 
-        _write_mode(mode)
+            _write_mode(mode)
+
         return jsonify({'success': True, 'mode': mode})
 
     except subprocess.TimeoutExpired:
