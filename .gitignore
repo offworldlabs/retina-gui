@@ -1,3 +1,6 @@
 __pycache__/
 tests/__pycache__/
 .venv/
+
+# Dev mode local data
+src/dev_data/
