@@ -10,9 +10,9 @@ bp = Blueprint('mender', __name__, url_prefix='/mender')
 def check():
     """Check for available retina-node updates and install status."""
     from app import mender, device_state
-    from mender import get_all_stable_versions_from_github, parse_version
+    from mender import get_all_stable_versions_from_github, parse_version, get_retina_node_version_from_docker
 
-    _, current = mender.get_versions()
+    current = get_retina_node_version_from_docker()
 
     in_progress, reason = device_state.is_any_update_in_progress()
     if in_progress:
@@ -72,8 +72,8 @@ def install():
     if not success:
         return jsonify({"success": False, "error": error})
 
-    _, retina_node_version = mender.get_versions()
-    already_installed = retina_node_version is not None
+    from mender import get_retina_node_version_from_docker
+    already_installed = get_retina_node_version_from_docker() is not None
 
     can_install, reason = device_state.can_start_install()
     if not can_install:
@@ -107,7 +107,18 @@ def install():
 
     def _run_install(download_url):
         from mender import get_retina_node_version_from_docker
+        from routes.mode import _write_mode
         try:
+            # Silence the watchdog before touching containers so it cannot see
+            # blah2 go down and trigger a spurious radar stack restart mid-install.
+            _write_mode('spectrum')
+            try:
+                subprocess.run(
+                    ["mender-update", "rollback"],
+                    capture_output=True, timeout=30
+                )
+            except Exception:
+                pass
             if already_installed:
                 try:
                     subprocess.run(
@@ -119,6 +130,7 @@ def install():
             success, error = mender.install_from_url(download_url)
             if not success:
                 app.logger.error(f"Background install failed: {error}")
+                _write_mode('radar')
             else:
                 device_state.update_install_stage("starting")
                 deadline = time.time() + 120
@@ -128,8 +140,10 @@ def install():
                     time.sleep(3)
                 else:
                     app.logger.warning("Containers did not come up within 2 minutes after install")
+                    _write_mode('radar')
         except Exception as e:
             app.logger.error(f"Background install crashed: {e}")
+            _write_mode('radar')
         finally:
             device_state.release_install_lock()
 

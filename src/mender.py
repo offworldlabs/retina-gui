@@ -167,6 +167,14 @@ class MenderClient:
             )
             if result.returncode != 0:
                 return False, result.stderr or "Install failed"
+            try:
+                subprocess.run(
+                    ["mender-update", "commit"],
+                    capture_output=True,
+                    timeout=30,
+                )
+            except Exception:
+                pass
             return True, None
         except subprocess.TimeoutExpired:
             return False, "Installation timed out"
