@@ -36,7 +36,7 @@ class DeviceState:
     """
 
     def __init__(self, data_dir, mender_services, mender_conf_path,
-                 mender_conf_backup_dir, mender_conf_backup_path):
+                 mender_conf_backup_dir, mender_conf_backup_path, dev_mode=False):
         self.data_dir = data_dir
         self.install_lock_file = os.path.join(data_dir, "install.lock")
         self.cloud_disabled_flag = os.path.join(data_dir, "cloud-services-disabled")
@@ -46,6 +46,7 @@ class DeviceState:
         self.mender_conf_backup_dir = mender_conf_backup_dir
         self.mender_conf_backup_path = mender_conf_backup_path
         self.setup_wizard_file = os.path.join(data_dir, "setup-wizard.json")
+        self.dev_mode = dev_mode
 
     # ── State Queries ──────────────────────────────────────────
 
@@ -121,6 +122,14 @@ class DeviceState:
 
     def get_cloud_services_status(self) -> dict:
         """Full status for GET /mender/cloud-services."""
+        if self.dev_mode:
+            return {
+                "enabled": self.is_cloud_services_enabled(),
+                "services": {s: True for s in self.mender_services},
+                "update_in_progress": False,
+                "update_reason": None,
+            }
+
         service_status = {}
         for service in self.mender_services:
             try:
@@ -184,6 +193,15 @@ class DeviceState:
         if not allowed:
             return False, reason
 
+        if self.dev_mode:
+            os.makedirs(self.data_dir, exist_ok=True)
+            if enabled:
+                if os.path.exists(self.cloud_disabled_flag):
+                    os.remove(self.cloud_disabled_flag)
+            else:
+                open(self.cloud_disabled_flag, 'w').close()
+            return True, None
+
         try:
             if enabled:
                 if os.path.exists(self.cloud_disabled_flag):
@@ -228,6 +246,9 @@ class DeviceState:
         Ensures the setting persists across OTA updates.
         If OTA regenerates mender.conf, we stop services and re-backup.
         """
+        if self.dev_mode:
+            return
+
         if not os.path.exists(self.cloud_disabled_flag):
             return  # Enabled - nothing to enforce
 
@@ -322,6 +343,9 @@ class DeviceState:
         Takes get_jwt_fn callable to avoid circular dependency with MenderClient.
         Returns (success, error).
         """
+        if self.dev_mode:
+            return True, None
+
         if not os.path.exists(self.cloud_disabled_flag):
             token, _ = get_jwt_fn()
             if token:

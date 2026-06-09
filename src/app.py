@@ -14,15 +14,23 @@ app = Flask(__name__,
 app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', os.urandom(32).hex())
 csrf = CSRFProtect(app)
 
-# Configurable paths - override via environment for local dev
-DATA_DIR = os.environ.get('DATA_DIR', '/data/retina-gui')
-USER_CONFIG_PATH = os.environ.get('USER_CONFIG_PATH', '/data/retina-node/config/user.yml')
-MERGED_CONFIG_PATH = os.environ.get('MERGED_CONFIG_PATH', '/data/retina-node/config/config.yml')
+DEV_MODE = os.environ.get('DEV_MODE', '').lower() in ('1', 'true', 'yes')
+
+# Configurable paths - override via environment for local dev.
+# In dev mode, default to a writable local directory instead of the on-device paths.
+DATA_DIR = os.environ.get('DATA_DIR',
+    os.path.join(PROJECT_ROOT, 'dev_data') if DEV_MODE else '/data/retina-gui'
+)
+USER_CONFIG_PATH = os.environ.get('USER_CONFIG_PATH',
+    os.path.join(PROJECT_ROOT, 'dev_data', 'user.yml') if DEV_MODE else '/data/retina-node/config/user.yml'
+)
+MERGED_CONFIG_PATH = os.environ.get('MERGED_CONFIG_PATH',
+    os.path.join(PROJECT_ROOT, 'dev_data', 'config.yml') if DEV_MODE else '/data/retina-node/config/config.yml'
+)
 RETINA_NODE_PATH = os.environ.get('RETINA_NODE_PATH', '/data/mender-docker-compose/current/manifests')
 RETINA_SPECTRUM_URL = os.environ.get('RETINA_SPECTRUM_URL', 'http://localhost:3020')
 NODE_ID_FILE = os.environ.get('NODE_ID_FILE', '/data/mender/node_id')
 TOWER_FINDER_URL = os.environ.get('TOWER_FINDER_URL', 'https://api.retina.fm')
-DEV_MODE = os.environ.get('DEV_MODE', '').lower() in ('1', 'true', 'yes')
 
 # Shared services
 ssh_keys = SSHKeyManager(os.path.join(DATA_DIR, "authorized_keys"))
@@ -37,6 +45,8 @@ mender = MenderClient(
     server_url=os.environ.get('MENDER_SERVER_URL', 'https://hosted.mender.io'),
     release_name=os.environ.get('MENDER_RELEASE_NAME', 'retina-node'),
     device_type=os.environ.get('MENDER_DEVICE_TYPE', 'pi5-v3-arm64'),
+    dev_mode=DEV_MODE,
+    dev_data_dir=DATA_DIR,
 )
 
 MENDER_SERVICES = ["mender-authd", "mender-updated", "mender-connect"]
@@ -47,15 +57,17 @@ device_state = DeviceState(
     mender_conf_path="/data/mender/mender.conf",
     mender_conf_backup_dir="/data/mender-cloud-disabled",
     mender_conf_backup_path="/data/mender-cloud-disabled/mender.conf",
+    dev_mode=DEV_MODE,
 )
 
-device_state.apply_startup_preferences()
+if not DEV_MODE:
+    device_state.apply_startup_preferences()
 
-# Always boot into radar mode — delete any persisted spectrum state
-try:
-    os.remove(os.path.join(DATA_DIR, 'mode.txt'))
-except OSError:
-    pass
+    # Always boot into radar mode — delete any persisted spectrum state
+    try:
+        os.remove(os.path.join(DATA_DIR, 'mode.txt'))
+    except OSError:
+        pass
 
 
 def get_node_id():
