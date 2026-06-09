@@ -212,7 +212,8 @@ function initSetupWizard(resumeStep, highestStepName, devMode, isRerun, demoMode
     var rfSseReconnectTimer = null;
     var wizardWasMode = null;
     var connectRfSse = null; // defined inside enterHooks.location on first entry
-    var locationActive = false; // guards against dangling fetch resolving after leave
+    var locationActive = false;    // guards against dangling fetch resolving after leave
+    var pendingModeSwitch = null;  // tracks in-flight /api/mode POST so the leave hook can serialise the revert
 
     // Step 1: Agreements
     enterHooks.agreements = function() {
@@ -582,16 +583,23 @@ function initSetupWizard(resumeStep, highestStepName, devMode, isRerun, demoMode
         locationActive = false;
         clearTimeout(rfSseReconnectTimer); rfSseReconnectTimer = null;
         if (rfSse) { rfSse.close(); rfSse = null; }
-        var targetMode = wizardWasMode || 'radar';
+        var targetMode = wizardWasMode;
         wizardWasMode = null;
-        if (targetMode === 'spectrum') return; // already in spectrum — nothing to revert
+        var pending = pendingModeSwitch;
+        pendingModeSwitch = null;
+        // No revert needed: spectrum was never started (user left before the mode
+        // switch completed), or we were already in spectrum mode.
+        if (!targetMode || targetMode === 'spectrum') return;
         var scanStatus = document.getElementById('scanStatus');
         if (scanStatus) { scanStatus.textContent = 'Reverting to radar mode…'; scanStatus.style.display = ''; }
-        return postJSON('/api/mode', { mode: targetMode })
-            .then(
-                function() { if (scanStatus) scanStatus.style.display = 'none'; },
-                function() { if (scanStatus) scanStatus.style.display = 'none'; }
-            );
+        // Wait for any in-flight spectrum switch to finish before sending the
+        // radar revert — prevents concurrent docker operations racing each other.
+        return (pending || Promise.resolve()).then(function() {
+            return postJSON('/api/mode', { mode: targetMode });
+        }).then(
+            function() { if (scanStatus) scanStatus.style.display = 'none'; },
+            function() { if (scanStatus) scanStatus.style.display = 'none'; }
+        );
     };
 
     enterHooks.location = function() {
@@ -604,7 +612,7 @@ function initSetupWizard(resumeStep, highestStepName, devMode, isRerun, demoMode
         scanBtn.textContent = 'Starting analyser…';
         scanStatus.textContent = 'Starting spectrum analyser…';
         scanStatus.style.display = '';
-        fetch('/api/mode')
+        pendingModeSwitch = fetch('/api/mode')
             .then(function(r) { return r.json(); })
             .then(function(d) {
                 if (!locationActive) return;
