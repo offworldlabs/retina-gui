@@ -10,9 +10,9 @@ bp = Blueprint('mender', __name__, url_prefix='/mender')
 def check():
     """Check for available retina-node updates and install status."""
     from app import mender, device_state
-    from mender import get_all_stable_versions_from_github, parse_version, get_retina_node_version_from_docker
+    from mender import get_all_stable_versions_from_github, parse_version
 
-    current = get_retina_node_version_from_docker()
+    _, current = mender.get_versions()
 
     in_progress, reason = device_state.is_any_update_in_progress()
     if in_progress:
@@ -40,10 +40,14 @@ def check():
 
     if current:
         current_tuple = parse_version(f"retina-node-{current}")
-        available_updates = [
-            v for v in all_versions
-            if (vt := parse_version(f"retina-node-{v}")) and current_tuple and vt > current_tuple
-        ]
+        if current_tuple is None:
+            # Dev/pre-release build — no stable release can be meaningfully compared.
+            available_updates = []
+        else:
+            available_updates = [
+                v for v in all_versions
+                if (vt := parse_version(f"retina-node-{v}")) and vt > current_tuple
+            ]
     else:
         available_updates = list(all_versions)
 
