@@ -1,6 +1,7 @@
 from flask import Blueprint, jsonify, request
 import subprocess
 import threading
+import time
 
 bp = Blueprint('mender', __name__, url_prefix='/mender')
 
@@ -17,7 +18,12 @@ def check():
     if in_progress:
         locked, lock_info = device_state.is_install_locked()
         mender_status = device_state._get_mender_update_status()
-        stage = mender_status.get("state") if mender_status else "downloading"
+        if mender_status:
+            stage = mender_status.get("state")
+        elif lock_info:
+            stage = lock_info.get("stage", "downloading")
+        else:
+            stage = "downloading"
         return jsonify({
             "installing": True,
             "stage": stage,
@@ -100,15 +106,28 @@ def install():
         return jsonify({"success": False, "error": error})
 
     def _run_install(download_url):
+        from mender import get_retina_node_version_from_docker
         try:
             if already_installed:
-                subprocess.run(
-                    ["docker", "compose", "-p", "retina-node", "down"],
-                    capture_output=True, timeout=60
-                )
+                try:
+                    subprocess.run(
+                        ["docker", "compose", "-p", "retina-node", "down"],
+                        capture_output=True, timeout=60
+                    )
+                except Exception as e:
+                    app.logger.warning(f"Pre-install docker down failed (continuing): {e}")
             success, error = mender.install_from_url(download_url)
             if not success:
                 app.logger.error(f"Background install failed: {error}")
+            else:
+                device_state.update_install_stage("starting")
+                deadline = time.time() + 120
+                while time.time() < deadline:
+                    if get_retina_node_version_from_docker():
+                        break
+                    time.sleep(3)
+                else:
+                    app.logger.warning("Containers did not come up within 2 minutes after install")
         except Exception as e:
             app.logger.error(f"Background install crashed: {e}")
         finally:

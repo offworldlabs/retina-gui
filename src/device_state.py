@@ -175,6 +175,19 @@ class DeviceState:
         if os.path.exists(self.install_lock_file):
             os.remove(self.install_lock_file)
 
+    def update_install_stage(self, stage: str):
+        """Update the stage field in the install lock for UI progress reporting."""
+        if not os.path.exists(self.install_lock_file):
+            return
+        try:
+            with open(self.install_lock_file) as f:
+                lock = json.load(f)
+            lock["stage"] = stage
+            with open(self.install_lock_file, "w") as f:
+                json.dump(lock, f)
+        except Exception:
+            pass
+
     def set_cloud_services(self, enabled: bool) -> tuple[bool, str | None]:
         """Enable/disable cloud services. Respects guards.
 
