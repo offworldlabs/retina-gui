@@ -383,6 +383,14 @@ function initSetupWizard(resumeStep, highestStepName, devMode, isRerun, demoMode
             fetch('/mender/check')
                 .then(function(r) { return r.json(); })
                 .then(function(data) {
+                    if (data.installing) {
+                        status.textContent = data.reason || 'Installation in progress...';
+                        installStatus.innerHTML = '<span class="text-warning">Do not power off the device.</span>';
+                        if (backBtn) backBtn.style.display = 'none';
+                        startRadarPoll();
+                        return;
+                    }
+
                     var updates = data.available_updates || [];
                     var packageList = document.getElementById('radarPackageList');
                     var currentSection = document.getElementById('radarCurrentSection');
@@ -440,6 +448,7 @@ function initSetupWizard(resumeStep, highestStepName, devMode, isRerun, demoMode
                 var selected = document.querySelector('input[name="packageSelect"]:checked');
                 installBtn.style.display = 'none';
                 nextBtn.style.display = 'none';
+                if (backBtn) backBtn.style.display = 'none';
                 status.textContent = 'Installing...';
                 installStatus.innerHTML = '<span class="text-warning">Do not power off the device.</span>';
 
@@ -453,6 +462,7 @@ function initSetupWizard(resumeStep, highestStepName, devMode, isRerun, demoMode
                             status.textContent = '';
                             installBtn.style.display = '';
                             nextBtn.style.display = '';
+                            if (backBtn) backBtn.style.display = '';
                             rerunUpdateGate();
                         }
                     });
@@ -481,6 +491,7 @@ function initSetupWizard(resumeStep, highestStepName, devMode, isRerun, demoMode
                     status.textContent = data.reason || 'Installation in progress...';
                     installStatus.innerHTML = '<span class="text-warning">Do not power off the device.</span>';
                     packageStatus.innerHTML = '<span class="spinner-border spinner-border-sm text-primary"></span>';
+                    if (backBtn) backBtn.style.display = 'none';
                     startRadarPoll();
                     return;
                 }
@@ -503,6 +514,7 @@ function initSetupWizard(resumeStep, highestStepName, devMode, isRerun, demoMode
 
         installBtn.addEventListener('click', function() {
             installBtn.style.display = 'none';
+            if (backBtn) backBtn.style.display = 'none';
             packageStatus.innerHTML = '<span class="spinner-border spinner-border-sm text-primary"></span>';
             status.textContent = 'Installing...';
             installStatus.innerHTML = '<span class="text-warning">Do not power off the device.</span>';
@@ -517,6 +529,7 @@ function initSetupWizard(resumeStep, highestStepName, devMode, isRerun, demoMode
                         packageStatus.innerHTML = '';
                         status.textContent = '';
                         installBtn.style.display = '';
+                        if (backBtn) backBtn.style.display = '';
                         updateInstallGate();
                     }
                 });
@@ -543,10 +556,16 @@ function initSetupWizard(resumeStep, highestStepName, devMode, isRerun, demoMode
                                 packageStatus.innerHTML = '';
                                 status.textContent = '';
                                 installBtn.style.display = '';
+                                if (isRerun) nextBtn.style.display = '';
+                                if (backBtn) backBtn.style.display = '';
                                 updateInstallGate();
                             }
                         } else {
-                            status.textContent = (data.stage || 'Installing') + '...';
+                            var stageText = {
+                                downloading: 'Downloading...',
+                                starting: 'Starting retina-node...'
+                            };
+                            status.textContent = stageText[data.stage] || 'Installing...';
                         }
                     });
             }, 5000);
