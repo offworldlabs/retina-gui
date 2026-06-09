@@ -102,8 +102,8 @@ function initSetupWizard(resumeStep, highestStepName, devMode, isRerun, demoMode
 
             var backBtn = document.getElementById('wizBackBtn');
             if (backBtn) {
-                backBtn.style.display = '';
-                backBtn.textContent = (index === 0) ? 'Exit' : '← Back';
+                backBtn.style.display = index === 0 ? 'none' : '';
+                if (index > 0) backBtn.textContent = '← Back';
             }
 
             document.querySelectorAll('.step-foot-btns').forEach(function(el) {
@@ -148,6 +148,21 @@ function initSetupWizard(resumeStep, highestStepName, devMode, isRerun, demoMode
             body: body ? JSON.stringify(body) : undefined
         });
     }
+
+    // Single beforeunload guard for the entire wizard lifetime.
+    // Shows the browser's native "leave site?" dialog on all steps.
+    // On the location step it also fires the SDR-release beacon so
+    // retina-spectrum stops even if the user confirms and leaves.
+    function handleBeforeUnload(e) {
+        if (steps[currentIndex] && steps[currentIndex].name === 'location') {
+            var fd = new FormData();
+            fd.append('csrf_token', csrfToken);
+            if (navigator.sendBeacon) navigator.sendBeacon('/api/mode/release-spectrum', fd);
+        }
+        e.preventDefault();
+        e.returnValue = '';
+    }
+    window.addEventListener('beforeunload', handleBeforeUnload);
 
     // ── Demo mode: mock all API calls ────────────────────
     if (demoMode) {
@@ -198,7 +213,6 @@ function initSetupWizard(resumeStep, highestStepName, devMode, isRerun, demoMode
     var wizardWasMode = null;
     var connectRfSse = null; // defined inside enterHooks.location on first entry
     var locationActive = false; // guards against dangling fetch resolving after leave
-    var unloadHandler = null; // beforeunload safety net — registered on location enter, cleared on leave
 
     // Step 1: Agreements
     enterHooks.agreements = function() {
@@ -568,7 +582,6 @@ function initSetupWizard(resumeStep, highestStepName, devMode, isRerun, demoMode
         locationActive = false;
         clearTimeout(rfSseReconnectTimer); rfSseReconnectTimer = null;
         if (rfSse) { rfSse.close(); rfSse = null; }
-        if (unloadHandler) { window.removeEventListener('beforeunload', unloadHandler); unloadHandler = null; }
         var targetMode = wizardWasMode || 'radar';
         wizardWasMode = null;
         if (targetMode === 'spectrum') return; // already in spectrum — nothing to revert
@@ -605,16 +618,6 @@ function initSetupWizard(resumeStep, highestStepName, devMode, isRerun, demoMode
                 if (!locationActive) return;
                 scanStatus.textContent = 'Analyser unavailable — RF scan disabled';
             });
-
-        // Register beforeunload safety net: if the user navigates away mid-step,
-        // stop retina-spectrum via beacon so the SDR is released.
-        if (unloadHandler) window.removeEventListener('beforeunload', unloadHandler);
-        unloadHandler = function() {
-            var fd = new FormData();
-            fd.append('csrf_token', csrfToken);
-            if (navigator.sendBeacon) navigator.sendBeacon('/api/mode/release-spectrum', fd);
-        };
-        window.addEventListener('beforeunload', unloadHandler);
 
         // Event listeners and inner state set up only once
         if (hookInitialized.location) return;
@@ -1087,6 +1090,7 @@ function initSetupWizard(resumeStep, highestStepName, devMode, isRerun, demoMode
 
     // Step 6: Complete
     enterHooks.complete = function() {
+        window.removeEventListener('beforeunload', handleBeforeUnload);
         postJSON('/set-up/complete');
     };
 

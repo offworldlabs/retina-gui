@@ -1,4 +1,4 @@
-from flask import Blueprint, render_template, request
+from flask import Blueprint, render_template, request, redirect
 from routes.mode import get_current_mode
 
 bp = Blueprint('home', __name__)
@@ -8,6 +8,9 @@ bp = Blueprint('home', __name__)
 def index():
     """Home page with node ID, services, and SSH keys."""
     from app import ssh_keys, config_mgr, mender, device_state, get_node_id
+
+    if device_state.is_setup_wizard_in_progress():
+        return redirect('/set-up')
 
     keys = ssh_keys.get_keys()
     node_id = get_node_id()
