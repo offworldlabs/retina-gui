@@ -56,7 +56,8 @@
     <section class="spectrum-section">
         <div class="section-head"><h2>Spectrum</h2></div>
         <div class="spectrum-frame-wrap">
-            <iframe id="spectrumFrame" class="spectrum-frame" src="" frameborder="0"></iframe>
+            <div id="spectrumLoading" style="width:100%;height:100%;display:flex;align-items:center;justify-content:center;color:var(--ink-3);font-size:14px;">Starting spectrum analyser…</div>
+            <iframe id="spectrumFrame" class="spectrum-frame" src="" frameborder="0" style="display:none"></iframe>
         </div>
     </section>
     {% else %}
@@ -138,7 +139,40 @@
 {% block scripts %}
 {% if mode == 'spectrum' %}
 <script>
-document.getElementById('spectrumFrame').src = 'http://' + window.location.hostname + ':3020';
+(function() {
+    var frame   = document.getElementById('spectrumFrame');
+    var loading = document.getElementById('spectrumLoading');
+    var host    = 'http://' + window.location.hostname + ':3020';
+    var maxAttempts = 30; // 30 × 2 s = 60 s before giving up
+    var attempt = 0;
+
+    function showFrame() {
+        frame.src = host;
+        frame.style.display = '';
+        if (loading) loading.style.display = 'none';
+    }
+
+    function poll() {
+        fetch('/api/spectrum/ready')
+            .then(function(r) { return r.json(); })
+            .then(function(d) {
+                if (d.ready) {
+                    showFrame();
+                } else if (attempt < maxAttempts) {
+                    attempt++;
+                    setTimeout(poll, 2000);
+                } else {
+                    showFrame(); // timed out — show iframe so user sees the error
+                }
+            })
+            .catch(function() {
+                if (attempt < maxAttempts) { attempt++; setTimeout(poll, 2000); }
+                else { showFrame(); }
+            });
+    }
+
+    poll();
+})();
 </script>
 {% endif %}
 {% if retina_node_version %}

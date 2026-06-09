@@ -47,6 +47,16 @@ def run_config_merger_and_restart(retina_node_path: str) -> str | None:
     if get_current_mode() == 'spectrum':
         return None
 
+    # Defensive: ensure retina-spectrum is stopped before bringing the radar stack up.
+    # Non-fatal — retina-spectrum may already be stopped.
+    try:
+        subprocess.run(['docker', 'compose', '-p', 'retina-node', 'stop', 'retina-spectrum'],
+                       cwd=retina_node_path, capture_output=True, timeout=60)
+        subprocess.run(['docker', 'compose', '-p', 'retina-node', 'rm', '-sf', 'retina-spectrum'],
+                       cwd=retina_node_path, capture_output=True, timeout=30)
+    except Exception:
+        pass
+
     result = subprocess.run(
         ['docker', 'compose', '-p', 'retina-node', 'up', '-d', '--force-recreate'],
         cwd=retina_node_path,
@@ -110,6 +120,14 @@ def set_mode():
                 return jsonify({'success': False,
                                 'error': f'Failed to stop retina-spectrum: {result.stderr or result.stdout}'}), 500
 
+            # Remove the stopped container so it cannot be auto-restarted and
+            # so the SDR device is cleanly released before blah2 starts.
+            subprocess.run(
+                ['docker', 'compose', '-p', 'retina-node', 'rm', '-sf', 'retina-spectrum'],
+                cwd=RETINA_NODE_PATH,
+                capture_output=True, text=True, timeout=30
+            )
+
             result = subprocess.run(
                 ['docker', 'compose', '-p', 'retina-node', 'start',
                  'blah2', 'blah2_api', 'blah2_web', 'blah2_host'],
@@ -127,3 +145,44 @@ def set_mode():
         return jsonify({'success': False, 'error': 'Command timed out'}), 500
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@bp.route('/api/spectrum/ready', methods=['GET'])
+def spectrum_ready():
+    """Probe retina-spectrum to see if it is serving yet.
+
+    Returns {ready: true} as soon as the container responds on its port,
+    regardless of HTTP status code.
+    """
+    from app import RETINA_SPECTRUM_URL
+    import urllib.request
+    import urllib.error
+    try:
+        urllib.request.urlopen(RETINA_SPECTRUM_URL, timeout=2)
+        return jsonify({'ready': True})
+    except urllib.error.HTTPError:
+        return jsonify({'ready': True})  # server responded — it's up
+    except Exception:
+        return jsonify({'ready': False})
+
+
+@bp.route('/api/mode/release-spectrum', methods=['POST'])
+def release_spectrum():
+    """Stop retina-spectrum and revert to radar mode.
+
+    Called via navigator.sendBeacon when the user navigates away from the
+    wizard location step mid-flow. Returns 204 — callers do not inspect the
+    response body.
+    """
+    from app import RETINA_NODE_PATH, config_mgr
+    if not config_mgr.is_retina_node_installed():
+        return '', 204
+    try:
+        subprocess.run(['docker', 'compose', '-p', 'retina-node', 'stop', 'retina-spectrum'],
+                       cwd=RETINA_NODE_PATH, capture_output=True, timeout=60)
+        subprocess.run(['docker', 'compose', '-p', 'retina-node', 'rm', '-sf', 'retina-spectrum'],
+                       cwd=RETINA_NODE_PATH, capture_output=True, timeout=30)
+        _write_mode('radar')
+    except Exception:
+        pass
+    return '', 204
