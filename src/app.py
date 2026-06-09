@@ -1,6 +1,7 @@
 from flask import Flask
 from flask_wtf.csrf import CSRFProtect
 import os
+import subprocess
 
 from config_manager import ConfigManager
 from device_state import DeviceState
@@ -56,6 +57,17 @@ try:
     os.remove(os.path.join(DATA_DIR, 'mode.txt'))
 except OSError:
     pass
+
+# Enforce radar at the Docker level: stop and remove retina-spectrum if it is running.
+# retina-spectrum is only allowed while the wizard location step or config toggle is active.
+if config_mgr.is_retina_node_installed():
+    try:
+        subprocess.run(['docker', 'compose', '-p', 'retina-node', 'stop', 'retina-spectrum'],
+                       cwd=RETINA_NODE_PATH, capture_output=True, timeout=60)
+        subprocess.run(['docker', 'compose', '-p', 'retina-node', 'rm', '-sf', 'retina-spectrum'],
+                       cwd=RETINA_NODE_PATH, capture_output=True, timeout=30)
+    except Exception:
+        pass
 
 
 def get_node_id():
