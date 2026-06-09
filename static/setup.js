@@ -75,52 +75,51 @@ function initSetupWizard(resumeStep, highestStepName, devMode, isRerun, demoMode
     }
 
     function showStep(index) {
-        // Call leave hook for the step we're navigating away from
         var leaveFn = leaveHooks[steps[currentIndex].name];
-        if (leaveFn) leaveFn();
+        var leavePromise = Promise.resolve(leaveFn ? leaveFn() : null);
 
-        // Clear any active polling timer when leaving a step
-        if (pollTimer) {
-            clearInterval(pollTimer);
-            pollTimer = null;
+        // Disable navigation while an async leave hook (e.g. mode revert) completes.
+        var navBtns = document.querySelectorAll('.step-foot-btns button, #wizBackBtn');
+        navBtns.forEach(function(b) { b.disabled = true; });
+
+        function doTransition() {
+            navBtns.forEach(function(b) { b.disabled = false; });
+
+            if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+
+            var card = document.querySelector('.setup-card');
+            var towersIndex = -1;
+            for (var i = 0; i < steps.length; i++) {
+                if (steps[i].name === 'towers') { towersIndex = i; break; }
+            }
+            card.classList.toggle('wide', index === towersIndex);
+
+            steps.forEach(function(s, i) {
+                s.el.style.display = (i === index) ? '' : 'none';
+            });
+            currentIndex = index;
+            updateProgress(index);
+
+            var backBtn = document.getElementById('wizBackBtn');
+            if (backBtn) {
+                backBtn.style.display = '';
+                backBtn.textContent = (index === 0) ? 'Exit' : '← Back';
+            }
+
+            document.querySelectorAll('.step-foot-btns').forEach(function(el) {
+                el.style.display = 'none';
+            });
+            var activeBtns = document.getElementById('stepBtns-' + steps[index].name);
+            if (activeBtns) activeBtns.style.display = '';
+
+            postJSON('/set-up/save-step', { step: steps[index].name });
+
+            var enterFn = enterHooks[steps[index].name];
+            if (enterFn) enterFn();
         }
 
-        var card = document.querySelector('.setup-card');
-        // Wide card only for towers step
-        var towersIndex = -1;
-        for (var i = 0; i < steps.length; i++) {
-            if (steps[i].name === 'towers') { towersIndex = i; break; }
-        }
-        if (index === towersIndex) {
-            card.classList.add('wide');
-        } else {
-            card.classList.remove('wide');
-        }
-
-        steps.forEach(function(s, i) {
-            s.el.style.display = (i === index) ? '' : 'none';
-        });
-        currentIndex = index;
-        updateProgress(index);
-
-        // Back/Exit button — always visible; label changes based on step
-        var backBtn = document.getElementById('wizBackBtn');
-        if (backBtn) {
-            backBtn.style.display = '';
-            backBtn.textContent = (index === 0) ? 'Exit' : '← Back';
-        }
-
-        // Switch active footer button group
-        document.querySelectorAll('.step-foot-btns').forEach(function(el) {
-            el.style.display = 'none';
-        });
-        var activeBtns = document.getElementById('stepBtns-' + steps[index].name);
-        if (activeBtns) activeBtns.style.display = '';
-
-        postJSON('/set-up/save-step', {step: steps[index].name});
-
-        var enterFn = enterHooks[steps[index].name];
-        if (enterFn) enterFn();
+        // Always transition regardless of leave hook success or failure.
+        leavePromise.then(doTransition, doTransition);
     }
 
     function advance() {
@@ -199,6 +198,7 @@ function initSetupWizard(resumeStep, highestStepName, devMode, isRerun, demoMode
     var wizardWasMode = null;
     var connectRfSse = null; // defined inside enterHooks.location on first entry
     var locationActive = false; // guards against dangling fetch resolving after leave
+    var unloadHandler = null; // beforeunload safety net — registered on location enter, cleared on leave
 
     // Step 1: Agreements
     enterHooks.agreements = function() {
@@ -577,10 +577,17 @@ function initSetupWizard(resumeStep, highestStepName, devMode, isRerun, demoMode
         locationActive = false;
         clearTimeout(rfSseReconnectTimer); rfSseReconnectTimer = null;
         if (rfSse) { rfSse.close(); rfSse = null; }
-        if (wizardWasMode && wizardWasMode !== 'spectrum') {
-            postJSON('/api/mode', { mode: wizardWasMode });
-        }
+        if (unloadHandler) { window.removeEventListener('beforeunload', unloadHandler); unloadHandler = null; }
+        var targetMode = wizardWasMode || 'radar';
         wizardWasMode = null;
+        if (targetMode === 'spectrum') return; // already in spectrum — nothing to revert
+        var scanStatus = document.getElementById('scanStatus');
+        if (scanStatus) { scanStatus.textContent = 'Reverting to radar mode…'; scanStatus.style.display = ''; }
+        return postJSON('/api/mode', { mode: targetMode })
+            .then(
+                function() { if (scanStatus) scanStatus.style.display = 'none'; },
+                function() { if (scanStatus) scanStatus.style.display = 'none'; }
+            );
     };
 
     enterHooks.location = function() {
@@ -598,18 +605,25 @@ function initSetupWizard(resumeStep, highestStepName, devMode, isRerun, demoMode
             .then(function(d) {
                 if (!locationActive) return;
                 wizardWasMode = d.mode || 'radar';
-                if (d.mode === 'spectrum') {
-                    if (connectRfSse) connectRfSse();
-                    return;
-                }
-                return postJSON('/api/mode', { mode: 'spectrum' })
-                    .then(function(r) { return r.json(); })
-                    .then(function() { if (connectRfSse) connectRfSse(); });
+                return postJSON('/api/mode', { mode: 'spectrum' });
+            })
+            .then(function() {
+                if (locationActive && connectRfSse) connectRfSse();
             })
             .catch(function() {
                 if (!locationActive) return;
                 scanStatus.textContent = 'Analyser unavailable — RF scan disabled';
             });
+
+        // Register beforeunload safety net: if the user navigates away mid-step,
+        // stop retina-spectrum via beacon so the SDR is released.
+        if (unloadHandler) window.removeEventListener('beforeunload', unloadHandler);
+        unloadHandler = function() {
+            var fd = new FormData();
+            fd.append('csrf_token', csrfToken);
+            if (navigator.sendBeacon) navigator.sendBeacon('/api/mode/release-spectrum', fd);
+        };
+        window.addEventListener('beforeunload', unloadHandler);
 
         // Event listeners and inner state set up only once
         if (hookInitialized.location) return;
