@@ -181,6 +181,34 @@ def spectrum_ready():
         return jsonify({'ready': False})
 
 
+def enforce_radar_mode(retina_node_path: str) -> None:
+    """Stop retina-spectrum and bring the radar stack up unconditionally.
+
+    Called on wizard completion so the node is always left in a clean radar
+    state regardless of what happened during the wizard flow. Non-fatal: errors
+    are swallowed so callers don't need to handle them.
+    """
+    try:
+        subprocess.run(
+            ['docker', 'compose', '-p', 'retina-node', 'stop', 'retina-spectrum'],
+            cwd=retina_node_path, capture_output=True, timeout=60
+        )
+        subprocess.run(
+            ['docker', 'compose', '-p', 'retina-node', 'rm', '-sf', 'retina-spectrum'],
+            cwd=retina_node_path, capture_output=True, timeout=30
+        )
+        subprocess.run(['systemctl', 'restart', 'sdrplay.service'],
+                       capture_output=True, timeout=30)
+        subprocess.run(
+            ['docker', 'compose', '-p', 'retina-node', 'up', '-d', '--force-recreate',
+             'blah2', 'blah2_api', 'blah2_web', 'blah2_host'],
+            cwd=retina_node_path, capture_output=True, timeout=120
+        )
+        _write_mode('radar')
+    except Exception:
+        pass
+
+
 @bp.route('/api/mode/release-spectrum', methods=['POST'])
 def release_spectrum():
     """Stop retina-spectrum and revert to radar mode.
