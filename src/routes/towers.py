@@ -21,12 +21,45 @@ def search():
     if body.get("lat") is None or body.get("lon") is None:
         return jsonify({"error": "lat and lon are required"}), 400
 
+    measurements = body.get("measurements") or []
+
     try:
-        resp = http_requests.post(
-            f"{TOWER_FINDER_URL}/api/towers",
-            json=body,
-            timeout=90,
-        )
+        if measurements:
+            # Measurement-enriched POST: gives the tower-finder actual RF data
+            # so it can rank towers by signal match rather than geography alone.
+            post_body = {
+                "lat": body["lat"],
+                "lon": body["lon"],
+                "measurements": measurements,
+            }
+            if body.get("radius_km") is not None:
+                post_body["radius_km"] = body["radius_km"]
+            if body.get("limit") is not None:
+                post_body["limit"] = body["limit"]
+            if body.get("source") is not None:
+                post_body["source"] = body["source"]
+            resp = http_requests.post(
+                f"{TOWER_FINDER_URL}/api/towers",
+                json=post_body,
+                timeout=90,
+            )
+        else:
+            params = {"lat": body["lat"], "lon": body["lon"]}
+            if body.get("altitude") is not None:
+                params["altitude"] = body["altitude"]
+            if body.get("radius_km") is not None:
+                params["radius_km"] = body["radius_km"]
+            if body.get("limit") is not None:
+                params["limit"] = body["limit"]
+            if body.get("source") is not None:
+                params["source"] = body["source"]
+            if body.get("frequencies") is not None:
+                params["frequencies"] = body["frequencies"]
+            resp = http_requests.get(
+                f"{TOWER_FINDER_URL}/api/towers",
+                params=params,
+                timeout=90,
+            )
         resp.raise_for_status()
         return jsonify(resp.json())
     except http_requests.Timeout:
