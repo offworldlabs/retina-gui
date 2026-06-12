@@ -490,6 +490,8 @@ function initSetupWizard(resumeStep, highestStepName, devMode, isRerun, demoMode
         }
         regionCheck.addEventListener('change', updateInstallGate);
 
+        var latestVersion = null;
+
         fetch('/mender/check')
             .then(function(r) { return r.json(); })
             .then(function(data) {
@@ -511,6 +513,7 @@ function initSetupWizard(resumeStep, highestStepName, devMode, isRerun, demoMode
                     document.getElementById('radarLatestVersion').textContent = data.current_version;
                     nextBtn.style.display = '';
                 } else {
+                    latestVersion = data.latest_version;
                     document.getElementById('radarLatestVersion').textContent = data.latest_version;
                     installBtn.style.display = '';
                     updateInstallGate();
@@ -525,7 +528,7 @@ function initSetupWizard(resumeStep, highestStepName, devMode, isRerun, demoMode
             status.textContent = 'Installing...';
             installStatus.innerHTML = '<span class="text-warning">Do not power off the device.</span>';
 
-            postJSON('/mender/install')
+            postJSON('/mender/install', latestVersion ? {version: latestVersion} : undefined)
                 .then(function(r) { return r.json(); })
                 .then(function(data) {
                     if (data.success) {
