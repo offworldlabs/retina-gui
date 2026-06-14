@@ -52,6 +52,16 @@ device_state = DeviceState(
 
 device_state.apply_startup_preferences()
 
+# After an OWL-OS rootfs update the device reboots into the new partition
+# with Mender in "awaiting commit" state. Commit here to make it permanent,
+# then clear the install lock that was intentionally left by install_os.
+# This is idempotent — mender-update commit is a no-op when nothing is pending.
+try:
+    subprocess.run(["mender-update", "commit"], capture_output=True, timeout=30)
+except Exception:
+    pass
+device_state.release_install_lock()
+
 # Always boot into radar mode — delete any persisted spectrum state
 try:
     os.remove(os.path.join(DATA_DIR, 'mode.txt'))

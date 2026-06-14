@@ -314,7 +314,7 @@ function initSetupWizard(resumeStep, highestStepName, devMode, isRerun, demoMode
                     status.innerHTML = 'System is up to date &#10003;';
                     cardStatus.innerHTML = '<span class="text-success">&#10003;</span>';
                     nextBtn.style.display = '';
-                    nextBtn.textContent = 'Skip \u2192';
+                    nextBtn.textContent = 'Continue \u2192';
                 }
             })
             .catch(function() {
@@ -355,6 +355,8 @@ function initSetupWizard(resumeStep, highestStepName, devMode, isRerun, demoMode
                 status.textContent = 'Downloading OS update...';
             } else if (stage === 'installing') {
                 status.textContent = 'Installing OS update...';
+            } else if (stage === 'rebooting') {
+                status.textContent = 'Rebooting device...';
             } else {
                 status.textContent = 'Updating...';
             }
@@ -363,6 +365,7 @@ function initSetupWizard(resumeStep, highestStepName, devMode, isRerun, demoMode
 
         function startSystemPoll() {
             showStage('waiting');
+            if (backBtn) backBtn.style.display = 'none';
             if (pollTimer) clearInterval(pollTimer);
             pollTimer = setInterval(function() {
                 fetch('/mender/check-os')
@@ -371,6 +374,7 @@ function initSetupWizard(resumeStep, highestStepName, devMode, isRerun, demoMode
                         if (!data.installing) {
                             clearInterval(pollTimer);
                             pollTimer = null;
+                            if (backBtn) backBtn.style.display = '';
                             if (!data.update_available) {
                                 status.innerHTML = 'Update complete &#10003;';
                                 installStatus.innerHTML = '<span class="text-success">Complete!</span>';

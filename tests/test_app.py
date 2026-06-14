@@ -774,49 +774,138 @@ class TestMenderCheckOs:
         data = json.loads(response.data)
         assert 'error' in data
 
+    @patch('app.device_state')
+    @patch('app.mender')
+    def test_check_os_installing_stage_from_lock(self, mock_mender, mock_ds, app_client):
+        """Stage should be read from the install lock when no mender-update status exists."""
+        mock_mender.get_versions.return_value = ('v0.1.0', None)
+        mock_ds.is_any_update_in_progress.return_value = (True, 'Installing owl-os-pi5-v0.2.0')
+        mock_ds.is_install_locked.return_value = (True, {
+            'version': 'owl-os-pi5-v0.2.0',
+            'started_at': '2026-01-01T00:00:00',
+            'stage': 'rebooting',
+        })
+        mock_ds._get_mender_update_status.return_value = None
+
+        response = app_client.get('/mender/check-os')
+        data = json.loads(response.data)
+        assert data['installing'] is True
+        assert data['stage'] == 'rebooting'
+        assert data['version'] == 'owl-os-pi5-v0.2.0'
+
+    @patch('app.device_state')
+    @patch('app.mender')
+    def test_check_os_installing_stage_defaults_to_downloading(self, mock_mender, mock_ds, app_client):
+        """Stage should default to 'downloading' when lock has no stage field yet."""
+        mock_mender.get_versions.return_value = ('v0.1.0', None)
+        mock_ds.is_any_update_in_progress.return_value = (True, 'Installing owl-os-pi5-v0.2.0')
+        mock_ds.is_install_locked.return_value = (True, {
+            'version': 'owl-os-pi5-v0.2.0',
+            'started_at': '2026-01-01T00:00:00',
+        })
+        mock_ds._get_mender_update_status.return_value = None
+
+        response = app_client.get('/mender/check-os')
+        data = json.loads(response.data)
+        assert data['installing'] is True
+        assert data['stage'] == 'downloading'
+
 
 class TestMenderInstallOs:
     """Test the /mender/install-os endpoint."""
 
+    @patch('routes.mender_routes.threading.Thread')
+    @patch('app.mender')
     @patch('app.device_state')
     @patch('mender.get_latest_owl_os_from_github')
-    def test_install_os_success(self, mock_github, mock_ds, app_client):
-        """Should enable cloud services, acquire lock, and return waiting state."""
+    def test_install_os_success(self, mock_github, mock_ds, mock_mender, mock_thread, app_client):
+        """Should return success immediately and spawn a background install thread."""
+        mock_ds.ensure_cloud_services_enabled.return_value = (True, None)
         mock_ds.can_start_install.return_value = (True, None)
         mock_ds.acquire_install_lock.return_value = True
-        mock_ds.ensure_cloud_services_enabled.return_value = (True, None)
         mock_github.return_value = ('os-v0.2.0', None)
+        mock_mender.list_artifacts.return_value = ([{"id": "abc123"}], None)
+        mock_mender.get_download_url.return_value = ("https://example.com/artifact.mender", None)
 
         response = app_client.post('/mender/install-os')
         data = json.loads(response.data)
         assert data['success'] is True
         assert data['version'] == 'owl-os-pi5-v0.2.0'
-        assert data['state'] == 'waiting'
+        assert 'state' not in data
         mock_ds.acquire_install_lock.assert_called_once_with('owl-os-pi5-v0.2.0')
-        mock_ds.save_setup_wizard_step.assert_called_once_with('system')
+        mock_thread.assert_called_once()
 
     @patch('app.device_state')
     @patch('mender.get_latest_owl_os_from_github')
     def test_install_os_not_authenticated(self, mock_github, mock_ds, app_client):
-        """Should fail and release lock when cloud services can't be enabled."""
-        mock_ds.can_start_install.return_value = (True, None)
-        mock_ds.acquire_install_lock.return_value = True
-        mock_github.return_value = ('os-v0.2.0', None)
+        """Should fail before acquiring lock when cloud services can't be enabled."""
         mock_ds.ensure_cloud_services_enabled.return_value = (False, 'Timed out')
 
         response = app_client.post('/mender/install-os')
         data = json.loads(response.data)
         assert data['success'] is False
         assert 'Timed out' in data['error']
-        mock_ds.release_install_lock.assert_called_once()
+        mock_ds.acquire_install_lock.assert_not_called()
+        mock_ds.release_install_lock.assert_not_called()
 
     @patch('app.device_state')
     def test_install_os_already_updating(self, mock_ds, app_client):
         """Should fail when update already in progress."""
+        mock_ds.ensure_cloud_services_enabled.return_value = (True, None)
         mock_ds.can_start_install.return_value = (False, 'Installing v0.3.5')
 
         response = app_client.post('/mender/install-os')
         assert response.status_code == 409
+
+    @patch('app.mender')
+    @patch('app.device_state')
+    @patch('mender.get_latest_owl_os_from_github')
+    def test_install_os_github_error(self, mock_github, mock_ds, mock_mender, app_client):
+        """Should fail and not acquire lock when GitHub version lookup fails."""
+        mock_ds.ensure_cloud_services_enabled.return_value = (True, None)
+        mock_ds.can_start_install.return_value = (True, None)
+        mock_github.return_value = (None, 'GitHub API error: 503')
+
+        response = app_client.post('/mender/install-os')
+        data = json.loads(response.data)
+        assert data['success'] is False
+        assert 'GitHub API error' in data['error']
+        mock_ds.acquire_install_lock.assert_not_called()
+
+    @patch('app.mender')
+    @patch('app.device_state')
+    @patch('mender.get_latest_owl_os_from_github')
+    def test_install_os_no_artifact(self, mock_github, mock_ds, mock_mender, app_client):
+        """Should fail and release lock when no artifact is found in Mender."""
+        mock_ds.ensure_cloud_services_enabled.return_value = (True, None)
+        mock_ds.can_start_install.return_value = (True, None)
+        mock_ds.acquire_install_lock.return_value = True
+        mock_github.return_value = ('os-v0.2.0', None)
+        mock_mender.list_artifacts.return_value = ([], None)
+
+        response = app_client.post('/mender/install-os')
+        data = json.loads(response.data)
+        assert data['success'] is False
+        assert 'No artifact found' in data['error']
+        mock_ds.release_install_lock.assert_called_once()
+
+    @patch('app.mender')
+    @patch('app.device_state')
+    @patch('mender.get_latest_owl_os_from_github')
+    def test_install_os_download_url_error(self, mock_github, mock_ds, mock_mender, app_client):
+        """Should fail and release lock when download URL fetch fails."""
+        mock_ds.ensure_cloud_services_enabled.return_value = (True, None)
+        mock_ds.can_start_install.return_value = (True, None)
+        mock_ds.acquire_install_lock.return_value = True
+        mock_github.return_value = ('os-v0.2.0', None)
+        mock_mender.list_artifacts.return_value = ([{"id": "abc123"}], None)
+        mock_mender.get_download_url.return_value = (None, 'Failed to get download URL: 403')
+
+        response = app_client.post('/mender/install-os')
+        data = json.loads(response.data)
+        assert data['success'] is False
+        assert '403' in data['error']
+        mock_ds.release_install_lock.assert_called_once()
 
 
 class TestSetupWizardStepRoutes:
