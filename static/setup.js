@@ -1120,6 +1120,7 @@ function initSetupWizard(resumeStep, highestStepName, devMode, isRerun, demoMode
     // Step 6: Complete
     enterHooks.complete = function() {
         window.removeEventListener('beforeunload', handleBeforeUnload);
+        if (backBtn) backBtn.style.display = 'none';
         postJSON('/set-up/complete');
     };
 
