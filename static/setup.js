@@ -277,6 +277,11 @@ function initSetupWizard(resumeStep, highestStepName, devMode, isRerun, demoMode
                     cardStatus.innerHTML = '<span class="text-success">&#10003;</span>';
                     nextBtn.style.display = '';
                     nextBtn.textContent = 'Continue \u2192';
+                })
+                .catch(function() {
+                    status.textContent = 'Unable to check system version.';
+                    nextBtn.style.display = '';
+                    nextBtn.textContent = 'Continue \u2192';
                 });
             nextBtn.addEventListener('click', advance);
             return;
@@ -311,6 +316,11 @@ function initSetupWizard(resumeStep, highestStepName, devMode, isRerun, demoMode
                     nextBtn.style.display = '';
                     nextBtn.textContent = 'Skip \u2192';
                 }
+            })
+            .catch(function() {
+                status.textContent = 'Unable to check for system updates.';
+                nextBtn.style.display = '';
+                nextBtn.textContent = 'Skip \u2192';
             });
 
         updateBtn.addEventListener('click', function() {
@@ -328,6 +338,11 @@ function initSetupWizard(resumeStep, highestStepName, devMode, isRerun, demoMode
                         cardStatus.innerHTML = '';
                         updateBtn.style.display = '';
                     }
+                })
+                .catch(function() {
+                    installStatus.innerHTML = '<span class="text-danger">Request failed. Please try again.</span>';
+                    cardStatus.innerHTML = '';
+                    updateBtn.style.display = '';
                 });
         });
 
@@ -407,6 +422,7 @@ function initSetupWizard(resumeStep, highestStepName, devMode, isRerun, demoMode
                     }
 
                     var updates = data.available_updates || [];
+
                     var packageList = document.getElementById('radarPackageList');
                     var availableSection = document.getElementById('radarAvailableSection');
                     var availableHeading = document.getElementById('radarAvailableHeading');
@@ -448,6 +464,11 @@ function initSetupWizard(resumeStep, highestStepName, devMode, isRerun, demoMode
 
                     nextBtn.textContent = 'Skip \u2192';
                     nextBtn.style.display = '';
+                })
+                .catch(function() {
+                    status.textContent = 'Unable to check for updates.';
+                    nextBtn.textContent = 'Skip \u2192';
+                    nextBtn.style.display = '';
                 });
 
             installBtn.addEventListener('click', function() {
@@ -471,6 +492,14 @@ function initSetupWizard(resumeStep, highestStepName, devMode, isRerun, demoMode
                             if (backBtn) backBtn.style.display = '';
                             rerunUpdateGate();
                         }
+                    })
+                    .catch(function() {
+                        installStatus.innerHTML = '<span class="text-danger">Request failed. Please try again.</span>';
+                        status.textContent = '';
+                        installBtn.style.display = '';
+                        nextBtn.style.display = '';
+                        if (backBtn) backBtn.style.display = '';
+                        rerunUpdateGate();
                     });
             });
 
@@ -519,6 +548,9 @@ function initSetupWizard(resumeStep, highestStepName, devMode, isRerun, demoMode
                     updateInstallGate();
                     // No skip — installation is required on a fresh node
                 }
+            })
+            .catch(function() {
+                status.textContent = 'Unable to check for available packages.';
             });
 
         installBtn.addEventListener('click', function() {
@@ -541,6 +573,14 @@ function initSetupWizard(resumeStep, highestStepName, devMode, isRerun, demoMode
                         if (backBtn) backBtn.style.display = '';
                         updateInstallGate();
                     }
+                })
+                .catch(function() {
+                    installStatus.innerHTML = '<span class="text-danger">Request failed. Please try again.</span>';
+                    packageStatus.innerHTML = '';
+                    status.textContent = '';
+                    installBtn.style.display = '';
+                    if (backBtn) backBtn.style.display = '';
+                    updateInstallGate();
                 });
         });
 
@@ -1102,6 +1142,7 @@ function initSetupWizard(resumeStep, highestStepName, devMode, isRerun, demoMode
     // Step 6: Complete
     enterHooks.complete = function() {
         window.removeEventListener('beforeunload', handleBeforeUnload);
+        if (backBtn) backBtn.style.display = 'none';
         postJSON('/set-up/complete');
     };
 
