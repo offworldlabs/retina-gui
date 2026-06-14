@@ -150,11 +150,19 @@ class MenderClient:
         except requests.RequestException as e:
             return None, str(e)
 
-    def install_from_url(self, url: str, timeout: int = 600) -> tuple[bool, str | None]:
+    def install_from_url(
+        self, url: str, timeout: int = 600, commit: bool = True
+    ) -> tuple[bool, str | None]:
         """Install artifact from URL via mender-update (standalone).
 
-        Used for app updates only (no reboot needed). OS updates use managed
-        mode via the mender-updated daemon — see /mender/install-os.
+        Args:
+            url:     Signed artifact download URL.
+            timeout: Download+install timeout in seconds. OS images need much
+                     longer than the default — pass 1800 for a ~600 MB rootfs.
+            commit:  Whether to commit immediately after install. True for
+                     app artifacts (no reboot needed). False for OS rootfs
+                     artifacts, where the device must reboot into the new
+                     partition first; commit is then called at next startup.
 
         Returns (success, error) tuple.
         """
@@ -167,14 +175,15 @@ class MenderClient:
             )
             if result.returncode != 0:
                 return False, result.stderr or "Install failed"
-            try:
-                subprocess.run(
-                    ["mender-update", "commit"],
-                    capture_output=True,
-                    timeout=30,
-                )
-            except Exception:
-                pass
+            if commit:
+                try:
+                    subprocess.run(
+                        ["mender-update", "commit"],
+                        capture_output=True,
+                        timeout=30,
+                    )
+                except Exception:
+                    pass
             return True, None
         except subprocess.TimeoutExpired:
             return False, "Installation timed out"
