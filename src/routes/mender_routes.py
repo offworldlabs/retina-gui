@@ -190,7 +190,12 @@ def check_os():
     if in_progress:
         locked, lock_info = device_state.is_install_locked()
         mender_status = device_state._get_mender_update_status()
-        stage = mender_status.get("state") if mender_status else "waiting"
+        if mender_status:
+            stage = mender_status.get("state")
+        elif lock_info:
+            stage = lock_info.get("stage", "downloading")
+        else:
+            stage = "downloading"
         return jsonify({
             "installing": True,
             "stage": stage,
@@ -269,10 +274,18 @@ def install_os():
         return jsonify({"success": False, "error": f"No artifact found for {release_name}"})
 
     artifact = artifacts[0]
-    url, error = mender.get_download_url(artifact["id"])
+    artifact_id = artifact.get("id")
+    if not artifact_id:
+        device_state.release_install_lock()
+        return jsonify({"success": False, "error": "Artifact missing ID field"})
+
+    url, error = mender.get_download_url(artifact_id)
     if error:
         device_state.release_install_lock()
         return jsonify({"success": False, "error": error})
+    if not url:
+        device_state.release_install_lock()
+        return jsonify({"success": False, "error": "Mender returned no download URL"})
 
     def _run_os_install(download_url):
         try:

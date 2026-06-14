@@ -774,6 +774,42 @@ class TestMenderCheckOs:
         data = json.loads(response.data)
         assert 'error' in data
 
+    @patch('app.device_state')
+    @patch('app.mender')
+    def test_check_os_installing_stage_from_lock(self, mock_mender, mock_ds, app_client):
+        """Stage should be read from the install lock when no mender-update status exists."""
+        mock_mender.get_versions.return_value = ('v0.1.0', None)
+        mock_ds.is_any_update_in_progress.return_value = (True, 'Installing owl-os-pi5-v0.2.0')
+        mock_ds.is_install_locked.return_value = (True, {
+            'version': 'owl-os-pi5-v0.2.0',
+            'started_at': '2026-01-01T00:00:00',
+            'stage': 'rebooting',
+        })
+        mock_ds._get_mender_update_status.return_value = None
+
+        response = app_client.get('/mender/check-os')
+        data = json.loads(response.data)
+        assert data['installing'] is True
+        assert data['stage'] == 'rebooting'
+        assert data['version'] == 'owl-os-pi5-v0.2.0'
+
+    @patch('app.device_state')
+    @patch('app.mender')
+    def test_check_os_installing_stage_defaults_to_downloading(self, mock_mender, mock_ds, app_client):
+        """Stage should default to 'downloading' when lock has no stage field yet."""
+        mock_mender.get_versions.return_value = ('v0.1.0', None)
+        mock_ds.is_any_update_in_progress.return_value = (True, 'Installing owl-os-pi5-v0.2.0')
+        mock_ds.is_install_locked.return_value = (True, {
+            'version': 'owl-os-pi5-v0.2.0',
+            'started_at': '2026-01-01T00:00:00',
+        })
+        mock_ds._get_mender_update_status.return_value = None
+
+        response = app_client.get('/mender/check-os')
+        data = json.loads(response.data)
+        assert data['installing'] is True
+        assert data['stage'] == 'downloading'
+
 
 class TestMenderInstallOs:
     """Test the /mender/install-os endpoint."""
