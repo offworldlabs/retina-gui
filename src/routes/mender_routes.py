@@ -275,9 +275,7 @@ def install_os():
         return jsonify({"success": False, "error": error})
 
     def _run_os_install(download_url):
-        from routes.mode import _write_mode
         try:
-            _write_mode('spectrum')
             try:
                 subprocess.run(
                     ["mender-update", "rollback"],
@@ -296,7 +294,6 @@ def install_os():
             if not success:
                 app.logger.error(f"OS install failed: {error}")
                 device_state.release_install_lock()
-                _write_mode('radar')
                 return
 
             # Save wizard step so the wizard resumes at "system" post-reboot
@@ -311,12 +308,10 @@ def install_os():
             except Exception as e:
                 app.logger.error(f"Reboot failed: {e}")
                 device_state.release_install_lock()
-                _write_mode('radar')
 
         except Exception as e:
             app.logger.error(f"OS install thread crashed: {e}")
             device_state.release_install_lock()
-            _write_mode('radar')
 
     threading.Thread(target=_run_os_install, args=(url,), daemon=True).start()
     return jsonify({"success": True, "version": release_name})
