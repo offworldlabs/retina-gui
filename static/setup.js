@@ -277,6 +277,11 @@ function initSetupWizard(resumeStep, highestStepName, devMode, isRerun, demoMode
                     cardStatus.innerHTML = '<span class="text-success">&#10003;</span>';
                     nextBtn.style.display = '';
                     nextBtn.textContent = 'Continue \u2192';
+                })
+                .catch(function() {
+                    status.textContent = 'Unable to check system version.';
+                    nextBtn.style.display = '';
+                    nextBtn.textContent = 'Continue \u2192';
                 });
             nextBtn.addEventListener('click', advance);
             return;
@@ -328,6 +333,11 @@ function initSetupWizard(resumeStep, highestStepName, devMode, isRerun, demoMode
                         cardStatus.innerHTML = '';
                         updateBtn.style.display = '';
                     }
+                })
+                .catch(function() {
+                    installStatus.innerHTML = '<span class="text-danger">Request failed. Please try again.</span>';
+                    cardStatus.innerHTML = '';
+                    updateBtn.style.display = '';
                 });
         });
 
@@ -471,6 +481,14 @@ function initSetupWizard(resumeStep, highestStepName, devMode, isRerun, demoMode
                             if (backBtn) backBtn.style.display = '';
                             rerunUpdateGate();
                         }
+                    })
+                    .catch(function() {
+                        installStatus.innerHTML = '<span class="text-danger">Request failed. Please try again.</span>';
+                        status.textContent = '';
+                        installBtn.style.display = '';
+                        nextBtn.style.display = '';
+                        if (backBtn) backBtn.style.display = '';
+                        rerunUpdateGate();
                     });
             });
 
