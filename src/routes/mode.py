@@ -204,7 +204,6 @@ def enforce_radar_mode(retina_node_path: str) -> None:
              'blah2', 'blah2_api', 'blah2_web', 'blah2_host'],
             cwd=retina_node_path, capture_output=True, timeout=120
         )
-        _write_mode('radar')
     except Exception:
         pass
 

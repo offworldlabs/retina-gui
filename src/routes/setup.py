@@ -48,7 +48,11 @@ def save_step():
 def complete():
     """Mark setup wizard as complete."""
     from app import config_mgr, RETINA_NODE_PATH
-    from routes.mode import enforce_radar_mode
+    from routes.mode import enforce_radar_mode, _write_mode
+
+    # Write radar to mode.txt before docker ops so the home page cannot race
+    # and see spectrum mode while enforce_radar_mode is still running.
+    _write_mode('radar')
 
     if config_mgr.is_retina_node_installed():
         enforce_radar_mode(RETINA_NODE_PATH)
