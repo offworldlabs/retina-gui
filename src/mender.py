@@ -232,13 +232,14 @@ def parse_version(artifact_name: str) -> tuple[int, ...] | None:
 
 def get_all_stable_versions_from_github(
     repo: str = "offworldlabs/retina-node",
-) -> tuple[list[str], str | None]:
+) -> tuple[list[dict], str | None]:
     """Get all stable version tags from GitHub releases, newest first.
 
     Queries GitHub releases API, filters to stable versions (excludes rc, dev, beta),
-    and returns all matching tags sorted by semver descending.
+    and returns all matching entries sorted by semver descending.
 
-    Returns (versions, error) tuple. versions is a list like ["v0.3.5", "v0.3.4"].
+    Returns (versions, error) tuple. Each entry is {"version": "v0.3.5", "size_bytes": 628000000}.
+    size_bytes is the size of the .mender artifact asset, or None if no assets are present.
     """
     try:
         resp = requests.get(
@@ -253,9 +254,17 @@ def get_all_stable_versions_from_github(
         for release in resp.json():
             tag = release.get("tag_name", "")
             if parse_version(f"retina-node-{tag}"):
-                stable.append(tag)
+                assets = release.get("assets", [])
+                mender_asset = next((a for a in assets if a["name"].endswith(".mender")), None)
+                if mender_asset:
+                    size_bytes = mender_asset["size"]
+                elif assets:
+                    size_bytes = max(a["size"] for a in assets)
+                else:
+                    size_bytes = None
+                stable.append({"version": tag, "size_bytes": size_bytes})
 
-        stable.sort(key=lambda t: parse_version(f"retina-node-{t}"), reverse=True)
+        stable.sort(key=lambda v: parse_version(f"retina-node-{v['version']}"), reverse=True)
         return stable, None
     except requests.RequestException as e:
         return [], str(e)

@@ -1,3 +1,8 @@
+function formatSize(bytes) {
+    var mb = bytes ? '~' + Math.round(bytes / 1024 / 1024) + ' MB' : '~600 MB';
+    return mb + ' · 5–10 minutes';
+}
+
 function initSetupWizard(resumeStep, highestStepName, devMode, isRerun, demoMode) {
     var steps = [];
     var currentIndex = 0;
@@ -183,7 +188,11 @@ function initSetupWizard(resumeStep, highestStepName, devMode, isRerun, demoMode
                 return ok({
                     current_version: 'v0.9.0-demo',
                     latest_version: 'v1.0.0-demo',
-                    available_updates: ['v1.0.0-demo', 'v0.9.5-demo'],
+                    latest_size_bytes: 641000000,
+                    available_updates: [
+                        { version: 'v1.0.0-demo', size_bytes: 641000000 },
+                        { version: 'v0.9.5-demo', size_bytes: 635000000 },
+                    ],
                 });
             }
             if (path === '/mender/install') {
@@ -445,14 +454,14 @@ function initSetupWizard(resumeStep, highestStepName, devMode, isRerun, demoMode
                     if (updates.length > 0) {
                         description.textContent = 'A newer version of RETINA is available.';
                         var cards = updates.map(function(v, i) {
-                            var safeId = 'pkg-' + v.replace(/[^a-z0-9]/gi, '-');
+                            var safeId = 'pkg-' + v.version.replace(/[^a-z0-9]/gi, '-');
                             return '<div class="step-card">' +
-                                '<div><input type="radio" name="packageSelect" id="' + safeId + '" value="' + esc(v) + '"' +
+                                '<div><input type="radio" name="packageSelect" id="' + safeId + '" value="' + esc(v.version) + '"' +
                                 (i === 0 ? ' checked' : '') +
                                 ' style="accent-color:var(--ink);margin-right:12px;"></div>' +
                                 '<label class="step-card-body" for="' + safeId + '" style="cursor:pointer;">' +
-                                '<div class="step-card-title">Retina Passive Radar <span style="font-weight:400;color:var(--ink-3);font-size:13px;margin-left:4px;">' + esc(v) + '</span></div>' +
-                                '<div class="step-card-sub">~600 MB \u00b7 5\u201310 minutes</div>' +
+                                '<div class="step-card-title">Retina Passive Radar <span style="font-weight:400;color:var(--ink-3);font-size:13px;margin-left:4px;">' + esc(v.version) + '</span></div>' +
+                                '<div class="step-card-sub">' + formatSize(v.size_bytes) + '</div>' +
                                 '</label></div>';
                         });
                         packageList.innerHTML = cards.join('');
@@ -544,10 +553,12 @@ function initSetupWizard(resumeStep, highestStepName, devMode, isRerun, demoMode
                     status.innerHTML = 'Packages are up to date &#10003;';
                     packageStatus.innerHTML = '<span class="text-success">&#10003;</span>';
                     document.getElementById('radarLatestVersion').textContent = data.current_version;
+                    document.getElementById('radarPackageSub').textContent = formatSize(data.latest_size_bytes);
                     nextBtn.style.display = '';
                 } else {
                     latestVersion = data.latest_version;
                     document.getElementById('radarLatestVersion').textContent = data.latest_version;
+                    document.getElementById('radarPackageSub').textContent = formatSize(data.latest_size_bytes);
                     installBtn.style.display = '';
                     updateInstallGate();
                     // No skip — installation is required on a fresh node
