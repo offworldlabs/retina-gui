@@ -53,7 +53,7 @@ def sample_merged_config():
             'device': {
                 'type': 'RspDuo',
                 'agcSetPoint': -50,
-                'gainReduction': 40,
+                'gainReduction': [40, 40],
                 'lnaState': 4,
                 'dabNotch': True,
                 'rfNotch': True,

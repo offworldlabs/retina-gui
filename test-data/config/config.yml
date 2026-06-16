@@ -9,7 +9,7 @@ capture:
     type: "RspDuo"
     agcSetPoint: -60
     bandwidthNumber: 0
-    gainReduction: 40
+    gainReduction: [40, 40]
     lnaState: 4
     dabNotch: true
     rfNotch: true

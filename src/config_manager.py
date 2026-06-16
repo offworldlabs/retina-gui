@@ -45,12 +45,14 @@ class ConfigManager:
         if not nested:
             return {}
         device = nested.get('device', {}) or {}
+        gain_reduction = device.get('gainReduction') or []
         return {
             'fs': nested.get('fs'),
             'fc': nested.get('fc'),
             'device_type': device.get('type'),
             'device_agcSetPoint': device.get('agcSetPoint'),
-            'device_gainReduction': device.get('gainReduction'),
+            'device_gainReductionA': gain_reduction[0] if len(gain_reduction) > 0 else None,
+            'device_gainReductionB': gain_reduction[1] if len(gain_reduction) > 1 else None,
             'device_lnaState': device.get('lnaState'),
             'device_dabNotch': device.get('dabNotch'),
             'device_rfNotch': device.get('rfNotch'),
@@ -66,7 +68,7 @@ class ConfigManager:
             'device': {
                 'type': flat.get('device_type'),
                 'agcSetPoint': flat.get('device_agcSetPoint'),
-                'gainReduction': flat.get('device_gainReduction'),
+                'gainReduction': [flat.get('device_gainReductionA'), flat.get('device_gainReductionB')],
                 'lnaState': flat.get('device_lnaState'),
                 'dabNotch': flat.get('device_dabNotch', False),
                 'rfNotch': flat.get('device_rfNotch', False),

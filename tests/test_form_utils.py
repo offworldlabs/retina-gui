@@ -18,7 +18,7 @@ class TestGetFieldInputType:
 
     def test_int_to_number(self):
         """Integer fields should map to number."""
-        field_info = CaptureFormConfig.model_fields['device_gainReduction']
+        field_info = CaptureFormConfig.model_fields['device_gainReductionA']
         assert get_field_input_type(field_info) == 'number'
 
     def test_str_to_text(self):
@@ -37,13 +37,13 @@ class TestGetFieldConstraints:
 
     def test_ge_constraint(self):
         """ge constraint should become min."""
-        field_info = CaptureFormConfig.model_fields['device_gainReduction']
+        field_info = CaptureFormConfig.model_fields['device_gainReductionA']
         constraints = get_field_constraints(field_info)
         assert constraints.get('min') == 20
 
     def test_le_constraint(self):
         """le constraint should become max."""
-        field_info = CaptureFormConfig.model_fields['device_gainReduction']
+        field_info = CaptureFormConfig.model_fields['device_gainReductionA']
         constraints = get_field_constraints(field_info)
         assert constraints.get('max') == 59
 
@@ -84,7 +84,8 @@ class TestSchemaToFormFields:
             'fc': 503000000,
             'device_type': 'RspDuo',
             'device_agcSetPoint': -50,
-            'device_gainReduction': 40,
+            'device_gainReductionA': 40,
+            'device_gainReductionB': 40,
             'device_lnaState': 4,
             'device_dabNotch': True,
             'device_rfNotch': True,
@@ -93,7 +94,7 @@ class TestSchemaToFormFields:
         fields = schema_to_form_fields(CaptureFormConfig, values)
 
         # Should have all flat fields
-        assert len(fields) == 9
+        assert len(fields) == 10
 
         # Check fs field
         fs_field = next(f for f in fields if f['name'] == 'fs')
@@ -109,7 +110,8 @@ class TestSchemaToFormFields:
             'fc': 503000000,
             'device_type': 'RspDuo',
             'device_agcSetPoint': -50,
-            'device_gainReduction': 40,
+            'device_gainReductionA': 40,
+            'device_gainReductionB': 40,
             'device_lnaState': 4,
             'device_dabNotch': True,
             'device_rfNotch': False,
@@ -127,10 +129,10 @@ class TestSchemaToFormFields:
 
     def test_constraints_included(self):
         """Field constraints should be included."""
-        values = {'device_gainReduction': 40}
+        values = {'device_gainReductionA': 40}
         fields = schema_to_form_fields(CaptureFormConfig, values)
 
-        gain_field = next(f for f in fields if f['name'] == 'device_gainReduction')
+        gain_field = next(f for f in fields if f['name'] == 'device_gainReductionA')
         assert gain_field.get('min') == 20
         assert gain_field.get('max') == 59
 
@@ -141,7 +143,8 @@ class TestSchemaToFormFields:
             'fc': 100000000,
             'device_type': 'CustomDevice',
             'device_agcSetPoint': -30,
-            'device_gainReduction': 25,
+            'device_gainReductionA': 25,
+            'device_gainReductionB': 25,
             'device_lnaState': 7,
             'device_dabNotch': False,
             'device_rfNotch': False,
