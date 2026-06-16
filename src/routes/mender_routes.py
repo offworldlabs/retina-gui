@@ -36,7 +36,9 @@ def check():
     if error:
         return jsonify({"error": error})
 
-    latest = all_versions[0] if all_versions else None
+    latest_meta = all_versions[0] if all_versions else None
+    latest = latest_meta["version"] if latest_meta else None
+    latest_size_bytes = latest_meta["size_bytes"] if latest_meta else None
 
     if current:
         current_tuple = parse_version(f"retina-node-{current}")
@@ -45,15 +47,17 @@ def check():
             available_updates = []
         else:
             available_updates = [
-                v for v in all_versions
-                if (vt := parse_version(f"retina-node-{v}")) and vt > current_tuple
+                {"version": v["version"], "size_bytes": v["size_bytes"]}
+                for v in all_versions
+                if (vt := parse_version(f"retina-node-{v['version']}")) and vt > current_tuple
             ]
     else:
-        available_updates = list(all_versions)
+        available_updates = [{"version": v["version"], "size_bytes": v["size_bytes"]} for v in all_versions]
 
     return jsonify({
         "installing": False,
         "latest_version": latest,
+        "latest_size_bytes": latest_size_bytes,
         "current_version": current,
         "available_updates": available_updates,
     })
