@@ -1,12 +1,16 @@
 from flask import Flask
 from flask_wtf.csrf import CSRFProtect
 import os
+import socket
 import subprocess
+import threading
+from wsgiref.simple_server import WSGIServer, make_server
 
 from config_manager import ConfigManager
 from device_state import DeviceState
 from mender import MenderClient
 from ssh_keys import SSHKeyManager
+from tls_cert import ensure_self_signed_cert
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 app = Flask(__name__,
@@ -121,7 +125,36 @@ app.register_blueprint(towers_bp)
 app.register_blueprint(mode_bp)
 
 
+class _DualStackWSGIServer(WSGIServer):
+    """WSGIServer bound to AF_INET6 so it also accepts IPv4 (dual-stack), matching
+    how the main app binds host="::"."""
+    address_family = socket.AF_INET6
+
+
+def _redirect_to_https(environ, start_response):
+    """Minimal WSGI app: 301-redirect plain HTTP requests to HTTPS."""
+    host = environ.get('HTTP_HOST', '').split(':')[0]
+    path = environ.get('RAW_URI', environ.get('PATH_INFO', '/'))
+    start_response('301 Moved Permanently', [('Location', f'https://{host}{path}')])
+    return []
+
+
 if __name__ == "__main__":
-    port = int(os.environ.get('PORT', 80))
+    port = int(os.environ.get('PORT', 443))
+    http_port = int(os.environ.get('HTTP_PORT', 80))
     debug = os.environ.get('FLASK_DEBUG', 'false').lower() == 'true'
-    app.run(host="::", port=port, debug=debug)
+
+    cert_path, key_path = ensure_self_signed_cert(DATA_DIR)
+
+    # With the debug reloader, this script re-runs in both the watcher process
+    # and the actual serving child (WERKZEUG_RUN_MAIN=true) — only start the
+    # redirect listener once, in whichever process really serves the app.
+    # Note: this must NOT use werkzeug.serving.run_simple — under the reloader
+    # it ignores the port argument and silently reuses the main app's already
+    # -bound socket (keyed off the WERKZEUG_SERVER_FD env var), since that env
+    # var is process-global, not specific to a given run_simple() call.
+    if not debug or os.environ.get('WERKZEUG_RUN_MAIN') == 'true':
+        redirect_server = make_server("::", http_port, _redirect_to_https, server_class=_DualStackWSGIServer)
+        threading.Thread(target=redirect_server.serve_forever, daemon=True).start()
+
+    app.run(host="::", port=port, debug=debug, ssl_context=(cert_path, key_path))

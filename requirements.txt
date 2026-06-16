@@ -3,3 +3,4 @@ flask-wtf
 pydantic
 requests
 pyyaml
+cryptography
