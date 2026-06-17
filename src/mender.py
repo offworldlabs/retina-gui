@@ -183,11 +183,19 @@ class MenderClient:
         except requests.RequestException as e:
             return None, str(e)
 
-    def install_from_url(self, url: str, timeout: int = 600) -> tuple[bool, str | None]:
+    def install_from_url(
+        self, url: str, timeout: int = 600, commit: bool = True
+    ) -> tuple[bool, str | None]:
         """Install artifact from URL via mender-update (standalone).
 
-        Used for app updates only (no reboot needed). OS updates use managed
-        mode via the mender-updated daemon — see /mender/install-os.
+        Args:
+            url:     Signed artifact download URL.
+            timeout: Download+install timeout in seconds. OS images need much
+                     longer than the default — pass 1800 for a ~600 MB rootfs.
+            commit:  Whether to commit immediately after install. True for
+                     app artifacts (no reboot needed). False for OS rootfs
+                     artifacts, where the device must reboot into the new
+                     partition first; commit is then called at next startup.
 
         Returns (success, error) tuple.
         """
@@ -200,6 +208,15 @@ class MenderClient:
             )
             if result.returncode != 0:
                 return False, result.stderr or "Install failed"
+            if commit:
+                try:
+                    subprocess.run(
+                        ["mender-update", "commit"],
+                        capture_output=True,
+                        timeout=30,
+                    )
+                except Exception:
+                    pass
             return True, None
         except subprocess.TimeoutExpired:
             return False, "Installation timed out"
@@ -248,13 +265,14 @@ def parse_version(artifact_name: str) -> tuple[int, ...] | None:
 
 def get_all_stable_versions_from_github(
     repo: str = "offworldlabs/retina-node",
-) -> tuple[list[str], str | None]:
+) -> tuple[list[dict], str | None]:
     """Get all stable version tags from GitHub releases, newest first.
 
     Queries GitHub releases API, filters to stable versions (excludes rc, dev, beta),
-    and returns all matching tags sorted by semver descending.
+    and returns all matching entries sorted by semver descending.
 
-    Returns (versions, error) tuple. versions is a list like ["v0.3.5", "v0.3.4"].
+    Returns (versions, error) tuple. Each entry is {"version": "v0.3.5", "size_bytes": 628000000}.
+    size_bytes is the size of the .mender artifact asset, or None if no assets are present.
     """
     try:
         resp = requests.get(
@@ -269,9 +287,17 @@ def get_all_stable_versions_from_github(
         for release in resp.json():
             tag = release.get("tag_name", "")
             if parse_version(f"retina-node-{tag}"):
-                stable.append(tag)
+                assets = release.get("assets", [])
+                mender_asset = next((a for a in assets if a["name"].endswith(".mender")), None)
+                if mender_asset:
+                    size_bytes = mender_asset["size"]
+                elif assets:
+                    size_bytes = max(a["size"] for a in assets)
+                else:
+                    size_bytes = None
+                stable.append({"version": tag, "size_bytes": size_bytes})
 
-        stable.sort(key=lambda t: parse_version(f"retina-node-{t}"), reverse=True)
+        stable.sort(key=lambda v: parse_version(f"retina-node-{v['version']}"), reverse=True)
         return stable, None
     except requests.RequestException as e:
         return [], str(e)
@@ -320,11 +346,12 @@ def get_latest_stable_from_github(
 def parse_os_version(tag: str) -> tuple[int, ...] | None:
     """Extract semver tuple from owl-os version strings.
 
-    Handles formats: 'os-v0.1.0', 'v0.1.0', '0.1.0'.
-    Returns version tuple (0, 1, 0) for stable releases.
-    Returns None for RCs, dev, or non-matching strings.
+    Handles formats: 'os-v0.1.0', 'v0.1.0', '0.1.0',
+    and pre-release variants like 'os-v0.1.0-dev', 'v0.1.0-rc1'.
+    Returns the numeric version tuple (0, 1, 0) — suffix is ignored for comparison.
+    Returns None for non-matching strings.
     """
-    match = re.match(r"^(?:os-)?v?(\d+)\.(\d+)\.(\d+)$", tag)
+    match = re.match(r"^(?:os-)?v?(\d+)\.(\d+)\.(\d+)(?:[-.].+)?$", tag)
     if match:
         return tuple(int(x) for x in match.groups())
     return None
@@ -333,12 +360,13 @@ def parse_os_version(tag: str) -> tuple[int, ...] | None:
 def get_latest_owl_os_from_github(
     repo: str = "offworldlabs/owl-os",
 ) -> tuple[str | None, str | None]:
-    """Get latest stable owl-os version tag from GitHub releases.
+    """Get latest owl-os version tag from GitHub releases.
 
-    Queries GitHub releases API, filters to stable versions
-    (tags matching os-v*.*.*), and returns the highest semver version.
+    Queries GitHub releases API, includes both stable and pre-release builds
+    (tags matching os-v*.*.*[-suffix]), and returns the highest semver version.
 
-    Returns (version_tag, error) tuple. version_tag is like 'os-v0.2.0'.
+    Returns (version_tag, error) tuple. version_tag is like 'os-v0.2.0' or
+    'os-v0.2.1-dev'.
     """
     try:
         resp = requests.get(
@@ -349,20 +377,19 @@ def get_latest_owl_os_from_github(
         if resp.status_code != 200:
             return None, f"GitHub API error: {resp.status_code}"
 
-        releases = resp.json()
-        stable = []
-        for release in releases:
+        found = []
+        for release in resp.json():
             tag = release.get("tag_name", "")
             if not tag.startswith("os-v"):
                 continue
             version = parse_os_version(tag)
             if version:
-                stable.append((tag, version))
+                found.append((tag, version))
 
-        if not stable:
-            return None, "No stable owl-os releases found"
+        if not found:
+            return None, "No owl-os releases found"
 
-        stable.sort(key=lambda x: x[1], reverse=True)
-        return stable[0][0], None
+        found.sort(key=lambda x: x[1], reverse=True)
+        return found[0][0], None
     except requests.RequestException as e:
         return None, str(e)

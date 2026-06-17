@@ -1,3 +1,8 @@
+function formatSize(bytes) {
+    var mb = bytes ? '~' + Math.round(bytes / 1024 / 1024) + ' MB' : '~600 MB';
+    return mb + ' · 5–10 minutes';
+}
+
 function initSetupWizard(resumeStep, highestStepName, devMode, isRerun, demoMode) {
     var steps = [];
     var currentIndex = 0;
@@ -75,52 +80,51 @@ function initSetupWizard(resumeStep, highestStepName, devMode, isRerun, demoMode
     }
 
     function showStep(index) {
-        // Call leave hook for the step we're navigating away from
         var leaveFn = leaveHooks[steps[currentIndex].name];
-        if (leaveFn) leaveFn();
+        var leavePromise = Promise.resolve(leaveFn ? leaveFn() : null);
 
-        // Clear any active polling timer when leaving a step
-        if (pollTimer) {
-            clearInterval(pollTimer);
-            pollTimer = null;
+        // Disable navigation while an async leave hook (e.g. mode revert) completes.
+        var navBtns = document.querySelectorAll('.step-foot-btns button, #wizBackBtn');
+        navBtns.forEach(function(b) { b.disabled = true; });
+
+        function doTransition() {
+            navBtns.forEach(function(b) { b.disabled = false; });
+
+            if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+
+            var card = document.querySelector('.setup-card');
+            var towersIndex = -1;
+            for (var i = 0; i < steps.length; i++) {
+                if (steps[i].name === 'towers') { towersIndex = i; break; }
+            }
+            card.classList.toggle('wide', index === towersIndex);
+
+            steps.forEach(function(s, i) {
+                s.el.style.display = (i === index) ? '' : 'none';
+            });
+            currentIndex = index;
+            updateProgress(index);
+
+            var backBtn = document.getElementById('wizBackBtn');
+            if (backBtn) {
+                backBtn.style.display = index === 0 ? 'none' : '';
+                if (index > 0) backBtn.textContent = '← Back';
+            }
+
+            document.querySelectorAll('.step-foot-btns').forEach(function(el) {
+                el.style.display = 'none';
+            });
+            var activeBtns = document.getElementById('stepBtns-' + steps[index].name);
+            if (activeBtns) activeBtns.style.display = '';
+
+            postJSON('/set-up/save-step', { step: steps[index].name });
+
+            var enterFn = enterHooks[steps[index].name];
+            if (enterFn) enterFn();
         }
 
-        var card = document.querySelector('.setup-card');
-        // Wide card only for towers step
-        var towersIndex = -1;
-        for (var i = 0; i < steps.length; i++) {
-            if (steps[i].name === 'towers') { towersIndex = i; break; }
-        }
-        if (index === towersIndex) {
-            card.classList.add('wide');
-        } else {
-            card.classList.remove('wide');
-        }
-
-        steps.forEach(function(s, i) {
-            s.el.style.display = (i === index) ? '' : 'none';
-        });
-        currentIndex = index;
-        updateProgress(index);
-
-        // Back/Exit button — always visible; label changes based on step
-        var backBtn = document.getElementById('wizBackBtn');
-        if (backBtn) {
-            backBtn.style.display = '';
-            backBtn.textContent = (index === 0) ? 'Exit' : '← Back';
-        }
-
-        // Switch active footer button group
-        document.querySelectorAll('.step-foot-btns').forEach(function(el) {
-            el.style.display = 'none';
-        });
-        var activeBtns = document.getElementById('stepBtns-' + steps[index].name);
-        if (activeBtns) activeBtns.style.display = '';
-
-        postJSON('/set-up/save-step', {step: steps[index].name});
-
-        var enterFn = enterHooks[steps[index].name];
-        if (enterFn) enterFn();
+        // Always transition regardless of leave hook success or failure.
+        leavePromise.then(doTransition, doTransition);
     }
 
     function advance() {
@@ -150,6 +154,21 @@ function initSetupWizard(resumeStep, highestStepName, devMode, isRerun, demoMode
         });
     }
 
+    // Single beforeunload guard for the entire wizard lifetime.
+    // Shows the browser's native "leave site?" dialog on all steps.
+    // On the location step it also fires the SDR-release beacon so
+    // retina-spectrum stops even if the user confirms and leaves.
+    function handleBeforeUnload(e) {
+        if (steps[currentIndex] && steps[currentIndex].name === 'location') {
+            var fd = new FormData();
+            fd.append('csrf_token', csrfToken);
+            if (navigator.sendBeacon) navigator.sendBeacon('/api/mode/release-spectrum', fd);
+        }
+        e.preventDefault();
+        e.returnValue = '';
+    }
+    window.addEventListener('beforeunload', handleBeforeUnload);
+
     // ── Demo mode: mock all API calls ────────────────────
     if (demoMode) {
         var _demoNodeInstalling = false;
@@ -169,7 +188,11 @@ function initSetupWizard(resumeStep, highestStepName, devMode, isRerun, demoMode
                 return ok({
                     current_version: 'v0.9.0-demo',
                     latest_version: 'v1.0.0-demo',
-                    available_updates: ['v1.0.0-demo', 'v0.9.5-demo'],
+                    latest_size_bytes: 641000000,
+                    available_updates: [
+                        { version: 'v1.0.0-demo', size_bytes: 641000000 },
+                        { version: 'v0.9.5-demo', size_bytes: 635000000 },
+                    ],
                 });
             }
             if (path === '/mender/install') {
@@ -198,7 +221,8 @@ function initSetupWizard(resumeStep, highestStepName, devMode, isRerun, demoMode
     var rfSseReconnectTimer = null;
     var wizardWasMode = null;
     var connectRfSse = null; // defined inside enterHooks.location on first entry
-    var locationActive = false; // guards against dangling fetch resolving after leave
+    var locationActive = false;    // guards against dangling fetch resolving after leave
+    var pendingModeSwitch = null;  // tracks in-flight /api/mode POST so the leave hook can serialise the revert
 
     // Step 1: Agreements
     enterHooks.agreements = function() {
@@ -262,6 +286,11 @@ function initSetupWizard(resumeStep, highestStepName, devMode, isRerun, demoMode
                     cardStatus.innerHTML = '<span class="text-success">&#10003;</span>';
                     nextBtn.style.display = '';
                     nextBtn.textContent = 'Continue \u2192';
+                })
+                .catch(function() {
+                    status.textContent = 'Unable to check system version.';
+                    nextBtn.style.display = '';
+                    nextBtn.textContent = 'Continue \u2192';
                 });
             nextBtn.addEventListener('click', advance);
             return;
@@ -294,8 +323,13 @@ function initSetupWizard(resumeStep, highestStepName, devMode, isRerun, demoMode
                     status.innerHTML = 'System is up to date &#10003;';
                     cardStatus.innerHTML = '<span class="text-success">&#10003;</span>';
                     nextBtn.style.display = '';
-                    nextBtn.textContent = 'Skip \u2192';
+                    nextBtn.textContent = 'Continue \u2192';
                 }
+            })
+            .catch(function() {
+                status.textContent = 'Unable to check for system updates.';
+                nextBtn.style.display = '';
+                nextBtn.textContent = 'Skip \u2192';
             });
 
         updateBtn.addEventListener('click', function() {
@@ -313,6 +347,11 @@ function initSetupWizard(resumeStep, highestStepName, devMode, isRerun, demoMode
                         cardStatus.innerHTML = '';
                         updateBtn.style.display = '';
                     }
+                })
+                .catch(function() {
+                    installStatus.innerHTML = '<span class="text-danger">Request failed. Please try again.</span>';
+                    cardStatus.innerHTML = '';
+                    updateBtn.style.display = '';
                 });
         });
 
@@ -325,6 +364,8 @@ function initSetupWizard(resumeStep, highestStepName, devMode, isRerun, demoMode
                 status.textContent = 'Downloading OS update...';
             } else if (stage === 'installing') {
                 status.textContent = 'Installing OS update...';
+            } else if (stage === 'rebooting') {
+                status.textContent = 'Rebooting device...';
             } else {
                 status.textContent = 'Updating...';
             }
@@ -333,6 +374,7 @@ function initSetupWizard(resumeStep, highestStepName, devMode, isRerun, demoMode
 
         function startSystemPoll() {
             showStage('waiting');
+            if (backBtn) backBtn.style.display = 'none';
             if (pollTimer) clearInterval(pollTimer);
             pollTimer = setInterval(function() {
                 fetch('/mender/check-os')
@@ -341,6 +383,7 @@ function initSetupWizard(resumeStep, highestStepName, devMode, isRerun, demoMode
                         if (!data.installing) {
                             clearInterval(pollTimer);
                             pollTimer = null;
+                            if (backBtn) backBtn.style.display = '';
                             if (!data.update_available) {
                                 status.innerHTML = 'Update complete &#10003;';
                                 installStatus.innerHTML = '<span class="text-success">Complete!</span>';
@@ -370,7 +413,8 @@ function initSetupWizard(resumeStep, highestStepName, devMode, isRerun, demoMode
         var regionCheck = document.getElementById('regionCheck');
         var packageStatus = document.getElementById('radarPackageStatus');
 
-        // On re-run, package is already installed \u2014 show available updates as cards, don't require action
+        // Re-run: RETINA is already installed — show installed version for reference
+        // and any available updates below. No reinstall option.
         if (isRerun) {
             function rerunUpdateGate() {
                 if (installBtn.style.display !== 'none') {
@@ -382,49 +426,61 @@ function initSetupWizard(resumeStep, highestStepName, devMode, isRerun, demoMode
             fetch('/mender/check')
                 .then(function(r) { return r.json(); })
                 .then(function(data) {
+                    if (data.installing) {
+                        status.textContent = data.reason || 'Installation in progress...';
+                        installStatus.innerHTML = '<span class="text-warning">Do not power off the device.</span>';
+                        if (backBtn) backBtn.style.display = 'none';
+                        startRadarPoll();
+                        return;
+                    }
+
                     var updates = data.available_updates || [];
+
                     var packageList = document.getElementById('radarPackageList');
+                    var availableSection = document.getElementById('radarAvailableSection');
+                    var availableHeading = document.getElementById('radarAvailableHeading');
+                    var description = document.getElementById('radarDescription');
+
+                    if (data.current_version) {
+                        document.getElementById('radarCurrentList').innerHTML =
+                            '<div class="step-card">' +
+                            '<div class="step-card-body">' +
+                            '<div class="step-card-title">Retina Passive Radar <span style="font-weight:400;color:var(--ink-3);font-size:13px;margin-left:4px;">' + esc(data.current_version) + '</span></div>' +
+                            '<div class="step-card-sub">Installed</div>' +
+                            '</div></div>';
+                        document.getElementById('radarCurrentSection').style.display = '';
+                    }
 
                     if (updates.length > 0) {
+                        description.textContent = 'A newer version of RETINA is available.';
                         var cards = updates.map(function(v, i) {
-                            var safeId = 'pkg-' + v.replace(/[^a-z0-9]/gi, '-');
+                            var safeId = 'pkg-' + v.version.replace(/[^a-z0-9]/gi, '-');
                             return '<div class="step-card">' +
-                                '<div><input type="radio" name="packageSelect" id="' + safeId + '" value="' + v + '"' +
+                                '<div><input type="radio" name="packageSelect" id="' + safeId + '" value="' + esc(v.version) + '"' +
                                 (i === 0 ? ' checked' : '') +
                                 ' style="accent-color:var(--ink);margin-right:12px;"></div>' +
                                 '<label class="step-card-body" for="' + safeId + '" style="cursor:pointer;">' +
-                                '<div class="step-card-title">Retina Passive Radar <span style="font-weight:400;color:var(--ink-3);font-size:13px;margin-left:4px;">' + v + '</span></div>' +
-                                '<div class="step-card-sub">~600 MB \u00b7 5\u201310 minutes</div>' +
+                                '<div class="step-card-title">Retina Passive Radar <span style="font-weight:400;color:var(--ink-3);font-size:13px;margin-left:4px;">' + esc(v.version) + '</span></div>' +
+                                '<div class="step-card-sub">' + formatSize(v.size_bytes) + '</div>' +
                                 '</label></div>';
                         });
-                        if (data.current_version) {
-                            var cur = data.current_version;
-                            var safeId = 'pkg-' + cur.replace(/[^a-z0-9]/gi, '-');
-                            cards.push(
-                                '<div class="step-card">' +
-                                '<div><input type="radio" name="packageSelect" id="' + safeId + '" value="' + cur + '"' +
-                                ' style="accent-color:var(--ink);margin-right:12px;"></div>' +
-                                '<label class="step-card-body" for="' + safeId + '" style="cursor:pointer;">' +
-                                '<div class="step-card-title">Retina Passive Radar <span style="font-weight:400;color:var(--ink-3);font-size:13px;margin-left:4px;">' + cur + '</span>' +
-                                '<span style="font-size:11px;color:var(--ink-3);margin-left:6px;">(installed)</span></div>' +
-                                '<div class="step-card-sub">Reinstall \u00b7 ~600 MB \u00b7 5\u201310 minutes</div>' +
-                                '</label></div>'
-                            );
-                        }
                         packageList.innerHTML = cards.join('');
+                        availableHeading.textContent = 'Available updates';
+                        availableHeading.style.display = '';
                         installBtn.textContent = 'Install selected';
                         installBtn.style.display = '';
                         rerunUpdateGate();
-                        nextBtn.textContent = 'Skip \u2192';
                     } else {
-                        if (data.current_version) {
-                            document.getElementById('radarLatestVersion').textContent = data.current_version;
-                        }
-                        packageStatus.innerHTML = '<span class="text-success">&#10003;</span>';
-                        status.innerHTML = 'Packages are up to date &#10003;';
-                        nextBtn.textContent = 'Continue \u2192';
+                        description.textContent = 'RETINA is up to date.';
+                        availableSection.style.display = 'none';
                     }
 
+                    nextBtn.textContent = 'Skip \u2192';
+                    nextBtn.style.display = '';
+                })
+                .catch(function() {
+                    status.textContent = 'Unable to check for updates.';
+                    nextBtn.textContent = 'Skip \u2192';
                     nextBtn.style.display = '';
                 });
 
@@ -432,6 +488,7 @@ function initSetupWizard(resumeStep, highestStepName, devMode, isRerun, demoMode
                 var selected = document.querySelector('input[name="packageSelect"]:checked');
                 installBtn.style.display = 'none';
                 nextBtn.style.display = 'none';
+                if (backBtn) backBtn.style.display = 'none';
                 status.textContent = 'Installing...';
                 installStatus.innerHTML = '<span class="text-warning">Do not power off the device.</span>';
 
@@ -445,14 +502,28 @@ function initSetupWizard(resumeStep, highestStepName, devMode, isRerun, demoMode
                             status.textContent = '';
                             installBtn.style.display = '';
                             nextBtn.style.display = '';
+                            if (backBtn) backBtn.style.display = '';
                             rerunUpdateGate();
                         }
+                    })
+                    .catch(function() {
+                        installStatus.innerHTML = '<span class="text-danger">Request failed. Please try again.</span>';
+                        status.textContent = '';
+                        installBtn.style.display = '';
+                        nextBtn.style.display = '';
+                        if (backBtn) backBtn.style.display = '';
+                        rerunUpdateGate();
                     });
             });
 
             nextBtn.addEventListener('click', advance);
             return;
         }
+
+        // Fresh install — RETINA is not yet on this node, installation is required.
+        document.getElementById('radarDescription').textContent = 'RETINA is not yet installed on this node. Select a version below to continue.';
+        installBtn.classList.remove('ghost');
+        installBtn.classList.add('primary');
 
         function updateInstallGate() {
             if (installBtn.style.display !== 'none') {
@@ -461,6 +532,8 @@ function initSetupWizard(resumeStep, highestStepName, devMode, isRerun, demoMode
         }
         regionCheck.addEventListener('change', updateInstallGate);
 
+        var latestVersion = null;
+
         fetch('/mender/check')
             .then(function(r) { return r.json(); })
             .then(function(data) {
@@ -468,6 +541,7 @@ function initSetupWizard(resumeStep, highestStepName, devMode, isRerun, demoMode
                     status.textContent = data.reason || 'Installation in progress...';
                     installStatus.innerHTML = '<span class="text-warning">Do not power off the device.</span>';
                     packageStatus.innerHTML = '<span class="spinner-border spinner-border-sm text-primary"></span>';
+                    if (backBtn) backBtn.style.display = 'none';
                     startRadarPoll();
                     return;
                 }
@@ -479,24 +553,29 @@ function initSetupWizard(resumeStep, highestStepName, devMode, isRerun, demoMode
                     status.innerHTML = 'Packages are up to date &#10003;';
                     packageStatus.innerHTML = '<span class="text-success">&#10003;</span>';
                     document.getElementById('radarLatestVersion').textContent = data.current_version;
+                    document.getElementById('radarPackageSub').textContent = formatSize(data.latest_size_bytes);
                     nextBtn.style.display = '';
                 } else {
-                    status.textContent = '';
+                    latestVersion = data.latest_version;
                     document.getElementById('radarLatestVersion').textContent = data.latest_version;
+                    document.getElementById('radarPackageSub').textContent = formatSize(data.latest_size_bytes);
                     installBtn.style.display = '';
                     updateInstallGate();
-                    nextBtn.style.display = '';
-                    nextBtn.textContent = 'Skip →';
+                    // No skip — installation is required on a fresh node
                 }
+            })
+            .catch(function() {
+                status.textContent = 'Unable to check for available packages.';
             });
 
         installBtn.addEventListener('click', function() {
             installBtn.style.display = 'none';
+            if (backBtn) backBtn.style.display = 'none';
             packageStatus.innerHTML = '<span class="spinner-border spinner-border-sm text-primary"></span>';
             status.textContent = 'Installing...';
             installStatus.innerHTML = '<span class="text-warning">Do not power off the device.</span>';
 
-            postJSON('/mender/install')
+            postJSON('/mender/install', latestVersion ? {version: latestVersion} : undefined)
                 .then(function(r) { return r.json(); })
                 .then(function(data) {
                     if (data.success) {
@@ -506,8 +585,17 @@ function initSetupWizard(resumeStep, highestStepName, devMode, isRerun, demoMode
                         packageStatus.innerHTML = '';
                         status.textContent = '';
                         installBtn.style.display = '';
+                        if (backBtn) backBtn.style.display = '';
                         updateInstallGate();
                     }
+                })
+                .catch(function() {
+                    installStatus.innerHTML = '<span class="text-danger">Request failed. Please try again.</span>';
+                    packageStatus.innerHTML = '';
+                    status.textContent = '';
+                    installBtn.style.display = '';
+                    if (backBtn) backBtn.style.display = '';
+                    updateInstallGate();
                 });
         });
 
@@ -532,10 +620,16 @@ function initSetupWizard(resumeStep, highestStepName, devMode, isRerun, demoMode
                                 packageStatus.innerHTML = '';
                                 status.textContent = '';
                                 installBtn.style.display = '';
+                                if (isRerun) nextBtn.style.display = '';
+                                if (backBtn) backBtn.style.display = '';
                                 updateInstallGate();
                             }
                         } else {
-                            status.textContent = (data.stage || 'Installing') + '...';
+                            var stageText = {
+                                downloading: 'Downloading...',
+                                starting: 'Starting retina-node...'
+                            };
+                            status.textContent = stageText[data.stage] || 'Installing...';
                         }
                     });
             }, 5000);
@@ -547,10 +641,23 @@ function initSetupWizard(resumeStep, highestStepName, devMode, isRerun, demoMode
         locationActive = false;
         clearTimeout(rfSseReconnectTimer); rfSseReconnectTimer = null;
         if (rfSse) { rfSse.close(); rfSse = null; }
-        if (wizardWasMode && wizardWasMode !== 'spectrum') {
-            postJSON('/api/mode', { mode: wizardWasMode });
-        }
+        var targetMode = wizardWasMode;
         wizardWasMode = null;
+        var pending = pendingModeSwitch;
+        pendingModeSwitch = null;
+        // No revert needed: spectrum was never started (user left before the mode
+        // switch completed), or we were already in spectrum mode.
+        if (!targetMode || targetMode === 'spectrum') return;
+        var scanStatus = document.getElementById('scanStatus');
+        if (scanStatus) { scanStatus.textContent = 'Reverting to radar mode…'; scanStatus.style.display = ''; }
+        // Wait for any in-flight spectrum switch to finish before sending the
+        // radar revert — prevents concurrent docker operations racing each other.
+        return (pending || Promise.resolve()).then(function() {
+            return postJSON('/api/mode', { mode: targetMode });
+        }).then(
+            function() { if (scanStatus) scanStatus.style.display = 'none'; },
+            function() { if (scanStatus) scanStatus.style.display = 'none'; }
+        );
     };
 
     enterHooks.location = function() {
@@ -563,18 +670,15 @@ function initSetupWizard(resumeStep, highestStepName, devMode, isRerun, demoMode
         scanBtn.textContent = 'Starting analyser…';
         scanStatus.textContent = 'Starting spectrum analyser…';
         scanStatus.style.display = '';
-        fetch('/api/mode')
+        pendingModeSwitch = fetch('/api/mode')
             .then(function(r) { return r.json(); })
             .then(function(d) {
                 if (!locationActive) return;
                 wizardWasMode = d.mode || 'radar';
-                if (d.mode === 'spectrum') {
-                    if (connectRfSse) connectRfSse();
-                    return;
-                }
-                return postJSON('/api/mode', { mode: 'spectrum' })
-                    .then(function(r) { return r.json(); })
-                    .then(function() { if (connectRfSse) connectRfSse(); });
+                return postJSON('/api/mode', { mode: 'spectrum' });
+            })
+            .then(function() {
+                if (locationActive && connectRfSse) connectRfSse();
             })
             .catch(function() {
                 if (!locationActive) return;
@@ -1052,6 +1156,8 @@ function initSetupWizard(resumeStep, highestStepName, devMode, isRerun, demoMode
 
     // Step 6: Complete
     enterHooks.complete = function() {
+        window.removeEventListener('beforeunload', handleBeforeUnload);
+        if (backBtn) backBtn.style.display = 'none';
         postJSON('/set-up/complete');
     };
 

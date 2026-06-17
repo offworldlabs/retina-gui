@@ -37,14 +37,24 @@ def save_step():
     data = request.get_json()
     if not data or "step" not in data:
         return jsonify({"success": False, "error": "Missing 'step' field"}), 400
-    device_state.save_setup_wizard_step(data["step"])
+    if data["step"] == "complete":
+        device_state.clear_setup_wizard()
+    else:
+        device_state.save_setup_wizard_step(data["step"])
     return jsonify({"success": True})
 
 
 @bp.route("/set-up/complete", methods=["POST"])
 def complete():
     """Mark setup wizard as complete."""
-    from app import device_state
+    from app import config_mgr, RETINA_NODE_PATH
+    from routes.mode import enforce_radar_mode, _write_mode
 
-    device_state.clear_setup_wizard()
+    # Write radar to mode.txt before docker ops so the home page cannot race
+    # and see spectrum mode while enforce_radar_mode is still running.
+    _write_mode('radar')
+
+    if config_mgr.is_retina_node_installed():
+        enforce_radar_mode(RETINA_NODE_PATH)
+
     return jsonify({"success": True})

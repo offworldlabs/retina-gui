@@ -11,6 +11,14 @@ from form_utils import schema_to_form_fields
 bp = Blueprint('config', __name__)
 
 
+@bp.before_request
+def _check_wizard_not_active():
+    """Block config access while the setup wizard is in progress."""
+    from app import device_state
+    if device_state.is_setup_wizard_in_progress():
+        return redirect('/set-up')
+
+
 @bp.route("/config")
 def config_page():
     """Configuration page with all settings."""

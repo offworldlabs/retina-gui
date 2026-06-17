@@ -1,6 +1,7 @@
 from flask import Flask
 from flask_wtf.csrf import CSRFProtect
 import os
+import subprocess
 
 from config_manager import ConfigManager
 from device_state import DeviceState
@@ -30,7 +31,8 @@ MERGED_CONFIG_PATH = os.environ.get('MERGED_CONFIG_PATH',
 RETINA_NODE_PATH = os.environ.get('RETINA_NODE_PATH', '/data/mender-docker-compose/current/manifests')
 RETINA_SPECTRUM_URL = os.environ.get('RETINA_SPECTRUM_URL', 'http://localhost:3020')
 NODE_ID_FILE = os.environ.get('NODE_ID_FILE', '/data/mender/node_id')
-TOWER_FINDER_URL = os.environ.get('TOWER_FINDER_URL', 'https://api.retina.fm')
+TOWER_FINDER_URL = os.environ.get('TOWER_FINDER_URL', 'https://tower-finder.retina.fm')
+DEV_MODE = os.environ.get('DEV_MODE', '').lower() in ('1', 'true', 'yes')
 
 # Shared services
 ssh_keys = SSHKeyManager(os.path.join(DATA_DIR, "authorized_keys"))
@@ -63,10 +65,31 @@ device_state = DeviceState(
 if not DEV_MODE:
     device_state.apply_startup_preferences()
 
-    # Always boot into radar mode — delete any persisted spectrum state
+# After an OWL-OS rootfs update the device reboots into the new partition
+# with Mender in "awaiting commit" state. Commit here to make it permanent,
+# then clear the install lock that was intentionally left by install_os.
+# This is idempotent — mender-update commit is a no-op when nothing is pending.
+try:
+    subprocess.run(["mender-update", "commit"], capture_output=True, timeout=30)
+except Exception:
+    pass
+device_state.release_install_lock()
+
+# Always boot into radar mode — delete any persisted spectrum state
+try:
+    os.remove(os.path.join(DATA_DIR, 'mode.txt'))
+except OSError:
+    pass
+
+# Enforce radar at the Docker level: stop and remove retina-spectrum if it is running.
+# retina-spectrum is only allowed while the wizard location step or config toggle is active.
+if config_mgr.is_retina_node_installed():
     try:
-        os.remove(os.path.join(DATA_DIR, 'mode.txt'))
-    except OSError:
+        subprocess.run(['docker', 'compose', '-p', 'retina-node', 'stop', 'retina-spectrum'],
+                       cwd=RETINA_NODE_PATH, capture_output=True, timeout=60)
+        subprocess.run(['docker', 'compose', '-p', 'retina-node', 'rm', '-sf', 'retina-spectrum'],
+                       cwd=RETINA_NODE_PATH, capture_output=True, timeout=30)
+    except Exception:
         pass
 
 
