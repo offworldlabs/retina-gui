@@ -296,7 +296,7 @@ def install_os():
          until the device comes back up.
       7. On failure the thread releases the lock and restores radar mode.
     """
-    from app import mender, device_state, app
+    from app import mender, device_state, app, DEV_MODE
     from mender import get_latest_owl_os_from_github
     import time
 
