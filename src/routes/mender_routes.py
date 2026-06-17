@@ -9,8 +9,32 @@ bp = Blueprint('mender', __name__, url_prefix='/mender')
 @bp.route("/check")
 def check():
     """Check for available retina-node updates and install status."""
-    from app import mender, device_state
-    from mender import get_all_stable_versions_from_github, parse_version
+    from app import mender, device_state, DEV_MODE
+    from mender import get_all_stable_versions_from_github, parse_version, DEV_VERSIONS
+
+    if DEV_MODE:
+        in_progress, reason = device_state.is_any_update_in_progress()
+        if in_progress:
+            locked, lock_info = device_state.is_install_locked()
+            return jsonify({
+                "installing": True,
+                "stage": "pulling",
+                "version": lock_info["version"] if lock_info else "retina-node",
+                "reason": reason,
+            })
+        current = mender.dev_get_node_version()
+        if current and current in DEV_VERSIONS:
+            available_updates = DEV_VERSIONS[:DEV_VERSIONS.index(current)]
+        elif current:
+            available_updates = []
+        else:
+            available_updates = list(DEV_VERSIONS)
+        return jsonify({
+            "installing": False,
+            "latest_version": DEV_VERSIONS[0],
+            "current_version": current,
+            "available_updates": available_updates,
+        })
 
     _, current = mender.get_versions()
 
@@ -70,11 +94,29 @@ def install():
     Accepts an optional 'version' in the JSON body (e.g. {"version": "v0.3.11"}).
     Defaults to the latest stable release if omitted.
     """
-    from app import mender, device_state, app
-    from mender import get_latest_stable_from_github
+    from app import mender, device_state, app, DEV_MODE
+    from mender import get_latest_stable_from_github, DEV_VERSIONS
+    import time
 
     body = request.get_json() or {}
     requested_version = body.get("version")
+
+    if DEV_MODE:
+        version_tag = requested_version or DEV_VERSIONS[0]
+        can_install, reason = device_state.can_start_install()
+        if not can_install:
+            return jsonify({"success": False, "error": reason}), 409
+        release_name = f"retina-node-{version_tag}"
+        if not device_state.acquire_install_lock(release_name):
+            return jsonify({"success": False, "error": "Install already in progress"}), 409
+
+        def _dev_install():
+            time.sleep(8)
+            mender.dev_set_node_version(version_tag)
+            device_state.release_install_lock()
+
+        threading.Thread(target=_dev_install, daemon=True).start()
+        return jsonify({"success": True, "version": release_name})
 
     success, error = device_state.ensure_cloud_services_enabled(mender.get_jwt)
     if not success:
@@ -185,8 +227,15 @@ def cloud_services_toggle():
 @bp.route("/check-os")
 def check_os():
     """Check for owl-os updates and install status."""
-    from app import mender, device_state
+    from app import mender, device_state, DEV_MODE
     from mender import get_latest_owl_os_from_github, parse_os_version
+
+    if DEV_MODE:
+        return jsonify({
+            "installing": False,
+            "current_version": "2.4.1-dev",
+            "update_available": False,
+        })
 
     owl_os_current, _ = mender.get_versions()
 
@@ -249,6 +298,22 @@ def install_os():
     """
     from app import mender, device_state, app
     from mender import get_latest_owl_os_from_github
+    import time
+
+    if DEV_MODE:
+        can_install, reason = device_state.can_start_install()
+        if not can_install:
+            return jsonify({"success": False, "error": reason}), 409
+        if not device_state.acquire_install_lock("owl-os-dev"):
+            return jsonify({"success": False, "error": "Install already in progress"}), 409
+
+        def _dev_os_install():
+            time.sleep(6)
+            device_state.release_install_lock()
+
+        threading.Thread(target=_dev_os_install, daemon=True).start()
+        device_state.save_setup_wizard_step("system")
+        return jsonify({"success": True, "version": "owl-os-dev", "state": "waiting"})
 
     success, error = device_state.ensure_cloud_services_enabled(mender.get_jwt)
     if not success:

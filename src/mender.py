@@ -1,8 +1,17 @@
 """Mender client for device-initiated OTA updates."""
+import os
 import re
 import subprocess
 
 import requests
+
+
+# Fake version history used by all dev-mode routes — newest first.
+# Set DEV_NODE_VERSION env var to control the simulated installed version:
+#   DEV_NODE_VERSION=v1.0.0  (default) → re-run with v1.1.0 and v1.0.5 available
+#   DEV_NODE_VERSION=v1.1.0            → re-run, up to date (no updates)
+#   DEV_NODE_VERSION=                  → fresh install (no package installed)
+DEV_VERSIONS = ['v1.1.0', 'v1.0.5', 'v1.0.0', 'v0.9.5', 'v0.9.0']
 
 
 class MenderClient:
@@ -17,10 +26,14 @@ class MenderClient:
         server_url: str = "https://hosted.mender.io",
         release_name: str = "retina-node",
         device_type: str = "pi5-v3-arm64",
+        dev_mode: bool = False,
+        dev_data_dir: str | None = None,
     ):
         self.server_url = server_url
         self.release_name = release_name
         self.device_type = device_type
+        self.dev_mode = dev_mode
+        self.dev_data_dir = dev_data_dir
 
     def get_jwt(self) -> tuple[str, str] | tuple[None, None]:
         """Get device JWT via D-Bus from mender-auth.
@@ -60,6 +73,23 @@ class MenderClient:
         except Exception:
             return None, None
 
+    def dev_get_node_version(self) -> str | None:
+        """Read the simulated installed retina-node version from dev_data."""
+        if self.dev_data_dir:
+            path = os.path.join(self.dev_data_dir, 'dev_node_version.txt')
+            if os.path.exists(path):
+                v = open(path).read().strip()
+                return v or None
+        v = os.environ.get('DEV_NODE_VERSION', 'v1.0.0')
+        return v or None
+
+    def dev_set_node_version(self, version: str):
+        """Write the simulated installed retina-node version to dev_data."""
+        if self.dev_data_dir:
+            os.makedirs(self.dev_data_dir, exist_ok=True)
+            with open(os.path.join(self.dev_data_dir, 'dev_node_version.txt'), 'w') as f:
+                f.write(version)
+
     def get_versions(self) -> tuple[str | None, str | None]:
         """Get owl-os and retina-node versions.
 
@@ -71,6 +101,9 @@ class MenderClient:
         On fresh bootstrap, only owl-os version exists. retina-node version
         appears after the first app OTA update.
         """
+        if self.dev_mode:
+            return ('2.4.1-dev', self.dev_get_node_version())
+
         try:
             result = subprocess.run(
                 ["mender-update", "show-provides"],

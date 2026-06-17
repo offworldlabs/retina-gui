@@ -22,10 +22,10 @@ def _check_wizard_not_active():
 @bp.route("/config")
 def config_page():
     """Configuration page with all settings."""
-    from app import config_mgr, ssh_keys
+    from app import config_mgr, ssh_keys, DEV_MODE
 
     config = config_mgr.load_merged_config()
-    retina_installed = config_mgr.is_retina_node_installed()
+    retina_installed = config_mgr.is_retina_node_installed() or DEV_MODE or request.args.get('demo') == '1'
 
     capture_flat = config_mgr.flatten_capture_for_form(config.get('capture', {}))
     capture_fields = schema_to_form_fields(CaptureFormConfig, capture_flat)
@@ -104,9 +104,9 @@ def save_config():
             all_errors.update(ConfigManager.format_validation_errors(e, 'tar1090'))
 
     if all_errors:
-        from app import ssh_keys
+        from app import ssh_keys, DEV_MODE
         return render_template("config.html",
-                               retina_installed=config_mgr.is_retina_node_installed(),
+                               retina_installed=config_mgr.is_retina_node_installed() or DEV_MODE or request.args.get('demo') == '1',
                                capture_fields=schema_to_form_fields(CaptureFormConfig, capture_flat),
                                location_fields=schema_to_form_fields(LocationFormConfig, location_flat),
                                truth_fields=schema_to_form_fields(AdsbTruthConfig, truth_data),
@@ -166,8 +166,11 @@ def apply_config():
     In spectrum mode only config-merger runs — blah2 is intentionally stopped
     and must not be restarted until the user switches back to radar mode.
     """
-    from app import config_mgr, RETINA_NODE_PATH
+    from app import config_mgr, RETINA_NODE_PATH, DEV_MODE
     from routes.mode import run_config_merger_and_restart
+
+    if DEV_MODE:
+        return jsonify({"success": True})
 
     if not config_mgr.is_retina_node_installed():
         return jsonify({"success": False, "error": "retina-node not installed"}), 400
