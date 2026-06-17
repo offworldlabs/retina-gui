@@ -29,7 +29,8 @@ class TestCaptureFormConfig:
             fc=503000000,
             device_type='RspDuo',
             device_agcSetPoint=-50,
-            device_gainReduction=40,
+            device_gainReductionA=40,
+            device_gainReductionB=45,
             device_lnaState=4,
             device_dabNotch=True,
             device_rfNotch=True,
@@ -37,14 +38,15 @@ class TestCaptureFormConfig:
         )
         assert config.fs == 2000000
         assert config.device_type == 'RspDuo'
-        assert config.device_gainReduction == 40
+        assert config.device_gainReductionA == 40
+        assert config.device_gainReductionB == 45
 
     def test_agc_set_point_must_be_negative_or_zero(self):
         """AGC set point must be <= 0 (dBFS)."""
         # Valid: negative value
         config = CaptureFormConfig(
             fs=2000000, fc=503000000, device_type='RspDuo',
-            device_agcSetPoint=-60, device_gainReduction=40,
+            device_agcSetPoint=-60, device_gainReductionA=40, device_gainReductionB=40,
             device_lnaState=4, device_dabNotch=True,
             device_rfNotch=True, device_bandwidthNumber=0
         )
@@ -53,7 +55,7 @@ class TestCaptureFormConfig:
         # Valid: zero
         config = CaptureFormConfig(
             fs=2000000, fc=503000000, device_type='RspDuo',
-            device_agcSetPoint=0, device_gainReduction=40,
+            device_agcSetPoint=0, device_gainReductionA=40, device_gainReductionB=40,
             device_lnaState=4, device_dabNotch=True,
             device_rfNotch=True, device_bandwidthNumber=0
         )
@@ -63,50 +65,38 @@ class TestCaptureFormConfig:
         with pytest.raises(ValidationError) as exc_info:
             CaptureFormConfig(
                 fs=2000000, fc=503000000, device_type='RspDuo',
-                device_agcSetPoint=10, device_gainReduction=40,
+                device_agcSetPoint=10, device_gainReductionA=40, device_gainReductionB=40,
                 device_lnaState=4, device_dabNotch=True,
                 device_rfNotch=True, device_bandwidthNumber=0
             )
         assert 'less than or equal to 0' in str(exc_info.value)
 
-    def test_gain_reduction_bounds(self):
-        """Gain reduction must be 20-59 dB."""
-        # Valid: minimum
-        config = CaptureFormConfig(
+    @pytest.mark.parametrize('field', ['device_gainReductionA', 'device_gainReductionB'])
+    def test_gain_reduction_bounds(self, field):
+        """Gain reduction must be 20-59 dB, independently for each tuner."""
+        base_kwargs = dict(
             fs=2000000, fc=503000000, device_type='RspDuo',
-            device_agcSetPoint=-50, device_gainReduction=20,
+            device_agcSetPoint=-50, device_gainReductionA=40, device_gainReductionB=40,
             device_lnaState=4, device_dabNotch=True,
             device_rfNotch=True, device_bandwidthNumber=0
         )
-        assert config.device_gainReduction == 20
+
+        # Valid: minimum
+        config = CaptureFormConfig(**{**base_kwargs, field: 20})
+        assert getattr(config, field) == 20
 
         # Valid: maximum
-        config = CaptureFormConfig(
-            fs=2000000, fc=503000000, device_type='RspDuo',
-            device_agcSetPoint=-50, device_gainReduction=59,
-            device_lnaState=4, device_dabNotch=True,
-            device_rfNotch=True, device_bandwidthNumber=0
-        )
-        assert config.device_gainReduction == 59
+        config = CaptureFormConfig(**{**base_kwargs, field: 59})
+        assert getattr(config, field) == 59
 
         # Invalid: below minimum
         with pytest.raises(ValidationError) as exc_info:
-            CaptureFormConfig(
-                fs=2000000, fc=503000000, device_type='RspDuo',
-                device_agcSetPoint=-50, device_gainReduction=19,
-                device_lnaState=4, device_dabNotch=True,
-                device_rfNotch=True, device_bandwidthNumber=0
-            )
+            CaptureFormConfig(**{**base_kwargs, field: 19})
         assert 'greater than or equal to 20' in str(exc_info.value)
 
         # Invalid: above maximum
         with pytest.raises(ValidationError) as exc_info:
-            CaptureFormConfig(
-                fs=2000000, fc=503000000, device_type='RspDuo',
-                device_agcSetPoint=-50, device_gainReduction=60,
-                device_lnaState=4, device_dabNotch=True,
-                device_rfNotch=True, device_bandwidthNumber=0
-            )
+            CaptureFormConfig(**{**base_kwargs, field: 60})
         assert 'less than or equal to 59' in str(exc_info.value)
 
     def test_lna_state_bounds(self):
@@ -114,7 +104,7 @@ class TestCaptureFormConfig:
         # Valid: minimum (max gain)
         config = CaptureFormConfig(
             fs=2000000, fc=503000000, device_type='RspDuo',
-            device_agcSetPoint=-50, device_gainReduction=40,
+            device_agcSetPoint=-50, device_gainReductionA=40, device_gainReductionB=40,
             device_lnaState=1, device_dabNotch=True,
             device_rfNotch=True, device_bandwidthNumber=0
         )
@@ -123,7 +113,7 @@ class TestCaptureFormConfig:
         # Valid: maximum (min gain)
         config = CaptureFormConfig(
             fs=2000000, fc=503000000, device_type='RspDuo',
-            device_agcSetPoint=-50, device_gainReduction=40,
+            device_agcSetPoint=-50, device_gainReductionA=40, device_gainReductionB=40,
             device_lnaState=9, device_dabNotch=True,
             device_rfNotch=True, device_bandwidthNumber=0
         )
@@ -133,7 +123,7 @@ class TestCaptureFormConfig:
         with pytest.raises(ValidationError) as exc_info:
             CaptureFormConfig(
                 fs=2000000, fc=503000000, device_type='RspDuo',
-                device_agcSetPoint=-50, device_gainReduction=40,
+                device_agcSetPoint=-50, device_gainReductionA=40, device_gainReductionB=40,
                 device_lnaState=0, device_dabNotch=True,
                 device_rfNotch=True, device_bandwidthNumber=0
             )
@@ -143,7 +133,7 @@ class TestCaptureFormConfig:
         with pytest.raises(ValidationError) as exc_info:
             CaptureFormConfig(
                 fs=2000000, fc=503000000, device_type='RspDuo',
-                device_agcSetPoint=-50, device_gainReduction=40,
+                device_agcSetPoint=-50, device_gainReductionA=40, device_gainReductionB=40,
                 device_lnaState=10, device_dabNotch=True,
                 device_rfNotch=True, device_bandwidthNumber=0
             )

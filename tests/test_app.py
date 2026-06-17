@@ -191,7 +191,8 @@ class TestConfigSaveRoute:
             'capture.fc': '500000000',
             'capture.device_type': 'RspDuo',
             'capture.device_agcSetPoint': '-40',
-            'capture.device_gainReduction': '35',
+            'capture.device_gainReductionA': '35',
+            'capture.device_gainReductionB': '30',
             'capture.device_lnaState': '5',
             'capture.device_dabNotch': 'on',
             'capture.device_rfNotch': 'on',
@@ -206,7 +207,7 @@ class TestConfigSaveRoute:
             saved = yaml.safe_load(f)
         assert saved['capture']['fs'] == 5000000
         assert saved['capture']['fc'] == 500000000
-        assert saved['capture']['device']['gainReduction'] == 35
+        assert saved['capture']['device']['gainReduction'] == [35, 30]
         assert saved['capture']['device']['lnaState'] == 5
 
     def test_save_unchecked_checkbox(self, app_client, user_config_file):
@@ -216,7 +217,8 @@ class TestConfigSaveRoute:
             'capture.fc': '503000000',
             'capture.device_type': 'RspDuo',
             'capture.device_agcSetPoint': '-50',
-            'capture.device_gainReduction': '40',
+            'capture.device_gainReductionA': '40',
+            'capture.device_gainReductionB': '40',
             'capture.device_lnaState': '4',
             # dabNotch and rfNotch NOT included (unchecked)
             'capture.device_bandwidthNumber': '0'
@@ -236,7 +238,8 @@ class TestConfigSaveRoute:
             'capture.fc': '503000000',
             'capture.device_type': 'RspDuo',
             'capture.device_agcSetPoint': '-50',
-            'capture.device_gainReduction': '100',  # Invalid: > 59
+            'capture.device_gainReductionA': '100',  # Invalid: > 59
+            'capture.device_gainReductionB': '40',
             'capture.device_lnaState': '4',
             'capture.device_dabNotch': 'on',
             'capture.device_rfNotch': 'on',
@@ -255,7 +258,8 @@ class TestConfigSaveRoute:
             'capture.fc': '503000000',
             'capture.device_type': 'RspDuo',
             'capture.device_agcSetPoint': '-50',
-            'capture.device_gainReduction': '40',
+            'capture.device_gainReductionA': '40',
+            'capture.device_gainReductionB': '40',
             'capture.device_lnaState': '0',  # Invalid: < 1
             'capture.device_dabNotch': 'on',
             'capture.device_rfNotch': 'on',
@@ -273,7 +277,8 @@ class TestConfigSaveRoute:
             'capture.fc': '503000000',
             'capture.device_type': 'RspDuo',
             'capture.device_agcSetPoint': '10',  # Invalid: > 0
-            'capture.device_gainReduction': '40',
+            'capture.device_gainReductionA': '40',
+            'capture.device_gainReductionB': '40',
             'capture.device_lnaState': '4',
             'capture.device_dabNotch': 'on',
             'capture.device_rfNotch': 'on',
@@ -298,7 +303,8 @@ class TestConfigSaveRoute:
             'capture.fc': '503000000',
             'capture.device_type': 'RspDuo',
             'capture.device_agcSetPoint': '-50',
-            'capture.device_gainReduction': '40',
+            'capture.device_gainReductionA': '40',
+            'capture.device_gainReductionB': '40',
             'capture.device_lnaState': '4',
             'capture.device_dabNotch': 'on',
             'capture.device_rfNotch': 'on',
@@ -622,13 +628,15 @@ class TestParseFlatFormData:
             'capture.fs': '4000000',
             'capture.fc': '503000000',
             'capture.device_type': 'RspDuo',
-            'capture.device_gainReduction': '40'
+            'capture.device_gainReductionA': '40',
+            'capture.device_gainReductionB': '35'
         })
 
         assert capture['fs'] == 4000000
         assert capture['fc'] == 503000000
         assert capture['device_type'] == 'RspDuo'
-        assert capture['device_gainReduction'] == 40
+        assert capture['device_gainReductionA'] == 40
+        assert capture['device_gainReductionB'] == 35
 
     def test_parse_flat_location_fields(self):
         """Flat location fields should be parsed correctly."""
