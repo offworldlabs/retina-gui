@@ -45,14 +45,20 @@ class ConfigManager:
         if not nested:
             return {}
         device = nested.get('device', {}) or {}
-        gain_reduction = device.get('gainReduction') or []
+        gain_reduction = device.get('gainReduction')
+        if isinstance(gain_reduction, list):
+            gain_reduction_a = gain_reduction[0] if len(gain_reduction) > 0 else None
+            gain_reduction_b = gain_reduction[1] if len(gain_reduction) > 1 else None
+        else:
+            # Pre-split configs stored a single scalar shared by both tuners.
+            gain_reduction_a = gain_reduction_b = gain_reduction
         return {
             'fs': nested.get('fs'),
             'fc': nested.get('fc'),
             'device_type': device.get('type'),
             'device_agcSetPoint': device.get('agcSetPoint'),
-            'device_gainReductionA': gain_reduction[0] if len(gain_reduction) > 0 else None,
-            'device_gainReductionB': gain_reduction[1] if len(gain_reduction) > 1 else None,
+            'device_gainReductionA': gain_reduction_a,
+            'device_gainReductionB': gain_reduction_b,
             'device_lnaState': device.get('lnaState'),
             'device_dabNotch': device.get('dabNotch'),
             'device_rfNotch': device.get('rfNotch'),

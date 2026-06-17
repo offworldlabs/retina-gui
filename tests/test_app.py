@@ -716,6 +716,40 @@ class TestParseFlatFormData:
         assert isinstance(capture['device_type'], str)
 
 
+class TestFlattenCaptureForForm:
+    """Test gainReduction migration handling in flatten_capture_for_form."""
+
+    def test_legacy_scalar_gain_reduction(self):
+        """A pre-split scalar gainReduction should populate both fields, not crash."""
+        from config_manager import ConfigManager
+
+        flat = ConfigManager.flatten_capture_for_form({
+            'device': {'gainReduction': 40}
+        })
+        assert flat['device_gainReductionA'] == 40
+        assert flat['device_gainReductionB'] == 40
+
+    def test_list_gain_reduction(self):
+        """The new two-element list should map to the two fields independently."""
+        from config_manager import ConfigManager
+
+        flat = ConfigManager.flatten_capture_for_form({
+            'device': {'gainReduction': [25, 50]}
+        })
+        assert flat['device_gainReductionA'] == 25
+        assert flat['device_gainReductionB'] == 50
+
+    def test_missing_gain_reduction(self):
+        """No gainReduction at all should leave both fields None, not crash."""
+        from config_manager import ConfigManager
+
+        flat = ConfigManager.flatten_capture_for_form({
+            'device': {}
+        })
+        assert flat['device_gainReductionA'] is None
+        assert flat['device_gainReductionB'] is None
+
+
 class TestSetupRoute:
     """Test the /set-up wizard route."""
 
