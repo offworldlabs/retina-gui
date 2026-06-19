@@ -95,7 +95,7 @@ def install():
     Defaults to the latest stable release if omitted.
     """
     from app import mender, device_state, app, DEV_MODE
-    from mender import get_latest_stable_from_github, DEV_VERSIONS
+    from mender import get_latest_stable_from_github, get_latest_owl_os_from_github, parse_os_version, DEV_VERSIONS
     import time
 
     body = request.get_json() or {}
@@ -128,6 +128,23 @@ def install():
     can_install, reason = device_state.can_start_install()
     if not can_install:
         return jsonify({"success": False, "error": reason}), 409
+
+    # can_start_install() only sees an OS update once mender-updated has
+    # actually started it locally. Also check GitHub (cached, so this is
+    # cheap) to catch a deployment that's been pushed but hasn't reached the
+    # device yet — starting an app install in that gap risks an OS reboot
+    # interrupting it mid-install. Fail open on a GitHub error: a transient
+    # rate-limit/outage shouldn't permanently block app installs.
+    owl_os_current, _ = mender.get_versions()
+    latest_owl_os, os_check_error = get_latest_owl_os_from_github()
+    if not os_check_error and latest_owl_os:
+        latest_tuple = parse_os_version(latest_owl_os)
+        current_tuple = parse_os_version(owl_os_current) if owl_os_current else None
+        if latest_tuple and (not current_tuple or latest_tuple > current_tuple):
+            return jsonify({
+                "success": False,
+                "error": "A system update is pending — please wait for it to finish before installing.",
+            }), 409
 
     if requested_version:
         version_tag = requested_version

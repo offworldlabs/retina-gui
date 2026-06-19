@@ -853,6 +853,52 @@ class TestMenderCheckOs:
         assert data['stage'] == 'downloading'
 
 
+class TestMenderInstallOsGuard:
+    """Test that /mender/install refuses to start while an owl-os update is
+    pending but hasn't reached mender-updated locally yet (the gap
+    can_start_install() alone can't see)."""
+
+    @patch('mender.get_retina_node_version_from_docker', return_value=None)
+    @patch('mender.get_latest_owl_os_from_github')
+    @patch('app.device_state')
+    @patch('app.mender')
+    def test_install_blocked_when_os_update_pending(
+        self, mock_mender, mock_ds, mock_github, mock_docker, app_client
+    ):
+        mock_mender.get_versions.return_value = ('os-v0.2.0', 'v0.3.5')
+        mock_ds.ensure_cloud_services_enabled.return_value = (True, None)
+        mock_ds.can_start_install.return_value = (True, None)
+        mock_github.return_value = ('os-v0.3.0', None)
+
+        response = app_client.post('/mender/install', json={'version': 'v0.4.0'})
+        data = json.loads(response.data)
+
+        assert response.status_code == 409
+        assert data['success'] is False
+        assert 'pending' in data['error']
+        mock_ds.acquire_install_lock.assert_not_called()
+
+    @patch('mender.get_latest_stable_from_github', return_value=(None, 'boom'))
+    @patch('mender.get_retina_node_version_from_docker', return_value=None)
+    @patch('mender.get_latest_owl_os_from_github')
+    @patch('app.device_state')
+    @patch('app.mender')
+    def test_install_proceeds_when_os_check_errors(
+        self, mock_mender, mock_ds, mock_github, mock_docker, mock_stable, app_client
+    ):
+        """A GitHub failure should fail open rather than permanently block installs."""
+        mock_mender.get_versions.return_value = ('os-v0.2.0', 'v0.3.5')
+        mock_ds.ensure_cloud_services_enabled.return_value = (True, None)
+        mock_ds.can_start_install.return_value = (True, None)
+        mock_github.return_value = (None, 'GitHub API error: 403')
+
+        response = app_client.post('/mender/install', json={})
+        data = json.loads(response.data)
+
+        assert data['success'] is False
+        assert 'Failed to get version' in data['error']
+
+
 class TestSetupWizardStepRoutes:
     """Test /set-up/save-step and /set-up/complete endpoints."""
 

@@ -2,6 +2,7 @@
 import os
 import re
 import subprocess
+import time
 
 import requests
 
@@ -348,6 +349,12 @@ def parse_os_version(tag: str) -> tuple[int, ...] | None:
     return None
 
 
+# Polled every 5s while the wizard's System step is open, so this needs a
+# cache or it blows through GitHub's 60-req/hour unauthenticated rate limit.
+_OWL_OS_RELEASE_CACHE_TTL = 300  # seconds
+_owl_os_release_cache: dict[str, tuple[float, tuple[str | None, str | None]]] = {}
+
+
 def get_latest_owl_os_from_github(
     repo: str = "offworldlabs/owl-os",
 ) -> tuple[str | None, str | None]:
@@ -355,10 +362,15 @@ def get_latest_owl_os_from_github(
 
     Queries GitHub releases API, includes both stable and pre-release builds
     (tags matching os-v*.*.*[-suffix]), and returns the highest semver version.
+    Result (including errors) is cached for _OWL_OS_RELEASE_CACHE_TTL seconds.
 
     Returns (version_tag, error) tuple. version_tag is like 'os-v0.2.0' or
     'os-v0.2.1-dev'.
     """
+    cached = _owl_os_release_cache.get(repo)
+    if cached and time.monotonic() - cached[0] < _OWL_OS_RELEASE_CACHE_TTL:
+        return cached[1]
+
     try:
         resp = requests.get(
             f"https://api.github.com/repos/{repo}/releases",
@@ -366,21 +378,24 @@ def get_latest_owl_os_from_github(
             timeout=30,
         )
         if resp.status_code != 200:
-            return None, f"GitHub API error: {resp.status_code}"
+            result = None, f"GitHub API error: {resp.status_code}"
+        else:
+            found = []
+            for release in resp.json():
+                tag = release.get("tag_name", "")
+                if not tag.startswith("os-v"):
+                    continue
+                version = parse_os_version(tag)
+                if version:
+                    found.append((tag, version))
 
-        found = []
-        for release in resp.json():
-            tag = release.get("tag_name", "")
-            if not tag.startswith("os-v"):
-                continue
-            version = parse_os_version(tag)
-            if version:
-                found.append((tag, version))
-
-        if not found:
-            return None, "No owl-os releases found"
-
-        found.sort(key=lambda x: x[1], reverse=True)
-        return found[0][0], None
+            if not found:
+                result = None, "No owl-os releases found"
+            else:
+                found.sort(key=lambda x: x[1], reverse=True)
+                result = found[0][0], None
     except requests.RequestException as e:
-        return None, str(e)
+        result = None, str(e)
+
+    _owl_os_release_cache[repo] = (time.monotonic(), result)
+    return result

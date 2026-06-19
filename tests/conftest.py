@@ -13,6 +13,15 @@ import pytest
 import yaml
 
 
+@pytest.fixture(autouse=True)
+def clear_owl_os_release_cache():
+    """Reset mender's module-level GitHub release cache between tests."""
+    import mender
+    mender._owl_os_release_cache.clear()
+    yield
+    mender._owl_os_release_cache.clear()
+
+
 @pytest.fixture
 def temp_dir():
     """Create a temporary directory for test files."""

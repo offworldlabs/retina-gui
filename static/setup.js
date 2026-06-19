@@ -323,18 +323,17 @@ function initSetupWizard(resumeStep, highestStepName, devMode, isRerun, demoMode
         }
 
         // Update is on its way from the server but hasn't started downloading
-        // yet (deployment still being created). If this drags on, offer a way
-        // out rather than stranding the customer.
+        // yet (deployment still being created). The Packages step isn't safe
+        // to enter until this either starts downloading or turns out not to
+        // be needed, so there is deliberately no way to skip past this —
+        // just reassure the user it hasn't stalled.
         function showPreparing(version) {
             status.textContent = 'Preparing system update...';
             showTarget(version);
             cardStatus.innerHTML = '<span class="spinner-border spinner-border-sm text-primary"></span>';
-            installStatus.textContent = '';
             if (!stuckTimer) {
                 stuckTimer = setTimeout(function() {
-                    installStatus.innerHTML = '<span class="text-warning">Taking longer than expected.</span>';
-                    nextBtn.style.display = '';
-                    nextBtn.textContent = 'Continue anyway \u2192';
+                    installStatus.innerHTML = '<span class="text-warning">Taking longer than expected. Please keep waiting.</span>';
                 }, 120000);
             }
         }
@@ -367,12 +366,10 @@ function initSetupWizard(resumeStep, highestStepName, devMode, isRerun, demoMode
                             return;
                         }
                         if (data.error) {
-                            clearInterval(pollTimer);
-                            pollTimer = null;
-                            if (backBtn) backBtn.style.display = '';
-                            status.textContent = 'Unable to check: ' + data.error;
-                            nextBtn.style.display = '';
-                            nextBtn.textContent = 'Continue \u2192';
+                            // Transient check failure (e.g. GitHub unreachable) — keep
+                            // polling rather than letting the user past an unconfirmed
+                            // update state.
+                            status.textContent = 'Unable to check: ' + data.error + ' \u2014 retrying...';
                             return;
                         }
                         if (data.update_available) {
