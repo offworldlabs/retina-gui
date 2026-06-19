@@ -180,7 +180,6 @@ function initSetupWizard(resumeStep, highestStepName, devMode, isRerun, demoMode
             }
             if (path === '/mender/cloud-services')  return ok({ success: true, enabled: true });
             if (path === '/mender/check-os')         return ok({ current_version: '2.4.1-demo', update_available: false });
-            if (path === '/mender/install-os')       return ok({ success: true });
             if (path === '/mender/check') {
                 if (_demoNodeInstalling) {
                     return ok({ installing: true, stage: 'pulling', reason: 'Installing retina-node-v1.0.0-demo' });
@@ -263,18 +262,19 @@ function initSetupWizard(resumeStep, highestStepName, devMode, isRerun, demoMode
         });
     };
 
-    // Step 2: System Update
+    // Step 2: System Update — fully automatic (server-pushed deployment +
+    // managed-mode Mender daemon). This page only reports progress; there is
+    // nothing for the user to click until it's done.
     enterHooks.system = function() {
         if (hookInitialized.system) return;
         hookInitialized.system = true;
         var status = document.getElementById('systemStatus');
-        var updateBtn = document.getElementById('systemUpdateBtn');
         var nextBtn = document.getElementById('systemNextBtn');
         var installStatus = document.getElementById('systemInstallStatus');
         var cardStatus = document.getElementById('systemCardStatus');
-        var versionArrow = document.getElementById('systemVersionArrow');
+        var stuckTimer = null;
 
-        // On re-run, skip updates — OS updates are managed remotely after onboarding
+        // On re-run, OS updates are managed remotely after onboarding — just inform.
         if (isRerun) {
             fetch('/mender/check-os')
                 .then(function(r) { return r.json(); })
@@ -296,68 +296,16 @@ function initSetupWizard(resumeStep, highestStepName, devMode, isRerun, demoMode
             return;
         }
 
-        fetch('/mender/check-os')
-            .then(function(r) { return r.json(); })
-            .then(function(data) {
-                if (data.current_version) {
-                    document.getElementById('systemCurrentVersion').textContent = data.current_version;
-                }
-                if (data.installing) {
-                    showStage(data.stage);
-                    cardStatus.innerHTML = '<span class="spinner-border spinner-border-sm text-primary"></span>';
-                    installStatus.innerHTML = '<span class="text-warning">Do not power off the device.</span>';
-                    startSystemPoll();
-                    return;
-                }
-                if (data.error) {
-                    status.textContent = 'Unable to check: ' + data.error;
-                    nextBtn.style.display = '';
-                    return;
-                }
-                if (data.update_available) {
-                    status.textContent = '';
-                    versionArrow.style.display = '';
-                    document.getElementById('systemLatestVersion').textContent = data.latest_version;
-                    updateBtn.style.display = '';
-                } else {
-                    status.innerHTML = 'System is up to date &#10003;';
-                    cardStatus.innerHTML = '<span class="text-success">&#10003;</span>';
-                    nextBtn.style.display = '';
-                    nextBtn.textContent = 'Continue \u2192';
-                }
-            })
-            .catch(function() {
-                status.textContent = 'Unable to check for system updates.';
-                nextBtn.style.display = '';
-                nextBtn.textContent = 'Skip \u2192';
-            });
-
-        updateBtn.addEventListener('click', function() {
-            updateBtn.style.display = 'none';
-            cardStatus.innerHTML = '<span class="spinner-border spinner-border-sm text-primary"></span>';
-            installStatus.innerHTML = '<span class="text-warning">Do not power off the device.</span>';
-
-            postJSON('/mender/install-os')
-                .then(function(r) { return r.json(); })
-                .then(function(data) {
-                    if (data.success) {
-                        startSystemPoll();
-                    } else {
-                        installStatus.innerHTML = '<span class="text-danger">' + data.error + '</span>';
-                        cardStatus.innerHTML = '';
-                        updateBtn.style.display = '';
-                    }
-                })
-                .catch(function() {
-                    installStatus.innerHTML = '<span class="text-danger">Request failed. Please try again.</span>';
-                    cardStatus.innerHTML = '';
-                    updateBtn.style.display = '';
-                });
-        });
-
         nextBtn.addEventListener('click', advance);
+        startSystemPoll();
 
-        function showStage(stage) {
+        function showTarget(version) {
+            if (!version) return;
+            document.getElementById('systemVersionArrow').style.display = '';
+            document.getElementById('systemLatestVersion').textContent = version;
+        }
+
+        function showStage(stage, version) {
             if (stage === 'waiting') {
                 status.textContent = 'Connecting to update server...';
             } else if (stage === 'downloading') {
@@ -369,36 +317,87 @@ function initSetupWizard(resumeStep, highestStepName, devMode, isRerun, demoMode
             } else {
                 status.textContent = 'Updating...';
             }
+            showTarget(version);
             cardStatus.innerHTML = '<span class="spinner-border spinner-border-sm text-primary"></span>';
+            installStatus.innerHTML = '<span class="text-warning">Do not power off the device.</span>';
+        }
+
+        // Update is on its way from the server but hasn't started downloading
+        // yet (deployment still being created). If this drags on, offer a way
+        // out rather than stranding the customer.
+        function showPreparing(version) {
+            status.textContent = 'Preparing system update...';
+            showTarget(version);
+            cardStatus.innerHTML = '<span class="spinner-border spinner-border-sm text-primary"></span>';
+            installStatus.textContent = '';
+            if (!stuckTimer) {
+                stuckTimer = setTimeout(function() {
+                    installStatus.innerHTML = '<span class="text-warning">Taking longer than expected.</span>';
+                    nextBtn.style.display = '';
+                    nextBtn.textContent = 'Continue anyway \u2192';
+                }, 120000);
+            }
+        }
+
+        function clearStuckTimer() {
+            if (stuckTimer) {
+                clearTimeout(stuckTimer);
+                stuckTimer = null;
+            }
         }
 
         function startSystemPoll() {
-            showStage('waiting');
             if (backBtn) backBtn.style.display = 'none';
             if (pollTimer) clearInterval(pollTimer);
-            pollTimer = setInterval(function() {
+
+            function poll() {
                 fetch('/mender/check-os')
                     .then(function(r) { return r.json(); })
                     .then(function(data) {
-                        if (!data.installing) {
+                        if (data.current_version) {
+                            document.getElementById('systemCurrentVersion').textContent = data.current_version;
+                        }
+                        if (data.installing) {
+                            clearStuckTimer();
+                            nextBtn.style.display = 'none';
+                            // data.version is a generic placeholder for
+                            // server-pushed updates (no GUI install lock to
+                            // read a real tag from) — don't show it.
+                            showStage(data.stage);
+                            return;
+                        }
+                        if (data.error) {
                             clearInterval(pollTimer);
                             pollTimer = null;
                             if (backBtn) backBtn.style.display = '';
-                            if (!data.update_available) {
-                                status.innerHTML = 'Update complete &#10003;';
-                                installStatus.innerHTML = '<span class="text-success">Complete!</span>';
-                            } else {
-                                status.innerHTML = 'Device may reboot &mdash; reconnect to continue.';
-                            }
+                            status.textContent = 'Unable to check: ' + data.error;
                             nextBtn.style.display = '';
-                        } else {
-                            showStage(data.stage);
+                            nextBtn.textContent = 'Continue \u2192';
+                            return;
                         }
+                        if (data.update_available) {
+                            showPreparing(data.latest_version);
+                            return;
+                        }
+                        // Up to date — either nothing was ever needed, or the
+                        // update just finished and the device rebooted back in.
+                        clearInterval(pollTimer);
+                        pollTimer = null;
+                        clearStuckTimer();
+                        if (backBtn) backBtn.style.display = '';
+                        status.innerHTML = 'System is up to date &#10003;';
+                        cardStatus.innerHTML = '<span class="text-success">&#10003;</span>';
+                        installStatus.innerHTML = '<span class="text-success">Complete!</span>';
+                        nextBtn.style.display = '';
+                        nextBtn.textContent = 'Continue \u2192';
                     })
                     .catch(function() {
-                        status.textContent = 'Rebooting... reconnect shortly.';
+                        status.textContent = 'Reconnecting...';
                     });
-            }, 5000);
+            }
+
+            poll();
+            pollTimer = setInterval(poll, 5000);
         }
     };
 
