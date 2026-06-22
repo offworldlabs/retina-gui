@@ -65,7 +65,7 @@
         <div class="section-head"><h2>Services</h2></div>
         <div class="svc-grid">
             {% if retina_node_version %}
-            <a class="svc-card" href="http://owl.local:49152" target="_blank">
+            <a class="svc-card" href="#" data-port="49152" target="_blank">
                 <div class="svc-head">
                     <div class="svc-icon">
                         <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
@@ -83,7 +83,7 @@
                 </div>
                 <div class="svc-desc">Delay-Doppler radar display.</div>
             </a>
-            <a class="svc-card" href="http://owl.local:8078" target="_blank">
+            <a class="svc-card" href="#" data-port="8078" target="_blank">
                 <div class="svc-head">
                     <div class="svc-icon">
                         <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
@@ -137,6 +137,11 @@
 {% endblock %}
 
 {% block scripts %}
+<script>
+document.querySelectorAll('.svc-card[data-port]').forEach(function(el) {
+    el.href = 'http://' + window.location.hostname + ':' + el.dataset.port;
+});
+</script>
 {% if mode == 'spectrum' %}
 <script>
 (function() {
