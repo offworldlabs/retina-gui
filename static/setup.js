@@ -184,15 +184,7 @@ function initSetupWizard(resumeStep, highestStepName, devMode, isRerun, demoMode
                 if (_demoNodeInstalling) {
                     return ok({ installing: true, stage: 'pulling', reason: 'Installing retina-node-v1.0.0-demo' });
                 }
-                return ok({
-                    current_version: 'v0.9.0-demo',
-                    latest_version: 'v1.0.0-demo',
-                    latest_size_bytes: 641000000,
-                    available_updates: [
-                        { version: 'v1.0.0-demo', size_bytes: 641000000 },
-                        { version: 'v0.9.5-demo', size_bytes: 635000000 },
-                    ],
-                });
+                return ok({ installing: false, current_version: 'v0.9.0-demo' });
             }
             if (path === '/mender/install') {
                 _demoNodeInstalling = true;
@@ -409,108 +401,31 @@ function initSetupWizard(resumeStep, highestStepName, devMode, isRerun, demoMode
         var regionCheck = document.getElementById('regionCheck');
         var packageStatus = document.getElementById('radarPackageStatus');
 
-        // Re-run: RETINA is already installed — show installed version for reference
-        // and any available updates below. No reinstall option.
+        // Re-run: RETINA is already installed — package management isn't
+        // the user's responsibility from here on, same framing as the
+        // System step. No install affordance, no polling, no failure
+        // states tied to packages — just say so and let them continue.
+        // The version lookup below is purely cosmetic and never blocks
+        // or gates the Continue button.
         if (isRerun) {
-            function rerunUpdateGate() {
-                if (installBtn.style.display !== 'none') {
-                    installBtn.disabled = !regionCheck.checked;
-                }
-            }
-            regionCheck.addEventListener('change', rerunUpdateGate);
+            document.getElementById('regionCheckRow').style.display = 'none';
+            document.getElementById('radarPackageRadio').style.display = 'none';
+            document.getElementById('radarDescription').textContent =
+                'RETINA package updates are managed remotely.';
+            document.getElementById('radarPackageSub').textContent = 'Managed automatically';
+            packageStatus.innerHTML = '<span class="text-success">&#10003;</span>';
+            status.innerHTML = 'Package updates are managed remotely &#10003;';
+            nextBtn.textContent = 'Continue →';
+            nextBtn.style.display = '';
 
             fetch('/mender/check')
                 .then(function(r) { return r.json(); })
                 .then(function(data) {
-                    if (data.installing) {
-                        status.textContent = data.reason || 'Installation in progress...';
-                        installStatus.innerHTML = '<span class="text-warning">Do not power off the device.</span>';
-                        if (backBtn) backBtn.style.display = 'none';
-                        startRadarPoll();
-                        return;
-                    }
-
-                    var updates = data.available_updates || [];
-
-                    var packageList = document.getElementById('radarPackageList');
-                    var availableSection = document.getElementById('radarAvailableSection');
-                    var availableHeading = document.getElementById('radarAvailableHeading');
-                    var description = document.getElementById('radarDescription');
-
                     if (data.current_version) {
-                        document.getElementById('radarCurrentList').innerHTML =
-                            '<div class="step-card">' +
-                            '<div class="step-card-body">' +
-                            '<div class="step-card-title">Retina Passive Radar <span style="font-weight:400;color:var(--ink-3);font-size:13px;margin-left:4px;">' + esc(data.current_version) + '</span></div>' +
-                            '<div class="step-card-sub">Installed</div>' +
-                            '</div></div>';
-                        document.getElementById('radarCurrentSection').style.display = '';
+                        document.getElementById('radarLatestVersion').textContent = data.current_version;
                     }
-
-                    if (updates.length > 0) {
-                        description.textContent = 'A newer version of RETINA is available.';
-                        var cards = updates.map(function(v, i) {
-                            var safeId = 'pkg-' + v.version.replace(/[^a-z0-9]/gi, '-');
-                            return '<div class="step-card">' +
-                                '<div><input type="radio" name="packageSelect" id="' + safeId + '" value="' + esc(v.version) + '"' +
-                                (i === 0 ? ' checked' : '') +
-                                ' style="accent-color:var(--ink);margin-right:12px;"></div>' +
-                                '<label class="step-card-body" for="' + safeId + '" style="cursor:pointer;">' +
-                                '<div class="step-card-title">Retina Passive Radar <span style="font-weight:400;color:var(--ink-3);font-size:13px;margin-left:4px;">' + esc(v.version) + '</span></div>' +
-                                '<div class="step-card-sub">' + formatSize(v.size_bytes) + '</div>' +
-                                '</label></div>';
-                        });
-                        packageList.innerHTML = cards.join('');
-                        availableHeading.textContent = 'Available updates';
-                        availableHeading.style.display = '';
-                        installBtn.textContent = 'Install selected';
-                        installBtn.style.display = '';
-                        rerunUpdateGate();
-                    } else {
-                        description.textContent = 'RETINA is up to date.';
-                        availableSection.style.display = 'none';
-                    }
-
-                    nextBtn.textContent = 'Skip \u2192';
-                    nextBtn.style.display = '';
                 })
-                .catch(function() {
-                    status.textContent = 'Unable to check for updates.';
-                    nextBtn.textContent = 'Skip \u2192';
-                    nextBtn.style.display = '';
-                });
-
-            installBtn.addEventListener('click', function() {
-                var selected = document.querySelector('input[name="packageSelect"]:checked');
-                installBtn.style.display = 'none';
-                nextBtn.style.display = 'none';
-                if (backBtn) backBtn.style.display = 'none';
-                status.textContent = 'Installing...';
-                installStatus.innerHTML = '<span class="text-warning">Do not power off the device.</span>';
-
-                postJSON('/mender/install', selected ? {version: selected.value} : undefined)
-                    .then(function(r) { return r.json(); })
-                    .then(function(data) {
-                        if (data.success) {
-                            startRadarPoll();
-                        } else {
-                            installStatus.innerHTML = '<span class="text-danger">' + data.error + '</span>';
-                            status.textContent = '';
-                            installBtn.style.display = '';
-                            nextBtn.style.display = '';
-                            if (backBtn) backBtn.style.display = '';
-                            rerunUpdateGate();
-                        }
-                    })
-                    .catch(function() {
-                        installStatus.innerHTML = '<span class="text-danger">Request failed. Please try again.</span>';
-                        status.textContent = '';
-                        installBtn.style.display = '';
-                        nextBtn.style.display = '';
-                        if (backBtn) backBtn.style.display = '';
-                        rerunUpdateGate();
-                    });
-            });
+                .catch(function() {});
 
             nextBtn.addEventListener('click', advance);
             return;
@@ -530,39 +445,49 @@ function initSetupWizard(resumeStep, highestStepName, devMode, isRerun, demoMode
 
         var latestVersion = null;
 
-        fetch('/mender/check')
-            .then(function(r) { return r.json(); })
-            .then(function(data) {
-                if (data.installing) {
-                    status.textContent = data.reason || 'Installation in progress...';
-                    installStatus.innerHTML = '<span class="text-warning">Do not power off the device.</span>';
-                    packageStatus.innerHTML = '<span class="spinner-border spinner-border-sm text-primary"></span>';
-                    if (backBtn) backBtn.style.display = 'none';
-                    startRadarPoll();
-                    return;
-                }
-                if (data.error) {
-                    status.textContent = 'Unable to check: ' + data.error;
-                    return;
-                }
-                if (data.current_version) {
-                    status.innerHTML = 'Packages are up to date &#10003;';
-                    packageStatus.innerHTML = '<span class="text-success">&#10003;</span>';
-                    document.getElementById('radarLatestVersion').textContent = data.current_version;
-                    document.getElementById('radarPackageSub').textContent = formatSize(data.latest_size_bytes);
-                    nextBtn.style.display = '';
-                } else {
-                    latestVersion = data.latest_version;
-                    document.getElementById('radarLatestVersion').textContent = data.latest_version;
-                    document.getElementById('radarPackageSub').textContent = formatSize(data.latest_size_bytes);
-                    installBtn.style.display = '';
-                    updateInstallGate();
-                    // No skip — installation is required on a fresh node
-                }
-            })
-            .catch(function() {
-                status.textContent = 'Unable to check for available packages.';
-            });
+        // GitHub is the only source of truth for what to install on a fresh
+        // node, and there's no skipping this step — so a transient failure
+        // here must not be a dead end. Keep retrying every 5s until it
+        // succeeds; the backend caches the GitHub call for 60s so this
+        // doesn't blow through GitHub's unauthenticated rate limit.
+        function checkAvailability() {
+            fetch('/mender/check')
+                .then(function(r) { return r.json(); })
+                .then(function(data) {
+                    if (data.installing) {
+                        status.textContent = data.reason || 'Installation in progress...';
+                        installStatus.innerHTML = '<span class="text-warning">Do not power off the device.</span>';
+                        packageStatus.innerHTML = '<span class="spinner-border spinner-border-sm text-primary"></span>';
+                        if (backBtn) backBtn.style.display = 'none';
+                        startRadarPoll();
+                        return;
+                    }
+                    if (data.error) {
+                        status.textContent = 'Unable to check: ' + data.error + ' — retrying...';
+                        setTimeout(checkAvailability, 5000);
+                        return;
+                    }
+                    if (data.current_version) {
+                        status.innerHTML = 'Packages are up to date &#10003;';
+                        packageStatus.innerHTML = '<span class="text-success">&#10003;</span>';
+                        document.getElementById('radarLatestVersion').textContent = data.current_version;
+                        document.getElementById('radarPackageSub').textContent = formatSize(data.latest_size_bytes);
+                        nextBtn.style.display = '';
+                    } else {
+                        latestVersion = data.latest_version;
+                        document.getElementById('radarLatestVersion').textContent = data.latest_version;
+                        document.getElementById('radarPackageSub').textContent = formatSize(data.latest_size_bytes);
+                        installBtn.style.display = '';
+                        updateInstallGate();
+                        // No skip — installation is required on a fresh node
+                    }
+                })
+                .catch(function() {
+                    status.textContent = 'Unable to check for available packages — retrying...';
+                    setTimeout(checkAvailability, 5000);
+                });
+        }
+        checkAvailability();
 
         installBtn.addEventListener('click', function() {
             installBtn.style.display = 'none';
