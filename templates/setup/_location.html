@@ -21,11 +21,14 @@
             <input type="number" class="ds-input mono" id="rxAlt" step="any" min="0" placeholder="Enter altitude manually">
         </div>
 
+        <!-- "Use my location" requires HTTPS (browser Geolocation API); re-enable once 20260616-location-fetch-https lands.
         <button type="button" class="ds-btn ghost" id="useMyLocationBtn" style="align-self:flex-start;">
             <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>
             Use my location
         </button>
         <p id="locationGeoError" style="display:none;color:var(--danger);font-size:13px;margin:0;"></p>
+        -->
+        <p style="font-size:13px;color:var(--ink-2);margin:0;">Enter your receiver's coordinates manually below.</p>
 
         <div class="ds-field">
             <button type="button" class="ds-btn ghost sm" id="scanRfBtn" style="width:100%;">

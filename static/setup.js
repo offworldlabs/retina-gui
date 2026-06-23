@@ -796,8 +796,8 @@ function initSetupWizard(resumeStep, highestStepName, devMode, isRerun, demoMode
         rxLat.addEventListener('input', updateFindBtn);
         rxLon.addEventListener('input', updateFindBtn);
 
-        // Use My Location
-        useMyLocBtn.addEventListener('click', function() {
+        // Use My Location (button commented out in markup until HTTPS lands; see 20260616-location-fetch-https)
+        if (useMyLocBtn) useMyLocBtn.addEventListener('click', function() {
             if (!navigator.geolocation) {
                 geoError.textContent = 'Geolocation not supported by your browser';
                 geoError.style.display = '';
