@@ -10,7 +10,7 @@ bp = Blueprint('mender', __name__, url_prefix='/mender')
 def check():
     """Check for available retina-node updates and install status."""
     from app import mender, device_state, DEV_MODE
-    from mender import get_all_stable_versions_from_github, parse_version, DEV_VERSIONS
+    from mender import get_all_stable_versions_from_github, DEV_VERSIONS
 
     if DEV_MODE:
         in_progress, reason = device_state.is_any_update_in_progress()
@@ -23,17 +23,14 @@ def check():
                 "reason": reason,
             })
         current = mender.dev_get_node_version()
-        if current and current in DEV_VERSIONS:
-            available_updates = DEV_VERSIONS[:DEV_VERSIONS.index(current)]
-        elif current:
-            available_updates = []
-        else:
-            available_updates = list(DEV_VERSIONS)
+        if current:
+            # Once any package is installed, updates are handled by the
+            # server — no need to show what's available.
+            return jsonify({"installing": False, "current_version": current})
         return jsonify({
             "installing": False,
             "latest_version": DEV_VERSIONS[0],
-            "current_version": current,
-            "available_updates": available_updates,
+            "current_version": None,
         })
 
     _, current = mender.get_versions()
@@ -56,6 +53,13 @@ def check():
             "reason": reason,
         })
 
+    if current:
+        # Already have a package installed — updates from here on are
+        # handled by the server, so there's nothing to check on GitHub for.
+        return jsonify({"installing": False, "current_version": current})
+
+    # Fresh node, nothing installed yet — installation is mandatory to
+    # proceed, so we need GitHub to tell us what to install.
     all_versions, error = get_all_stable_versions_from_github()
     if error:
         return jsonify({"error": error})
@@ -64,26 +68,11 @@ def check():
     latest = latest_meta["version"] if latest_meta else None
     latest_size_bytes = latest_meta["size_bytes"] if latest_meta else None
 
-    if current:
-        current_tuple = parse_version(f"retina-node-{current}")
-        if current_tuple is None:
-            # Dev/pre-release build — no stable release can be meaningfully compared.
-            available_updates = []
-        else:
-            available_updates = [
-                {"version": v["version"], "size_bytes": v["size_bytes"]}
-                for v in all_versions
-                if (vt := parse_version(f"retina-node-{v['version']}")) and vt > current_tuple
-            ]
-    else:
-        available_updates = [{"version": v["version"], "size_bytes": v["size_bytes"]} for v in all_versions]
-
     return jsonify({
         "installing": False,
         "latest_version": latest,
         "latest_size_bytes": latest_size_bytes,
-        "current_version": current,
-        "available_updates": available_updates,
+        "current_version": None,
     })
 
 

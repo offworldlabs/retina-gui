@@ -9,8 +9,7 @@ import requests
 
 # Fake version history used by all dev-mode routes — newest first.
 # Set DEV_NODE_VERSION env var to control the simulated installed version:
-#   DEV_NODE_VERSION=v1.0.0  (default) → re-run with v1.1.0 and v1.0.5 available
-#   DEV_NODE_VERSION=v1.1.0            → re-run, up to date (no updates)
+#   DEV_NODE_VERSION=v1.0.0  (default) → re-run, package already installed
 #   DEV_NODE_VERSION=                  → fresh install (no package installed)
 DEV_VERSIONS = ['v1.1.0', 'v1.0.5', 'v1.0.0', 'v0.9.5', 'v0.9.0']
 
@@ -255,44 +254,61 @@ def parse_version(artifact_name: str) -> tuple[int, ...] | None:
     return None
 
 
+# Polled every 5s while the wizard's Packages step is open on a fresh node
+# (no skip available, so a failure here keeps retrying), so this needs a
+# cache or it blows through GitHub's 60-req/hour unauthenticated rate limit
+# — see _OWL_OS_RELEASE_CACHE_TTL above for the same reasoning.
+_STABLE_RELEASE_CACHE_TTL = 60  # seconds
+_stable_release_cache: dict[str, tuple[float, tuple[list[dict], str | None]]] = {}
+
+
 def get_all_stable_versions_from_github(
     repo: str = "offworldlabs/retina-node",
+    request_timeout: float = 10.0,
 ) -> tuple[list[dict], str | None]:
     """Get all stable version tags from GitHub releases, newest first.
 
     Queries GitHub releases API, filters to stable versions (excludes rc, dev, beta),
     and returns all matching entries sorted by semver descending.
+    Result (including errors) is cached for _STABLE_RELEASE_CACHE_TTL seconds.
 
     Returns (versions, error) tuple. Each entry is {"version": "v0.3.5", "size_bytes": 628000000}.
     size_bytes is the size of the .mender artifact asset, or None if no assets are present.
     """
+    cached = _stable_release_cache.get(repo)
+    if cached and time.monotonic() - cached[0] < _STABLE_RELEASE_CACHE_TTL:
+        return cached[1]
+
     try:
         resp = requests.get(
             f"https://api.github.com/repos/{repo}/releases",
             headers={"Accept": "application/vnd.github+json"},
-            timeout=30,
+            timeout=request_timeout,
         )
         if resp.status_code != 200:
-            return [], f"GitHub API error: {resp.status_code}"
+            result = [], f"GitHub API error: {resp.status_code}"
+        else:
+            stable = []
+            for release in resp.json():
+                tag = release.get("tag_name", "")
+                if parse_version(f"retina-node-{tag}"):
+                    assets = release.get("assets", [])
+                    mender_asset = next((a for a in assets if a["name"].endswith(".mender")), None)
+                    if mender_asset:
+                        size_bytes = mender_asset["size"]
+                    elif assets:
+                        size_bytes = max(a["size"] for a in assets)
+                    else:
+                        size_bytes = None
+                    stable.append({"version": tag, "size_bytes": size_bytes})
 
-        stable = []
-        for release in resp.json():
-            tag = release.get("tag_name", "")
-            if parse_version(f"retina-node-{tag}"):
-                assets = release.get("assets", [])
-                mender_asset = next((a for a in assets if a["name"].endswith(".mender")), None)
-                if mender_asset:
-                    size_bytes = mender_asset["size"]
-                elif assets:
-                    size_bytes = max(a["size"] for a in assets)
-                else:
-                    size_bytes = None
-                stable.append({"version": tag, "size_bytes": size_bytes})
-
-        stable.sort(key=lambda v: parse_version(f"retina-node-{v['version']}"), reverse=True)
-        return stable, None
+            stable.sort(key=lambda v: parse_version(f"retina-node-{v['version']}"), reverse=True)
+            result = stable, None
     except requests.RequestException as e:
-        return [], str(e)
+        result = [], str(e)
+
+    _stable_release_cache[repo] = (time.monotonic(), result)
+    return result
 
 
 def get_latest_stable_from_github(

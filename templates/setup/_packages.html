@@ -5,7 +5,7 @@
         <p id="radarDescription"></p>
     </div>
     <div class="step-stack">
-        <label class="step-check">
+        <label class="step-check" id="regionCheckRow">
             <input type="checkbox" id="regionCheck">
             <div>
                 <div class="step-check-text">This device will not be exported from the USA</div>
@@ -13,18 +13,11 @@
             </div>
         </label>
 
-        <!-- Currently installed (re-run mode, display only) -->
-        <div id="radarCurrentSection" style="display:none;">
-            <div class="wiz-section-label">Currently installed</div>
-            <div id="radarCurrentList" style="margin-top:8px;"></div>
-        </div>
-
-        <!-- Available packages / updates -->
+        <!-- Package status -->
         <div id="radarAvailableSection" style="display:flex;flex-direction:column;gap:8px;">
-            <div id="radarAvailableHeading" class="wiz-section-label" style="display:none;"></div>
             <div id="radarPackageList" style="display:flex;flex-direction:column;gap:8px;">
                 <div class="step-card" id="radarPackageCard">
-                    <div>
+                    <div id="radarPackageRadio">
                         <input type="radio" name="packageSelect" id="packageRetina" value="retina-node" checked
                                style="accent-color:var(--ink);margin-right:12px;">
                     </div>
