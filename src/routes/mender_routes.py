@@ -23,14 +23,15 @@ def check():
                 "reason": reason,
             })
         current = mender.dev_get_node_version()
-        if current:
-            # Once any package is installed, updates are handled by the
-            # server — no need to show what's available.
+        if current and device_state.has_completed_setup_wizard():
+            # Once any package is installed and the wizard has completed at
+            # least once, updates are handled by the server — no need to
+            # show what's available.
             return jsonify({"installing": False, "current_version": current})
         return jsonify({
             "installing": False,
             "latest_version": DEV_VERSIONS[0],
-            "current_version": None,
+            "current_version": current,
         })
 
     _, current = mender.get_versions()
@@ -53,13 +54,15 @@ def check():
             "reason": reason,
         })
 
-    if current:
-        # Already have a package installed — updates from here on are
-        # handled by the server, so there's nothing to check on GitHub for.
+    if current and device_state.has_completed_setup_wizard():
+        # Already have a package installed and the wizard has completed at
+        # least once — updates from here on are handled by the server, so
+        # there's nothing to check on GitHub for.
         return jsonify({"installing": False, "current_version": current})
 
-    # Fresh node, nothing installed yet — installation is mandatory to
-    # proceed, so we need GitHub to tell us what to install.
+    # Either nothing is installed yet, or this is the first time the wizard
+    # is running on a node that shipped with retina-node pre-installed — in
+    # both cases the user should be able to see/install the latest version.
     all_versions, error = get_all_stable_versions_from_github()
     if error:
         return jsonify({"error": error})
@@ -72,7 +75,7 @@ def check():
         "installing": False,
         "latest_version": latest,
         "latest_size_bytes": latest_size_bytes,
-        "current_version": None,
+        "current_version": current,
     })
 
 
@@ -146,7 +149,23 @@ def install():
 
     def _run_install(download_url):
         from mender import get_retina_node_version_from_docker
-        from routes.mode import _write_mode
+        from routes.mode import _write_mode, enforce_radar_mode
+        from app import RETINA_NODE_PATH
+
+        def _recover():
+            # The new artifact failed to apply. If something was already
+            # running, bring the previous (still-on-disk) compose stack back
+            # up rather than leaving the device with no radar containers at
+            # all — the failed install never committed, so RETINA_NODE_PATH
+            # still points at the old manifests.
+            #
+            # Mode stays 'spectrum' (watchdog silenced) until the containers
+            # are actually back up — flipping to 'radar' first would let the
+            # cron watchdog's own docker compose calls race these ones.
+            if already_installed:
+                enforce_radar_mode(RETINA_NODE_PATH)
+            _write_mode('radar')
+
         try:
             # Silence the watchdog before touching containers so it cannot see
             # blah2 go down and trigger a spurious radar stack restart mid-install.
@@ -169,7 +188,7 @@ def install():
             success, error = mender.install_from_url(download_url)
             if not success:
                 app.logger.error(f"Background install failed: {error}")
-                _write_mode('radar')
+                _recover()
             else:
                 device_state.update_install_stage("starting")
                 deadline = time.time() + 120
@@ -179,10 +198,10 @@ def install():
                     time.sleep(3)
                 else:
                     app.logger.warning("Containers did not come up within 2 minutes after install")
-                    _write_mode('radar')
+                    _recover()
         except Exception as e:
             app.logger.error(f"Background install crashed: {e}")
-            _write_mode('radar')
+            _recover()
         finally:
             device_state.release_install_lock()
 

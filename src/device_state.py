@@ -46,6 +46,7 @@ class DeviceState:
         self.mender_conf_backup_dir = mender_conf_backup_dir
         self.mender_conf_backup_path = mender_conf_backup_path
         self.setup_wizard_file = os.path.join(data_dir, "setup-wizard.json")
+        self.setup_wizard_completed_flag = os.path.join(data_dir, "setup-wizard-completed")
         self.dev_mode = dev_mode
 
     # ── State Queries ──────────────────────────────────────────
@@ -344,6 +345,21 @@ class DeviceState:
         """Clear wizard state (called on completion)."""
         if os.path.exists(self.setup_wizard_file):
             os.remove(self.setup_wizard_file)
+
+    def has_completed_setup_wizard(self) -> bool:
+        """Whether the wizard has ever been completed on this device.
+
+        Distinct from retina-node being installed: a node can ship with
+        retina-node pre-installed but never have had the wizard run on it,
+        in which case it's still a first run.
+        """
+        return os.path.exists(self.setup_wizard_completed_flag)
+
+    def mark_setup_wizard_completed(self):
+        """Record that the wizard has been completed at least once."""
+        os.makedirs(os.path.dirname(self.setup_wizard_completed_flag), exist_ok=True)
+        with open(self.setup_wizard_completed_flag, "w") as f:
+            f.write(datetime.now().isoformat())
 
     def is_setup_wizard_in_progress(self) -> bool:
         """Check if setup wizard is active (not completed)."""
