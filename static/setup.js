@@ -455,6 +455,14 @@ function initSetupWizard(resumeStep, highestStepName, devMode, isRerun, demoMode
                 .then(function(r) { return r.json(); })
                 .then(function(data) {
                     if (data.installing) {
+                        // Resuming into an install already running in the background
+                        // (e.g. after a page reload) — latestVersion was never set by
+                        // this fresh page load, so recover it from the lock's release
+                        // name ("retina-node-vX") to keep the success check below
+                        // accurate instead of comparing against null.
+                        if (!latestVersion && data.version) {
+                            latestVersion = data.version.replace(/^retina-node-/, '');
+                        }
                         status.textContent = data.reason || 'Installation in progress...';
                         installStatus.innerHTML = '<span class="text-warning">Do not power off the device.</span>';
                         packageStatus.innerHTML = '<span class="spinner-border spinner-border-sm text-primary"></span>';
@@ -467,7 +475,7 @@ function initSetupWizard(resumeStep, highestStepName, devMode, isRerun, demoMode
                         setTimeout(checkAvailability, 5000);
                         return;
                     }
-                    if (data.current_version) {
+                    if (data.current_version && data.current_version === data.latest_version) {
                         status.innerHTML = 'Packages are up to date &#10003;';
                         packageStatus.innerHTML = '<span class="text-success">&#10003;</span>';
                         document.getElementById('radarLatestVersion').textContent = data.current_version;
@@ -479,7 +487,14 @@ function initSetupWizard(resumeStep, highestStepName, devMode, isRerun, demoMode
                         document.getElementById('radarPackageSub').textContent = formatSize(data.latest_size_bytes);
                         installBtn.style.display = '';
                         updateInstallGate();
-                        // No skip — installation is required on a fresh node
+                        if (data.current_version) {
+                            // Node shipped with retina-node pre-installed, but
+                            // a newer version exists. Installing the latest
+                            // is mandatory on first run regardless — no skip.
+                            document.getElementById('radarDescription').textContent =
+                                'A newer version of RETINA is available (currently ' + data.current_version + '). Select a version below to install it before continuing.';
+                        }
+                        // No skip — installation of the latest version is required on first run
                     }
                 })
                 .catch(function() {
@@ -531,17 +546,31 @@ function initSetupWizard(resumeStep, highestStepName, devMode, isRerun, demoMode
                         if (!data.installing) {
                             clearInterval(pollTimer);
                             pollTimer = null;
-                            if (data.current_version) {
+                            if (data.current_version === latestVersion) {
                                 packageStatus.innerHTML = '<span class="text-success">&#10003;</span>';
                                 status.textContent = '';
                                 installStatus.innerHTML = '';
                                 advance();
+                            } else if (data.current_version) {
+                                // Install failed, but the previously working version
+                                // came back up — give the user an explicit way to
+                                // continue rather than getting stuck if updates keep
+                                // failing, instead of silently treating this as success.
+                                installStatus.innerHTML = '<span class="text-danger">Update failed. Your previous version (' +
+                                    data.current_version + ') has been restored and is running.</span>';
+                                packageStatus.innerHTML = '';
+                                status.textContent = '';
+                                installBtn.style.display = '';
+                                installBtn.textContent = 'Try again';
+                                nextBtn.textContent = 'Continue without updating';
+                                nextBtn.style.display = '';
+                                if (backBtn) backBtn.style.display = '';
+                                updateInstallGate();
                             } else {
                                 installStatus.innerHTML = '<span class="text-danger">Install may have failed. Try again.</span>';
                                 packageStatus.innerHTML = '';
                                 status.textContent = '';
                                 installBtn.style.display = '';
-                                if (isRerun) nextBtn.style.display = '';
                                 if (backBtn) backBtn.style.display = '';
                                 updateInstallGate();
                             }
