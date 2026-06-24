@@ -3,7 +3,7 @@ Utilities for converting Pydantic schemas to form field dicts for Jinja renderin
 
 Compatible with both Pydantic v1 (Debian Bookworm apt) and v2.
 """
-from typing import get_origin, get_args, Union
+from typing import get_origin, get_args, Union, Literal
 
 # Detect Pydantic version
 try:
@@ -52,20 +52,32 @@ def get_field_readonly(field_info):
     return False
 
 
-def get_field_input_type(field_info):
-    """Map Pydantic field type to HTML input type."""
-    annotation = get_field_type(field_info)
-
-    # Handle Optional[X] by extracting X
+def _unwrap_optional(annotation):
+    """Strip Optional[X] down to X."""
     origin = get_origin(annotation)
     if origin is Union:
         args = get_args(annotation)
-        # Filter out NoneType
         non_none = [a for a in args if a is not type(None)]
         if non_none:
-            annotation = non_none[0]
+            return non_none[0]
+    return annotation
 
-    if annotation == bool:
+
+def get_field_options(field_info):
+    """Get the allowed choices for a Literal[...] field, or None."""
+    annotation = _unwrap_optional(get_field_type(field_info))
+    if get_origin(annotation) is Literal:
+        return list(get_args(annotation))
+    return None
+
+
+def get_field_input_type(field_info):
+    """Map Pydantic field type to HTML input type."""
+    annotation = _unwrap_optional(get_field_type(field_info))
+
+    if get_origin(annotation) is Literal:
+        return "select"
+    elif annotation == bool:
         return "checkbox"
     elif annotation in (int, float):
         return "number"
@@ -97,13 +109,7 @@ def get_field_constraints(field_info):
             constraints['max'] = fi.le
 
     # Add step for float fields
-    annotation = get_field_type(field_info)
-    origin = get_origin(annotation)
-    if origin is Union:
-        args = get_args(annotation)
-        non_none = [a for a in args if a is not type(None)]
-        if non_none:
-            annotation = non_none[0]
+    annotation = _unwrap_optional(get_field_type(field_info))
     if annotation == float:
         constraints['step'] = 'any'  # Allow any decimal
 
@@ -139,15 +145,7 @@ def schema_to_form_fields(model_class, values: dict):
     """
     fields = []
     for name, field_info in get_model_fields(model_class).items():
-        annotation = get_field_type(field_info)
-
-        # Handle Optional[X]
-        origin = get_origin(annotation)
-        if origin is Union:
-            args = get_args(annotation)
-            non_none = [a for a in args if a is not type(None)]
-            if non_none:
-                annotation = non_none[0]
+        annotation = _unwrap_optional(get_field_type(field_info))
 
         # Check if this is a nested Pydantic model
         if is_nested_model(annotation):
@@ -161,6 +159,7 @@ def schema_to_form_fields(model_class, values: dict):
         else:
             constraints = get_field_constraints(field_info)
             readonly = get_field_readonly(field_info)
+            options = get_field_options(field_info)
             fields.append({
                 'name': name,
                 'title': get_field_title(field_info, name),
@@ -168,6 +167,7 @@ def schema_to_form_fields(model_class, values: dict):
                 'type': get_field_input_type(field_info),
                 'value': values.get(name),  # From user.yml, NOT schema default
                 'readonly': readonly,
+                'options': options,
                 **constraints,
             })
     return fields

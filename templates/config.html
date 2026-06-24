@@ -18,6 +18,23 @@
         {% for subfield in field.fields %}
             {{ render_field(subfield, section, prefix ~ field.name ~ '.') }}
         {% endfor %}
+    {% elif field.type == 'select' %}
+        <div class="cfg-row">
+            <div class="label-col">
+                <label for="{{ field_id }}">{{ field.title }}</label>
+                {% if field.description %}<span class="help">{{ field.description }}</span>{% endif %}
+            </div>
+            <div>
+                <select name="{{ field_name }}" id="{{ field_id }}"
+                        class="ds-input{% if field_err %} is-invalid{% endif %}"
+                        {% if field.readonly %}disabled{% endif %}>
+                    {% for opt in field.options %}
+                        <option value="{{ opt }}" {% if field.value == opt %}selected{% endif %}>{{ opt }}</option>
+                    {% endfor %}
+                </select>
+                {% if field_err %}<div style="color:var(--danger);font-size:12px;margin-top:4px;">{{ field_err }}</div>{% endif %}
+            </div>
+        </div>
     {% elif field.type == 'checkbox' %}
         <div class="toggle-row">
             <label class="ds-switch">

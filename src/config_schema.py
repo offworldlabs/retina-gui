@@ -14,6 +14,7 @@ Layered Config System:
 import os
 import yaml
 from copy import deepcopy
+from typing import Literal
 from pydantic import BaseModel, Field, VERSION
 
 # Detect Pydantic version for Field() syntax
@@ -122,7 +123,11 @@ class CaptureFormConfig(BaseModel):
     device_lnaState: int = Field(ge=1, le=9, title="LNA State", description="1=max gain, 9=min gain")
     device_dabNotch: bool = Field(title="DAB Notch Filter")
     device_rfNotch: bool = Field(title="RF Notch Filter")
-    device_bandwidthNumber: int = Field(title="Bandwidth Number")
+    device_bandwidthNumber: Literal[0, 5, 50, 100] = Field(
+        title="Bandwidth Number",
+        description="AGC loop bandwidth (Hz). 0 disables AGC — gain is fixed by Gain Reduction/LNA State. "
+                     "5/50/100 enable AGC: lower is slower and more stable, higher reacts faster but chases noise more."
+    )
 
 
 # ============================================================================

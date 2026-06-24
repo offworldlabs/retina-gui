@@ -196,7 +196,7 @@ class TestConfigSaveRoute:
             'capture.device_lnaState': '5',
             'capture.device_dabNotch': 'on',
             'capture.device_rfNotch': 'on',
-            'capture.device_bandwidthNumber': '1'
+            'capture.device_bandwidthNumber': '5'
         }, follow_redirects=False)
 
         # Should redirect on success
