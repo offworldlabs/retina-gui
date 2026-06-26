@@ -371,6 +371,11 @@
                     <div id="netWifiStatus" class="desc">Checking…</div>
                 </div>
 
+                <div style="display:flex;align-items:center;gap:10px;margin-bottom:14px;">
+                    <button type="button" class="ds-btn ghost" id="netRecheckBtn">Re-run network check</button>
+                    <span class="spinner-border spinner-border-sm" id="netRecheckSpinner" style="display:none;width:.9em;height:.9em;border-width:1.5px;"></span>
+                </div>
+
                 <div class="divider"></div>
 
                 <div class="ds-label-micro" style="margin-bottom:10px;">What are you trying to do?</div>
@@ -537,6 +542,8 @@
     var modeDifferent = document.getElementById('netModeDifferent');
     var modeSameDisabledHint = document.getElementById('netModeSameDisabledHint');
     var mode2Warning = document.getElementById('netMode2Warning');
+    var recheckBtn = document.getElementById('netRecheckBtn');
+    var recheckSpinner = document.getElementById('netRecheckSpinner');
     var manualMode = false;
     var scanned = [];
     var pollTimer = null;
@@ -570,7 +577,7 @@
     }
 
     function loadStatus() {
-        fetch('/network/status').then(function(r) { return r.json(); }).then(function(d) {
+        return fetch('/network/status').then(function(r) { return r.json(); }).then(function(d) {
             ethStatus.textContent = d.ethernet_connected ? 'Connected' : 'Not connected';
             wifiStatus.textContent = d.wifi_connected ? ('Connected to ' + d.wifi_ssid) : 'Not connected';
             lastStatus = d;
@@ -583,6 +590,17 @@
 
     modeSame.addEventListener('change', refreshModeUI);
     modeDifferent.addEventListener('change', refreshModeUI);
+
+    recheckBtn.addEventListener('click', function() {
+        recheckBtn.disabled = true;
+        recheckSpinner.style.display = 'inline-block';
+        ethStatus.textContent = 'Checking…';
+        wifiStatus.textContent = 'Checking…';
+        loadStatus().finally(function() {
+            recheckBtn.disabled = false;
+            recheckSpinner.style.display = 'none';
+        });
+    });
 
     function updatePasswordVisibility() {
         if (manualMode) {
