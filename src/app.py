@@ -1,4 +1,4 @@
-from flask import Flask, redirect, request
+from flask import Flask
 from flask_wtf.csrf import CSRFProtect
 import os
 import subprocess
@@ -13,29 +13,6 @@ app = Flask(__name__,
             template_folder=os.path.join(PROJECT_ROOT, 'templates'),
             static_folder=os.path.join(PROJECT_ROOT, 'static'))
 app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', os.urandom(32).hex())
-
-
-# owl.local is kept as a permanent mDNS alias (see owl-os) for nodes that have
-# already been renamed to retina, but the browser should always land on
-# retina.local so users aren't left on the old name. Before retina-node is
-# deployed, retina.local doesn't exist yet (same gating as the owl-os
-# hostname swap), so the redirect must not fire during onboarding. Registered
-# before CSRFProtect so the redirect always pre-empts CSRF checks on
-# state-changing requests that land on the old host.
-@app.before_request
-def redirect_owl_to_retina():
-    host = request.host
-    if host != 'owl.local' and not host.startswith('owl.local:'):
-        return None
-    if not config_mgr.is_retina_node_installed():
-        return None
-    target_host = host.replace('owl.local', 'retina.local', 1)
-    target = f"{request.scheme}://{target_host}{request.path}"
-    if request.query_string:
-        target += f"?{request.query_string.decode()}"
-    return redirect(target, code=308)
-
-
 csrf = CSRFProtect(app)
 
 DEV_MODE = os.environ.get('DEV_MODE', '').lower() in ('1', 'true', 'yes')
