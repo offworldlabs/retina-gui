@@ -95,6 +95,7 @@
         <a href="#ssh">SSH access</a>
         <a href="#cloud">Cloud services</a>
         <a href="#wizard">Setup wizard</a>
+        <a href="#network">Network</a>
     </aside>
 
     {# ── Main ── #}
@@ -354,6 +355,66 @@
             </div>
         </section>
 
+        {# ── Network ── #}
+        <section id="network" class="cfg-section">
+            <div class="cfg-section-head">
+                <h2>Network</h2>
+                <span class="desc">Connect or switch this node's WiFi network.</span>
+            </div>
+            <div class="cfg-body">
+                <div class="cfg-row" style="padding:0;border:0;margin-bottom:14px;">
+                    <div class="label-col"><label>Ethernet</label></div>
+                    <div id="netEthernetStatus" class="desc">Checking…</div>
+                </div>
+                <div class="cfg-row" style="padding:0;border:0;margin-bottom:14px;">
+                    <div class="label-col"><label>WiFi</label></div>
+                    <div id="netWifiStatus" class="desc">Checking…</div>
+                </div>
+
+                <div class="divider"></div>
+
+                <div class="ds-label-micro" style="margin-bottom:10px;">What are you trying to do?</div>
+                <div style="display:flex;flex-direction:column;gap:8px;margin-bottom:10px;">
+                    <label style="display:flex;align-items:flex-start;gap:8px;font-size:13.5px;cursor:pointer;">
+                        <input type="radio" name="netMode" id="netModeSame" value="same_network" checked style="margin-top:3px;">
+                        <span>
+                            <strong>Use this network's WiFi</strong> — I'm wired into a router and want this node on its WiFi too, then I'll unplug the cable.
+                            <span id="netModeSameDisabledHint" style="display:none;color:var(--ink-3);"> (connect an Ethernet cable to use this)</span>
+                        </span>
+                    </label>
+                    <label style="display:flex;align-items:flex-start;gap:8px;font-size:13.5px;cursor:pointer;">
+                        <input type="radio" name="netMode" id="netModeDifferent" value="different_network" style="margin-top:3px;">
+                        <span><strong>Switch to a different network</strong> — I'm moving this node to a new router entirely.</span>
+                    </label>
+                </div>
+
+                <div id="netMode2Warning" style="display:none;background:var(--accent-soft);border:1px solid var(--accent-edge);border-radius:var(--r-md);padding:10px 14px;margin-bottom:14px;font-size:13px;"></div>
+
+                <div class="divider"></div>
+
+                <div id="netScanRow" style="display:flex;gap:8px;align-items:flex-start;margin-bottom:10px;">
+                    <select id="netSsidSelect" class="ds-select" style="flex:1;min-width:0;">
+                        <option value="">Scanning…</option>
+                    </select>
+                    <button type="button" class="ds-btn ghost" id="netRescanBtn" title="Rescan">
+                        <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M21 2v6h-6"/><path d="M3 11a9 9 0 0 1 15-6.7L21 8"/><path d="M3 22v-6h6"/><path d="M21 13a9 9 0 0 1-15 6.7L3 16"/></svg>
+                    </button>
+                </div>
+                <div id="netManualRow" style="display:none;margin-bottom:10px;">
+                    <input type="text" id="netSsidManual" class="ds-input" placeholder="Network name (SSID)">
+                </div>
+                <a href="#" id="netManualToggle" style="font-size:12.5px;display:inline-block;margin-bottom:14px;">Enter network name manually</a>
+
+                <input type="password" id="netPassword" class="ds-input" placeholder="Password" style="margin-bottom:10px;display:none;">
+
+                <div style="display:flex;align-items:center;gap:10px;">
+                    <button type="button" class="ds-btn primary" id="netConnectBtn">Connect</button>
+                    <span class="spinner-border spinner-border-sm" id="netConnectSpinner" style="display:none;width:.9em;height:.9em;border-width:1.5px;"></span>
+                    <span id="netConnectStatus" style="font-size:13px;"></span>
+                </div>
+            </div>
+        </section>
+
         {# ── Save bar (bottom of all sections) ── #}
         {% if retina_installed %}
         <div class="savebar">
@@ -453,6 +514,190 @@
             });
         });
     }
+})();
+
+// Network panel — status, scan, manual entry toggle, connect + poll
+(function() {
+    var section = document.getElementById('network');
+    if (!section) return;
+
+    var csrf = document.querySelector('meta[name="csrf-token"]').content;
+    var ethStatus = document.getElementById('netEthernetStatus');
+    var wifiStatus = document.getElementById('netWifiStatus');
+    var select = document.getElementById('netSsidSelect');
+    var rescanBtn = document.getElementById('netRescanBtn');
+    var manualRow = document.getElementById('netManualRow');
+    var manualInput = document.getElementById('netSsidManual');
+    var manualToggle = document.getElementById('netManualToggle');
+    var passwordInput = document.getElementById('netPassword');
+    var connectBtn = document.getElementById('netConnectBtn');
+    var spinner = document.getElementById('netConnectSpinner');
+    var connectStatus = document.getElementById('netConnectStatus');
+    var modeSame = document.getElementById('netModeSame');
+    var modeDifferent = document.getElementById('netModeDifferent');
+    var modeSameDisabledHint = document.getElementById('netModeSameDisabledHint');
+    var mode2Warning = document.getElementById('netMode2Warning');
+    var manualMode = false;
+    var scanned = [];
+    var pollTimer = null;
+    var lastStatus = { ethernet_connected: false, client_on_wifi: false };
+
+    function currentMode() {
+        return modeDifferent.checked ? 'different_network' : 'same_network';
+    }
+
+    function refreshModeUI() {
+        modeSame.disabled = !lastStatus.ethernet_connected;
+        modeSameDisabledHint.style.display = lastStatus.ethernet_connected ? 'none' : '';
+        if (!lastStatus.ethernet_connected && modeSame.checked) {
+            modeSame.checked = false;
+            modeDifferent.checked = true;
+        }
+
+        if (currentMode() === 'different_network' && (!lastStatus.ethernet_connected || lastStatus.client_on_wifi)) {
+            var lines = [];
+            if (!lastStatus.ethernet_connected) {
+                lines.push("No Ethernet connection detected. Switching networks will disconnect this device from its current WiFi, so if the new network doesn't work out, you'll need to join it yourself to regain access. We recommend connecting Ethernet first as a fallback.");
+            }
+            if (lastStatus.client_on_wifi) {
+                lines.push("You also appear to be viewing this page over the WiFi network you're about to change — this page itself may stop responding the moment the switch happens.");
+            }
+            mode2Warning.innerHTML = lines.map(function(l) { return '<div>' + l + '</div>'; }).join('');
+            mode2Warning.style.display = '';
+        } else {
+            mode2Warning.style.display = 'none';
+        }
+    }
+
+    function loadStatus() {
+        fetch('/network/status').then(function(r) { return r.json(); }).then(function(d) {
+            ethStatus.textContent = d.ethernet_connected ? 'Connected' : 'Not connected';
+            wifiStatus.textContent = d.wifi_connected ? ('Connected to ' + d.wifi_ssid) : 'Not connected';
+            lastStatus = d;
+            refreshModeUI();
+        }).catch(function() {
+            ethStatus.textContent = 'Unknown';
+            wifiStatus.textContent = 'Unknown';
+        });
+    }
+
+    modeSame.addEventListener('change', refreshModeUI);
+    modeDifferent.addEventListener('change', refreshModeUI);
+
+    function updatePasswordVisibility() {
+        if (manualMode) {
+            passwordInput.style.display = '';
+            return;
+        }
+        var opt = select.options[select.selectedIndex];
+        passwordInput.style.display = (opt && opt.dataset.secured === '1') ? '' : 'none';
+    }
+
+    function renderScan() {
+        select.innerHTML = '';
+        if (scanned.length === 0) {
+            var o = document.createElement('option');
+            o.value = '';
+            o.textContent = 'No networks found';
+            select.appendChild(o);
+            return;
+        }
+        scanned.forEach(function(net) {
+            var o = document.createElement('option');
+            o.value = net.ssid;
+            o.textContent = net.ssid + (net.secured ? ' (secured)' : ' (open)') + ' — ' + net.signal + '%';
+            o.dataset.secured = net.secured ? '1' : '0';
+            select.appendChild(o);
+        });
+        updatePasswordVisibility();
+    }
+
+    function scan() {
+        select.innerHTML = '<option value="">Scanning…</option>';
+        fetch('/network/wifi/scan').then(function(r) { return r.json(); }).then(function(d) {
+            scanned = d.networks || [];
+            renderScan();
+        }).catch(function() {
+            select.innerHTML = '<option value="">Scan failed</option>';
+        });
+    }
+
+    select.addEventListener('change', updatePasswordVisibility);
+    rescanBtn.addEventListener('click', scan);
+
+    manualToggle.addEventListener('click', function(e) {
+        e.preventDefault();
+        manualMode = !manualMode;
+        document.getElementById('netScanRow').style.display = manualMode ? 'none' : 'flex';
+        manualRow.style.display = manualMode ? '' : 'none';
+        manualToggle.textContent = manualMode ? 'Choose from scanned networks' : 'Enter network name manually';
+        updatePasswordVisibility();
+    });
+
+    function pollConnectStatus() {
+        fetch('/network/wifi/connect/status').then(function(r) { return r.json(); }).then(function(d) {
+            if (d.state === 'connecting') {
+                pollTimer = setTimeout(pollConnectStatus, 2000);
+                return;
+            }
+            spinner.style.display = 'none';
+            connectBtn.disabled = false;
+            if (d.state === 'connected') {
+                connectStatus.style.color = 'var(--ok)';
+                if (currentMode() === 'same_network') {
+                    connectStatus.textContent = 'Connected to ' + d.ssid + ' — verified active. You can safely disconnect Ethernet now.';
+                } else if (lastStatus.ethernet_connected) {
+                    connectStatus.textContent = 'Connected to ' + d.ssid + ' — verified active. This device may now only be reachable from ' + d.ssid + '. Keep Ethernet connected for now, join ' + d.ssid + ' with your own computer, and confirm http://retina.local loads there. Once confirmed, it\'s safe to disconnect Ethernet.';
+                } else {
+                    connectStatus.textContent = 'Connected to ' + d.ssid + ' — verified active. Join ' + d.ssid + ' with your own computer now and confirm http://retina.local loads there.';
+                }
+                loadStatus();
+            } else if (d.state === 'failed') {
+                connectStatus.style.color = 'var(--danger)';
+                connectStatus.textContent = (d.error || 'Connection failed') + ' — nothing was removed from your existing network.';
+            }
+        }).catch(function() {
+            spinner.style.display = 'none';
+            connectBtn.disabled = false;
+            connectStatus.style.color = 'var(--danger)';
+            connectStatus.textContent = "Lost connection to the node — if you just changed WiFi networks, rejoin the new network and reload this page to confirm.";
+        });
+    }
+
+    connectBtn.addEventListener('click', function() {
+        var ssid = manualMode ? manualInput.value.trim() : select.value;
+        if (!ssid) return;
+        clearTimeout(pollTimer);
+        connectBtn.disabled = true;
+        spinner.style.display = 'inline-block';
+        connectStatus.style.color = '';
+        connectStatus.textContent = 'Connecting…';
+        fetch('/network/wifi/connect', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrf },
+            body: JSON.stringify({ ssid: ssid, password: passwordInput.value, hidden: manualMode })
+        })
+        .then(function(r) { return r.json(); })
+        .then(function(d) {
+            if (d.success) {
+                pollConnectStatus();
+            } else {
+                spinner.style.display = 'none';
+                connectBtn.disabled = false;
+                connectStatus.style.color = 'var(--danger)';
+                connectStatus.textContent = d.error || 'Failed to start connection';
+            }
+        })
+        .catch(function(e) {
+            spinner.style.display = 'none';
+            connectBtn.disabled = false;
+            connectStatus.style.color = 'var(--danger)';
+            connectStatus.textContent = 'Error: ' + e.message;
+        });
+    });
+
+    loadStatus();
+    scan();
 })();
 
 // Auto-apply after successful save redirect
@@ -590,7 +835,7 @@ if (discardBtn) discardBtn.addEventListener('click', () => location.reload());
 
 // Side-nav scrollspy
 (function() {
-    var sectionIds = ['mode','location','capture','truth','tar1090','ssh','cloud','wizard'];
+    var sectionIds = ['mode','location','capture','truth','tar1090','ssh','cloud','wizard','network'];
     var links = {};
     sectionIds.forEach(function(id) {
         var a = document.querySelector('.side a[href="#' + id + '"]');
