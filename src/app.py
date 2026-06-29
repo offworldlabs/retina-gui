@@ -84,6 +84,13 @@ if config_mgr.is_retina_node_installed():
     except Exception:
         pass
 
+# Same for sdrconnect.service — never leave a node stuck serving SDRconnect
+# after a GUI restart.
+try:
+    subprocess.run(['systemctl', 'stop', 'sdrconnect.service'], capture_output=True, timeout=30)
+except Exception:
+    pass
+
 
 def get_node_id():
     """Get node_id from Mender device identity file."""
