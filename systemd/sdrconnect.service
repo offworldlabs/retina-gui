@@ -1,0 +1,9 @@
+[Unit]
+Description=SDRconnect Server
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=/opt/sdrconnect/SDRconnect --server
+Restart=on-failure
+RestartSec=5

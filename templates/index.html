@@ -60,6 +60,35 @@
             <iframe id="spectrumFrame" class="spectrum-frame" src="" frameborder="0" style="display:none"></iframe>
         </div>
     </section>
+    {% elif mode == 'sdrconnect' %}
+    <section>
+        <div class="section-head"><h2>SDRconnect</h2></div>
+        <div class="svc-card" style="max-width:480px;">
+            <div class="svc-head">
+                <div class="svc-icon">
+                    <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+                        <rect x="3" y="11" width="18" height="9" rx="2"/>
+                        <path d="M7 11V7a5 5 0 0 1 10 0v4"/>
+                    </svg>
+                </div>
+                <div class="svc-name">SDRconnect server</div>
+                <span class="ds-pill" id="sdrconnectStatus">
+                    <span class="ds-pill-dot" style="background:var(--ink-3);"></span>
+                    Starting…
+                </span>
+            </div>
+            <div class="svc-desc">
+                Open the SDRconnect client app on your computer and connect to:
+            </div>
+            <div class="svc-desc" style="font-weight:600;color:var(--ink);" id="sdrconnectAddress"></div>
+            <div class="svc-desc">
+                Radar and the spectrum analyser are paused while SDRconnect mode is active.
+            </div>
+            <button type="button" class="ds-btn ghost" id="sdrconnectExitBtn" style="align-self:flex-start;">
+                Switch back to Radar
+            </button>
+        </div>
+    </section>
     {% else %}
     <section>
         <div class="section-head"><h2>Services</h2></div>
@@ -177,6 +206,60 @@ document.querySelectorAll('.svc-card[data-port]').forEach(function(el) {
     }
 
     poll();
+})();
+</script>
+{% endif %}
+{% if mode == 'sdrconnect' %}
+<script>
+(function() {
+    var statusPill = document.getElementById('sdrconnectStatus');
+    var address     = document.getElementById('sdrconnectAddress');
+    var exitBtn     = document.getElementById('sdrconnectExitBtn');
+    var csrf        = document.querySelector('meta[name="csrf-token"]').content;
+    var maxAttempts = 30; // 30 × 2 s = 60 s before giving up
+    var attempt = 0;
+
+    address.textContent = window.location.hostname;
+
+    function setStatus(text, color) {
+        statusPill.innerHTML = '<span class="ds-pill-dot" style="background:' + color + ';"></span>' + text;
+    }
+
+    function poll() {
+        fetch('/api/sdrconnect/ready')
+            .then(function(r) { return r.json(); })
+            .then(function(d) {
+                if (d.ready) {
+                    setStatus('Running', 'var(--ok)');
+                } else if (attempt < maxAttempts) {
+                    attempt++;
+                    setTimeout(poll, 2000);
+                } else {
+                    setStatus('Not responding', 'var(--danger)');
+                }
+            })
+            .catch(function() {
+                if (attempt < maxAttempts) { attempt++; setTimeout(poll, 2000); }
+                else { setStatus('Not responding', 'var(--danger)'); }
+            });
+    }
+
+    poll();
+
+    exitBtn.addEventListener('click', function() {
+        exitBtn.disabled = true;
+        exitBtn.textContent = 'Switching to Radar…';
+        fetch('/api/mode', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrf },
+            body: JSON.stringify({ mode: 'radar' })
+        })
+        .then(function() { window.location.reload(); })
+        .catch(function() {
+            exitBtn.disabled = false;
+            exitBtn.textContent = 'Switch back to Radar';
+        });
+    });
 })();
 </script>
 {% endif %}

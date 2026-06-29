@@ -397,6 +397,34 @@ h1, h2, h3, h4, h5, h6 {
 .ds-switch input:disabled + .ds-switch-track { opacity: 0.5; cursor: not-allowed; }
 
 /* ══════════════════════════════════════════════
+   SEGMENTED CONTROL
+   ══════════════════════════════════════════════ */
+.ds-segmented {
+    display: inline-flex;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    background: var(--surface-2);
+    padding: 2px;
+    gap: 2px;
+}
+.ds-segmented-btn {
+    border: none;
+    background: transparent;
+    border-radius: 6px;
+    padding: 6px 12px;
+    font: inherit;
+    font-size: 12.5px;
+    font-weight: 500;
+    color: var(--ink-2);
+    cursor: pointer;
+    white-space: nowrap;
+    transition: background .12s, color .12s;
+}
+.ds-segmented-btn:hover:not([disabled]):not(.active) { color: var(--ink); }
+.ds-segmented-btn.active { background: var(--surface); color: var(--ink); box-shadow: var(--shadow-md); }
+.ds-segmented-btn[disabled] { cursor: not-allowed; opacity: 0.5; }
+
+/* ══════════════════════════════════════════════
    PILLS / STATUS
    ══════════════════════════════════════════════ */
 .ds-pill {

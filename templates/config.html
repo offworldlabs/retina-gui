@@ -126,17 +126,18 @@
         <section id="mode" class="cfg-section">
             <div class="cfg-section-head">
                 <h2>Mode</h2>
-                <span class="desc">Switch the node between passive radar and spectrum analysis.</span>
+                <span class="desc">Switch the node between passive radar, spectrum analysis, and SDRconnect.</span>
             </div>
             <div class="cfg-body">
                 <div class="toggle-row" style="padding:0;border:0;">
-                    <label class="ds-switch">
-                        <input type="checkbox" id="modeToggle">
-                        <span class="ds-switch-track"></span>
-                    </label>
+                    <div class="ds-segmented" id="modeSegmented" role="group" aria-label="Mode">
+                        <button type="button" class="ds-segmented-btn" data-mode="radar">Radar</button>
+                        <button type="button" class="ds-segmented-btn" data-mode="spectrum">Spectrum</button>
+                        <button type="button" class="ds-segmented-btn" data-mode="sdrconnect">SDRconnect</button>
+                    </div>
                     <div class="body">
                         <div class="name" id="modeLabel">Radar</div>
-                        <div class="desc">Radar runs the blah2 passive radar pipeline. Spectrum stops blah2 and starts retina-spectrum.</div>
+                        <div class="desc">Radar runs the blah2 passive radar pipeline. Spectrum stops blah2 and starts retina-spectrum. SDRconnect stops both and starts the SDRconnect server for a remote desktop client.</div>
                     </div>
                     <span class="spinner-border spinner-border-sm" id="modeSpinner" style="display:none;width:.9em;height:.9em;border-width:1.5px;flex-shrink:0;"></span>
                 </div>
@@ -460,39 +461,48 @@
 
 {% block scripts %}
 <script>
-// Mode toggle — change is staged; applied when user clicks Apply changes
+// Mode segmented control — change is staged; applied when user clicks Apply changes
 (function() {
-    var toggle  = document.getElementById('modeToggle');
-    var label   = document.getElementById('modeLabel');
-    var spinner = document.getElementById('modeSpinner');
-    var csrf    = document.querySelector('meta[name="csrf-token"]').content;
+    var segmented = document.getElementById('modeSegmented');
+    var buttons   = Array.prototype.slice.call(segmented.querySelectorAll('.ds-segmented-btn'));
+    var label     = document.getElementById('modeLabel');
+    var spinner   = document.getElementById('modeSpinner');
+    var csrf      = document.querySelector('meta[name="csrf-token"]').content;
     var loadedMode = 'radar'; // the mode currently active on the device
+    var selectedMode = 'radar';
 
-    function setLabel(mode) {
-        label.textContent = mode === 'spectrum' ? 'Spectrum' : 'Radar';
+    var MODE_LABELS = { radar: 'Radar', spectrum: 'Spectrum', sdrconnect: 'SDRconnect' };
+
+    function setSelected(mode) {
+        selectedMode = mode;
+        label.textContent = MODE_LABELS[mode] || 'Radar';
+        buttons.forEach(function(btn) {
+            btn.classList.toggle('active', btn.dataset.mode === mode);
+        });
     }
 
     fetch('/api/mode')
         .then(function(r) { return r.json(); })
         .then(function(d) {
             loadedMode = d.mode || 'radar';
-            toggle.checked = loadedMode === 'spectrum';
-            setLabel(loadedMode);
+            setSelected(loadedMode);
         })
         .catch(function() {});
 
-    toggle.addEventListener('change', function() {
-        setLabel(toggle.checked ? 'spectrum' : 'radar');
+    buttons.forEach(function(btn) {
+        btn.addEventListener('click', function() {
+            setSelected(btn.dataset.mode);
+        });
     });
 
     // Apply mode change as part of the form submit triggered by Apply changes
     var form = document.getElementById('configForm');
     if (form) {
         form.addEventListener('submit', function(e) {
-            var newMode = toggle.checked ? 'spectrum' : 'radar';
+            var newMode = selectedMode;
             if (newMode === loadedMode) return; // no mode change — let form submit normally
             e.preventDefault();
-            toggle.disabled = true;
+            buttons.forEach(function(btn) { btn.disabled = true; });
             spinner.style.display = 'inline-block';
             fetch('/api/mode', {
                 method: 'POST',
@@ -505,16 +515,14 @@
                     loadedMode = newMode;
                     form.submit(); // HTMLFormElement.submit() bypasses the submit event
                 } else {
-                    toggle.checked = loadedMode === 'spectrum';
-                    setLabel(loadedMode);
+                    setSelected(loadedMode);
                 }
             })
             .catch(function() {
-                toggle.checked = loadedMode === 'spectrum';
-                setLabel(loadedMode);
+                setSelected(loadedMode);
             })
             .finally(function() {
-                toggle.disabled = false;
+                buttons.forEach(function(btn) { btn.disabled = false; });
                 spinner.style.display = 'none';
             });
         });
