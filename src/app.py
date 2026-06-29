@@ -6,6 +6,7 @@ import subprocess
 from config_manager import ConfigManager
 from device_state import DeviceState
 from mender import MenderClient
+from network_manager import NetworkManager
 from ssh_keys import SSHKeyManager
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -36,6 +37,7 @@ DEV_MODE = os.environ.get('DEV_MODE', '').lower() in ('1', 'true', 'yes')
 
 # Shared services
 ssh_keys = SSHKeyManager(os.path.join(DATA_DIR, "authorized_keys"))
+network_mgr = NetworkManager(dev_mode=DEV_MODE)
 
 config_mgr = ConfigManager(
     user_config_path=USER_CONFIG_PATH,
@@ -115,6 +117,7 @@ from routes.mender_routes import bp as mender_bp
 from routes.setup import bp as setup_bp
 from routes.towers import bp as towers_bp
 from routes.mode import bp as mode_bp
+from routes.network import bp as network_bp
 
 app.register_blueprint(home_bp)
 app.register_blueprint(config_bp)
@@ -122,6 +125,7 @@ app.register_blueprint(mender_bp)
 app.register_blueprint(setup_bp)
 app.register_blueprint(towers_bp)
 app.register_blueprint(mode_bp)
+app.register_blueprint(network_bp)
 
 
 if __name__ == "__main__":
