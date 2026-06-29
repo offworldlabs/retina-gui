@@ -620,6 +620,12 @@
             select.appendChild(o);
             return;
         }
+        var placeholder = document.createElement('option');
+        placeholder.value = '';
+        placeholder.textContent = 'Choose your WiFi network';
+        placeholder.disabled = true;
+        placeholder.selected = true;
+        select.appendChild(placeholder);
         scanned.forEach(function(net) {
             var o = document.createElement('option');
             o.value = net.ssid;
