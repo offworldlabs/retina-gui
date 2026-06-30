@@ -141,6 +141,7 @@
                     </div>
                     <span class="spinner-border spinner-border-sm" id="modeSpinner" style="display:none;width:.9em;height:.9em;border-width:1.5px;flex-shrink:0;"></span>
                 </div>
+                <div id="modeErrorMsg" style="font-size:13px;color:var(--danger);display:none;margin-top:6px;"></div>
             </div>
         </section>
 
@@ -463,12 +464,13 @@
 <script>
 // Mode segmented control — change is staged; applied when user clicks Apply changes
 (function() {
-    var segmented = document.getElementById('modeSegmented');
-    var buttons   = Array.prototype.slice.call(segmented.querySelectorAll('.ds-segmented-btn'));
-    var label     = document.getElementById('modeLabel');
-    var spinner   = document.getElementById('modeSpinner');
-    var csrf      = document.querySelector('meta[name="csrf-token"]').content;
-    var loadedMode = 'radar'; // the mode currently active on the device
+    var segmented    = document.getElementById('modeSegmented');
+    var buttons      = Array.prototype.slice.call(segmented.querySelectorAll('.ds-segmented-btn'));
+    var label        = document.getElementById('modeLabel');
+    var spinner      = document.getElementById('modeSpinner');
+    var errorMsg     = document.getElementById('modeErrorMsg');
+    var csrf         = document.querySelector('meta[name="csrf-token"]').content;
+    var loadedMode   = 'radar'; // the mode currently active on the device
     var selectedMode = 'radar';
 
     var MODE_LABELS = { radar: 'Radar', spectrum: 'Spectrum', sdrconnect: 'SDRconnect' };
@@ -502,6 +504,8 @@
             var newMode = selectedMode;
             if (newMode === loadedMode) return; // no mode change — let form submit normally
             e.preventDefault();
+            errorMsg.style.display = 'none';
+            errorMsg.textContent = '';
             buttons.forEach(function(btn) { btn.disabled = true; });
             spinner.style.display = 'inline-block';
             fetch('/api/mode', {
@@ -513,13 +517,18 @@
             .then(function(d) {
                 if (d.success) {
                     loadedMode = newMode;
+                    errorMsg.style.display = 'none';
                     form.submit(); // HTMLFormElement.submit() bypasses the submit event
                 } else {
-                    setSelected(loadedMode);
+                    // Leave selectedMode at the failed target so clicking Apply again retries.
+                    // The toggle stays on the target mode to invite the retry.
+                    errorMsg.textContent = (d.error || 'Mode switch failed') + ' — press Apply to retry.';
+                    errorMsg.style.display = '';
                 }
             })
             .catch(function() {
-                setSelected(loadedMode);
+                errorMsg.textContent = 'Failed to reach the node — check your connection and press Apply to retry.';
+                errorMsg.style.display = '';
             })
             .finally(function() {
                 buttons.forEach(function(btn) { btn.disabled = false; });
