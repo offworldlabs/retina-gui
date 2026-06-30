@@ -194,6 +194,7 @@ def install():
                 deadline = time.time() + 120
                 while time.time() < deadline:
                     if get_retina_node_version_from_docker():
+                        _write_mode('radar')  # re-enable watchdog now that containers are confirmed up
                         break
                     time.sleep(3)
                 else:
