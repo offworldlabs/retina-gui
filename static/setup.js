@@ -214,6 +214,7 @@ function initSetupWizard(resumeStep, highestStepName, devMode, isRerun, demoMode
     var connectRfSse = null; // defined inside enterHooks.location on first entry
     var locationActive = false;    // guards against dangling fetch resolving after leave
     var pendingModeSwitch = null;  // tracks in-flight /api/mode POST so the leave hook can serialise the revert
+    var spectrumGating = false;    // true while scan is in progress; gates Find Towers
 
     // Step 1: Agreements
     enterHooks.agreements = function() {
@@ -614,10 +615,9 @@ function initSetupWizard(resumeStep, highestStepName, devMode, isRerun, demoMode
         // Start retina-spectrum on every entry (idempotent — no-op if already in
         // spectrum mode or if retina-node is not yet installed).
         locationActive = true;
-        var scanBtn = document.getElementById('scanRfBtn');
+        spectrumGating = true;
+        document.getElementById('findTowersBtn').disabled = true;
         var scanStatus = document.getElementById('scanStatus');
-        scanBtn.disabled = true;
-        scanBtn.textContent = 'Starting analyser…';
         scanStatus.textContent = 'Starting spectrum analyser…';
         scanStatus.style.display = '';
         pendingModeSwitch = fetch('/api/mode')
@@ -632,7 +632,11 @@ function initSetupWizard(resumeStep, highestStepName, devMode, isRerun, demoMode
             })
             .catch(function() {
                 if (!locationActive) return;
-                scanStatus.textContent = 'Analyser unavailable — RF scan disabled';
+                scanStatus.textContent = 'Spectrum analyser unavailable — will search by location only';
+                spectrumGating = false;
+                var lat = parseFloat(document.getElementById('rxLat').value);
+                var lon = parseFloat(document.getElementById('rxLon').value);
+                document.getElementById('findTowersBtn').disabled = isNaN(lat) || isNaN(lon);
             });
 
         // Event listeners and inner state set up only once
@@ -662,7 +666,6 @@ function initSetupWizard(resumeStep, highestStepName, devMode, isRerun, demoMode
         var scanResult = document.getElementById('scanResult');
         var rfMeasurements = [];
         var rfPhase = 'idle'; // idle | waiting | scanning | done
-        var rfHwReady = false;
 
         function normaliseBand(id) {
             if (id === 'fm') return 'FM';
@@ -673,30 +676,27 @@ function initSetupWizard(resumeStep, highestStepName, devMode, isRerun, demoMode
 
         function updateRfUI() {
             var n = rfMeasurements.length;
-            if (rfPhase === 'idle' || rfPhase === 'waiting') {
-                scanStatus.textContent = rfPhase === 'waiting' ? 'Waiting for sweep to start…' : '';
-                scanStatus.style.display = rfPhase === 'waiting' ? '' : 'none';
+            if (rfPhase === 'waiting') {
+                scanStatus.textContent = 'Waiting for sweep to start — this will take about 1 minute…';
+                scanStatus.style.display = '';
                 scanResult.style.display = 'none';
-                scanBtn.disabled = !rfHwReady;
-                scanBtn.textContent = 'Scan RF signals';
             } else if (rfPhase === 'scanning') {
                 scanStatus.textContent = 'Scanning…' + (n > 0 ? ' — ' + n + ' signal' + (n !== 1 ? 's' : '') + ' found' : '');
                 scanStatus.style.display = '';
                 scanResult.style.display = 'none';
-                scanBtn.disabled = true;
-                scanBtn.textContent = 'Scanning…';
             } else if (rfPhase === 'done') {
                 scanStatus.style.display = 'none';
                 scanResult.textContent = n + ' signal' + (n !== 1 ? 's' : '') + ' detected';
                 scanResult.style.display = '';
-                scanBtn.disabled = false;
-                scanBtn.textContent = 'Rescan';
             }
         }
 
         // Assign to outer-scope var so leaveHooks.location and re-entries can reach it
         connectRfSse = function() {
             if (rfSse) return;
+            rfMeasurements = [];
+            rfPhase = 'waiting';
+            updateRfUI();
             rfSse = new EventSource('/towers/spectrum/events');
             rfSse.onmessage = function(e) {
                 var msg = JSON.parse(e.data);
@@ -706,7 +706,6 @@ function initSetupWizard(resumeStep, highestStepName, devMode, isRerun, demoMode
                     rfPhase = 'scanning';
                     updateRfUI();
                 } else if (msg.type === 'step') {
-                    if (!rfHwReady) { rfHwReady = true; updateRfUI(); }
                     if (rfPhase !== 'scanning') return;
                     if (msg.channels) {
                         msg.channels.forEach(function(ch) {
@@ -726,7 +725,9 @@ function initSetupWizard(resumeStep, highestStepName, devMode, isRerun, demoMode
                 } else if (msg.type === 'complete') {
                     if (rfPhase !== 'scanning') return;
                     rfPhase = 'done';
+                    spectrumGating = false;
                     updateRfUI();
+                    updateFindBtn();
                 }
             };
             rfSse.onerror = function() {
@@ -735,17 +736,11 @@ function initSetupWizard(resumeStep, highestStepName, devMode, isRerun, demoMode
             };
         };
 
-        scanBtn.addEventListener('click', function() {
-            rfMeasurements = [];
-            rfPhase = 'waiting';
-            updateRfUI();
-        });
-
-        // Enable Find Towers when lat/lon filled
+        // Enable Find Towers when lat/lon filled AND RF scan done (or unavailable)
         function updateFindBtn() {
             var lat = parseFloat(rxLat.value);
             var lon = parseFloat(rxLon.value);
-            findBtn.disabled = isNaN(lat) || isNaN(lon);
+            findBtn.disabled = isNaN(lat) || isNaN(lon) || spectrumGating;
         }
         rxLat.addEventListener('input', updateFindBtn);
         rxLon.addEventListener('input', updateFindBtn);

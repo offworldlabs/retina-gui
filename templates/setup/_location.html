@@ -2,7 +2,7 @@
 <div data-step="location" class="step-panel" style="display:none;">
     <div class="wiz-title-row">
         <h1>Where is your receiver?</h1>
-        <p>Set the coordinates of the radar receiver site.</p>
+        <p>Set the coordinates of the radar receiver site. While you do, the spectrum analyser will scan your RF environment to improve tower search results.</p>
     </div>
     <div class="step-stack">
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;">
@@ -30,12 +30,8 @@
         -->
 
         <div class="ds-field">
-            <button type="button" class="ds-btn ghost sm" id="scanRfBtn" style="width:100%;">
-                <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.55a11 11 0 0 1 14.08 0"/><path d="M1.42 9a16 16 0 0 1 21.16 0"/><path d="M8.53 16.11a6 6 0 0 1 6.95 0"/><line x1="12" y1="20" x2="12.01" y2="20"/></svg>
-                Scan RF signals
-            </button>
-            <p id="scanStatus" style="display:none;font-size:13px;color:var(--ink-2);margin:4px 0 0;"></p>
-            <p id="scanResult" style="display:none;font-size:13px;color:var(--ok);margin:4px 0 0;"></p>
+            <p id="scanStatus" style="display:none;font-size:13px;color:var(--ink-2);margin:0;"></p>
+            <p id="scanResult" style="display:none;font-size:13px;color:var(--ok);margin:0;"></p>
         </div>
     </div>
 
