@@ -114,15 +114,19 @@ def _readonly_field(**kwargs):
 
 class CaptureFormConfig(BaseModel):
     """Flat capture config for form display."""
-    fs: int = Field(title="Sample Rate", description="Hz")
-    fc: int = Field(title="Center Frequency", description="Hz")
+    fs: Literal[62500, 125000, 250000, 500000, 1000000, 2000000] = Field(
+        title="Sample Rate",
+        description="Hz. How much of the broadcast signal the radar captures. 2000000 gives the sharpest "
+                    "range detail (recommended); lower values blur range but reduce processing load."
+    )
+    fc: int = Field(title="Center Frequency", description="Hz. Set based on the tower you have chosen.")
     device_type: str = _readonly_field(title="Device Type")
-    device_agcSetPoint: int = Field(le=0, title="AGC Set Point", description="dBFS")
-    device_gainReductionA: int = Field(ge=20, le=59, title="Gain Reduction (Reference)", description="20-59 dB, higher=less gain")
-    device_gainReductionB: int = Field(ge=20, le=59, title="Gain Reduction (Surveillance)", description="20-59 dB, higher=less gain")
-    device_lnaState: int = Field(ge=1, le=9, title="LNA State", description="1=max gain, 9=min gain")
-    device_dabNotch: bool = Field(title="DAB Notch Filter")
-    device_rfNotch: bool = Field(title="RF Notch Filter")
+    device_agcSetPoint: int = Field(le=0, title="AGC Set Point", description="dBFS. Not recommended to be changed.")
+    device_gainReductionA: int = Field(ge=20, le=59, title="Reference Gain Reduction", description="20-59 dB, higher=less gain")
+    device_gainReductionB: int = Field(ge=20, le=59, title="Surveillance Gain Reduction", description="20-59 dB, higher=less gain")
+    device_lnaState: int = Field(ge=1, le=9, title="Low Noise Amplifier State", description="1=max gain, 9=min gain. RF attenuator block also used similarly to gain.")
+    device_dabNotch: bool = Field(title="DAB Notch Filter", description="Not recommended to enable unless you are sure.")
+    device_rfNotch: bool = Field(title="RF Notch Filter", description="Not recommended to enable unless you are sure.")
     device_bandwidthNumber: Literal[0, 5, 50, 100] = Field(
         title="Bandwidth Number",
         description="AGC loop bandwidth (Hz). 0 disables AGC — gain is fixed by Gain Reduction/LNA State. "
@@ -152,10 +156,10 @@ class LocationFormConfig(BaseModel):
 class AdsbTruthConfig(BaseModel):
     """ADS-B ground truth matching settings (flat for form display)."""
     enabled: bool = Field(title="Enabled")
-    tar1090: str = Field(title="tar1090 Server")
-    adsb2dd: str = Field(title="adsb2dd Address")
-    delay_tolerance: float = Field(gt=0, title="Delay Tolerance")
-    doppler_tolerance: float = Field(gt=0, title="Doppler Tolerance")
+    tar1090: str = Field(title="tar1090 Server", description="Used to access ADSB data")
+    adsb2dd: str = Field(title="adsb2dd Address", description="Local URL to view your local ADSB data")
+    delay_tolerance: float = Field(gt=0, title="Delay Tolerance", description="km. Maximum bistatic range error allowed when matching a radar detection to an ADS-B aircraft position.")
+    doppler_tolerance: float = Field(gt=0, title="Doppler Tolerance", description="Hz. Maximum bistatic Doppler error allowed when matching a radar detection to an ADS-B aircraft position.")
 
 
 # ============================================================================
