@@ -57,7 +57,7 @@ def sample_merged_config():
     """
     return {
         'capture': {
-            'fs': 4000000,
+            'fs': 2000000,
             'fc': 503000000,
             'device': {
                 'type': 'RspDuo',
