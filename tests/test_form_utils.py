@@ -80,7 +80,7 @@ class TestSchemaToFormFields:
     def test_basic_field_conversion(self):
         """Test basic field properties are converted."""
         values = {
-            'fs': 4000000,
+            'fs': 2000000,
             'fc': 503000000,
             'device_type': 'RspDuo',
             'device_agcSetPoint': -50,
@@ -96,17 +96,17 @@ class TestSchemaToFormFields:
         # Should have all flat fields
         assert len(fields) == 10
 
-        # Check fs field
+        # Check fs field (Literal -> select with fixed options)
         fs_field = next(f for f in fields if f['name'] == 'fs')
         assert fs_field['title'] == 'Sample Rate'
-        assert fs_field['type'] == 'number'
-        assert fs_field['value'] == 4000000
-        assert fs_field['description'] == 'Hz'
+        assert fs_field['type'] == 'select'
+        assert fs_field['value'] == 2000000
+        assert fs_field['options'] == [62500, 125000, 250000, 500000, 1000000, 2000000]
 
     def test_checkbox_field(self):
         """Boolean fields should be checkboxes."""
         values = {
-            'fs': 4000000,
+            'fs': 2000000,
             'fc': 503000000,
             'device_type': 'RspDuo',
             'device_agcSetPoint': -50,
@@ -139,7 +139,7 @@ class TestSchemaToFormFields:
     def test_values_from_dict_not_defaults(self):
         """Values should come from provided dict, not schema defaults."""
         values = {
-            'fs': 8000000,  # Different from typical default
+            'fs': 1000000,  # Different from typical default
             'fc': 100000000,
             'device_type': 'CustomDevice',
             'device_agcSetPoint': -30,
@@ -153,7 +153,7 @@ class TestSchemaToFormFields:
         fields = schema_to_form_fields(CaptureFormConfig, values)
 
         fs_field = next(f for f in fields if f['name'] == 'fs')
-        assert fs_field['value'] == 8000000
+        assert fs_field['value'] == 1000000
 
         type_field = next(f for f in fields if f['name'] == 'device_type')
         assert type_field['value'] == 'CustomDevice'
@@ -169,13 +169,13 @@ class TestSchemaToFormFields:
     def test_partial_values(self):
         """Partial values should work."""
         values = {
-            'fs': 4000000,
+            'fs': 2000000,
             # Missing other fields
         }
         fields = schema_to_form_fields(CaptureFormConfig, values)
 
         fs_field = next(f for f in fields if f['name'] == 'fs')
-        assert fs_field['value'] == 4000000
+        assert fs_field['value'] == 2000000
 
         fc_field = next(f for f in fields if f['name'] == 'fc')
         assert fc_field['value'] is None
@@ -230,7 +230,7 @@ class TestSchemaToFormFields:
 
     def test_readonly_field(self):
         """Fields with readonly=True should have readonly in output."""
-        values = {'fs': 4000000, 'device_type': 'RspDuo'}
+        values = {'fs': 2000000, 'device_type': 'RspDuo'}
         fields = schema_to_form_fields(CaptureFormConfig, values)
 
         # device_type has readonly=True in schema

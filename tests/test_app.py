@@ -129,7 +129,7 @@ class TestConfigPageRoute:
         """Capture values from user.yml should appear."""
         response = app_client.get('/config')
         assert response.status_code == 200
-        assert b'4000000' in response.data  # fs value
+        assert b'value="2000000" selected' in response.data  # fs value (select)
         assert b'503000000' in response.data  # fc value
         assert b'RspDuo' in response.data  # device type
 
@@ -187,7 +187,7 @@ class TestConfigSaveRoute:
     def test_save_valid_config(self, app_client, user_config_file):
         """Valid config should be saved to user.yml."""
         response = app_client.post('/config/save', data={
-            'capture.fs': '5000000',
+            'capture.fs': '1000000',
             'capture.fc': '500000000',
             'capture.device_type': 'RspDuo',
             'capture.device_agcSetPoint': '-40',
@@ -205,7 +205,7 @@ class TestConfigSaveRoute:
         # Check file was updated
         with open(user_config_file) as f:
             saved = yaml.safe_load(f)
-        assert saved['capture']['fs'] == 5000000
+        assert saved['capture']['fs'] == 1000000
         assert saved['capture']['fc'] == 500000000
         assert saved['capture']['device']['gainReduction'] == [35, 30]
         assert saved['capture']['device']['lnaState'] == 5
@@ -213,7 +213,7 @@ class TestConfigSaveRoute:
     def test_save_unchecked_checkbox(self, app_client, user_config_file):
         """Unchecked checkboxes should be saved as False."""
         response = app_client.post('/config/save', data={
-            'capture.fs': '4000000',
+            'capture.fs': '2000000',
             'capture.fc': '503000000',
             'capture.device_type': 'RspDuo',
             'capture.device_agcSetPoint': '-50',
@@ -234,7 +234,7 @@ class TestConfigSaveRoute:
     def test_save_invalid_gain_reduction(self, app_client):
         """Invalid gain reduction should show validation error."""
         response = app_client.post('/config/save', data={
-            'capture.fs': '4000000',
+            'capture.fs': '2000000',
             'capture.fc': '503000000',
             'capture.device_type': 'RspDuo',
             'capture.device_agcSetPoint': '-50',
@@ -254,7 +254,7 @@ class TestConfigSaveRoute:
     def test_save_invalid_lna_state(self, app_client):
         """Invalid LNA state should show validation error."""
         response = app_client.post('/config/save', data={
-            'capture.fs': '4000000',
+            'capture.fs': '2000000',
             'capture.fc': '503000000',
             'capture.device_type': 'RspDuo',
             'capture.device_agcSetPoint': '-50',
@@ -273,7 +273,7 @@ class TestConfigSaveRoute:
     def test_save_invalid_agc_set_point(self, app_client):
         """Positive AGC set point should show validation error."""
         response = app_client.post('/config/save', data={
-            'capture.fs': '4000000',
+            'capture.fs': '2000000',
             'capture.fc': '503000000',
             'capture.device_type': 'RspDuo',
             'capture.device_agcSetPoint': '10',  # Invalid: > 0
@@ -299,7 +299,7 @@ class TestConfigSaveRoute:
 
         # Save capture config
         response = app_client.post('/config/save', data={
-            'capture.fs': '6000000',
+            'capture.fs': '500000',
             'capture.fc': '503000000',
             'capture.device_type': 'RspDuo',
             'capture.device_agcSetPoint': '-50',
@@ -318,7 +318,7 @@ class TestConfigSaveRoute:
         # Other section should still exist
         assert saved.get('other_section') == {'foo': 'bar'}
         # Capture should be updated
-        assert saved['capture']['fs'] == 6000000
+        assert saved['capture']['fs'] == 500000
 
 
 class TestLocationSave:
@@ -625,14 +625,14 @@ class TestParseFlatFormData:
         from config_manager import ConfigManager
 
         capture, location, truth, tar1090 = ConfigManager.parse_flat_form_data({
-            'capture.fs': '4000000',
+            'capture.fs': '2000000',
             'capture.fc': '503000000',
             'capture.device_type': 'RspDuo',
             'capture.device_gainReductionA': '40',
             'capture.device_gainReductionB': '35'
         })
 
-        assert capture['fs'] == 4000000
+        assert capture['fs'] == 2000000
         assert capture['fc'] == 503000000
         assert capture['device_type'] == 'RspDuo'
         assert capture['device_gainReductionA'] == 40
