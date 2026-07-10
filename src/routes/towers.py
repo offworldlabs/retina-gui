@@ -12,7 +12,7 @@ bp = Blueprint('towers', __name__, url_prefix='/towers')
 @bp.route("/search", methods=["POST"])
 def search():
     """Proxy RF-profile tower search to Tower-Finder API."""
-    from app import app, TOWER_FINDER_URL
+    from app import app, TOWER_FINDER_URL, device_state
 
     body = request.get_json()
     if not body:
@@ -61,7 +61,14 @@ def search():
                 timeout=90,
             )
         resp.raise_for_status()
-        return jsonify(resp.json())
+        result = resp.json()
+        towers = result.get("towers") or []
+        if towers:
+            try:
+                device_state.save_towers_cache(body["lat"], body["lon"], towers)
+            except Exception as e:
+                app.logger.warning(f"Failed to cache tower search results: {e}")
+        return jsonify(result)
     except http_requests.Timeout:
         return jsonify({"error": "Tower search timed out — try again"}), 504
     except http_requests.RequestException as e:

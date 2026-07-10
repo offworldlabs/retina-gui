@@ -33,6 +33,11 @@ RETINA_NODE_PATH = os.environ.get('RETINA_NODE_PATH', '/data/mender-docker-compo
 RETINA_SPECTRUM_URL = os.environ.get('RETINA_SPECTRUM_URL', 'http://localhost:3020')
 NODE_ID_FILE = os.environ.get('NODE_ID_FILE', '/data/mender/node_id')
 TOWER_FINDER_URL = os.environ.get('TOWER_FINDER_URL', 'https://tower-finder.retina.fm')
+# blah2_api runs with network_mode: host and listens directly on this port —
+# NOT the :8080 blah2_host nginx proxy, which doesn't forward /capture/* at all.
+BLAH2_API_URL = os.environ.get('BLAH2_API_URL', 'http://localhost:3000')
+# Empty = telemetry disabled; set to the calibration ingest endpoint to enable.
+CALIBRATION_TELEMETRY_URL = os.environ.get('CALIBRATION_TELEMETRY_URL', '')
 DEV_MODE = os.environ.get('DEV_MODE', '').lower() in ('1', 'true', 'yes')
 
 # Shared services
@@ -73,6 +78,9 @@ try:
 except OSError:
     pass
 
+# A calibration run cannot survive a GUI restart — any lock left behind is stale
+device_state.release_calibration_lock()
+
 # Enforce radar at the Docker level: stop and remove retina-spectrum if it is running.
 # retina-spectrum is only allowed while the wizard location step or config toggle is active.
 if config_mgr.is_retina_node_installed():
@@ -90,6 +98,41 @@ try:
     subprocess.run(['systemctl', 'stop', 'sdrconnect.service'], capture_output=True, timeout=30)
 except Exception:
     pass
+
+
+from blah2_client import Blah2Client
+from calibrator import Calibrator
+import calibration_telemetry
+
+blah2_client = Blah2Client(BLAH2_API_URL)
+calibrator = Calibrator(blah2_client)
+
+
+def _rx_location():
+    """RX location from merged config, for the calibration run report."""
+    try:
+        location = (config_mgr.load_merged_config().get('location', {}) or {})
+        rx = location.get('rx', {}) or {}
+        return {"latitude": rx.get('latitude'), "longitude": rx.get('longitude'),
+                "altitude": rx.get('altitude')}
+    except Exception:
+        return None
+
+
+def _on_calibration_complete(status):
+    """Runs on the calibration thread when a run reaches a terminal state."""
+    device_state.release_calibration_lock()
+    calibration_telemetry.send_run_report(
+        CALIBRATION_TELEMETRY_URL, status, get_node_id(), _rx_location())
+
+
+calibrator.on_complete = _on_calibration_complete
+
+
+def send_calibration_applied_event(status):
+    """The user persisted a calibration result (called from /calibrate/apply)."""
+    calibration_telemetry.send_applied_event(
+        CALIBRATION_TELEMETRY_URL, status, get_node_id())
 
 
 def get_node_id():
@@ -125,6 +168,7 @@ from routes.setup import bp as setup_bp
 from routes.towers import bp as towers_bp
 from routes.mode import bp as mode_bp
 from routes.network import bp as network_bp
+from routes.calibrate import bp as calibrate_bp
 
 app.register_blueprint(home_bp)
 app.register_blueprint(config_bp)
@@ -133,6 +177,7 @@ app.register_blueprint(setup_bp)
 app.register_blueprint(towers_bp)
 app.register_blueprint(mode_bp)
 app.register_blueprint(network_bp)
+app.register_blueprint(calibrate_bp)
 
 
 if __name__ == "__main__":

@@ -24,6 +24,7 @@ from datetime import datetime, timedelta
 INSTALL_LOCK_TIMEOUT = timedelta(minutes=40)
 MENDER_STATUS_TIMEOUT = timedelta(hours=2)
 SETUP_WIZARD_TIMEOUT = timedelta(hours=24)
+CALIBRATE_LOCK_TIMEOUT = timedelta(minutes=20)
 
 
 class DeviceState:
@@ -47,6 +48,8 @@ class DeviceState:
         self.mender_conf_backup_path = mender_conf_backup_path
         self.setup_wizard_file = os.path.join(data_dir, "setup-wizard.json")
         self.setup_wizard_completed_flag = os.path.join(data_dir, "setup-wizard-completed")
+        self.calibrate_lock_file = os.path.join(data_dir, "calibrate.lock")
+        self.towers_cache_file = os.path.join(data_dir, "towers-cache.json")
         self.dev_mode = dev_mode
 
     # ── State Queries ──────────────────────────────────────────
@@ -161,13 +164,58 @@ class DeviceState:
         return True, None
 
     def can_start_install(self) -> tuple[bool, str | None]:
-        """Guard: blocked if already updating."""
+        """Guard: blocked if already updating or calibrating."""
         in_progress, reason = self.is_any_update_in_progress()
         if in_progress:
             return False, reason
+        calibrating, _ = self.is_calibration_locked()
+        if calibrating:
+            return False, "Auto-calibration in progress"
         return True, None
 
+    def can_start_calibration(self) -> tuple[bool, str | None]:
+        """Guard: blocked during any update (containers would restart under us)
+        or while another calibration run holds the lock."""
+        in_progress, reason = self.is_any_update_in_progress()
+        if in_progress:
+            return False, reason
+        calibrating, _ = self.is_calibration_locked()
+        if calibrating:
+            return False, "Auto-calibration already in progress"
+        return True, None
+
+    def is_calibration_locked(self) -> tuple[bool, dict | None]:
+        """Check calibration lock. Auto-clears stale locks (>20 min)."""
+        if not os.path.exists(self.calibrate_lock_file):
+            return False, None
+        try:
+            with open(self.calibrate_lock_file) as f:
+                lock = json.load(f)
+            started = datetime.fromisoformat(lock["started_at"])
+            if datetime.now() - started > CALIBRATE_LOCK_TIMEOUT:
+                os.remove(self.calibrate_lock_file)
+                return False, None
+            return True, lock
+        except Exception:
+            return False, None
+
     # ── Transitions ────────────────────────────────────────────
+
+    def acquire_calibration_lock(self) -> bool:
+        """Try to acquire the calibration lock. Returns False if already locked."""
+        locked, _ = self.is_calibration_locked()
+        if locked:
+            return False
+        lock = {"started_at": datetime.now().isoformat()}
+        os.makedirs(os.path.dirname(self.calibrate_lock_file), exist_ok=True)
+        with open(self.calibrate_lock_file, "w") as f:
+            json.dump(lock, f)
+        return True
+
+    def release_calibration_lock(self):
+        """Release the calibration lock."""
+        if os.path.exists(self.calibrate_lock_file):
+            os.remove(self.calibrate_lock_file)
 
     def acquire_install_lock(self, version: str) -> bool:
         """Try to acquire install lock. Returns False if already locked."""
@@ -345,6 +393,36 @@ class DeviceState:
         """Clear wizard state (called on completion)."""
         if os.path.exists(self.setup_wizard_file):
             os.remove(self.setup_wizard_file)
+
+    def save_towers_cache(self, lat: float, lon: float, towers: list):
+        """Cache the wizard's tower-finder search results.
+
+        Reused by Auto-Calibrate as its alternate-tower list — the wizard's
+        search is RF-measurement-informed (better ranking than a plain
+        geography lookup) and this avoids a second live tower-finder call at
+        calibration time. No expiry: broadcast tower frequencies/locations
+        essentially never change, and a re-run of the wizard's tower step
+        just overwrites this file with a fresh search.
+        """
+        data = {
+            "lat": lat,
+            "lon": lon,
+            "cached_at": datetime.now().isoformat(),
+            "towers": towers,
+        }
+        os.makedirs(os.path.dirname(self.towers_cache_file), exist_ok=True)
+        with open(self.towers_cache_file, "w") as f:
+            json.dump(data, f)
+
+    def get_towers_cache(self) -> dict | None:
+        """Get the cached tower search results, or None if never cached."""
+        if not os.path.exists(self.towers_cache_file):
+            return None
+        try:
+            with open(self.towers_cache_file) as f:
+                return json.load(f)
+        except Exception:
+            return None
 
     def has_completed_setup_wizard(self) -> bool:
         """Whether the wizard has ever been completed on this device.

@@ -218,6 +218,11 @@
                 <span class="desc">SDR sampling and gain. Touch with care — affects data quality.</span>
             </div>
             <div class="cfg-body" {% if not retina_installed %}style="opacity:.5;pointer-events:none;"{% endif %}>
+                <div style="display:flex;align-items:center;gap:10px;margin-bottom:4px;">
+                    <button type="button" class="ds-btn ghost" id="autoCalibrateBtn">Auto-Calibrate</button>
+                    <span class="help" style="margin:0;">Automatically tune tower and gain until a confirmed aircraft track appears (~10 min).</span>
+                </div>
+                <div class="divider"></div>
                 {% for field in capture_fields %}
                     {{ render_field(field, 'capture') }}
                 {% endfor %}
@@ -454,6 +459,59 @@
             <div class="modal-footer">
                 <button type="button" class="ds-btn ghost" data-bs-dismiss="modal">Cancel</button>
                 <button type="button" class="ds-btn danger-ghost" id="confirmDisableBtn">Disable</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+{# Bootstrap modal for auto-calibration progress #}
+<div class="modal fade" id="autoCalibrateModal" tabindex="-1" data-bs-backdrop="static" data-bs-keyboard="false">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Auto-Calibrate</h5>
+            </div>
+            <div class="modal-body" style="font-size:13.5px;color:var(--ink-2);">
+                <div id="calSetup">
+                    <p style="margin:0 0 10px;">How should a run decide it's calibrated?</p>
+                    <div style="display:flex;flex-direction:column;gap:8px;margin-bottom:6px;">
+                        <label style="display:flex;gap:8px;align-items:flex-start;cursor:pointer;">
+                            <input type="radio" name="calMode" value="track" checked style="margin-top:3px;">
+                            <span><strong>Standard</strong> — any track blah2 confirms (fast, but a persistent
+                                clutter/multipath return can occasionally pass confirmation too).</span>
+                        </label>
+                        <label style="display:flex;gap:8px;align-items:flex-start;cursor:pointer;">
+                            <input type="radio" name="calMode" value="adsb" style="margin-top:3px;">
+                            <span><strong>ADS-B verified</strong> — a confirmed track must also match a real
+                                aircraft's expected position. Stronger proof, but needs ADS-B truth enabled
+                                and working on this node.</span>
+                        </label>
+                    </div>
+                </div>
+                <div id="calPhase" style="display:none;align-items:center;gap:8px;font-weight:600;color:var(--ink-1);margin-bottom:10px;">
+                    <span class="spinner-border spinner-border-sm" id="calSpinner" style="width:.9em;height:.9em;border-width:1.5px;"></span>
+                    <span id="calPhaseText">Starting…</span>
+                </div>
+                <div id="calDetail" style="display:none;">
+                    <div style="display:grid;grid-template-columns:auto 1fr;gap:2px 14px;font-family:var(--mono,monospace);font-size:12.5px;">
+                        <span style="color:var(--ink-3);">Mode</span><span id="calModeDisplay">—</span>
+                        <span style="color:var(--ink-3);">Tower</span><span id="calTower">—</span>
+                        <span style="color:var(--ink-3);">Frequency</span><span id="calFc">—</span>
+                        <span style="color:var(--ink-3);">Gain reduction</span><span id="calGains">—</span>
+                        <span style="color:var(--ink-3);">RF overload</span><span id="calOverload">—</span>
+                        <span style="color:var(--ink-3);">Elapsed</span><span id="calElapsed">—</span>
+                    </div>
+                </div>
+                <div id="calBest" style="display:none;margin-top:10px;padding:8px 10px;background:var(--surface-2,rgba(128,128,128,.08));border-radius:6px;font-size:12.5px;"></div>
+                <div id="calResult" style="display:none;margin-top:10px;"></div>
+                <div id="calError" style="display:none;margin-top:10px;color:var(--danger,#c0392b);"></div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="ds-btn ghost" id="calSetupCancelBtn" data-bs-dismiss="modal">Cancel</button>
+                <button type="button" class="ds-btn primary" id="calStartBtn">Start Calibration</button>
+                <button type="button" class="ds-btn ghost" id="calCancelBtn" style="display:none;">Cancel run</button>
+                <button type="button" class="ds-btn ghost" id="calCloseBtn" data-bs-dismiss="modal" style="display:none;">Close</button>
+                <button type="button" class="ds-btn primary" id="calApplyBtn" style="display:none;">Persist to config</button>
             </div>
         </div>
     </div>
@@ -921,6 +979,218 @@ if (discardBtn) discardBtn.addEventListener('click', () => location.reload());
             var el = document.getElementById(id);
             if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
         });
+    });
+})();
+
+// Auto-Calibrate — start a run, poll status every 2s, offer persist on success
+(function() {
+    var csrf = document.querySelector('meta[name="csrf-token"]').content;
+    var btn = document.getElementById('autoCalibrateBtn');
+    if (!btn) return;
+
+    var modalEl = document.getElementById('autoCalibrateModal');
+    var modal = new bootstrap.Modal(modalEl);
+    var setupEl = document.getElementById('calSetup');
+    var phase = document.getElementById('calPhase');
+    var spinner = document.getElementById('calSpinner');
+    var phaseText = document.getElementById('calPhaseText');
+    var detail = document.getElementById('calDetail');
+    var best = document.getElementById('calBest');
+    var resultEl = document.getElementById('calResult');
+    var errorEl = document.getElementById('calError');
+    var setupCancelBtn = document.getElementById('calSetupCancelBtn');
+    var startBtn = document.getElementById('calStartBtn');
+    var cancelBtn = document.getElementById('calCancelBtn');
+    var closeBtn = document.getElementById('calCloseBtn');
+    var applyBtn = document.getElementById('calApplyBtn');
+    var pollTimer = null;
+    var lastStatus = null;
+
+    var PHASE_LABELS = {
+        descending: 'Maximizing gain — backing off overload…',
+        refining: 'Refining gain…',
+        dwelling: 'Watching for aircraft…',
+        restoring: 'Restoring original tuning…'
+    };
+
+    var MODE_LABELS = { track: 'Standard', adsb: 'ADS-B verified' };
+
+    function mhz(fc) { return (fc / 1e6).toFixed(1) + ' MHz'; }
+
+    function fmtSeconds(s) {
+        var m = Math.floor(s / 60), r = s % 60;
+        return m + ':' + (r < 10 ? '0' : '') + r;
+    }
+
+    function setTerminalButtons() {
+        spinner.style.display = 'none';
+        cancelBtn.style.display = 'none';
+        closeBtn.style.display = '';
+    }
+
+    function render(status) {
+        lastStatus = status;
+        if (status.state === 'running') {
+            phaseText.textContent = PHASE_LABELS[status.phase] || 'Starting…';
+            if (status.current) {
+                detail.style.display = '';
+                document.getElementById('calModeDisplay').textContent =
+                    MODE_LABELS[status.mode] || status.mode || '—';
+                var towersTotal = (status.progress && status.progress.towers_total) || 1;
+                document.getElementById('calTower').textContent =
+                    (status.current.tower_name || '—') + '  (' + ((status.current.tower_index || 0) + 1) + '/' + towersTotal + ')';
+                document.getElementById('calFc').textContent = mhz(status.current.fc);
+                document.getElementById('calGains').textContent =
+                    'A ' + status.current.gain_a + ' dB / B ' + status.current.gain_b + ' dB';
+                var rf = status.rf || {};
+                document.getElementById('calOverload').textContent =
+                    (rf.overload_a == null) ? '—'
+                    : ('A ' + (rf.overload_a ? 'OVERLOAD' : 'ok') + ' / B ' + (rf.overload_b ? 'OVERLOAD' : 'ok'));
+                var progress = status.progress || {};
+                document.getElementById('calElapsed').textContent =
+                    fmtSeconds(progress.elapsed_seconds || 0) + ' of ' + fmtSeconds(progress.budget_seconds || 600);
+            }
+            if (status.best_attempt) {
+                best.style.display = '';
+                best.textContent = 'Best so far: ' + mhz(status.best_attempt.fc)
+                    + ', gain A ' + status.best_attempt.gain_a + ' / B ' + status.best_attempt.gain_b
+                    + ' — ' + status.best_attempt.reason;
+            }
+            return;
+        }
+
+        // terminal states
+        setTerminalButtons();
+        if (status.state === 'done' && status.result) {
+            phaseText.textContent = 'Calibrated — confirmed track ' + (status.result.track_id || '');
+            detail.style.display = 'none';
+            best.style.display = 'none';
+            resultEl.style.display = '';
+            var adsbNote = status.result.adsb_flight || status.result.adsb_hex
+                ? ' Matched ADS-B aircraft ' + (status.result.adsb_flight || status.result.adsb_hex) + '.'
+                : '';
+            resultEl.innerHTML = '<strong>' + (status.result.tower_name || 'Tower') + '</strong> at '
+                + mhz(status.result.fc) + ', gain reduction A ' + status.result.gain_a
+                + ' dB / B ' + status.result.gain_b + ' dB.' + adsbNote
+                + '<br>The radar is running with this tuning now — persist it to keep it after restarts.';
+            applyBtn.style.display = '';
+        } else {
+            phaseText.textContent = status.state === 'cancelled' ? 'Cancelled' : 'No calibration found';
+            errorEl.style.display = '';
+            errorEl.textContent = status.error || '';
+            if (status.best_attempt) {
+                best.style.display = '';
+                best.innerHTML = 'Closest attempt: ' + mhz(status.best_attempt.fc)
+                    + ', gain A ' + status.best_attempt.gain_a + ' / B ' + status.best_attempt.gain_b
+                    + ' — ' + status.best_attempt.reason
+                    + '.<br>Try entering these in the Capture fields below as a starting point.';
+            }
+        }
+    }
+
+    function poll() {
+        fetch('/calibrate/status')
+            .then(function(r) { return r.json(); })
+            .then(function(status) {
+                render(status);
+                if (status.state === 'running') {
+                    pollTimer = setTimeout(poll, 2000);
+                }
+            })
+            .catch(function() { pollTimer = setTimeout(poll, 2000); });
+    }
+
+    function resetModal() {
+        setupEl.style.display = '';
+        phase.style.display = 'none';
+        startBtn.style.display = '';
+        setupCancelBtn.style.display = '';
+        spinner.style.display = '';
+        phaseText.textContent = 'Starting…';
+        detail.style.display = 'none';
+        best.style.display = 'none';
+        resultEl.style.display = 'none';
+        errorEl.style.display = 'none';
+        cancelBtn.style.display = 'none';
+        closeBtn.style.display = 'none';
+        applyBtn.style.display = 'none';
+        applyBtn.disabled = false;
+        applyBtn.textContent = 'Persist to config';
+    }
+
+    btn.addEventListener('click', function() {
+        resetModal();
+        modal.show();
+    });
+
+    startBtn.addEventListener('click', function() {
+        var mode = document.querySelector('input[name="calMode"]:checked').value;
+        setupEl.style.display = 'none';
+        startBtn.style.display = 'none';
+        setupCancelBtn.style.display = 'none';
+        phase.style.display = 'flex';
+        cancelBtn.style.display = '';
+        fetch('/calibrate/start', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrf },
+            body: JSON.stringify({ mode: mode })
+        })
+        .then(function(r) { return r.json().then(function(d) { return { ok: r.ok, data: d }; }); })
+        .then(function(res) {
+            if (!res.ok || !res.data.success) {
+                setTerminalButtons();
+                phaseText.textContent = 'Could not start';
+                errorEl.style.display = '';
+                errorEl.textContent = res.data.error || 'Unknown error';
+                return;
+            }
+            poll();
+        })
+        .catch(function() {
+            setTerminalButtons();
+            phaseText.textContent = 'Could not start';
+            errorEl.style.display = '';
+            errorEl.textContent = 'Request failed — is the GUI reachable?';
+        });
+    });
+
+    cancelBtn.addEventListener('click', function() {
+        cancelBtn.disabled = true;
+        fetch('/calibrate/cancel', {
+            method: 'POST',
+            headers: { 'X-CSRFToken': csrf }
+        }).finally(function() { cancelBtn.disabled = false; });
+    });
+
+    applyBtn.addEventListener('click', function() {
+        applyBtn.disabled = true;
+        applyBtn.innerHTML = '<span class="spinner-border spinner-border-sm" style="width:.8em;height:.8em;border-width:1.5px;"></span> Applying…';
+        fetch('/calibrate/apply', {
+            method: 'POST',
+            headers: { 'X-CSRFToken': csrf }
+        })
+        .then(function(r) { return r.json(); })
+        .then(function(d) {
+            if (d.success && d.applied) {
+                applyBtn.style.display = 'none';
+                resultEl.innerHTML += '<br><strong>Saved and applied.</strong> Services are restarting with the new tuning.';
+            } else {
+                applyBtn.disabled = false;
+                applyBtn.textContent = 'Persist to config';
+                errorEl.style.display = '';
+                errorEl.textContent = d.error || 'Apply failed';
+            }
+        })
+        .catch(function() {
+            applyBtn.disabled = false;
+            applyBtn.textContent = 'Persist to config';
+            errorEl.style.display = '';
+            errorEl.textContent = 'Apply request failed';
+        });
+    });
+
+    modalEl.addEventListener('hidden.bs.modal', function() {
+        if (pollTimer) { clearTimeout(pollTimer); pollTimer = null; }
     });
 })();
 </script>
