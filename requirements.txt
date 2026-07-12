@@ -3,3 +3,5 @@ flask-wtf
 pydantic
 requests
 pyyaml
+matplotlib
+git+https://github.com/offworldlabs/retina-tracker.git

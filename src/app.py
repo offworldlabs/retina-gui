@@ -2,6 +2,7 @@ from flask import Flask
 from flask_wtf.csrf import CSRFProtect
 import os
 import subprocess
+import sys
 
 from config_manager import ConfigManager
 from device_state import DeviceState
@@ -33,6 +34,9 @@ RETINA_NODE_PATH = os.environ.get('RETINA_NODE_PATH', '/data/mender-docker-compo
 RETINA_SPECTRUM_URL = os.environ.get('RETINA_SPECTRUM_URL', 'http://localhost:3020')
 NODE_ID_FILE = os.environ.get('NODE_ID_FILE', '/data/mender/node_id')
 TOWER_FINDER_URL = os.environ.get('TOWER_FINDER_URL', 'https://tower-finder.retina.fm')
+# blah2_api runs with network_mode: host and listens directly on this port —
+# NOT the :8080 blah2_host nginx proxy, which doesn't forward /capture/* at all.
+BLAH2_API_URL = os.environ.get('BLAH2_API_URL', 'http://localhost:3000')
 DEV_MODE = os.environ.get('DEV_MODE', '').lower() in ('1', 'true', 'yes')
 
 # Shared services
@@ -92,6 +96,20 @@ except Exception:
     pass
 
 
+from blah2_client import Blah2Client
+from tracker_capture import TrackerCaptureService
+
+blah2_client = Blah2Client(BLAH2_API_URL)
+tracker_capture = TrackerCaptureService(blah2_client)
+# Never auto-start under pytest: conftest.py's app_client fixture reloads this
+# module per-test, and start() spawns a permanent, never-stopped background
+# thread — under pytest that would leak one such thread per test (each making
+# real requests.get() calls that can race with any test mocking requests
+# globally).
+if "pytest" not in sys.modules:
+    tracker_capture.start()
+
+
 def get_node_id():
     """Get node_id from Mender device identity file."""
     try:
@@ -125,6 +143,7 @@ from routes.setup import bp as setup_bp
 from routes.towers import bp as towers_bp
 from routes.mode import bp as mode_bp
 from routes.network import bp as network_bp
+from routes.tracker_preview import bp as tracker_preview_bp
 
 app.register_blueprint(home_bp)
 app.register_blueprint(config_bp)
@@ -133,6 +152,7 @@ app.register_blueprint(setup_bp)
 app.register_blueprint(towers_bp)
 app.register_blueprint(mode_bp)
 app.register_blueprint(network_bp)
+app.register_blueprint(tracker_preview_bp)
 
 
 if __name__ == "__main__":

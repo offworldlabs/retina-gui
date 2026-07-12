@@ -1,0 +1,39 @@
+{% extends "base.html" %}
+{% block title %}Tracker Preview - OWL-OS{% endblock %}
+
+{% block content %}
+    <div class="container py-4">
+        <h1>Tracker Preview</h1>
+        <p class="text-muted">
+            Live delay/Doppler plot from blah2's detections, tracked via
+            <a href="https://github.com/offworldlabs/retina-tracker" target="_blank" rel="noopener">retina-tracker</a>.
+            Updates every few seconds while this page is open; capture stops
+            automatically when you leave.
+        </p>
+        <div id="plotStatus" class="text-muted mb-2">Waiting for first render&hellip;</div>
+        <img id="plot" alt="Tracker preview" style="max-width: 100%; border: 1px solid #ddd;">
+    </div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function() {
+    var img = document.getElementById('plot');
+    var status = document.getElementById('plotStatus');
+    var source = new EventSource('/tracker-preview/events');
+
+    source.onmessage = function(evt) {
+        status.textContent = '';
+        img.src = '/tracker-preview/image.png?t=' + Date.now();
+    };
+
+    source.onerror = function() {
+        status.textContent = 'Connection lost — reload the page to restart the capture.';
+    };
+
+    window.addEventListener('beforeunload', function() {
+        source.close();
+    });
+})();
+</script>
+{% endblock %}
