@@ -7,15 +7,23 @@ tracker to confirm a track. A confirmed track needs a real aircraft overhead,
 so dwell time dominates the run — the search minimises the number of dwells,
 not the granularity of the gain grid.
 
-Two success modes:
+Two success modes, with genuinely different dwell strategies:
   - MODE_TRACK (default): any track reaching ASSOCIATED/ACTIVE state
-    (nActive > 0) counts as success. Simple, but a persistent clutter/
-    multipath return can also pass blah2's M-of-N confirmation.
-  - MODE_ADSB: additionally requires that confirmed track's delay/doppler to
-    fall within tolerance of a real aircraft's expected position (from
-    blah2_api's /api/adsb2dd, computed for the node's actual rx/tx geometry
-    and fc) — much stronger evidence, but needs truth.adsb.enabled and a
-    working ADS-B feed on the node.
+    (nActive > 0) counts as success. No independent way to tell "bad gain"
+    from "no aircraft right now", so this mode is time-boxed — each tower
+    gets a fair share of the overall budget (see _run) and gives up when
+    that runs out.
+  - MODE_ADSB: a confirmed track only counts if its delay/doppler also
+    matches a real aircraft's expected position (from blah2_api's
+    /api/adsb2dd, computed for the node's actual rx/tx geometry and fc).
+    Because that gives an independent, ground-truth answer to "is there
+    even anything to detect right now", this mode has **no time division**
+    (see _dwell_adsb): it waits for an ADS-B-confirmed aircraft with no
+    timeout — absence of traffic is never the search's fault — and only
+    treats a candidate as failed once a real aircraft was actually in range
+    and still went unmatched. Gain then steps toward more sensitivity and
+    tries again; once gain candidates for a tower are exhausted (floor or
+    re-overload), the run moves to the next tower.
 
 Nothing is written to user.yml during a run; candidates are applied via
 blah2's live retune channel only. On any non-success terminal state the
@@ -39,6 +47,15 @@ GAIN_REDUCTION_MAX = 59
 # Descent: big backoff jumps per overloaded tuner, one optional refine step.
 DESCENT_STEP_DB = 10
 REFINE_STEP_DB = 5
+
+# MODE_ADSB gain cycling: step gainReductionB this much toward max sensitivity
+# each time a real (ADS-B-confirmed) aircraft was seen but never matched.
+ADSB_GAIN_STEP_DB = 5
+
+# MODE_ADSB's descent phase still needs *some* ceiling (it's a fast,
+# aircraft-independent overload-avoidance loop, not the part waiting on
+# traffic), just not one derived from a shrinking per-tower time division.
+ADSB_DESCENT_DEADLINE_SECONDS = 120
 
 # Retune protocol timing.
 ACK_TIMEOUT_SECONDS = 2.0
@@ -185,7 +202,10 @@ class Calibrator:
                 "_started_monotonic": time.monotonic(),
             })
             self._status["progress"]["towers_total"] = len(towers)
-            self._status["progress"]["budget_seconds"] = budget_seconds
+            # MODE_ADSB has no time division — don't report a budget that
+            # isn't actually enforced (see module docstring).
+            self._status["progress"]["budget_seconds"] = (
+                None if mode == MODE_ADSB else budget_seconds)
         self._cancel.clear()
         self._thread = threading.Thread(
             target=self._run, args=(list(towers), dict(original),
@@ -337,14 +357,11 @@ class Calibrator:
         return gain_a, gain_b, applied_at
 
     def _dwell(self, tower, fc, gain_a, gain_b, applied_at, dwell_deadline,
-               tower_entry, mode, adsb_delay_tolerance, adsb_doppler_tolerance):
-        """Hold the tuning, watching for a confirmed track. Returns a result
-        dict on success, None if the dwell budget expires.
-
-        MODE_TRACK: any track reaching ACTIVE is success. MODE_ADSB: an
-        ACTIVE track only succeeds if its delay/doppler also matches a real
-        aircraft's expected position — an unmatched confirmed track keeps
-        dwelling (real evidence, recorded as such, but not proof yet).
+               tower_entry):
+        """MODE_TRACK's dwell: hold the tuning, watching for any confirmed
+        track, until dwell_deadline. Returns a result dict on success, None
+        if the dwell budget expires. (MODE_ADSB uses _dwell_adsb instead —
+        see the module docstring for why the two need different strategies.)
         """
         self._update(phase="dwelling")
         max_evidence = EVIDENCE_NONE
@@ -352,30 +369,12 @@ class Calibrator:
 
         while time.monotonic() < dwell_deadline:
             self._check_cancel()
-            reason_override = None
 
             tracker = self._client.get_tracker()
             if tracker and tracker.get("timestamp", 0) >= applied_at:
                 active_tracks = [t for t in (tracker.get("data") or [])
                                  if t.get("state") == "ACTIVE"]
-                if active_tracks and mode == MODE_ADSB:
-                    adsb_tracks = self._client.get_adsb_tracks()
-                    matched_track, matched_aircraft = self._find_adsb_match(
-                        active_tracks, adsb_tracks,
-                        adsb_delay_tolerance, adsb_doppler_tolerance)
-                    if matched_track is not None:
-                        tower_entry["outcome"] = "confirmed_track"
-                        tower_entry["max_evidence"] = EVIDENCE_ACTIVE
-                        return {
-                            "tower_name": tower.get("name"), "fc": fc,
-                            "gain_a": gain_a, "gain_b": gain_b,
-                            "track_id": matched_track.get("id"),
-                            "adsb_hex": matched_aircraft.get("hex"),
-                            "adsb_flight": matched_aircraft.get("flight"),
-                        }
-                    max_evidence = max(max_evidence, EVIDENCE_ACTIVE)
-                    reason_override = "confirmed track, but doesn't match a known aircraft"
-                elif active_tracks:
+                if active_tracks:
                     tower_entry["outcome"] = "confirmed_track"
                     tower_entry["max_evidence"] = EVIDENCE_ACTIVE
                     return {
@@ -396,13 +395,111 @@ class Calibrator:
                     max_detections = max(max_detections, count)
 
             self._maybe_update_best_attempt(tower, fc, gain_a, gain_b,
-                                            max_evidence, max_detections,
-                                            reason=reason_override)
+                                            max_evidence, max_detections)
             self._sleep(DWELL_POLL_SECONDS)
 
         tower_entry["outcome"] = "no_confirmed_track"
         tower_entry["max_evidence"] = max_evidence
         tower_entry["max_detections"] = max_detections
+        return None
+
+    def _dwell_adsb(self, tower, fc, gain_a, initial_gain_b, tower_entry,
+                     adsb_delay_tolerance, adsb_doppler_tolerance):
+        """MODE_ADSB's dwell: no time budget. Starting from descent's clean
+        (no-overload) gainReductionB, wait for ADS-B truth to confirm a real
+        aircraft is actually observable — unbounded, since no traffic isn't
+        a tuning problem — then keep checking every poll for a matching
+        confirmed track for as long as some aircraft stays in range. If
+        every aircraft that showed up leaves again unmatched, that gain
+        candidate has had its genuine chance: step gainReductionB toward
+        max sensitivity (re-checking overload first) and try again. Returns
+        a result dict on success, None once candidates are exhausted for
+        this tower (sensitivity floor or re-overload).
+
+        gainReductionA stays fixed at descent's value throughout — it's the
+        surveillance channel (B) whose sensitivity determines whether a
+        weak real target actually gets detected, not the reference channel.
+        """
+        self._update(phase="dwelling")
+        gain_b = initial_gain_b
+        gains_tried = []
+        max_evidence = EVIDENCE_NONE
+        max_detections = 0
+
+        while True:
+            self._check_cancel()
+            applied_at = self._apply(fc, gain_a, gain_b)
+            self._set_current(gain_a=gain_a, gain_b=gain_b)
+            self._sleep(OVERLOAD_SETTLE_SECONDS)
+            overload_a, overload_b = self._read_overload(applied_at)
+            gains_tried.append({"gain_b": gain_b, "overload_b": overload_b})
+            if overload_b:
+                break  # more sensitivity than this isn't usable here
+
+            aircraft_seen = False
+            while True:
+                self._check_cancel()
+                reason_override = None
+
+                adsb_tracks = self._client.get_adsb_tracks()
+                tracker = self._client.get_tracker()
+                active_tracks = []
+                if tracker and tracker.get("timestamp", 0) >= applied_at:
+                    active_tracks = [t for t in (tracker.get("data") or [])
+                                     if t.get("state") == "ACTIVE"]
+
+                if adsb_tracks:
+                    aircraft_seen = True
+                    if active_tracks:
+                        matched_track, matched_aircraft = self._find_adsb_match(
+                            active_tracks, adsb_tracks,
+                            adsb_delay_tolerance, adsb_doppler_tolerance)
+                        if matched_track is not None:
+                            tower_entry["outcome"] = "confirmed_track"
+                            tower_entry["max_evidence"] = EVIDENCE_ACTIVE
+                            tower_entry["gains_tried"] = gains_tried
+                            return {
+                                "tower_name": tower.get("name"), "fc": fc,
+                                "gain_a": gain_a, "gain_b": gain_b,
+                                "track_id": matched_track.get("id"),
+                                "adsb_hex": matched_aircraft.get("hex"),
+                                "adsb_flight": matched_aircraft.get("flight"),
+                            }
+                        reason_override = "confirmed track, but doesn't match a known aircraft"
+                elif aircraft_seen:
+                    # every aircraft we had a real shot at is gone,
+                    # unmatched — this candidate's opportunity is over
+                    break
+
+                if active_tracks:
+                    max_evidence = max(max_evidence, EVIDENCE_ACTIVE)
+                elif tracker and (tracker.get("nAssociated", 0) > 0
+                                   or tracker.get("nCoasting", 0) > 0):
+                    max_evidence = max(max_evidence, EVIDENCE_ASSOCIATED)
+                elif tracker and tracker.get("nTentative", 0) > 0:
+                    max_evidence = max(max_evidence, EVIDENCE_TENTATIVE)
+
+                detection = self._client.get_detection()
+                if detection and detection.get("timestamp", 0) >= applied_at:
+                    count = len(detection.get("delay") or [])
+                    if count > 0:
+                        max_evidence = max(max_evidence, EVIDENCE_DETECTIONS)
+                        max_detections = max(max_detections, count)
+
+                self._maybe_update_best_attempt(tower, fc, gain_a, gain_b,
+                                                max_evidence, max_detections,
+                                                reason=reason_override)
+                self._sleep(DWELL_POLL_SECONDS)
+
+            next_gain_b = gain_b - ADSB_GAIN_STEP_DB
+            if next_gain_b < GAIN_REDUCTION_MIN:
+                break
+            gain_b = next_gain_b
+
+        tower_entry["outcome"] = "no_confirmed_track"
+        tower_entry["max_evidence"] = max_evidence
+        tower_entry["max_detections"] = max_detections
+        tower_entry["gains_tried"] = gains_tried
         return None
 
     @staticmethod
@@ -460,7 +557,9 @@ class Calibrator:
         try:
             for index, tower in enumerate(towers):
                 self._check_cancel()
-                if time.monotonic() >= run_deadline:
+                # MODE_ADSB has no time division (see module docstring) — the
+                # overall budget only bounds MODE_TRACK's tower rotation.
+                if mode != MODE_ADSB and time.monotonic() >= run_deadline:
                     break
                 fc = int(tower["fc"])
                 self._update(phase="descending")
@@ -476,26 +575,38 @@ class Calibrator:
                     "descent": [],
                     "outcome": "not_reached",
                 }
-                # This tower's total budget (descent + dwell together), so a
-                # slow descent shrinks its own dwell rather than overrunning
-                # into towers after it. Fixed dwell_seconds (tests) keeps the
-                # old fixed-window behaviour; None (production) divides
-                # whatever's left evenly across the towers left to try.
-                if dwell_seconds is not None:
-                    tower_deadline = min(time.monotonic() + dwell_seconds, run_deadline)
+
+                if mode == MODE_ADSB:
+                    # Descent is still time-bounded (it's a fast,
+                    # traffic-independent overload-avoidance loop) — just not
+                    # via a shrinking per-tower share of the overall budget.
+                    descent_deadline = time.monotonic() + ADSB_DESCENT_DEADLINE_SECONDS
                 else:
-                    towers_remaining = len(towers) - index
-                    time_left = max(run_deadline - time.monotonic(), 0)
-                    tower_deadline = time.monotonic() + (time_left / towers_remaining)
+                    # This tower's total budget (descent + dwell together), so
+                    # a slow descent shrinks its own dwell rather than
+                    # overrunning into towers after it. Fixed dwell_seconds
+                    # (tests) keeps the old fixed-window behaviour; None
+                    # (production) divides whatever's left evenly across the
+                    # remaining towers.
+                    if dwell_seconds is not None:
+                        descent_deadline = min(time.monotonic() + dwell_seconds, run_deadline)
+                    else:
+                        towers_remaining = len(towers) - index
+                        time_left = max(run_deadline - time.monotonic(), 0)
+                        descent_deadline = time.monotonic() + (time_left / towers_remaining)
 
                 try:
                     gain_a, gain_b, applied_at = self._descend(
-                        fc, tower_entry["descent"], tower_deadline)
+                        fc, tower_entry["descent"], descent_deadline)
                     tower_entry["final_gain_a"] = gain_a
                     tower_entry["final_gain_b"] = gain_b
                     self._set_current(gain_a=gain_a, gain_b=gain_b)
 
-                    if time.monotonic() >= tower_deadline:
+                    if mode == MODE_ADSB:
+                        result = self._dwell_adsb(tower, fc, gain_a, gain_b,
+                                                  tower_entry, adsb_delay_tolerance,
+                                                  adsb_doppler_tolerance)
+                    elif time.monotonic() >= descent_deadline:
                         # Descent alone used this tower's whole budget —
                         # be honest that it was never actually watched,
                         # rather than recording a misleading "checked,
@@ -505,8 +616,7 @@ class Calibrator:
                     else:
                         dwell_started = time.monotonic()
                         result = self._dwell(tower, fc, gain_a, gain_b, applied_at,
-                                             tower_deadline, tower_entry, mode,
-                                             adsb_delay_tolerance, adsb_doppler_tolerance)
+                                             descent_deadline, tower_entry)
                         tower_entry["dwell_seconds"] = round(time.monotonic() - dwell_started, 1)
                 finally:
                     self._append_history(tower_entry)
@@ -517,11 +627,15 @@ class Calibrator:
                     break
 
             if result is None and error is None:
-                what = ("No ADS-B-verified track" if mode == MODE_ADSB
-                        else "No confirmed track")
-                error = (f"{what} found within the time budget — this may "
-                        "simply mean no aircraft was overhead during this "
-                        "run, not that the tuning is wrong.")
+                if mode == MODE_ADSB:
+                    error = ("No ADS-B-verified track — every candidate tower "
+                             "and gain setting was tried, but no confirmed "
+                             "track ever matched a real aircraft while one "
+                             "was actually in range.")
+                else:
+                    error = ("No confirmed track found within the time budget "
+                             "— this may simply mean no aircraft was overhead "
+                             "during this run, not that the tuning is wrong.")
 
         except _Cancelled:
             state = "cancelled"

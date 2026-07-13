@@ -121,8 +121,24 @@ def active_track_at(delay, doppler):
 
 
 def adsb_aircraft_at(delay, doppler, hex_id="ABC123", flight="TEST1"):
-    """A single-aircraft /api/adsb2dd response factory."""
+    """A single-aircraft /api/adsb2dd response factory, present on every poll
+    (never leaves range) — for tests where a match should happen immediately."""
     def make(client):
+        return {hex_id: {"hex": hex_id, "flight": flight,
+                         "delay": delay, "doppler": doppler}}
+    return make
+
+
+def adsb_aircraft_appears_then_leaves(delay, doppler, present_polls,
+                                       hex_id="ABC123", flight="TEST1"):
+    """An /api/adsb2dd factory simulating a real aircraft: present for
+    `present_polls` calls, then gone for good — for testing MODE_ADSB's
+    "seen but never matched, opportunity closes" cycling."""
+    calls = {"n": 0}
+    def make(client):
+        calls["n"] += 1
+        if calls["n"] > present_polls:
+            return {}
         return {hex_id: {"hex": hex_id, "flight": flight,
                          "delay": delay, "doppler": doppler}}
     return make
@@ -316,13 +332,20 @@ class TestMultiTower:
 
 
 class TestAdsbMode:
-    def test_matched_track_succeeds(self, fast):
+    """MODE_ADSB has no time division (see calibrator.py's module docstring)
+    — an aircraft that's simply never present makes the dwell wait forever
+    by design, so tests for that case must cancel explicitly rather than
+    rely on a timeout. adsb_aircraft_appears_then_leaves simulates a real
+    aircraft's limited window instead of a permanently-present one, since a
+    permanently-present aircraft never gives _dwell_adsb a reason to
+    conclude a candidate failed."""
+
+    def test_matched_track_succeeds_immediately(self, fast):
         client = FakeBlah2Client(
             tracker=active_track_at(delay=10.0, doppler=50.0),
             adsb_tracks=adsb_aircraft_at(delay=10.5, doppler=51.0))
         cal = Calibrator(client)
-        started, error = cal.start([TOWER], ORIGINAL, budget_seconds=10,
-                                   dwell_seconds=0.2, mode=calmod.MODE_ADSB)
+        started, error = cal.start([TOWER], ORIGINAL, mode=calmod.MODE_ADSB)
         assert started, error
         cal._thread.join(timeout=10)
         status = cal.get_status()
@@ -330,40 +353,98 @@ class TestAdsbMode:
         assert status["result"]["adsb_hex"] == "ABC123"
         assert status["result"]["adsb_flight"] == "TEST1"
 
-    def test_confirmed_track_without_match_does_not_succeed(self, fast):
-        # blah2 confirms a track, but it's nowhere near any known aircraft
+    def test_no_time_division_reported(self, fast):
         client = FakeBlah2Client(
             tracker=active_track_at(delay=10.0, doppler=50.0),
-            adsb_tracks=adsb_aircraft_at(delay=200.0, doppler=-300.0))
+            adsb_tracks=adsb_aircraft_at(delay=10.5, doppler=51.0))
         cal = Calibrator(client)
-        started, error = cal.start([TOWER], ORIGINAL, budget_seconds=0.3,
-                                   dwell_seconds=0.2, mode=calmod.MODE_ADSB)
+        started, error = cal.start([TOWER], ORIGINAL, mode=calmod.MODE_ADSB)
+        assert started, error
+        cal._thread.join(timeout=10)
+        status = cal.get_status()
+        assert status["state"] == "done"
+        assert status["progress"]["budget_seconds"] is None
+
+    def test_unmatched_aircraft_departing_exhausts_the_only_candidate(self, fast):
+        """Clean overload_rule -> descent lands at the sensitivity floor
+        (20 dB) immediately, so there's no lower gain to cycle to: one
+        aircraft shows up, never matches, leaves — and that's the whole run
+        for this (single-tower) case. Must terminate on its own, no cancel
+        needed, since the gain floor is a real stopping point."""
+        client = FakeBlah2Client(
+            tracker=active_track_at(delay=10.0, doppler=50.0),
+            adsb_tracks=adsb_aircraft_appears_then_leaves(
+                delay=200.0, doppler=-300.0, present_polls=3))
+        cal = Calibrator(client)
+        started, error = cal.start([TOWER], ORIGINAL, mode=calmod.MODE_ADSB)
         assert started, error
         cal._thread.join(timeout=10)
         status = cal.get_status()
         assert status["state"] == "failed"
         assert status["result"] is None
+        assert "every candidate tower and gain setting" in status["error"]
+        assert status["history"][0]["gains_tried"] == [
+            {"gain_b": GAIN_REDUCTION_MIN, "overload_b": False}]
         assert "doesn't match a known aircraft" in status["best_attempt"]["reason"]
+        # restored, same invariant as every other non-success outcome
+        assert client.current["fc"] == ORIGINAL["fc"]
+        assert client.current["gain_a"] == ORIGINAL["gain_a"]
 
-    def test_no_adsb_feed_does_not_crash_and_does_not_succeed(self, fast):
-        # adsb_tracks returning None simulates an unreachable/disabled feed
-        client = FakeBlah2Client(tracker=active_track_at(delay=10.0, doppler=50.0))
+    def test_cycles_toward_more_sensitivity_then_stops_on_reoverload(self, fast):
+        """Descent backs off B to 30 dB to avoid overload. The first
+        unmatched-then-departed aircraft should step B down to 25 — which
+        immediately re-overloads per this rule — so the run must stop there
+        rather than trying the (unreachable) sensitivity floor."""
+        client = FakeBlah2Client(
+            overload_rule=lambda fc, ga, gb: (False, gb < 30),
+            tracker=active_track_at(delay=10.0, doppler=50.0),
+            adsb_tracks=adsb_aircraft_appears_then_leaves(
+                delay=200.0, doppler=-300.0, present_polls=3))
         cal = Calibrator(client)
-        started, error = cal.start([TOWER], ORIGINAL, budget_seconds=0.3,
-                                   dwell_seconds=0.2, mode=calmod.MODE_ADSB)
+        started, error = cal.start([TOWER], ORIGINAL, mode=calmod.MODE_ADSB)
         assert started, error
         cal._thread.join(timeout=10)
         status = cal.get_status()
         assert status["state"] == "failed"
+        gains_tried = status["history"][0]["gains_tried"]
+        assert [g["gain_b"] for g in gains_tried] == [30, 25]
+        assert gains_tried[0]["overload_b"] is False
+        assert gains_tried[1]["overload_b"] is True
+
+    def test_no_traffic_waits_until_cancelled(self, fast):
+        """No aircraft ever appears — by design this must wait forever, not
+        time out. Confirms it's genuinely waiting (not stuck/crashed) and
+        that cancelling it still restores the original tuning."""
+        import time as time_module
+        client = FakeBlah2Client(tracker=active_track_at(delay=10.0, doppler=50.0))
+        cal = Calibrator(client)
+        started, error = cal.start([TOWER], ORIGINAL, mode=calmod.MODE_ADSB)
+        assert started, error
+
+        deadline = time_module.monotonic() + 5
+        while time_module.monotonic() < deadline:
+            if cal.get_status()["phase"] == "dwelling":
+                break
+            time_module.sleep(0.01)
+        assert cal.is_running(), "run ended on its own despite no traffic ever appearing"
+
+        cal.cancel()
+        cal._thread.join(timeout=10)
+        status = cal.get_status()
+        assert status["state"] == "cancelled"
+        assert client.current["fc"] == ORIGINAL["fc"]
+        assert client.current["gain_a"] == ORIGINAL["gain_a"]
+        assert client.current["gain_b"] == ORIGINAL["gain_b"]
 
     def test_track_mode_ignores_adsb_entirely(self, fast):
         # default mode must succeed on confirmation alone, regardless of
-        # whether ADS-B truth would have matched
+        # whether ADS-B truth would have matched, and keeps its time budget
         client = FakeBlah2Client(
             tracker=active_track_at(delay=10.0, doppler=50.0),
             adsb_tracks=adsb_aircraft_at(delay=200.0, doppler=-300.0))
         status = run_to_completion(Calibrator(client), [TOWER])
         assert status["state"] == "done"
+        assert status["progress"]["budget_seconds"] is not None
 
     def test_invalid_mode_rejected(self, fast):
         cal = Calibrator(FakeBlah2Client())

@@ -477,14 +477,17 @@
                     <div style="display:flex;flex-direction:column;gap:8px;margin-bottom:6px;">
                         <label style="display:flex;gap:8px;align-items:flex-start;cursor:pointer;">
                             <input type="radio" name="calMode" value="track" checked style="margin-top:3px;">
-                            <span><strong>Standard</strong> — any track blah2 confirms (fast, but a persistent
-                                clutter/multipath return can occasionally pass confirmation too).</span>
+                            <span><strong>Standard</strong> — any track blah2 confirms, within a ~10 minute
+                                budget (fast, but a persistent clutter/multipath return can occasionally pass
+                                confirmation too).</span>
                         </label>
                         <label style="display:flex;gap:8px;align-items:flex-start;cursor:pointer;">
                             <input type="radio" name="calMode" value="adsb" style="margin-top:3px;">
                             <span><strong>ADS-B verified</strong> — a confirmed track must also match a real
-                                aircraft's expected position. Stronger proof, but needs ADS-B truth enabled
-                                and working on this node.</span>
+                                aircraft's expected position. No time limit: it waits for actual air traffic
+                                rather than guessing from a clock, so a run can take anywhere from seconds to
+                                a long wait in quiet airspace — cancel any time. Needs ADS-B truth enabled and
+                                working on this node.</span>
                         </label>
                     </div>
                 </div>
@@ -1048,7 +1051,9 @@ if (discardBtn) discardBtn.addEventListener('click', () => location.reload());
                     : ('A ' + (rf.overload_a ? 'OVERLOAD' : 'ok') + ' / B ' + (rf.overload_b ? 'OVERLOAD' : 'ok'));
                 var progress = status.progress || {};
                 document.getElementById('calElapsed').textContent =
-                    fmtSeconds(progress.elapsed_seconds || 0) + ' of ' + fmtSeconds(progress.budget_seconds || 600);
+                    (progress.budget_seconds == null)
+                        ? fmtSeconds(progress.elapsed_seconds || 0) + ' (no time limit — waiting for traffic)'
+                        : fmtSeconds(progress.elapsed_seconds || 0) + ' of ' + fmtSeconds(progress.budget_seconds);
             }
             if (status.best_attempt) {
                 best.style.display = '';

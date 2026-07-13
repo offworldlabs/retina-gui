@@ -3,6 +3,20 @@
 Status: implemented, uncommitted. `blah2-arm:20260708-auto-calibrate-live-tune`,
 `retina-gui:20260708-auto-calibrate`. Verification in progress (see bottom).
 
+**2026-07-12 update — ADS-B mode shipped, and reworked to have no time
+division.** The "Non-goals (v1)" ADS-B line below is stale; see "Two success
+modes" further down for what actually shipped. MODE_ADSB's dwell
+(`Calibrator._dwell_adsb`) doesn't share MODE_TRACK's time-boxed strategy at
+all: since `/api/adsb2dd` gives ground truth on whether an aircraft is
+actually observable, absence of traffic is never treated as a reason to give
+up. It waits for an ADS-B-confirmed aircraft with no timeout, and only
+concludes a gain candidate failed once a real aircraft was in range and left
+unmatched — then steps `gainReductionB` toward more sensitivity
+(`ADSB_GAIN_STEP_DB`, re-checking overload) and tries again. Once candidates
+are exhausted for a tower (sensitivity floor or re-overload), it moves to the
+next tower. No overall run budget applies to this mode either — only success,
+exhausting every tower's gain candidates, or the user cancelling ends it.
+
 ## Problem
 
 After the setup wizard picks a tower (which only sets `fc`), the user has to
@@ -204,14 +218,37 @@ winner; persisting to disk is a separate, explicit user action.
   an actual retune HTTP round-trip end to end — proves the whole chain (poll
   → apply → ack → status) without ever touching an SDR, enabled by the
   `replay_mode_fg` addition above.
-- **Tier 3 — real hardware, not yet run.** Needs the desk node: mid-stream fc
-  relock behavior, real overload/backoff behavior, a full end-to-end run
-  against real air traffic, and a browser walkthrough of the UI. Requires
-  explicit go-ahead before deploying to the node.
+- **Tier 3 — real hardware.** Done on the desk node: gain-only retune, fc
+  retune with a clean tracker reset, and a cancelled run's restore all
+  confirmed directly against real SDRplay hardware. Not yet done: a full
+  end-to-end run against real air traffic in either mode.
 
-## Known follow-ups (not blocking this project)
+## Must investigate before this is finished
 
-- ADS-B-verified success criterion (v2).
+Flagged 2026-07-10, not yet looked into — recorded here so they survive a
+context switch, not because either is confirmed a bug:
+
+- **Watchdog interaction.** `blah2-arm/script/blah2_rspduo_restart.bash`
+  (cron, every 5 min) restarts blah2 if `/api/map` looks stale, with a 60s
+  post-start grace period, and avoids racing a `docker compose` operation it
+  can see via `pgrep`. Auto-Calibrate never runs `docker compose` — it
+  live-retunes — so that race-avoidance check can't see a calibration in
+  progress. Does a live fc retune (tracker reset, brief relock gap) ever
+  look stale enough by the watchdog's own criteria to trigger a restart
+  mid-search?
+- **Container startup/sequencing.** The Capture.cpp poll thread assumes
+  blah2_api is reachable when blah2 starts polling `/capture/retune` —
+  only informally covered by retry-next-cycle, never checked against the
+  compose `depends_on` graph (config-merger → blah2_api → blah2) when both
+  are force-recreated together by the Persist/Apply flow.
+- **Calibration vs. mode-switching race.** Starting a calibration while not
+  in radar mode is refused (confirmed, in `routes/calibrate.py`). Not
+  confirmed: whether switching *to* spectrum/sdrconnect mode is blocked
+  while a calibration is actively running — if not, the SDR could be yanked
+  out from under the calibrator thread mid-run.
+
+## Other known follow-ups (not blocking this project)
+
 - Per-tuner LNA state remains a separate, pre-existing gap.
 - Descent/refine step sizes and dwell budget are principled estimates from
   CPI/M-N timing — expect to tune them empirically once real hardware data
