@@ -81,12 +81,22 @@ def get_mode():
 
 @bp.route('/api/mode', methods=['POST'])
 def set_mode():
-    from app import RETINA_NODE_PATH, config_mgr
+    from app import RETINA_NODE_PATH, config_mgr, calibrator, device_state
 
     data = request.get_json(silent=True) or {}
     mode = data.get('mode')
     if mode not in ('radar', 'spectrum', 'sdrconnect'):
         return jsonify({'success': False, 'error': 'Invalid mode'}), 400
+
+    # Every branch below (including 'radar', which force-recreates the
+    # containers) stops or restarts blah2 — any of that would yank the SDR
+    # out from under an active calibration run. Checking calibrator.is_running()
+    # directly (not just the lock file) matters because MODE_ADSB has no time
+    # limit: a genuine multi-hour run would outlive the lock file's own
+    # 20-minute staleness window, but is_running() is always correct.
+    if calibrator.is_running() or device_state.is_calibration_locked()[0]:
+        return jsonify({'success': False,
+                        'error': 'Auto-calibration is running — cancel it before switching modes'}), 409
 
     node_installed = config_mgr.is_retina_node_installed()
     current_mode = get_current_mode()

@@ -56,6 +56,39 @@ class TestSetMode:
                                    content_type='application/json')
         assert response.status_code == 400
 
+    def test_refuses_while_calibration_is_running(self, app_client):
+        import app as app_module
+        with patch.object(app_module.calibrator, 'is_running', return_value=True):
+            response = app_client.post('/api/mode',
+                                       data=json.dumps({'mode': 'spectrum'}),
+                                       content_type='application/json')
+        assert response.status_code == 409
+        assert 'calibrat' in json.loads(response.data)['error'].lower()
+
+    def test_refuses_switch_to_radar_while_calibration_is_running(self, app_client):
+        # even 'radar' force-recreates the containers, which would yank the
+        # SDR out from under an active run just as badly as switching away
+        import app as app_module
+        with patch.object(app_module.calibrator, 'is_running', return_value=True):
+            response = app_client.post('/api/mode',
+                                       data=json.dumps({'mode': 'radar'}),
+                                       content_type='application/json')
+        assert response.status_code == 409
+
+    def test_refuses_via_stale_lock_file_even_if_in_memory_says_not_running(self, app_client):
+        # belt-and-suspenders: the file lock (cross-process/crash-recovery
+        # signal) still blocks even if this process's calibrator object
+        # itself has never run anything (e.g. right after a restart)
+        import app as app_module
+        assert app_module.device_state.acquire_calibration_lock()
+        try:
+            response = app_client.post('/api/mode',
+                                       data=json.dumps({'mode': 'spectrum'}),
+                                       content_type='application/json')
+            assert response.status_code == 409
+        finally:
+            app_module.device_state.release_calibration_lock()
+
     def test_no_retina_node_still_succeeds(self, app_client_no_retina):
         """Mode switch should succeed (skipping docker) when retina-node is absent."""
         response = app_client_no_retina.post('/api/mode',

@@ -86,12 +86,21 @@ def install():
     Accepts an optional 'version' in the JSON body (e.g. {"version": "v0.3.11"}).
     Defaults to the latest stable release if omitted.
     """
-    from app import mender, device_state, app, DEV_MODE
+    from app import mender, device_state, app, DEV_MODE, calibrator
     from mender import get_latest_stable_from_github, DEV_VERSIONS
     import time
 
     body = request.get_json() or {}
     requested_version = body.get("version")
+
+    # calibrator.is_running() is checked directly (not just
+    # device_state.can_start_install()'s lock-file check) because MODE_ADSB
+    # has no time limit: a genuine multi-hour run would outlive the lock
+    # file's own 20-minute staleness window, but is_running() is always
+    # correct regardless of how long the run has been going.
+    if calibrator.is_running():
+        return jsonify({"success": False,
+                        "error": "Auto-calibration is running — cancel it before installing an update"}), 409
 
     if DEV_MODE:
         version_tag = requested_version or DEV_VERSIONS[0]
