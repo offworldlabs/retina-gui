@@ -23,7 +23,7 @@ class Blah2Client:
         except (requests.RequestException, ValueError):
             return None
 
-    def retune(self, fc, gain_a, gain_b):
+    def retune(self, fc, gain_a, gain_b, lna_state):
         """Request a live retune. Returns (generation, error)."""
         try:
             resp = requests.post(
@@ -32,6 +32,7 @@ class Blah2Client:
                     "fc": int(fc),
                     "gainReductionA": int(gain_a),
                     "gainReductionB": int(gain_b),
+                    "lnaState": int(lna_state),
                 },
                 timeout=self.timeout,
             )

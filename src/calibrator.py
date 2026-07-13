@@ -1,11 +1,41 @@
-"""Auto-Calibrate: tune tower/fc and per-tuner gain until a track confirms.
+"""Auto-Calibrate: tune tower/fc, per-tuner gain and LNA state until a track
+confirms.
 
 Strategy ("good, not best"): for each candidate tower, start at maximum gain
-(minimum gain reduction), back off the overloaded tuner in big steps until the
-RF front end runs clean, then dwell at that setting waiting for blah2's
-tracker to confirm a track. A confirmed track needs a real aircraft overhead,
-so dwell time dominates the run — the search minimises the number of dwells,
-not the granularity of the gain grid.
+(minimum gain reduction, minimum LNA attenuation), back off in big steps
+until the RF front end runs clean, then dwell at that setting waiting for a
+confirmed track. A confirmed track needs a real aircraft overhead, so dwell
+time dominates the run — the search minimises the number of dwells, not the
+granularity of the gain grid.
+
+Three search variables, adjusted in a fixed priority order per tower (see
+_descend_reference/_descend_surveillance/_descend):
+  1. Reference gain reduction (tuner A) — descend only, no refine. The
+     reference channel just needs to capture the illuminator cleanly; the
+     goal is simply the highest gain that doesn't clip.
+  2. Surveillance gain reduction (tuner B) — descend, then one refine step
+     (claw back 5dB, revert if it re-overloads). This is where MODE_ADSB's
+     sensitivity-cycling picks up from (see _dwell_adsb).
+  3. LNA state — shared across both tuners (the SDRplay device has no
+     per-tuner LNA control). Only touched if gain reduction alone can't
+     clear an overload (i.e. still clipping at gRdB's 59dB ceiling) — gRdB
+     is a downstream/IF-stage control, so it cannot fix a front end that's
+     genuinely saturating on a very strong signal; LNA state (an upstream,
+     RF-stage control) is the escalation path for that. Higher LNA state
+     number means more attenuation, less gain (state 1 = max gain, state 9
+     = min gain — see RspDuo/README.md in blah2-arm). Escalating LNA state
+     resets *only* whichever channel(s) triggered the escalation back to
+     20dB and redescends fresh — a channel that's already clean is left
+     untouched, since more attenuation upstream can never newly overload a
+     channel that wasn't already clipping.
+
+Track confirmation runs entirely in this process: a fresh retina-tracker
+(github.com/offworldlabs/retina-tracker) Tracker instance per tower is fed
+the same detection frames already being polled, and its own ACTIVE state is
+the success signal — not blah2's own built-in tracker, which the client has
+found to be unreliable on real data. Reset scope is per-tower only (matching
+blah2's own fc-triggered reset): since any confirmed track ends the search
+immediately, finer-grained reset scope has no effect on correctness.
 
 Two success modes, with genuinely different dwell strategies:
   - MODE_TRACK (default): any track reaching ASSOCIATED/ACTIVE state
@@ -25,6 +55,11 @@ Two success modes, with genuinely different dwell strategies:
     tries again; once gain candidates for a tower are exhausted (floor or
     re-overload), the run moves to the next tower.
 
+    MODE_ADSB is currently benched — deliberately left stale (still using
+    blah2's own tracker, not migrated to retina-tracker) and blocked at the
+    route level (routes/calibrate.py) so it isn't reachable by users. Kept
+    in place rather than removed since it's meant to be revisited later.
+
 Nothing is written to user.yml during a run; candidates are applied via
 blah2's live retune channel only. On any non-success terminal state the
 original tuning is restored. Persisting a successful result is a separate,
@@ -40,11 +75,21 @@ import threading
 import time
 from datetime import datetime, timezone
 
+from retina_tracker.config import get_config as get_retina_tracker_config
+from retina_tracker.tracker import Tracker as RetinaTracker
+
 # Gain reduction bounds (dB) — mirror blah2's RspDuo limits.
 GAIN_REDUCTION_MIN = 20
 GAIN_REDUCTION_MAX = 59
 
-# Descent: big backoff jumps per overloaded tuner, one optional refine step.
+# LNA state bounds — mirror blah2's RspDuo limits. Shared across both
+# tuners (no per-tuner LNA control on this device). Higher number = more
+# attenuation = less gain (state 1 = max gain, state 9 = min gain).
+LNA_STATE_MIN = 1
+LNA_STATE_MAX = 9
+
+# Descent: big backoff jumps per overloaded tuner, one optional refine step
+# (surveillance only — see module docstring for why reference doesn't get one).
 DESCENT_STEP_DB = 10
 REFINE_STEP_DB = 5
 
@@ -69,6 +114,13 @@ OVERLOAD_SETTLE_SECONDS = 2.0
 # in _run() as (time remaining / towers remaining), so a slow descent or an
 # early tower's full-length dwell can't silently starve the towers after it.
 DWELL_POLL_SECONDS = 1.0
+
+# MODE_TRACK's retina-tracker feed loop polls faster than blah2's own CPI
+# cadence (measured ~0.9-1s on the desk node) so a new detection frame is
+# never missed — same cadence retina-tracker's own always-on capture uses
+# (tracker_capture.py's POLL_INTERVAL_S). Frames are de-duplicated by
+# timestamp, so polling faster than the CPI rate is free, not wasteful.
+TRACKER_FEED_POLL_SECONDS = 0.2
 
 # Overall run budget.
 TOTAL_BUDGET_SECONDS = 600
@@ -113,6 +165,17 @@ class _Cancelled(Exception):
 
 def _utcnow():
     return datetime.now(timezone.utc).isoformat()
+
+
+def _frame_to_detections(frame):
+    """Convert a Blah2Client.get_detection() frame into retina-tracker's
+    per-detection dicts. Mirrors retina_tracker's own
+    server.py::process_streaming_frame conversion."""
+    delays = frame.get("delay", [])
+    dopplers = frame.get("doppler", [])
+    snrs = frame.get("snr", [])
+    return [{"delay": delay, "doppler": doppler, "snr": snr}
+            for delay, doppler, snr in zip(delays, dopplers, snrs)]
 
 
 class Calibrator:
@@ -249,7 +312,7 @@ class Calibrator:
 
     # ── Retune protocol ────────────────────────────────────────
 
-    def _apply(self, fc, gain_a, gain_b, ignore_cancel=False):
+    def _apply(self, fc, gain_a, gain_b, lna_state, ignore_cancel=False):
         """Request a retune and wait for blah2's ack. Returns appliedAt (ms).
 
         ignore_cancel: used only by the restore-on-failure path, which must
@@ -259,7 +322,7 @@ class Calibrator:
         last_error = None
         for attempt in range(2):
             self._check_cancel(ignore_cancel=ignore_cancel)
-            generation, error = self._client.retune(fc, gain_a, gain_b)
+            generation, error = self._client.retune(fc, gain_a, gain_b, lna_state)
             if generation is None:
                 last_error = error
                 self._sleep(0.5, ignore_cancel=ignore_cancel)
@@ -293,117 +356,166 @@ class Calibrator:
 
     # ── Search stages ──────────────────────────────────────────
 
-    def _descend(self, fc, descent_log, deadline):
-        """Find the highest clean gain per tuner: start at max gain, back off
-        the overloaded tuner in DESCENT_STEP_DB jumps, then one refine step.
-        Returns (gain_a, gain_b, applied_at_ms).
+    def _descend_reference(self, fc, gain_b, lna_state, descent_log, deadline):
+        """Find the highest clean gain for the reference tuner (A) only, at
+        a fixed lna_state. gain_b rides along in each retune call (both
+        tuners' gain are always set together) but is otherwise irrelevant
+        here — only overload_a is inspected, and there's no refine step
+        (see module docstring: reference just wants "as hot as possible
+        without clipping", not surveillance's finer optimisation).
 
-        deadline: this tower's shared descent+dwell budget (monotonic
-        clock). Never exceeded — each iteration always finishes its current
-        settle+read (so the returned gain/applied_at stay self-consistent
-        with what's actually on the hardware), but a new candidate is only
-        tried if there's still time left, so a slow descent can eat into
-        this tower's dwell but can never run past its whole budget.
+        Returns (gain_a, applied_at_ms, still_overloaded).
         """
-        gain_a = gain_b = GAIN_REDUCTION_MIN
-        backed_a = backed_b = False
-
-        applied_at = self._apply(fc, gain_a, gain_b)
+        gain_a = GAIN_REDUCTION_MIN
+        applied_at = self._apply(fc, gain_a, gain_b, lna_state)
         while True:
             self._sleep(OVERLOAD_SETTLE_SECONDS)
-            overload_a, overload_b = self._read_overload(applied_at)
-            descent_log.append({"gain_a": gain_a, "gain_b": gain_b,
-                                "overload_a": overload_a, "overload_b": overload_b})
-            if not overload_a and not overload_b:
-                break
-            at_floor_a = gain_a >= GAIN_REDUCTION_MAX
-            at_floor_b = gain_b >= GAIN_REDUCTION_MAX
-            if (not overload_a or at_floor_a) and (not overload_b or at_floor_b):
-                # Still overloaded with nowhere left to back off (at max
-                # gain reduction on every overloaded channel) — carry on;
-                # the dwell may still work.
-                break
-            if time.monotonic() >= deadline:
-                break  # out of time for this tower — use what we have
-            if overload_a and not at_floor_a:
-                gain_a = min(gain_a + DESCENT_STEP_DB, GAIN_REDUCTION_MAX)
-            if overload_b and not at_floor_b:
-                gain_b = min(gain_b + DESCENT_STEP_DB, GAIN_REDUCTION_MAX)
-            self._set_current(gain_a=gain_a, gain_b=gain_b)
-            applied_at = self._apply(fc, gain_a, gain_b)
-            backed_a = backed_a or overload_a
-            backed_b = backed_b or overload_b
+            overload_a, _ = self._read_overload(applied_at)
+            descent_log.append({"phase": "reference", "gain_a": gain_a,
+                                "lna_state": lna_state, "overload_a": overload_a})
+            if not overload_a:
+                return gain_a, applied_at, False
+            if gain_a >= GAIN_REDUCTION_MAX or time.monotonic() >= deadline:
+                return gain_a, applied_at, True
+            gain_a = min(gain_a + DESCENT_STEP_DB, GAIN_REDUCTION_MAX)
+            self._set_current(gain_a=gain_a)
+            applied_at = self._apply(fc, gain_a, gain_b, lna_state)
 
-        # One refine step: claw back REFINE_STEP_DB on tuners that backed off,
-        # revert whichever one re-overloads. Skipped if out of time — it's a
-        # bonus optimization, not required for a usable result.
-        refine_a = max(gain_a - REFINE_STEP_DB, GAIN_REDUCTION_MIN) if backed_a else gain_a
-        refine_b = max(gain_b - REFINE_STEP_DB, GAIN_REDUCTION_MIN) if backed_b else gain_b
-        if (refine_a, refine_b) != (gain_a, gain_b) and time.monotonic() < deadline:
-            self._update(phase="refining")
-            self._set_current(gain_a=refine_a, gain_b=refine_b)
-            applied_at = self._apply(fc, refine_a, refine_b)
+    def _descend_surveillance(self, fc, gain_a, lna_state, descent_log, deadline):
+        """Find the highest clean gain for the surveillance tuner (B) only,
+        at a fixed lna_state and fixed (already-resolved) gain_a. Same
+        backoff pattern as reference, plus one refine step once clean
+        (claw back REFINE_STEP_DB, revert if it re-overloads).
+
+        Returns (gain_b, applied_at_ms, still_overloaded).
+        """
+        gain_b = GAIN_REDUCTION_MIN
+        backed_b = False
+        applied_at = self._apply(fc, gain_a, gain_b, lna_state)
+        while True:
             self._sleep(OVERLOAD_SETTLE_SECONDS)
-            overload_a, overload_b = self._read_overload(applied_at)
-            descent_log.append({"gain_a": refine_a, "gain_b": refine_b,
-                                "overload_a": overload_a, "overload_b": overload_b})
-            final_a = gain_a if overload_a else refine_a
-            final_b = gain_b if overload_b else refine_b
-            if (final_a, final_b) != (refine_a, refine_b):
-                self._set_current(gain_a=final_a, gain_b=final_b)
-                applied_at = self._apply(fc, final_a, final_b)
-            gain_a, gain_b = final_a, final_b
+            _, overload_b = self._read_overload(applied_at)
+            descent_log.append({"phase": "surveillance", "gain_b": gain_b,
+                                "lna_state": lna_state, "overload_b": overload_b})
+            if not overload_b:
+                break
+            if gain_b >= GAIN_REDUCTION_MAX or time.monotonic() >= deadline:
+                return gain_b, applied_at, True
+            gain_b = min(gain_b + DESCENT_STEP_DB, GAIN_REDUCTION_MAX)
+            self._set_current(gain_b=gain_b)
+            applied_at = self._apply(fc, gain_a, gain_b, lna_state)
+            backed_b = True
 
-        return gain_a, gain_b, applied_at
+        if backed_b and time.monotonic() < deadline:
+            refine_b = max(gain_b - REFINE_STEP_DB, GAIN_REDUCTION_MIN)
+            self._update(phase="refining")
+            self._set_current(gain_b=refine_b)
+            applied_at = self._apply(fc, gain_a, refine_b, lna_state)
+            self._sleep(OVERLOAD_SETTLE_SECONDS)
+            _, overload_b = self._read_overload(applied_at)
+            descent_log.append({"phase": "surveillance_refine", "gain_b": refine_b,
+                                "lna_state": lna_state, "overload_b": overload_b})
+            if overload_b:
+                self._set_current(gain_b=gain_b)
+                applied_at = self._apply(fc, gain_a, gain_b, lna_state)
+            else:
+                gain_b = refine_b
+
+        return gain_b, applied_at, False
+
+    def _descend(self, fc, descent_log, deadline):
+        """Run the three-variable search in priority order: reference gain,
+        then surveillance gain, then (only if either is still overloaded at
+        its 59dB ceiling) escalate LNA state — resetting and redescending
+        only whichever channel(s) actually triggered the escalation, since
+        an already-clean channel can never be newly overloaded by more
+        upstream attenuation. See module docstring for the full rationale.
+
+        deadline: this tower's shared descent+dwell budget (monotonic
+        clock). Never exceeded — see _descend_reference/_descend_surveillance.
+
+        Returns (gain_a, gain_b, lna_state, applied_at_ms).
+        """
+        lna_state = LNA_STATE_MIN
+        gain_a, applied_at, overload_a = self._descend_reference(
+            fc, GAIN_REDUCTION_MIN, lna_state, descent_log, deadline)
+
+        gain_b, overload_b = GAIN_REDUCTION_MIN, False
+        if time.monotonic() < deadline:
+            gain_b, applied_at, overload_b = self._descend_surveillance(
+                fc, gain_a, lna_state, descent_log, deadline)
+
+        while ((overload_a or overload_b) and lna_state < LNA_STATE_MAX
+               and time.monotonic() < deadline):
+            lna_state += 1
+            self._set_current(lna_state=lna_state)
+            descent_log.append({"phase": "lna_escalation", "lna_state": lna_state})
+            if overload_a:
+                gain_a, applied_at, overload_a = self._descend_reference(
+                    fc, gain_b, lna_state, descent_log, deadline)
+            if overload_b:
+                gain_b, applied_at, overload_b = self._descend_surveillance(
+                    fc, gain_a, lna_state, descent_log, deadline)
+
+        return gain_a, gain_b, lna_state, applied_at
 
     def _dwell(self, tower, fc, gain_a, gain_b, applied_at, dwell_deadline,
-               tower_entry):
-        """MODE_TRACK's dwell: hold the tuning, watching for any confirmed
-        track, until dwell_deadline. Returns a result dict on success, None
-        if the dwell budget expires. (MODE_ADSB uses _dwell_adsb instead —
-        see the module docstring for why the two need different strategies.)
+               tower_entry, tracker):
+        """MODE_TRACK's dwell: feed live detections through a local
+        retina-tracker instance (see module docstring for why — blah2's own
+        tracker is not trusted here) until it confirms an ACTIVE track, or
+        dwell_deadline passes. Returns a result dict on success, None if the
+        dwell budget expires. (MODE_ADSB uses _dwell_adsb instead, still on
+        blah2's own tracker — see the module docstring.)
+
+        tracker: a fresh retina_tracker.Tracker for this tower (reset scope
+        is per-tower, not per-gain-candidate — see module docstring).
         """
         self._update(phase="dwelling")
         max_evidence = EVIDENCE_NONE
         max_detections = 0
+        last_timestamp = None
 
         while time.monotonic() < dwell_deadline:
             self._check_cancel()
 
-            tracker = self._client.get_tracker()
-            if tracker and tracker.get("timestamp", 0) >= applied_at:
-                active_tracks = [t for t in (tracker.get("data") or [])
-                                 if t.get("state") == "ACTIVE"]
+            detection = self._client.get_detection()
+            timestamp = detection.get("timestamp") if detection else None
+            if (detection and timestamp != last_timestamp
+                    and timestamp is not None and timestamp >= applied_at):
+                last_timestamp = timestamp
+                frame_detections = _frame_to_detections(detection)
+                tracker.process_frame(frame_detections, timestamp)
+
+                if frame_detections:
+                    max_evidence = max(max_evidence, EVIDENCE_DETECTIONS)
+                    max_detections = max(max_detections, len(frame_detections))
+
+                active_tracks = tracker.get_active_tracks()
                 if active_tracks:
                     tower_entry["outcome"] = "confirmed_track"
                     tower_entry["max_evidence"] = EVIDENCE_ACTIVE
                     return {
                         "tower_name": tower.get("name"), "fc": fc,
                         "gain_a": gain_a, "gain_b": gain_b,
-                        "track_id": active_tracks[0].get("id"),
+                        "track_id": active_tracks[0].id,
                     }
-                elif tracker.get("nAssociated", 0) > 0 or tracker.get("nCoasting", 0) > 0:
+                elif any(t.state_status.name in ("ASSOCIATED", "COASTING")
+                         for t in tracker.tracks):
                     max_evidence = max(max_evidence, EVIDENCE_ASSOCIATED)
-                elif tracker.get("nTentative", 0) > 0:
+                elif tracker.tracks:
                     max_evidence = max(max_evidence, EVIDENCE_TENTATIVE)
-
-            detection = self._client.get_detection()
-            if detection and detection.get("timestamp", 0) >= applied_at:
-                count = len(detection.get("delay") or [])
-                if count > 0:
-                    max_evidence = max(max_evidence, EVIDENCE_DETECTIONS)
-                    max_detections = max(max_detections, count)
 
             self._maybe_update_best_attempt(tower, fc, gain_a, gain_b,
                                             max_evidence, max_detections)
-            self._sleep(DWELL_POLL_SECONDS)
+            self._sleep(TRACKER_FEED_POLL_SECONDS)
 
         tower_entry["outcome"] = "no_confirmed_track"
         tower_entry["max_evidence"] = max_evidence
         tower_entry["max_detections"] = max_detections
         return None
 
-    def _dwell_adsb(self, tower, fc, gain_a, initial_gain_b, tower_entry,
+    def _dwell_adsb(self, tower, fc, gain_a, initial_gain_b, lna_state, tower_entry,
                      adsb_delay_tolerance, adsb_doppler_tolerance):
         """MODE_ADSB's dwell: no time budget. Starting from descent's clean
         (no-overload) gainReductionB, wait for ADS-B truth to confirm a real
@@ -428,7 +540,7 @@ class Calibrator:
 
         while True:
             self._check_cancel()
-            applied_at = self._apply(fc, gain_a, gain_b)
+            applied_at = self._apply(fc, gain_a, gain_b, lna_state)
             self._set_current(gain_a=gain_a, gain_b=gain_b)
             self._sleep(OVERLOAD_SETTLE_SECONDS)
             overload_a, overload_b = self._read_overload(applied_at)
@@ -565,7 +677,7 @@ class Calibrator:
                 self._update(phase="descending")
                 self._set_current(tower_index=index, tower_name=tower.get("name"),
                                   fc=fc, gain_a=GAIN_REDUCTION_MIN,
-                                  gain_b=GAIN_REDUCTION_MIN)
+                                  gain_b=GAIN_REDUCTION_MIN, lna_state=LNA_STATE_MIN)
                 # tower_entry stays thread-local until the tower is finished —
                 # it is only shared (appended to status history) once the run
                 # thread stops mutating it
@@ -596,14 +708,15 @@ class Calibrator:
                         descent_deadline = time.monotonic() + (time_left / towers_remaining)
 
                 try:
-                    gain_a, gain_b, applied_at = self._descend(
+                    gain_a, gain_b, lna_state, applied_at = self._descend(
                         fc, tower_entry["descent"], descent_deadline)
                     tower_entry["final_gain_a"] = gain_a
                     tower_entry["final_gain_b"] = gain_b
-                    self._set_current(gain_a=gain_a, gain_b=gain_b)
+                    tower_entry["final_lna_state"] = lna_state
+                    self._set_current(gain_a=gain_a, gain_b=gain_b, lna_state=lna_state)
 
                     if mode == MODE_ADSB:
-                        result = self._dwell_adsb(tower, fc, gain_a, gain_b,
+                        result = self._dwell_adsb(tower, fc, gain_a, gain_b, lna_state,
                                                   tower_entry, adsb_delay_tolerance,
                                                   adsb_doppler_tolerance)
                     elif time.monotonic() >= descent_deadline:
@@ -615,14 +728,16 @@ class Calibrator:
                         result = None
                     else:
                         dwell_started = time.monotonic()
+                        tracker = RetinaTracker(config=get_retina_tracker_config())
                         result = self._dwell(tower, fc, gain_a, gain_b, applied_at,
-                                             descent_deadline, tower_entry)
+                                             descent_deadline, tower_entry, tracker)
                         tower_entry["dwell_seconds"] = round(time.monotonic() - dwell_started, 1)
                 finally:
                     self._append_history(tower_entry)
                     self._update_progress(towers_tried=index + 1)
 
                 if result is not None:
+                    result["lna_state"] = lna_state
                     state = "done"
                     break
 
@@ -656,10 +771,10 @@ class Calibrator:
             self._update(phase="restoring")
             try:
                 self._apply(original["fc"], original["gain_a"], original["gain_b"],
-                           ignore_cancel=True)
+                           original["lna_state"], ignore_cancel=True)
                 self._set_current(tower_index=None, tower_name=None,
                                   fc=original["fc"], gain_a=original["gain_a"],
-                                  gain_b=original["gain_b"])
+                                  gain_b=original["gain_b"], lna_state=original["lna_state"])
             except Exception:
                 pass  # blah2 unreachable — restart:always re-reads config.yml
 

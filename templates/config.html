@@ -481,14 +481,9 @@
                                 budget (fast, but a persistent clutter/multipath return can occasionally pass
                                 confirmation too).</span>
                         </label>
-                        <label style="display:flex;gap:8px;align-items:flex-start;cursor:pointer;">
-                            <input type="radio" name="calMode" value="adsb" style="margin-top:3px;">
-                            <span><strong>ADS-B verified</strong> — a confirmed track must also match a real
-                                aircraft's expected position. No time limit: it waits for actual air traffic
-                                rather than guessing from a clock, so a run can take anywhere from seconds to
-                                a long wait in quiet airspace — cancel any time. Needs ADS-B truth enabled and
-                                working on this node.</span>
-                        </label>
+                        <!-- ADS-B verified mode is temporarily unavailable — benched, not removed;
+                             see calibrator.py's module docstring. The backend also rejects
+                             mode: "adsb" outright (routes/calibrate.py), so this isn't just a UI hide. -->
                     </div>
                 </div>
                 <div id="calPhase" style="display:none;align-items:center;gap:8px;font-weight:600;color:var(--ink-1);margin-bottom:10px;">
@@ -501,6 +496,7 @@
                         <span style="color:var(--ink-3);">Tower</span><span id="calTower">—</span>
                         <span style="color:var(--ink-3);">Frequency</span><span id="calFc">—</span>
                         <span style="color:var(--ink-3);">Gain reduction</span><span id="calGains">—</span>
+                        <span style="color:var(--ink-3);">LNA state</span><span id="calLna">—</span>
                         <span style="color:var(--ink-3);">RF overload</span><span id="calOverload">—</span>
                         <span style="color:var(--ink-3);">Elapsed</span><span id="calElapsed">—</span>
                     </div>
@@ -1045,6 +1041,8 @@ if (discardBtn) discardBtn.addEventListener('click', () => location.reload());
                 document.getElementById('calFc').textContent = mhz(status.current.fc);
                 document.getElementById('calGains').textContent =
                     'A ' + status.current.gain_a + ' dB / B ' + status.current.gain_b + ' dB';
+                document.getElementById('calLna').textContent =
+                    (status.current.lna_state == null) ? '—' : status.current.lna_state;
                 var rf = status.rf || {};
                 document.getElementById('calOverload').textContent =
                     (rf.overload_a == null) ? '—'
@@ -1076,7 +1074,8 @@ if (discardBtn) discardBtn.addEventListener('click', () => location.reload());
                 : '';
             resultEl.innerHTML = '<strong>' + (status.result.tower_name || 'Tower') + '</strong> at '
                 + mhz(status.result.fc) + ', gain reduction A ' + status.result.gain_a
-                + ' dB / B ' + status.result.gain_b + ' dB.' + adsbNote
+                + ' dB / B ' + status.result.gain_b + ' dB, LNA state ' + status.result.lna_state
+                + '.' + adsbNote
                 + '<br>The radar is running with this tuning now — persist it to keep it after restarts.';
             applyBtn.style.display = '';
         } else {

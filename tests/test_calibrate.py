@@ -3,6 +3,12 @@
 Calibrator logic runs against a scripted FakeBlah2Client (no real HTTP, no
 SDR hardware); route guards run against the Flask test client; telemetry
 payload assembly is tested directly.
+
+MODE_TRACK confirms tracks via a real, local retina-tracker instance fed
+scripted detection frames (see calibrator.py's module docstring for why:
+blah2's own tracker is no longer trusted for this). MODE_ADSB is benched —
+its engine code is deliberately left stale on blah2's own tracker, so its
+tests still use the old tracker-shaped fakes below unchanged.
 """
 import json
 import os
@@ -19,6 +25,8 @@ from calibrator import (
     EVIDENCE_DETECTIONS,
     GAIN_REDUCTION_MIN,
     GAIN_REDUCTION_MAX,
+    LNA_STATE_MIN,
+    LNA_STATE_MAX,
 )
 import calibration_telemetry
 from device_state import DeviceState
@@ -27,9 +35,10 @@ from device_state import DeviceState
 class FakeBlah2Client:
     """Scripted stand-in for Blah2Client.
 
-    Overload behaviour is a rule over the currently-applied tuning; tracker
-    and detection responses are callables receiving this client so tests can
-    key them off the current tuning or the fake clock.
+    Overload behaviour is a rule over the currently-applied tuning (fc,
+    gain_a, gain_b, lna_state); tracker and detection responses are
+    callables receiving this client so tests can key them off the current
+    tuning or the fake clock.
     """
 
     def __init__(self, overload_rule=None, tracker=None, detection=None,
@@ -40,7 +49,7 @@ class FakeBlah2Client:
         self.retune_error = None
         self.ack_enabled = True
         self.rf_enabled = True
-        self.overload_rule = overload_rule or (lambda fc, ga, gb: (False, False))
+        self.overload_rule = overload_rule or (lambda fc, ga, gb, lna: (False, False))
         self.tracker = tracker or (lambda client: None)
         self.detection = detection or (lambda client: None)
         self.adsb_tracks = adsb_tracks or (lambda client: None)
@@ -53,12 +62,12 @@ class FakeBlah2Client:
     def current(self):
         return self.applied[-1] if self.applied else None
 
-    def retune(self, fc, gain_a, gain_b):
+    def retune(self, fc, gain_a, gain_b, lna_state):
         if self.retune_error:
             return None, self.retune_error
         self.generation += 1
         self.applied.append({
-            "fc": fc, "gain_a": gain_a, "gain_b": gain_b,
+            "fc": fc, "gain_a": gain_a, "gain_b": gain_b, "lna_state": lna_state,
             "generation": self.generation, "applied_at": self._now(),
         })
         return self.generation, None
@@ -72,6 +81,7 @@ class FakeBlah2Client:
             "fc": last["fc"],
             "gainReductionA": last["gain_a"],
             "gainReductionB": last["gain_b"],
+            "lnaState": last["lna_state"],
             "appliedAt": last["applied_at"],
         }
 
@@ -80,7 +90,7 @@ class FakeBlah2Client:
             return None
         cur = self.applied[-1]
         overload_a, overload_b = self.overload_rule(
-            cur["fc"], cur["gain_a"], cur["gain_b"])
+            cur["fc"], cur["gain_a"], cur["gain_b"], cur["lna_state"])
         return {"overloadA": overload_a, "overloadB": overload_b,
                 "timestamp": self._now()}
 
@@ -94,9 +104,38 @@ class FakeBlah2Client:
         return self.adsb_tracks(self)
 
 
-ORIGINAL = {"fc": 98_000_000, "gain_a": 40, "gain_b": 41}
+ORIGINAL = {"fc": 98_000_000, "gain_a": 40, "gain_b": 41, "lna_state": 4}
 TOWER = {"name": "Tower One", "fc": 98_000_000}
 TOWER_TWO = {"name": "Tower Two", "fc": 105_100_000}
+
+
+def moving_track_detections(delay=10.0, doppler=50.0, snr=15.0, step_ms=500):
+    """A single, consistent (stationary-in-delay-doppler) simulated target,
+    one detection per call, its own timestamp counter advancing step_ms per
+    call regardless of the client's clock — so consecutive fed frames are
+    realistically spaced for retina-tracker's tracklet-velocity check
+    (TRACKLET_MAX_TIME_SPAN), reliably promoting to ACTIVE within a few
+    frames via 3 consistent associated points."""
+    state = {"t": 0}
+    def make(client):
+        state["t"] += step_ms
+        return {"timestamp": state["t"], "delay": [delay],
+                "doppler": [doppler], "snr": [snr]}
+    return make
+
+
+def scattered_detections():
+    """Real detections every frame, but at wildly different delay/doppler
+    each time — never consistent enough to associate into a multi-frame
+    track, so evidence never progresses past a lone tentative blip."""
+    points = [(10.0, 50.0), (300.0, -200.0), (75.0, 400.0), (150.0, -50.0)]
+    calls = {"n": 0}
+    def make(client):
+        delay, doppler = points[calls["n"] % len(points)]
+        calls["n"] += 1
+        return {"timestamp": client._now(), "delay": [delay],
+                "doppler": [doppler], "snr": [15.0]}
+    return make
 
 
 def active_track(client):
@@ -111,7 +150,9 @@ def empty_track(client):
 
 
 def active_track_at(delay, doppler):
-    """An ACTIVE track factory carrying delay/doppler, for ADS-B match tests."""
+    """An ACTIVE track factory carrying delay/doppler, for ADS-B match tests.
+    MODE_ADSB's _dwell_adsb still reads blah2's own tracker (stale, see
+    calibrator.py's module docstring), so this fake stays as-is."""
     def make(client):
         return {"timestamp": client._now(), "n": 1, "nTentative": 0,
                 "nAssociated": 0, "nActive": 1, "nCoasting": 0,
@@ -153,9 +194,10 @@ def fast(monkeypatch):
     monkeypatch.setattr(calmod, "RF_STATUS_TIMEOUT_SECONDS", 0.1)
     monkeypatch.setattr(calmod, "RF_STATUS_POLL_SECONDS", 0.005)
     monkeypatch.setattr(calmod, "DWELL_POLL_SECONDS", 0.01)
+    monkeypatch.setattr(calmod, "TRACKER_FEED_POLL_SECONDS", 0.01)
 
 
-def run_to_completion(cal, towers, original=ORIGINAL, budget=10, dwell=0.2):
+def run_to_completion(cal, towers, original=ORIGINAL, budget=10, dwell=0.5):
     started, error = cal.start(towers, original, budget_seconds=budget,
                                dwell_seconds=dwell)
     assert started, error
@@ -166,75 +208,123 @@ def run_to_completion(cal, towers, original=ORIGINAL, budget=10, dwell=0.2):
 
 class TestDescent:
     def test_clean_at_max_gain_needs_no_backoff(self, fast):
-        client = FakeBlah2Client(tracker=active_track)
+        client = FakeBlah2Client(detection=moving_track_detections())
         status = run_to_completion(Calibrator(client), [TOWER])
         assert status["state"] == "done"
         assert status["result"]["gain_a"] == GAIN_REDUCTION_MIN
         assert status["result"]["gain_b"] == GAIN_REDUCTION_MIN
+        assert status["result"]["lna_state"] == LNA_STATE_MIN
 
-    def test_backs_off_only_overloaded_tuner(self, fast):
-        # tuner A overloads below 40 dB reduction; B is always clean
+    def test_reference_backs_off_alone_with_no_refine(self, fast):
+        # tuner A overloads below 40 dB reduction; B is always clean.
+        # Reference gets no refine step (see module docstring) — it just
+        # stops the moment it's clean.
         client = FakeBlah2Client(
-            overload_rule=lambda fc, ga, gb: (ga < 40, False),
-            tracker=active_track)
+            overload_rule=lambda fc, ga, gb, lna: (ga < 40, False),
+            detection=moving_track_detections())
         status = run_to_completion(Calibrator(client), [TOWER])
         assert status["state"] == "done"
-        # descent 20->30->40 clean; refine tries 35 (overloads) and reverts
         assert status["result"]["gain_a"] == 40
         assert status["result"]["gain_b"] == GAIN_REDUCTION_MIN
 
-    def test_refine_keeps_lower_gain_reduction_when_clean(self, fast):
-        # A overloads below 33: descent lands at 40, refine 35 stays clean
+    def test_surveillance_refine_keeps_lower_gain_when_clean(self, fast):
+        # B overloads below 33: descent lands at 40, refine's 35 stays clean
         client = FakeBlah2Client(
-            overload_rule=lambda fc, ga, gb: (ga < 33, False),
-            tracker=active_track)
+            overload_rule=lambda fc, ga, gb, lna: (False, gb < 33),
+            detection=moving_track_detections())
         status = run_to_completion(Calibrator(client), [TOWER])
         assert status["state"] == "done"
-        assert status["result"]["gain_a"] == 35
+        assert status["result"]["gain_b"] == 35
 
-    def test_persistent_overload_stops_at_floor(self, fast):
-        # B overloads no matter what — descent must terminate at max reduction
+    def test_surveillance_refine_reverts_when_it_reoverloads(self, fast):
+        # B overloads below 38: descent lands at 40, refine's 35 re-overloads
+        # (35 < 38) so it must revert back to 40.
         client = FakeBlah2Client(
-            overload_rule=lambda fc, ga, gb: (False, True),
-            tracker=active_track)
+            overload_rule=lambda fc, ga, gb, lna: (False, gb < 38),
+            detection=moving_track_detections())
         status = run_to_completion(Calibrator(client), [TOWER])
+        assert status["state"] == "done"
+        assert status["result"]["gain_b"] == 40
+
+    def test_persistent_overload_stops_at_gain_and_lna_ceiling(self, fast):
+        # B overloads no matter what gain or LNA state — descent must
+        # terminate at max gain reduction *and* max LNA state, not loop
+        # forever, and the dwell may still proceed ("good, not best").
+        client = FakeBlah2Client(
+            overload_rule=lambda fc, ga, gb, lna: (False, True),
+            detection=moving_track_detections())
+        # extra dwell headroom: a full 1->9 LNA escalation redoes surveillance's
+        # descent 8 times before even reaching the dwell phase
+        status = run_to_completion(Calibrator(client), [TOWER], dwell=5)
         assert status["state"] == "done"
         assert status["result"]["gain_b"] == GAIN_REDUCTION_MAX
+        assert status["result"]["lna_state"] == LNA_STATE_MAX
 
     def test_descend_stops_at_an_already_past_deadline(self, fast):
-        """A deadline in the past must still let the first settle+read
-        complete (so the returned gain/applied_at stay consistent with what
-        was actually applied), but must not attempt any further candidates
-        or the refine step."""
+        """A deadline in the past must still let reference's first
+        settle+read complete (so the returned state stays consistent with
+        what was actually applied), but must not attempt surveillance's
+        phase or any LNA escalation at all."""
         import time
         client = FakeBlah2Client(
-            overload_rule=lambda fc, ga, gb: (ga < 40, False))
+            overload_rule=lambda fc, ga, gb, lna: (ga < 40, False))
         cal = Calibrator(client)
-        gain_a, gain_b, applied_at = cal._descend(
+        gain_a, gain_b, lna_state, applied_at = cal._descend(
             TOWER["fc"], [], deadline=time.monotonic() - 1)
-        assert (gain_a, gain_b) == (GAIN_REDUCTION_MIN, GAIN_REDUCTION_MIN)
-        assert len(client.applied) == 1  # only the initial candidate, no backoff
+        assert (gain_a, gain_b, lna_state) == (
+            GAIN_REDUCTION_MIN, GAIN_REDUCTION_MIN, LNA_STATE_MIN)
+        assert len(client.applied) == 1  # only reference's first candidate
+
+
+class TestLnaEscalation:
+    def test_escalates_only_when_gain_alone_cant_clear_it(self, fast):
+        """Reference only clears once lna_state >= 3, regardless of gain.
+        Surveillance is clean from the very first candidate and must never
+        be redone across the escalation — proving the optimisation (only
+        redo the channel that actually triggered escalation)."""
+        client = FakeBlah2Client(
+            overload_rule=lambda fc, ga, gb, lna: (lna < 3, False),
+            detection=moving_track_detections())
+        status = run_to_completion(Calibrator(client), [TOWER])
+        assert status["state"] == "done"
+        assert status["result"]["gain_a"] == GAIN_REDUCTION_MIN  # clean immediately once lna=3
+        assert status["result"]["gain_b"] == GAIN_REDUCTION_MIN  # never touched
+        assert status["result"]["lna_state"] == 3
+
+        descent = status["history"][0]["descent"]
+        surveillance_entries = [e for e in descent if e.get("phase") == "surveillance"]
+        assert len(surveillance_entries) == 1  # only the initial pass, never redone
+
+    def test_escalation_exhausted_reports_max_lna_state(self, fast):
+        client = FakeBlah2Client(
+            overload_rule=lambda fc, ga, gb, lna: (True, False),
+            detection=moving_track_detections())
+        status = run_to_completion(Calibrator(client), [TOWER], dwell=5)
+        assert status["state"] == "done"
+        assert status["result"]["gain_a"] == GAIN_REDUCTION_MAX
+        assert status["result"]["lna_state"] == LNA_STATE_MAX
 
 
 class TestDwell:
     def test_success_leaves_blah2_on_winner(self, fast):
-        client = FakeBlah2Client(tracker=active_track)
+        client = FakeBlah2Client(detection=moving_track_detections())
         status = run_to_completion(Calibrator(client), [TOWER])
         assert status["state"] == "done"
-        assert status["result"]["track_id"] == "0A3F"
+        assert status["result"]["track_id"] is not None
         assert status["result"]["tower_name"] == "Tower One"
         # no restore: last applied tuning is the winner, not the original
         assert client.current["fc"] == TOWER["fc"]
         assert client.current["gain_a"] == status["result"]["gain_a"]
 
     def test_no_track_restores_original(self, fast):
-        client = FakeBlah2Client(tracker=empty_track)
+        client = FakeBlah2Client()  # no detections at all — never confirms
         status = run_to_completion(Calibrator(client), [TOWER])
         assert status["state"] == "failed"
         assert "No confirmed track" in status["error"]
         assert client.current["fc"] == ORIGINAL["fc"]
         assert client.current["gain_a"] == ORIGINAL["gain_a"]
         assert client.current["gain_b"] == ORIGINAL["gain_b"]
+        assert client.current["lna_state"] == ORIGINAL["lna_state"]
         # status must reflect the real (restored) hardware state, not the
         # last failed candidate it was still showing mid-run
         assert status["current"]["fc"] == ORIGINAL["fc"]
@@ -243,7 +333,7 @@ class TestDwell:
 
     def test_cancel_restores_original(self, fast):
         import time
-        client = FakeBlah2Client(tracker=empty_track)
+        client = FakeBlah2Client()
         cal = Calibrator(client)
         started, _ = cal.start([TOWER], ORIGINAL, budget_seconds=30,
                                dwell_seconds=30)
@@ -260,37 +350,34 @@ class TestDwell:
         assert client.current["fc"] == ORIGINAL["fc"]
         assert client.current["gain_a"] == ORIGINAL["gain_a"]
 
-    def test_stale_tracker_data_is_ignored(self, fast):
-        # tracker reports an ACTIVE track with a timestamp older than the
-        # retune — pre-retune data must not count as success
-        def stale_track(client):
-            return {"timestamp": 1, "nActive": 1,
-                    "data": [{"id": "0001", "state": "ACTIVE"}]}
-        client = FakeBlah2Client(tracker=stale_track)
+    def test_stale_detection_data_is_ignored(self, fast):
+        # a detection with a timestamp older than the retune — pre-retune
+        # data must not count toward confirmation, even if it looks like a
+        # perfectly good, consistent target.
+        def stale_detection(client):
+            return {"timestamp": 1, "delay": [10.0], "doppler": [50.0], "snr": [15.0]}
+        client = FakeBlah2Client(detection=stale_detection)
         status = run_to_completion(Calibrator(client), [TOWER])
         assert status["state"] == "failed"
 
     def test_best_attempt_records_detection_evidence(self, fast):
-        def detections(client):
-            return {"timestamp": client._now(), "delay": [1.0, 2.0],
-                    "doppler": [10.0, -5.0], "snr": [12.0, 8.0]}
-        client = FakeBlah2Client(tracker=empty_track, detection=detections)
+        client = FakeBlah2Client(detection=scattered_detections())
         status = run_to_completion(Calibrator(client), [TOWER])
         assert status["state"] == "failed"
         best = status["best_attempt"]
-        assert best["evidence"] == EVIDENCE_DETECTIONS
-        assert best["max_detections"] == 2
-        assert "detections seen" in best["reason"]
+        assert best["evidence"] >= EVIDENCE_DETECTIONS
+        assert best["max_detections"] >= 1
 
 
 class TestMultiTower:
     def test_falls_through_to_second_tower(self, fast):
-        # only Tower Two's frequency ever confirms a track
-        def tracker(client):
+        # only Tower Two's frequency ever produces a confirmable target
+        tower_two_track = moving_track_detections()
+        def detection(client):
             if client.current and client.current["fc"] == TOWER_TWO["fc"]:
-                return active_track(client)
-            return empty_track(client)
-        client = FakeBlah2Client(tracker=tracker)
+                return tower_two_track(client)
+            return None
+        client = FakeBlah2Client(detection=detection)
         status = run_to_completion(Calibrator(client), [TOWER, TOWER_TWO])
         assert status["state"] == "done"
         assert status["result"]["tower_name"] == "Tower Two"
@@ -303,7 +390,7 @@ class TestMultiTower:
         tower's dwell comes out of the remaining budget divided by the
         remaining towers — no fixed-per-tower window that could overrun,
         and no tower silently starved to zero."""
-        client = FakeBlah2Client(tracker=empty_track)
+        client = FakeBlah2Client()
         cal = Calibrator(client)
         started, error = cal.start([TOWER, TOWER_TWO], ORIGINAL, budget_seconds=0.6)
         assert started, error
@@ -321,7 +408,7 @@ class TestMultiTower:
         'checked, nothing there'."""
         # Every candidate overloads on A, forcing repeated backoff — with a
         # tiny total budget the first tower's descent alone exceeds its share.
-        client = FakeBlah2Client(overload_rule=lambda fc, ga, gb: (True, False))
+        client = FakeBlah2Client(overload_rule=lambda fc, ga, gb, lna: (True, False))
         cal = Calibrator(client)
         started, error = cal.start([TOWER, TOWER_TWO], ORIGINAL, budget_seconds=0.015)
         assert started, error
@@ -338,7 +425,12 @@ class TestAdsbMode:
     rely on a timeout. adsb_aircraft_appears_then_leaves simulates a real
     aircraft's limited window instead of a permanently-present one, since a
     permanently-present aircraft never gives _dwell_adsb a reason to
-    conclude a candidate failed."""
+    conclude a candidate failed.
+
+    MODE_ADSB is benched and blocked at the route level (see TestRoutes),
+    but its engine is deliberately left stale and still fully exercisable
+    directly via Calibrator.start() — these tests still use blah2's own
+    tracker-shaped fakes, unchanged."""
 
     def test_matched_track_succeeds_immediately(self, fast):
         client = FakeBlah2Client(
@@ -396,7 +488,7 @@ class TestAdsbMode:
         immediately re-overloads per this rule — so the run must stop there
         rather than trying the (unreachable) sensitivity floor."""
         client = FakeBlah2Client(
-            overload_rule=lambda fc, ga, gb: (False, gb < 30),
+            overload_rule=lambda fc, ga, gb, lna: (False, gb < 30),
             tracker=active_track_at(delay=10.0, doppler=50.0),
             adsb_tracks=adsb_aircraft_appears_then_leaves(
                 delay=200.0, doppler=-300.0, present_polls=3))
@@ -439,9 +531,7 @@ class TestAdsbMode:
     def test_track_mode_ignores_adsb_entirely(self, fast):
         # default mode must succeed on confirmation alone, regardless of
         # whether ADS-B truth would have matched, and keeps its time budget
-        client = FakeBlah2Client(
-            tracker=active_track_at(delay=10.0, doppler=50.0),
-            adsb_tracks=adsb_aircraft_at(delay=200.0, doppler=-300.0))
+        client = FakeBlah2Client(detection=moving_track_detections())
         status = run_to_completion(Calibrator(client), [TOWER])
         assert status["state"] == "done"
         assert status["progress"]["budget_seconds"] is not None
@@ -469,7 +559,7 @@ class TestFailureModes:
         assert "acknowledge" in status["error"]
 
     def test_missing_rf_status_fails_the_run(self, fast):
-        client = FakeBlah2Client(tracker=active_track)
+        client = FakeBlah2Client(detection=moving_track_detections())
         client.rf_enabled = False
         status = run_to_completion(Calibrator(client), [TOWER])
         assert status["state"] == "failed"
@@ -483,15 +573,17 @@ class TestFailureModes:
         cal = Calibrator(client)
         cal._cancel.set()  # simulates a cancel already pending/re-arriving
         applied_at = cal._apply(ORIGINAL["fc"], ORIGINAL["gain_a"],
-                                ORIGINAL["gain_b"], ignore_cancel=True)
+                                ORIGINAL["gain_b"], ORIGINAL["lna_state"],
+                                ignore_cancel=True)
         assert applied_at is not None
         assert client.current["fc"] == ORIGINAL["fc"]
         # without the flag, the same call must still raise as before
         with pytest.raises(calmod._Cancelled):
-            cal._apply(ORIGINAL["fc"], ORIGINAL["gain_a"], ORIGINAL["gain_b"])
+            cal._apply(ORIGINAL["fc"], ORIGINAL["gain_a"], ORIGINAL["gain_b"],
+                      ORIGINAL["lna_state"])
 
     def test_cannot_start_twice(self, fast):
-        client = FakeBlah2Client(tracker=empty_track)
+        client = FakeBlah2Client()
         cal = Calibrator(client)
         started, _ = cal.start([TOWER], ORIGINAL, budget_seconds=30,
                                dwell_seconds=30)
@@ -503,7 +595,7 @@ class TestFailureModes:
         cal._thread.join(timeout=10)
 
     def test_on_complete_fires_with_terminal_status(self, fast):
-        client = FakeBlah2Client(tracker=active_track)
+        client = FakeBlah2Client(detection=moving_track_detections())
         cal = Calibrator(client)
         seen = []
         cal.on_complete = seen.append
@@ -574,27 +666,17 @@ class TestRoutes:
         assert resp.status_code == 400
         assert "Invalid mode" in resp.get_json()["error"]
 
-    def test_start_refuses_adsb_mode_when_truth_disabled(self, app_client, config_files):
-        def disable_adsb(merged):
-            merged['truth']['adsb']['enabled'] = False
-        self._set_merged(config_files, disable_adsb)
-        resp = app_client.post('/calibrate/start', json={"mode": "adsb", "scope": "current_tower"})
+    def test_start_rejects_adsb_mode_unconditionally(self, app_client, config_files):
+        """ADS-B mode is benched — rejected at the route regardless of
+        truth.adsb.enabled, since the engine is deliberately left stale
+        rather than migrated to retina-tracker (see calibrator.py)."""
+        def enable_adsb(merged):
+            merged['truth']['adsb']['enabled'] = True
+        self._set_merged(config_files, enable_adsb)
+        resp = app_client.post('/calibrate/start',
+                               json={"mode": "adsb", "scope": "current_tower"})
         assert resp.status_code == 409
-        assert "ADS-B" in resp.get_json()["error"]
-
-    def test_start_accepts_adsb_mode_when_truth_enabled(self, app_client):
-        import app as app_module
-        with patch.object(app_module.calibrator, 'start',
-                          return_value=(True, None)) as mock_start:
-            resp = app_client.post('/calibrate/start', json={"mode": "adsb", "scope": "current_tower"})
-        assert resp.status_code == 200
-        assert resp.get_json()["mode"] == "adsb"
-        app_module.device_state.release_calibration_lock()
-
-        kwargs = mock_start.call_args.kwargs
-        assert kwargs["mode"] == "adsb"
-        assert kwargs["adsb_delay_tolerance"] == 2.0
-        assert kwargs["adsb_doppler_tolerance"] == 5.0
+        assert "not currently available" in resp.get_json()["error"]
 
     def test_start_refuses_during_install(self, app_client):
         import app as app_module
@@ -619,6 +701,7 @@ class TestRoutes:
         towers, original = mock_start.call_args[0]
         assert towers[0]["fc"] == original["fc"]
         assert GAIN_REDUCTION_MIN <= original["gain_a"] <= GAIN_REDUCTION_MAX
+        assert LNA_STATE_MIN <= original["lna_state"] <= LNA_STATE_MAX
 
     def test_start_prefers_cached_towers_over_live_lookup(self, app_client):
         """When the wizard's tower search was cached, /calibrate/start uses
@@ -657,7 +740,8 @@ class TestRoutes:
             "state": "done",
             "started_at": "2026-07-08T00:00:00+00:00",
             "result": {"tower_name": "Tower One", "fc": 105_100_000,
-                       "gain_a": 30, "gain_b": 45, "track_id": "0A3F"},
+                       "gain_a": 30, "gain_b": 45, "lna_state": 6,
+                       "track_id": "0A3F"},
         }
         with patch.object(app_module.calibrator, 'get_status', return_value=done), \
              patch.object(mode_module, 'run_config_merger_and_restart',
@@ -672,6 +756,7 @@ class TestRoutes:
             user = yaml.safe_load(f)
         assert user['capture']['fc'] == 105_100_000
         assert user['capture']['device']['gainReduction'] == [30, 45]
+        assert user['capture']['device']['lnaState'] == 6
 
 
 class TestTelemetry:

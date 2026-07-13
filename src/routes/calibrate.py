@@ -4,7 +4,8 @@ import subprocess
 import requests as http_requests
 
 from calibrator import (
-    GAIN_REDUCTION_MIN, GAIN_REDUCTION_MAX, MODE_TRACK, MODE_ADSB, VALID_MODES,
+    GAIN_REDUCTION_MIN, GAIN_REDUCTION_MAX, LNA_STATE_MIN, LNA_STATE_MAX,
+    MODE_TRACK, MODE_ADSB, VALID_MODES,
     DEFAULT_ADSB_DELAY_TOLERANCE, DEFAULT_ADSB_DOPPLER_TOLERANCE,
 )
 
@@ -110,17 +111,19 @@ def start():
     gain_reduction = device.get('gainReduction')
     if not isinstance(gain_reduction, list):
         gain_reduction = [gain_reduction, gain_reduction]
-    if fc is None or gain_reduction[0] is None:
+    lna_state = device.get('lnaState')
+    if fc is None or gain_reduction[0] is None or lna_state is None:
         return jsonify({"success": False,
                         "error": "Capture config is incomplete — finish setup first"}), 409
 
-    def clamp(gain):
-        return max(GAIN_REDUCTION_MIN, min(GAIN_REDUCTION_MAX, int(gain)))
+    def clamp(value, lo, hi):
+        return max(lo, min(hi, int(value)))
 
     original = {
         "fc": int(fc),
-        "gain_a": clamp(gain_reduction[0]),
-        "gain_b": clamp(gain_reduction[1]),
+        "gain_a": clamp(gain_reduction[0], GAIN_REDUCTION_MIN, GAIN_REDUCTION_MAX),
+        "gain_b": clamp(gain_reduction[1], GAIN_REDUCTION_MIN, GAIN_REDUCTION_MAX),
+        "lna_state": clamp(lna_state, LNA_STATE_MIN, LNA_STATE_MAX),
     }
 
     tx_name = ((merged.get('location', {}) or {}).get('tx', {}) or {}).get('name')
@@ -133,20 +136,15 @@ def start():
     mode = body.get("mode", MODE_TRACK)
     if mode not in VALID_MODES:
         return jsonify({"success": False, "error": f"Invalid mode: {mode}"}), 400
+    if mode == MODE_ADSB:
+        # Benched for now — the engine code is deliberately left in place
+        # (stale, still on blah2's own tracker) to revisit later, but it
+        # isn't available to users. See calibrator.py's module docstring.
+        return jsonify({"success": False,
+                        "error": "ADS-B verified mode is not currently available"}), 409
 
     adsb_delay_tolerance = DEFAULT_ADSB_DELAY_TOLERANCE
     adsb_doppler_tolerance = DEFAULT_ADSB_DOPPLER_TOLERANCE
-    if mode == MODE_ADSB:
-        adsb_cfg = (merged.get('truth', {}) or {}).get('adsb', {}) or {}
-        if not adsb_cfg.get('enabled'):
-            return jsonify({
-                "success": False,
-                "error": "ADS-B mode requires ADS-B truth to be enabled on "
-                         "this node (truth.adsb.enabled) — enable it in the "
-                         "ADS-B config first, or use standard mode.",
-            }), 409
-        adsb_delay_tolerance = adsb_cfg.get('delay_tolerance', DEFAULT_ADSB_DELAY_TOLERANCE)
-        adsb_doppler_tolerance = adsb_cfg.get('doppler_tolerance', DEFAULT_ADSB_DOPPLER_TOLERANCE)
 
     if not device_state.acquire_calibration_lock():
         return jsonify({"success": False,
@@ -198,6 +196,7 @@ def apply():
     capture['fc'] = int(result['fc'])
     device = dict(capture.get('device', {}) or {})
     device['gainReduction'] = [int(result['gain_a']), int(result['gain_b'])]
+    device['lnaState'] = int(result['lna_state'])
     capture['device'] = device
     user_config['capture'] = capture
     config_mgr.save_user_config(user_config)
