@@ -175,10 +175,13 @@ winner; persisting to disk is a separate, explicit user action.
   phase/tower/gain/live-overload/elapsed, a best-attempt summary on
   failure/timeout, and an explicit "Persist to config" button on success
   (never auto-applied, since a restart is involved).
-- Telemetry: one fire-and-forget summary POST per run to
-  `CALIBRATION_TELEMETRY_URL` (empty = disabled), sent unconditionally, plus
-  a small "applied" event when the user persists a result. Payload contract
-  in [012-auto-calibrate-telemetry.md](012-auto-calibrate-telemetry.md); the
+- Telemetry (2026-07-14 redesign, superseding the original per-run version):
+  no longer calibration-specific. A full config-snapshot POST to
+  `CONFIG_TELEMETRY_URL` (empty = disabled, renamed from
+  `CALIBRATION_TELEMETRY_URL`) fires app-wide, fire-and-forget, whenever any
+  config-applying action succeeds (`/calibrate/apply` included, alongside
+  `/towers/select`, `/config/apply`, and mode switches) — see
+  [012-auto-calibrate-telemetry.md](012-auto-calibrate-telemetry.md). The
   server-side ingest app itself is out of scope for this project.
 
 ## Key decisions and why

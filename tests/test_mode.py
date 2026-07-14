@@ -252,3 +252,47 @@ class TestHomepageModeRendering:
         response = app_client.get('/')
         assert b'Passive Radar' not in response.data
         assert b'49152' not in response.data
+
+
+class TestConfigTelemetryHooks:
+    """_write_mode() and run_config_merger_and_restart() are the two shared
+    choke points every config-applying/mode-switching route funnels through
+    (see config_telemetry.py's module docstring) — testing them here covers
+    /api/mode, /towers/select, /calibrate/apply, /config/save+apply, and
+    wizard completion all at once, without needing a hook-point test in each
+    of those route test files."""
+
+    def test_write_mode_sends_a_snapshot(self, app_client):
+        import routes.mode as mode_module
+        with patch('config_telemetry.send_config_snapshot') as mock_send:
+            mode_module._write_mode('spectrum')
+        mock_send.assert_called_once()
+        args = mock_send.call_args[0]
+        assert args[2] == 'spectrum'  # mode
+        assert args[4] == 'mode_switch'  # trigger (default)
+
+    def test_write_mode_honours_explicit_trigger(self, app_client):
+        import routes.mode as mode_module
+        with patch('config_telemetry.send_config_snapshot') as mock_send:
+            mode_module._write_mode('radar', trigger='wizard_complete')
+        assert mock_send.call_args[0][4] == 'wizard_complete'
+
+    @patch('subprocess.run')
+    def test_config_merger_success_sends_a_snapshot(self, mock_run, app_client, temp_dir):
+        import routes.mode as mode_module
+        mock_run.return_value = MagicMock(returncode=0, stdout='', stderr='')
+        with patch('config_telemetry.send_config_snapshot') as mock_send:
+            error = mode_module.run_config_merger_and_restart(
+                temp_dir, trigger='tower_select')
+        assert error is None
+        mock_send.assert_called_once()
+        assert mock_send.call_args[0][4] == 'tower_select'
+
+    @patch('subprocess.run')
+    def test_config_merger_failure_sends_nothing(self, mock_run, app_client, temp_dir):
+        import routes.mode as mode_module
+        mock_run.return_value = MagicMock(returncode=1, stdout='', stderr='boom')
+        with patch('config_telemetry.send_config_snapshot') as mock_send:
+            error = mode_module.run_config_merger_and_restart(temp_dir)
+        assert error is not None
+        mock_send.assert_not_called()

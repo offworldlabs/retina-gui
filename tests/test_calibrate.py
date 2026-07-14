@@ -1,8 +1,9 @@
 """Tests for the Auto-Calibrate feature.
 
 Calibrator logic runs against a scripted FakeBlah2Client (no real HTTP, no
-SDR hardware); route guards run against the Flask test client; telemetry
-payload assembly is tested directly.
+SDR hardware); route guards run against the Flask test client. Telemetry is
+no longer calibration-specific — see test_config_telemetry.py and the
+hook-point tests in test_mode.py/test_towers.py/test_app.py.
 
 MODE_TRACK confirms tracks via a real, local retina-tracker instance fed
 scripted detection frames (see calibrator.py's module docstring for why:
@@ -28,7 +29,6 @@ from calibrator import (
     LNA_STATE_MIN,
     LNA_STATE_MAX,
 )
-import calibration_telemetry
 from device_state import DeviceState
 
 
@@ -757,42 +757,3 @@ class TestRoutes:
         assert user['capture']['fc'] == 105_100_000
         assert user['capture']['device']['gainReduction'] == [30, 45]
         assert user['capture']['device']['lnaState'] == 6
-
-
-class TestTelemetry:
-    def test_run_report_payload(self):
-        status = {
-            "state": "done", "started_at": "s", "finished_at": "f",
-            "error": None, "original": ORIGINAL,
-            "progress": {"retunes": 5},
-            "history": [{"tower_name": "Tower One"}],
-            "best_attempt": None,
-            "result": {"fc": 98_000_000},
-        }
-        report = calibration_telemetry.build_run_report(status, "ret123",
-                                                        {"latitude": 1.0})
-        assert report["schema"] == 1
-        assert report["event"] == "run_summary"
-        assert report["node_id"] == "ret123"
-        assert report["run"]["state"] == "done"
-        assert report["run"]["history"] == [{"tower_name": "Tower One"}]
-        assert report["run"]["original"] == ORIGINAL
-
-    def test_applied_event_payload(self):
-        status = {"started_at": "s", "result": {"fc": 98_000_000}}
-        event = calibration_telemetry.build_applied_event(status, "ret123")
-        assert event["event"] == "applied"
-        assert event["result"]["fc"] == 98_000_000
-
-    def test_empty_url_sends_nothing(self):
-        with patch('calibration_telemetry.requests.post') as mock_post:
-            sent = calibration_telemetry.send_run_report("", {}, "n", None)
-        assert sent is False
-        mock_post.assert_not_called()
-
-    def test_send_failure_is_swallowed(self):
-        with patch('calibration_telemetry.requests.post',
-                   side_effect=Exception("boom")):
-            sent = calibration_telemetry.send_run_report(
-                "http://example.invalid", {}, "n", None)
-        assert sent is False

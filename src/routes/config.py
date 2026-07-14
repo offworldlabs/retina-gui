@@ -176,7 +176,7 @@ def apply_config():
         return jsonify({"success": False, "error": "retina-node not installed"}), 400
 
     try:
-        error = run_config_merger_and_restart(RETINA_NODE_PATH)
+        error = run_config_merger_and_restart(RETINA_NODE_PATH, trigger='config_apply')
         if error:
             return jsonify({"success": False, "error": error}), 500
         return jsonify({"success": True})

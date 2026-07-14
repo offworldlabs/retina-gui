@@ -202,7 +202,7 @@ def apply():
     config_mgr.save_user_config(user_config)
 
     try:
-        error = run_config_merger_and_restart(RETINA_NODE_PATH)
+        error = run_config_merger_and_restart(RETINA_NODE_PATH, trigger='calibrate_apply')
         if error:
             return jsonify({"success": True, "applied": False, "error": error})
     except subprocess.TimeoutExpired:
@@ -212,8 +212,5 @@ def apply():
                         "error": "docker not found — is it installed?"})
     except Exception as e:
         return jsonify({"success": True, "applied": False, "error": str(e)})
-
-    from app import send_calibration_applied_event
-    send_calibration_applied_event(run_status)
 
     return jsonify({"success": True, "applied": True})

@@ -18,7 +18,20 @@ def get_current_mode():
         return _mode_cache
 
 
-def _write_mode(mode):
+def _send_config_snapshot(trigger):
+    """Best-effort: never let a telemetry-assembly problem break the caller.
+    The actual send is fire-and-forget on its own thread (see config_telemetry)."""
+    try:
+        from app import config_mgr, get_node_id, CONFIG_TELEMETRY_URL
+        import config_telemetry
+        config_telemetry.send_config_snapshot(
+            CONFIG_TELEMETRY_URL, get_node_id(), get_current_mode(),
+            config_mgr.load_merged_config(), trigger)
+    except Exception:
+        pass
+
+
+def _write_mode(mode, trigger='mode_switch'):
     global _mode_cache
     _mode_cache = mode
     from app import DATA_DIR
@@ -28,12 +41,15 @@ def _write_mode(mode):
             f.write(mode)
     except OSError:
         pass  # dev: no /data — in-memory cache is the fallback
+    _send_config_snapshot(trigger)
 
 
-def run_config_merger_and_restart(retina_node_path: str) -> str | None:
+def run_config_merger_and_restart(retina_node_path: str, trigger: str = 'config_apply') -> str | None:
     """Run config-merger then, in radar mode, restart services.
 
-    Returns an error string on failure, None on success.
+    Returns an error string on failure, None on success — a snapshot is only
+    sent on success, since that's the point the merged config actually
+    reflects what's now running.
     Lets TimeoutExpired and FileNotFoundError propagate — callers handle them.
     """
     result = subprocess.run(
@@ -45,6 +61,7 @@ def run_config_merger_and_restart(retina_node_path: str) -> str | None:
         return f'config-merger failed: {result.stderr or result.stdout}'
 
     if get_current_mode() in ('spectrum', 'sdrconnect'):
+        _send_config_snapshot(trigger)
         return None
 
     # Defensive: ensure retina-spectrum is stopped before bringing the radar stack up.
@@ -71,6 +88,7 @@ def run_config_merger_and_restart(retina_node_path: str) -> str | None:
     if result.returncode != 0:
         return f'restart failed: {result.stderr or result.stdout}'
 
+    _send_config_snapshot(trigger)
     return None
 
 

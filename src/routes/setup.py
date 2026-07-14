@@ -56,7 +56,7 @@ def complete():
 
     # Write radar to mode.txt before docker ops so the home page cannot race
     # and see spectrum mode while enforce_radar_mode is still running.
-    _write_mode('radar')
+    _write_mode('radar', trigger='wizard_complete')
 
     if config_mgr.is_retina_node_installed():
         enforce_radar_mode(RETINA_NODE_PATH)

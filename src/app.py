@@ -36,8 +36,10 @@ TOWER_FINDER_URL = os.environ.get('TOWER_FINDER_URL', 'https://tower-finder.reti
 # blah2_api runs with network_mode: host and listens directly on this port —
 # NOT the :8080 blah2_host nginx proxy, which doesn't forward /capture/* at all.
 BLAH2_API_URL = os.environ.get('BLAH2_API_URL', 'http://localhost:3000')
-# Empty = telemetry disabled; set to the calibration ingest endpoint to enable.
-CALIBRATION_TELEMETRY_URL = os.environ.get('CALIBRATION_TELEMETRY_URL', '')
+# Empty = telemetry disabled; set to the config-snapshot ingest endpoint to
+# enable. Renamed from CALIBRATION_TELEMETRY_URL — telemetry now covers every
+# config-apply/mode-switch action, not just Auto-Calibrate.
+CONFIG_TELEMETRY_URL = os.environ.get('CONFIG_TELEMETRY_URL', '')
 DEV_MODE = os.environ.get('DEV_MODE', '').lower() in ('1', 'true', 'yes')
 
 # Shared services
@@ -102,37 +104,23 @@ except Exception:
 
 from blah2_client import Blah2Client
 from calibrator import Calibrator
-import calibration_telemetry
 
 blah2_client = Blah2Client(BLAH2_API_URL)
 calibrator = Calibrator(blah2_client)
 
 
-def _rx_location():
-    """RX location from merged config, for the calibration run report."""
-    try:
-        location = (config_mgr.load_merged_config().get('location', {}) or {})
-        rx = location.get('rx', {}) or {}
-        return {"latitude": rx.get('latitude'), "longitude": rx.get('longitude'),
-                "altitude": rx.get('altitude')}
-    except Exception:
-        return None
-
-
 def _on_calibration_complete(status):
-    """Runs on the calibration thread when a run reaches a terminal state."""
+    """Runs on the calibration thread when a run reaches a terminal state.
+
+    No telemetry here — a config snapshot is only meaningful once a result is
+    actually persisted (see routes/calibrate.py's apply(), which triggers one
+    via run_config_merger_and_restart), not on every terminal state including
+    failures/cancels that change nothing on disk.
+    """
     device_state.release_calibration_lock()
-    calibration_telemetry.send_run_report(
-        CALIBRATION_TELEMETRY_URL, status, get_node_id(), _rx_location())
 
 
 calibrator.on_complete = _on_calibration_complete
-
-
-def send_calibration_applied_event(status):
-    """The user persisted a calibration result (called from /calibrate/apply)."""
-    calibration_telemetry.send_applied_event(
-        CALIBRATION_TELEMETRY_URL, status, get_node_id())
 
 
 def get_node_id():
