@@ -1,6 +1,6 @@
 import queue
 
-from flask import Blueprint, Response, render_template, stream_with_context
+from flask import Blueprint, Response, jsonify, render_template, stream_with_context
 
 bp = Blueprint('tracker_preview', __name__, url_prefix='/tracker-preview')
 
@@ -22,7 +22,7 @@ def index():
 
 @bp.route("/events")
 def events():
-    """SSE stream: one message per newly-rendered plot. The connection's
+    """SSE stream: one message per newly-refreshed data snapshot. The connection's
     lifetime IS the capture session's lifetime — attach() on connect,
     detach() in finally (tab close / network drop) so the background
     capture thread only ever runs while this is open."""
@@ -51,12 +51,21 @@ def events():
     )
 
 
-@bp.route("/image.png")
-def image():
-    """Latest rendered plot, or a 404 before the first render completes."""
+@bp.route("/data.json")
+def data():
+    """Latest tracker-history snapshot as JSON, rendered client-side by
+    Plotly. Always 200 — even before the first refresh this is a
+    well-shaped empty snapshot ({"raw": [], "tracks": {}})."""
     from app import tracker_capture
 
-    data = tracker_capture.latest_image()
-    if data is None:
-        return "No plot yet — still capturing", 404
-    return Response(data, mimetype="image/png")
+    return jsonify(tracker_capture.latest_data())
+
+
+@bp.route("/clear", methods=["POST"])
+def clear():
+    """Wipe the display buffer only — the underlying retina-tracker Tracker
+    keeps running unmodified; see TrackerCaptureService.request_clear."""
+    from app import tracker_capture
+
+    tracker_capture.request_clear()
+    return jsonify({"success": True})

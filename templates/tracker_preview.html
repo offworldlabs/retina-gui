@@ -5,35 +5,163 @@
     <div class="container py-4">
         <h1>Tracker Preview</h1>
         <p class="text-muted">
-            Live delay/Doppler plot from blah2's detections, tracked via
+            Interactive delay/Doppler plot from blah2's detections, tracked via
             <a href="https://github.com/offworldlabs/retina-tracker" target="_blank" rel="noopener">retina-tracker</a>.
-            Updates every few seconds while this page is open; capture stops
-            automatically when you leave.
+            Zoom, pan, and hover for details. Background capture runs for the
+            life of the node regardless of this page; only the live refresh
+            stops when you leave.
         </p>
-        <div id="plotStatus" class="text-muted mb-2">Waiting for first render&hellip;</div>
-        <img id="plot" alt="Tracker preview" style="max-width: 100%; border: 1px solid #ddd;">
+        <div class="d-flex align-items-center gap-2 mb-2">
+            <div id="plotStatus" class="text-muted">Waiting for first data&hellip;</div>
+            <div class="flex-grow-1"></div>
+            <button type="button" id="clearBufferBtn" class="ds-btn danger-ghost sm"
+                    title="Clears only what's displayed here — tracking keeps running, so an active aircraft will reappear on its own.">
+                Clear buffer
+            </button>
+        </div>
+        <div id="plot" style="width:100%; height:640px;"></div>
     </div>
 {% endblock %}
 
 {% block scripts %}
+<script src="https://cdn.jsdelivr.net/npm/plotly.js-dist-min@3.7.0/plotly.min.js"></script>
 <script>
 (function() {
-    var img = document.getElementById('plot');
+    var plotDiv = document.getElementById('plot');
     var status = document.getElementById('plotStatus');
-    var source = new EventSource('/tracker-preview/events');
+    var clearBtn = document.getElementById('clearBufferBtn');
+    var csrf = document.querySelector('meta[name="csrf-token"]').content;
 
-    source.onmessage = function(evt) {
+    // Categorical palette + sequential SNR ramp from the design-system
+    // color reference — track identity is never carried by color alone
+    // (legend name + hover both always spell out the track id too), and
+    // SNR is a magnitude with no "opposite sides of zero" meaning, hence
+    // a sequential ramp rather than a diverging one.
+    var PALETTE = ['#2a78d6', '#008300', '#e87ba4', '#eda100', '#1baf7a', '#eb6834', '#4a3aa7', '#e34948'];
+    var SNR_COLORSCALE = [
+        [0.00, '#cde2fb'], [0.20, '#9ec5f4'], [0.40, '#6da7ec'],
+        [0.60, '#3987e5'], [0.80, '#1c5cab'], [1.00, '#0d366b']
+    ];
+
+    // Assigned once per track id on first sighting, never recomputed by
+    // position — otherwise every surviving track would repaint whenever an
+    // older one aged out of the window.
+    var trackColors = {};
+    var nextColorSlot = 0;
+    function colorFor(trackId) {
+        if (!(trackId in trackColors)) {
+            trackColors[trackId] = PALETTE[nextColorSlot % PALETTE.length];
+            nextColorSlot++;
+        }
+        return trackColors[trackId];
+    }
+
+    function renderPlot(snapshot) {
         status.textContent = '';
-        img.src = '/tracker-preview/image.png?t=' + Date.now();
-    };
+        var traces = [];
 
+        Object.keys(snapshot.tracks).forEach(function(trackId) {
+            var pts = snapshot.tracks[trackId];
+            if (!pts.length) return;
+            traces.push({
+                type: 'scattergl',
+                mode: 'lines+markers',
+                name: 'Track ' + trackId,
+                x: pts.map(function(p) { return p.delay; }),
+                y: pts.map(function(p) { return p.doppler; }),
+                line: { color: 'rgba(0,0,0,0.25)', width: 1 },
+                marker: { color: colorFor(trackId), size: 8, line: { color: '#ffffff', width: 1.5 } },
+                customdata: pts.map(function(p) {
+                    return [trackId, p.snr, new Date(p.t).toLocaleTimeString()];
+                }),
+                hovertemplate:
+                    'Track %{customdata[0]}<br>' +
+                    'Delay: %{x:.2f}<br>Doppler: %{y:.2f} Hz<br>' +
+                    'SNR: %{customdata[1]:.1f} dB<br>%{customdata[2]}<extra></extra>',
+            });
+        });
+
+        if (snapshot.raw.length) {
+            traces.push({
+                type: 'scattergl',
+                mode: 'markers',
+                name: 'Detections',
+                x: snapshot.raw.map(function(p) { return p.delay; }),
+                y: snapshot.raw.map(function(p) { return p.doppler; }),
+                marker: {
+                    color: snapshot.raw.map(function(p) { return p.snr; }),
+                    colorscale: SNR_COLORSCALE,
+                    size: 4,
+                    opacity: 0.4,
+                    // Fixed geometry so this never collides with the legend,
+                    // which lives below the plot precisely to keep this
+                    // strip on the right clear for the colorbar alone.
+                    colorbar: { title: { text: 'SNR (dB)' }, x: 1.02, xpad: 0, len: 1, thickness: 14 },
+                },
+                customdata: snapshot.raw.map(function(p) {
+                    return [p.snr, new Date(p.t).toLocaleTimeString()];
+                }),
+                hovertemplate: 'Delay: %{x:.2f}<br>Doppler: %{y:.2f} Hz<br>SNR: %{customdata[0]:.1f} dB<br>%{customdata[1]}<extra></extra>',
+            });
+        }
+
+        // react (not newPlot) for every update, including the first — it
+        // preserves the viewer's zoom/pan across refreshes, which is the
+        // whole point of making this interactive.
+        Plotly.react(plotDiv, traces, {
+            xaxis: { title: { text: 'Delay' } },
+            yaxis: { title: { text: 'Doppler (Hz)' } },
+            // Legend lives below the plot, not floating over it or sharing
+            // the right-hand strip with the colorbar — the two were
+            // competing for the same default position and stepping on each
+            // other. automargin lets Plotly grow the bottom margin to fit
+            // however many tracks are actually live, rather than us
+            // guessing a fixed height that could clip or wrap awkwardly
+            // once enough tracks are confirmed at once.
+            margin: { t: 20, r: 70, b: 60 },
+            showlegend: true,
+            legend: {
+                orientation: 'h',
+                x: 0.5,
+                xanchor: 'center',
+                y: -0.18,
+                yanchor: 'top',
+                font: { size: 10 },
+                automargin: true,
+            },
+        });
+    }
+
+    function refresh() {
+        fetch('/tracker-preview/data.json', { cache: 'no-store' })
+            .then(function(r) { return r.json(); })
+            .then(renderPlot)
+            .catch(function(e) { status.textContent = 'Refresh failed: ' + e.message; });
+    }
+
+    var source = new EventSource('/tracker-preview/events');
+    source.onmessage = refresh;
     source.onerror = function() {
         status.textContent = 'Connection lost — reload the page to restart the capture.';
     };
-
     window.addEventListener('beforeunload', function() {
         source.close();
     });
+
+    clearBtn.addEventListener('click', function() {
+        clearBtn.disabled = true;
+        status.textContent = 'Clearing…';
+        fetch('/tracker-preview/clear', { method: 'POST', headers: { 'X-CSRFToken': csrf } })
+            .then(function(r) { return r.json(); })
+            .then(function(d) { status.textContent = d.success ? '' : (d.error || 'Failed to clear'); })
+            .catch(function(e) { status.textContent = 'Error: ' + e.message; })
+            .finally(function() { clearBtn.disabled = false; });
+    });
+
+    // Show whatever snapshot already exists immediately, rather than
+    // waiting on the first SSE tick — useful when reattaching to a node
+    // that's had other viewers (or this page) open recently.
+    refresh();
 })();
 </script>
 {% endblock %}

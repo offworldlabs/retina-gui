@@ -1,9 +1,10 @@
-"""Live tracker-preview capture service: always-on capture, lazy rendering.
+"""Live tracker-preview capture service: always-on capture, lazy data refresh.
 
 Capture + tracking runs permanently once the app boots, feeding a bounded
 4-hour rolling buffer so loading /tracker-preview shows recent history
-immediately. Rendering (the expensive matplotlib step) stays lazy — it
-only happens while at least one browser has the page open.
+immediately. Building the JSON snapshot the browser renders (client-side,
+via Plotly) stays lazy — it only happens while at least one browser has the
+page open.
 
 retina-tracker's own Tracker object doesn't retain completed-track history
 beyond a ~5 second merge window (see its tracker.py: `all_tracks` is pruned
@@ -14,7 +15,6 @@ archive ourselves via the `event_writer` hook (the same duck-typed
 interface retina-tracker's own JSONL streaming output uses).
 """
 
-import io
 import queue
 import threading
 import time
@@ -50,8 +50,8 @@ class HistoryBuffer:
     """Bounded rolling history: raw detections + per-track points.
 
     Only ever touched from the single capture thread (written during
-    capture, read during render — both synchronous on that thread), so no
-    locking is needed here; only TrackerCaptureService's `_latest_image`
+    capture, read during refresh — both synchronous on that thread), so no
+    locking is needed here; only TrackerCaptureService's `_latest_data`
     crosses threads.
 
     `write_event` matches retina-tracker's event_writer duck type, called
@@ -100,10 +100,36 @@ class HistoryBuffer:
             del self.tracks[track_id]
             self._last_track_timestamp.pop(track_id, None)
 
+    def clear(self):
+        """Wipe all buffered history. Capture-thread-only, same invariant
+        as add_raw/write_event/prune above."""
+        self.raw_points = []
+        self.tracks = {}
+        self._last_track_timestamp = {}
+
+    def to_dict(self):
+        """JSON-serializable snapshot sent to the browser on every refresh
+        tick. Values already originate as plain JSON floats (traced through
+        retina-tracker's Track.update() -> frame_to_detections() above), so
+        no numpy-safe encoding is needed here."""
+        return {
+            "raw": [
+                {"t": t, "delay": delay, "doppler": doppler, "snr": snr}
+                for (t, delay, doppler, snr) in self.raw_points
+            ],
+            "tracks": {
+                track_id: [
+                    {"t": t, "delay": delay, "doppler": doppler, "snr": snr}
+                    for (t, delay, doppler, snr) in points
+                ]
+                for track_id, points in self.tracks.items()
+            },
+        }
+
 
 class TrackerCaptureService:
-    """Runs capture+tracking permanently from start(); rendering stays lazy,
-    gated to only run while at least one viewer is attached.
+    """Runs capture+tracking permanently from start(); the JSON data refresh
+    stays lazy, gated to only run while at least one viewer is attached.
     """
 
     def __init__(self, blah2_client):
@@ -111,10 +137,11 @@ class TrackerCaptureService:
         self._lock = threading.Lock()
         self._thread = None
         self._viewers = []  # list of queue.Queue, one per attached viewer
-        self._render_requested = False
-        self._latest_image = None  # bytes, or None before the first render
-        self._seq = 0
+        self._refresh_requested = False
+        self._clear_requested = False
         self.history = HistoryBuffer()
+        self._latest_data = self.history.to_dict()  # always a valid snapshot, never None
+        self._seq = 0
 
     def start(self):
         """Begin permanent capture — call once at app boot, independent of
@@ -126,25 +153,37 @@ class TrackerCaptureService:
 
     def attach(self):
         """Register a new viewer. Does not start capture (already running
-        from start()) — only makes rendering eligible and requests an
-        immediate render so this viewer doesn't wait for the next cadence
+        from start()) — only makes data refresh eligible and requests an
+        immediate refresh so this viewer doesn't wait for the next cadence
         tick if history already exists."""
         q = queue.Queue()
         with self._lock:
             self._viewers.append(q)
-            self._render_requested = True
+            self._refresh_requested = True
         return q
 
     def detach(self, q):
         """Unregister a viewer. Capture keeps running regardless — only
-        rendering stops once no viewers remain."""
+        the data refresh stops once no viewers remain."""
         with self._lock:
             if q in self._viewers:
                 self._viewers.remove(q)
 
-    def latest_image(self):
+    def latest_data(self):
         with self._lock:
-            return self._latest_image
+            return self._latest_data
+
+    def request_clear(self):
+        """Request that HistoryBuffer be wiped on the capture thread's next
+        loop tick (cross-thread signal, mirroring attach()'s
+        _refresh_requested flag). Deliberately does NOT touch the
+        underlying retina_tracker Tracker — it keeps running and tracking
+        unmodified; only the display buffer is reset. Any still-active
+        track will repopulate on its own within a few refresh ticks, since
+        retina-tracker resends its own recent-history window on the next
+        confirmed update."""
+        with self._lock:
+            self._clear_requested = True
 
     def is_running(self):
         return self._thread is not None and self._thread.is_alive()
@@ -165,6 +204,27 @@ class TrackerCaptureService:
         new_frames_since_render = 0
 
         while True:
+            # Clear check runs first, before this tick's frame is even
+            # polled, so a frame that arrives later in this same tick lands
+            # in the now-empty buffer rather than being wiped right after
+            # being added. Runs unconditionally (independent of
+            # has_viewers), same reasoning as prune()'s independence below —
+            # a clear should be visible immediately, not wait for the
+            # viewer-gated refresh cadence.
+            with self._lock:
+                do_clear = self._clear_requested
+                if do_clear:
+                    self._clear_requested = False
+            if do_clear:
+                try:
+                    self.history.clear()
+                    with self._lock:
+                        self._latest_data = self.history.to_dict()
+                    new_frames_since_render = 0
+                    self._broadcast()
+                except Exception:
+                    pass  # a failed clear must not kill the capture loop
+
             frame = self._client.get_detection()
             if frame is not None and frame.get("timestamp") != last_timestamp:
                 last_timestamp = frame.get("timestamp")
@@ -190,71 +250,26 @@ class TrackerCaptureService:
             with self._lock:
                 has_viewers = bool(self._viewers)
                 do_render = has_viewers and (
-                    self._render_requested
+                    self._refresh_requested
                     or (new_frames_since_render > 0 and now - last_render >= RENDER_INTERVAL_S)
                 )
                 if do_render:
-                    self._render_requested = False
+                    self._refresh_requested = False
 
             if do_render:
                 last_render = now
                 new_frames_since_render = 0
                 try:
-                    self._render(self.history)
+                    self._refresh_data(self.history)
                     self._broadcast()
                 except Exception:
-                    pass  # a failed render shouldn't kill the capture loop
+                    pass  # a failed refresh shouldn't kill the capture loop
 
             time.sleep(POLL_INTERVAL_S)
 
-    def _render(self, history, tracks_only=False):
-        import matplotlib.pyplot as plt
-        import numpy as np
-
-        fig, ax = plt.subplots(figsize=(14, 10))
-        try:
-            colors = plt.cm.tab20(np.linspace(0, 1, 20))
-            track_items = list(history.tracks.items())
-
-            for i, (track_id, points) in enumerate(track_items):
-                if not points:
-                    continue
-                color = colors[i % 20]
-                delays = [p[1] for p in points]
-                dopplers = [p[2] for p in points]
-                ax.plot(delays, dopplers, "-", color="black", linewidth=0.5, alpha=0.3, zorder=1)
-                ax.scatter(delays, dopplers, c=[color] * len(delays), s=35, alpha=0.8,
-                           edgecolors="none", zorder=2, label=f"Track {track_id}")
-
-            if not tracks_only and history.raw_points:
-                all_delays = [p[1] for p in history.raw_points]
-                all_dopplers = [p[2] for p in history.raw_points]
-                all_snrs = [p[3] for p in history.raw_points]
-                scatter = ax.scatter(all_delays, all_dopplers, c=all_snrs, cmap="coolwarm",
-                                     s=5, alpha=0.4, zorder=3, label="Detections")
-                plt.colorbar(scatter, ax=ax, label="SNR (dB)")
-
-            ax.set_xlabel("Delay", fontsize=12)
-            ax.set_ylabel("Doppler (Hz)", fontsize=12)
-            ax.set_title("Radar Tracks Only" if tracks_only else "Radar Tracks",
-                        fontsize=14, fontweight="bold")
-            ax.grid(True, alpha=0.3)
-
-            if track_items:
-                if len(track_items) <= 15:
-                    ax.legend(loc="upper right", fontsize=8, ncol=2)
-                else:
-                    handles, labels = ax.get_legend_handles_labels()
-                    ax.legend(handles[:15], labels[:15], loc="upper right", fontsize=8, ncol=2)
-
-            plt.tight_layout()
-            buf = io.BytesIO()
-            fig.savefig(buf, dpi=150, bbox_inches="tight")
-            buf.seek(0)
-            with self._lock:
-                self._latest_image = buf.getvalue()
-        finally:
-            # Called every few seconds for the life of the process — an
-            # unclosed Figure per call would leak memory permanently now
-            # that this isn't bounded to a 30-minute session anymore.
-            plt.close("all")
+    def _refresh_data(self, history):
+        """Build a fresh JSON snapshot and publish it for readers on other
+        threads. Called only from the capture thread."""
+        snapshot = history.to_dict()
+        with self._lock:
+            self._latest_data = snapshot
