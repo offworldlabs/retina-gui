@@ -3,4 +3,4 @@ flask-wtf
 pydantic
 requests
 pyyaml
-git+https://github.com/offworldlabs/retina-tracker.git
+git+https://github.com/offworldlabs/retina-tracker.git@v0.1.0

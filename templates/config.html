@@ -1057,6 +1057,7 @@ if (discardBtn) discardBtn.addEventListener('click', () => location.reload());
                 best.style.display = '';
                 best.textContent = 'Best so far: ' + mhz(status.best_attempt.fc)
                     + ', gain A ' + status.best_attempt.gain_a + ' / B ' + status.best_attempt.gain_b
+                    + ', LNA state ' + status.best_attempt.lna_state
                     + ' — ' + status.best_attempt.reason;
             }
             return;
@@ -1086,6 +1087,7 @@ if (discardBtn) discardBtn.addEventListener('click', () => location.reload());
                 best.style.display = '';
                 best.innerHTML = 'Closest attempt: ' + mhz(status.best_attempt.fc)
                     + ', gain A ' + status.best_attempt.gain_a + ' / B ' + status.best_attempt.gain_b
+                    + ', LNA state ' + status.best_attempt.lna_state
                     + ' — ' + status.best_attempt.reason
                     + '.<br>Try entering these in the Capture fields below as a starting point.';
             }

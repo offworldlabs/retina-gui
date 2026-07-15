@@ -367,6 +367,17 @@ class TestDwell:
         best = status["best_attempt"]
         assert best["evidence"] >= EVIDENCE_DETECTIONS
         assert best["max_detections"] >= 1
+        assert best["lna_state"] == LNA_STATE_MIN
+
+    def test_best_attempt_records_the_lna_state_in_effect(self, fast):
+        # A only clears once lna_state >= 2, so best_attempt recorded while
+        # dwelling must reflect the escalated state, not the starting one.
+        client = FakeBlah2Client(
+            overload_rule=lambda fc, ga, gb, lna: (lna < 2, False),
+            detection=scattered_detections())
+        status = run_to_completion(Calibrator(client), [TOWER])
+        assert status["state"] == "failed"
+        assert status["best_attempt"]["lna_state"] == 2
 
 
 class TestMultiTower:

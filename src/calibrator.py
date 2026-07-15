@@ -459,7 +459,7 @@ class Calibrator:
 
         return gain_a, gain_b, lna_state, applied_at
 
-    def _dwell(self, tower, fc, gain_a, gain_b, applied_at, dwell_deadline,
+    def _dwell(self, tower, fc, gain_a, gain_b, lna_state, applied_at, dwell_deadline,
                tower_entry, tracker):
         """MODE_TRACK's dwell: feed live detections through a local
         retina-tracker instance (see module docstring for why — blah2's own
@@ -506,7 +506,7 @@ class Calibrator:
                 elif tracker.tracks:
                     max_evidence = max(max_evidence, EVIDENCE_TENTATIVE)
 
-            self._maybe_update_best_attempt(tower, fc, gain_a, gain_b,
+            self._maybe_update_best_attempt(tower, fc, gain_a, gain_b, lna_state,
                                             max_evidence, max_detections)
             self._sleep(TRACKER_FEED_POLL_SECONDS)
 
@@ -598,7 +598,7 @@ class Calibrator:
                         max_evidence = max(max_evidence, EVIDENCE_DETECTIONS)
                         max_detections = max(max_detections, count)
 
-                self._maybe_update_best_attempt(tower, fc, gain_a, gain_b,
+                self._maybe_update_best_attempt(tower, fc, gain_a, gain_b, lna_state,
                                                 max_evidence, max_detections,
                                                 reason=reason_override)
                 self._sleep(DWELL_POLL_SECONDS)
@@ -635,7 +635,7 @@ class Calibrator:
                     return track, aircraft
         return None, None
 
-    def _maybe_update_best_attempt(self, tower, fc, gain_a, gain_b,
+    def _maybe_update_best_attempt(self, tower, fc, gain_a, gain_b, lna_state,
                                    evidence, max_detections, reason=None):
         with self._lock:
             best = self._status.get("best_attempt")
@@ -646,6 +646,7 @@ class Calibrator:
                 "fc": fc,
                 "gain_a": gain_a,
                 "gain_b": gain_b,
+                "lna_state": lna_state,
                 "evidence": evidence,
                 "reason": reason or EVIDENCE_LABELS[evidence],
                 "max_detections": max_detections,
@@ -729,7 +730,7 @@ class Calibrator:
                     else:
                         dwell_started = time.monotonic()
                         tracker = RetinaTracker(config=get_retina_tracker_config())
-                        result = self._dwell(tower, fc, gain_a, gain_b, applied_at,
+                        result = self._dwell(tower, fc, gain_a, gain_b, lna_state, applied_at,
                                              descent_deadline, tower_entry, tracker)
                         tower_entry["dwell_seconds"] = round(time.monotonic() - dwell_started, 1)
                 finally:
