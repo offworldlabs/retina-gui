@@ -87,6 +87,7 @@
         <h3>Node</h3>
         <a href="#mode">Mode</a>
         <h3>Radar</h3>
+        <a href="#tower">Tower</a>
         <a href="#location">Location</a>
         <a href="#capture">Capture</a>
         <a href="#truth">ADS-B truth</a>
@@ -142,6 +143,40 @@
                     <span class="spinner-border spinner-border-sm" id="modeSpinner" style="display:none;width:.9em;height:.9em;border-width:1.5px;flex-shrink:0;"></span>
                 </div>
                 <div id="modeErrorMsg" style="font-size:13px;color:var(--danger);display:none;margin-top:6px;"></div>
+            </div>
+        </section>
+
+        {# ── Tower ── #}
+        <section id="tower" class="cfg-section">
+            <div class="cfg-section-head">
+                <h2>Tower</h2>
+                <span class="desc">Pick a broadcast tower from your setup wizard's search results — updates the transmitter location and center frequency below.</span>
+            </div>
+            <div class="cfg-body" {% if not retina_installed %}style="opacity:.5;pointer-events:none;"{% endif %}>
+                {% if towers_cache and towers_cache.towers %}
+                <div class="cfg-row" style="padding:0;border:0;">
+                    <div class="label-col">
+                        <label for="towerPresetSelect">Tower preset</label>
+                        <span class="help">From your setup wizard's tower search{% if towers_cache.cached_at %} (cached {{ towers_cache.cached_at[:10] }}){% endif %}.</span>
+                    </div>
+                    <div>
+                        <select id="towerPresetSelect" class="ds-input">
+                            <option value="">Select a tower…</option>
+                            {% for tower in towers_cache.towers %}
+                            <option value="{{ loop.index0 }}"
+                                    data-callsign="{{ tower.get('callsign') or '' }}"
+                                    data-name="{{ tower.get('name') or '' }}"
+                                    data-lat="{{ tower.get('latitude') if tower.get('latitude') is not none else '' }}"
+                                    data-lon="{{ tower.get('longitude') if tower.get('longitude') is not none else '' }}"
+                                    data-altitude="{{ tower.get('altitude_m') if tower.get('altitude_m') is not none else 0 }}"
+                                    data-frequency="{{ tower.get('frequency_mhz') if tower.get('frequency_mhz') is not none else '' }}">{{ tower.get('callsign') or tower.get('name') or 'Tower' }} — {{ tower.get('frequency_mhz') }} MHz{% if tower.get('distance_km') is not none %} ({{ tower.get('distance_km') }} km{% if tower.get('distance_class') %}, {{ tower.get('distance_class') }}{% endif %}){% endif %}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                </div>
+                {% else %}
+                <div class="help">No cached tower search results yet. Run the Location step of the Setup Wizard to search for towers near you — results are cached here automatically.</div>
+                {% endif %}
             </div>
         </section>
 
@@ -538,6 +573,35 @@
     }
 })();
 
+// Tower preset — fills in Location (transmitter) + Capture (center frequency) from a cached search result
+(function() {
+    var select = document.getElementById('towerPresetSelect');
+    if (!select) return;
+    var form = document.getElementById('configForm');
+
+    function setField(name, value) {
+        var el = form.querySelector('[name="' + name + '"]');
+        if (!el) return;
+        el.value = value;
+        el.dispatchEvent(new Event('input', { bubbles: true }));
+        el.dispatchEvent(new Event('change', { bubbles: true }));
+    }
+
+    select.addEventListener('change', function() {
+        var opt = select.options[select.selectedIndex];
+        if (!opt || !opt.value) return;
+
+        var name = opt.dataset.callsign || opt.dataset.name || 'Tower';
+        setField('location.tx_name', name);
+        if (opt.dataset.lat) setField('location.tx_latitude', opt.dataset.lat);
+        if (opt.dataset.lon) setField('location.tx_longitude', opt.dataset.lon);
+        setField('location.tx_altitude', opt.dataset.altitude || 0);
+        if (opt.dataset.frequency) {
+            setField('capture.fc', Math.round(parseFloat(opt.dataset.frequency) * 1000000));
+        }
+    });
+})();
+
 // Network panel — status, scan, manual entry toggle, connect + poll
 (function() {
     var section = document.getElementById('network');
@@ -876,7 +940,7 @@ if (discardBtn) discardBtn.addEventListener('click', () => location.reload());
 
 // Side-nav scrollspy
 (function() {
-    var sectionIds = ['mode','location','capture','truth','tar1090','ssh','cloud','wizard','network'];
+    var sectionIds = ['mode','tower','location','capture','truth','tar1090','ssh','cloud','wizard','network'];
     var links = {};
     sectionIds.forEach(function(id) {
         var a = document.querySelector('.side a[href="#' + id + '"]');
