@@ -111,6 +111,36 @@ class TestTowerSearch:
         assert forwarded['altitude'] == 50
         assert forwarded['source'] == 'us'
 
+    @patch('routes.towers.http_requests.get')
+    def test_search_caches_results(self, mock_get, app_client):
+        """A successful search with towers populates the device_state cache."""
+        import app as app_module
+        mock_resp = MagicMock()
+        mock_resp.raise_for_status.return_value = None
+        mock_resp.json.return_value = SAMPLE_TOWER_RESPONSE
+        mock_get.return_value = mock_resp
+
+        app_client.post('/towers/search', json={'lat': -33.8688, 'lon': 151.2093})
+
+        cached = app_module.device_state.get_towers_cache()
+        assert cached is not None
+        assert cached['lat'] == -33.8688
+        assert cached['towers'][0]['callsign'] == 'ATN6'
+
+    @patch('routes.towers.http_requests.get')
+    def test_search_does_not_cache_empty_results(self, mock_get, app_client):
+        """An empty/no-towers response must not overwrite an existing cache
+        with nothing."""
+        import app as app_module
+        mock_resp = MagicMock()
+        mock_resp.raise_for_status.return_value = None
+        mock_resp.json.return_value = {"towers": [], "count": 0}
+        mock_get.return_value = mock_resp
+
+        app_client.post('/towers/search', json={'lat': -33.8688, 'lon': 151.2093})
+
+        assert app_module.device_state.get_towers_cache() is None
+
 
 class TestTowerSelect:
     """Tests for POST /towers/select route."""

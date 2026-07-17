@@ -367,3 +367,31 @@ class TestSetupWizardState:
         with open(ds.setup_wizard_file, "w") as f:
             f.write("not json")
         assert ds.get_setup_wizard_step() is None
+
+
+class TestTowersCache:
+    """Test the tower-preset cache populated by the wizard's tower search."""
+
+    def test_get_returns_none_when_never_cached(self, ds):
+        assert ds.get_towers_cache() is None
+
+    def test_save_and_get(self, ds):
+        ds.save_towers_cache(-33.8688, 151.2093, [{"callsign": "A", "frequency_mhz": 100.0}])
+        cache = ds.get_towers_cache()
+        assert cache["lat"] == -33.8688
+        assert cache["lon"] == 151.2093
+        assert cache["towers"] == [{"callsign": "A", "frequency_mhz": 100.0}]
+
+    def test_save_overwrites_previous_search(self, ds):
+        ds.save_towers_cache(1, 1, [{"callsign": "Old", "frequency_mhz": 1.0}])
+        ds.save_towers_cache(2, 2, [{"callsign": "New", "frequency_mhz": 2.0}])
+        cache = ds.get_towers_cache()
+        assert cache["lat"] == 2
+        assert len(cache["towers"]) == 1
+        assert cache["towers"][0]["callsign"] == "New"
+
+    def test_malformed_cache_file_treated_as_none(self, ds):
+        os.makedirs(os.path.dirname(ds.towers_cache_file), exist_ok=True)
+        with open(ds.towers_cache_file, "w") as f:
+            f.write("not json")
+        assert ds.get_towers_cache() is None
