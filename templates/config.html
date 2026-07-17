@@ -147,22 +147,22 @@
         </section>
 
         {# ── Tower ── #}
+        {% set towers = towers_cache.towers if towers_cache else [] %}
         <section id="tower" class="cfg-section">
             <div class="cfg-section-head">
                 <h2>Tower</h2>
-                <span class="desc">Pick a broadcast tower from your setup wizard's search results — updates the transmitter location and center frequency below.</span>
+                <span class="desc">Pick a broadcast tower from your setup wizard's search results — updates the transmitter location and center frequency below. Add or remove towers from this cached list manually.</span>
             </div>
             <div class="cfg-body" {% if not retina_installed %}style="opacity:.5;pointer-events:none;"{% endif %}>
-                {% if towers_cache and towers_cache.towers %}
-                <div class="cfg-row" style="padding:0;border:0;">
+                <div class="cfg-row" id="towerPresetRow" style="padding:0;border:0;{% if not towers %}display:none;{% endif %}">
                     <div class="label-col">
                         <label for="towerPresetSelect">Tower preset</label>
-                        <span class="help">From your setup wizard's tower search{% if towers_cache.cached_at %} (cached {{ towers_cache.cached_at[:10] }}){% endif %}.</span>
+                        <span class="help" id="towerPresetHelp">{% if towers_cache and towers_cache.cached_at %}From your setup wizard's tower search (cached {{ towers_cache.cached_at[:10] }}).{% endif %}</span>
                     </div>
                     <div>
                         <select id="towerPresetSelect" class="ds-input">
                             <option value="">Select a tower…</option>
-                            {% for tower in towers_cache.towers %}
+                            {% for tower in towers %}
                             <option value="{{ loop.index0 }}"
                                     data-callsign="{{ tower.get('callsign') or '' }}"
                                     data-name="{{ tower.get('name') or '' }}"
@@ -174,9 +174,27 @@
                         </select>
                     </div>
                 </div>
-                {% else %}
-                <div class="help">No cached tower search results yet. Run the Location step of the Setup Wizard to search for towers near you — results are cached here automatically.</div>
-                {% endif %}
+                <div class="help" id="towerEmptyMsg" {% if towers %}style="display:none;"{% endif %}>No cached tower search results yet. Run the Location step of the Setup Wizard to search for towers near you, or add one manually below.</div>
+
+                <div class="divider"></div>
+
+                <div class="ds-label-micro" style="margin-bottom:10px;">Manage cached towers</div>
+                <div class="ssh-list" id="towerManageList">
+                    {% for tower in towers %}
+                    <div class="ssh-item" data-index="{{ loop.index0 }}">
+                        <div class="ssh-meta">
+                            <div class="ssh-key">{{ tower.get('callsign') or tower.get('name') or 'Tower' }} — {{ tower.get('frequency_mhz') }} MHz</div>
+                        </div>
+                        <button type="button" class="ds-btn danger-ghost sm tower-remove-btn" data-index="{{ loop.index0 }}">Remove</button>
+                    </div>
+                    {% endfor %}
+                </div>
+
+                <button type="button" class="ds-btn ghost" style="margin-top:12px;" data-bs-toggle="modal" data-bs-target="#addTowerModal">
+                    <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M12 5v14M5 12h14"></path></svg>
+                    Add tower
+                </button>
+                <div id="towerManageError" style="font-size:13px;color:var(--danger);display:none;margin-top:8px;"></div>
             </div>
         </section>
 
@@ -474,6 +492,47 @@
     </main>
 </div>
 
+{# Bootstrap modal for manually adding a cached tower #}
+<div class="modal fade" id="addTowerModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <form id="addTowerForm">
+                <div class="modal-header">
+                    <h5 class="modal-title">Add Tower</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="cfg-row" style="padding:0;border:0;">
+                        <div class="label-col"><label for="towerAddCallsign">Name / Callsign</label></div>
+                        <div><input type="text" id="towerAddCallsign" name="callsign" class="ds-input" required></div>
+                    </div>
+                    <div class="cfg-row" style="padding:0;border:0;">
+                        <div class="label-col"><label for="towerAddFrequency">Frequency</label><span class="help">MHz</span></div>
+                        <div><input type="number" id="towerAddFrequency" name="frequency_mhz" class="ds-input mono" step="any" min="0" required></div>
+                    </div>
+                    <div class="cfg-row" style="padding:0;border:0;">
+                        <div class="label-col"><label for="towerAddLatitude">Latitude</label><span class="help">decimal degrees</span></div>
+                        <div><input type="number" id="towerAddLatitude" name="latitude" class="ds-input mono" step="any" min="-90" max="90" required></div>
+                    </div>
+                    <div class="cfg-row" style="padding:0;border:0;">
+                        <div class="label-col"><label for="towerAddLongitude">Longitude</label><span class="help">decimal degrees</span></div>
+                        <div><input type="number" id="towerAddLongitude" name="longitude" class="ds-input mono" step="any" min="-180" max="180" required></div>
+                    </div>
+                    <div class="cfg-row" style="padding:0;border:0;">
+                        <div class="label-col"><label for="towerAddAltitude">Altitude</label><span class="help">meters</span></div>
+                        <div><input type="number" id="towerAddAltitude" name="altitude_m" class="ds-input mono" step="any" value="0"></div>
+                    </div>
+                    <div id="towerAddError" style="font-size:13px;color:var(--danger);display:none;margin-top:8px;"></div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="ds-btn ghost" data-bs-dismiss="modal">Cancel</button>
+                    <button type="submit" class="ds-btn primary">Add tower</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
 {# Bootstrap modal for cloud services disable confirmation #}
 <div class="modal fade" id="disableCloudModal" tabindex="-1">
     <div class="modal-dialog">
@@ -573,11 +632,67 @@
     }
 })();
 
-// Tower preset — fills in Location (transmitter) + Capture (center frequency) from a cached search result
+// Tower — preset select fills in Location (transmitter) + Capture (center frequency).
+// Manage list add/remove persists straight to the cache file, independent of the
+// staged config form below (same "takes effect immediately" model as SSH keys).
 (function() {
-    var select = document.getElementById('towerPresetSelect');
-    if (!select) return;
-    var form = document.getElementById('configForm');
+    var presetSelect = document.getElementById('towerPresetSelect');
+    if (!presetSelect) return;
+
+    var csrf         = document.querySelector('meta[name="csrf-token"]').content;
+    var form         = document.getElementById('configForm');
+    var presetRow    = document.getElementById('towerPresetRow');
+    var presetHelp   = document.getElementById('towerPresetHelp');
+    var emptyMsg     = document.getElementById('towerEmptyMsg');
+    var manageList   = document.getElementById('towerManageList');
+    var manageError  = document.getElementById('towerManageError');
+    var addModalEl   = document.getElementById('addTowerModal');
+    var addForm      = document.getElementById('addTowerForm');
+    var addError     = document.getElementById('towerAddError');
+
+    function esc(s) {
+        var d = document.createElement('div');
+        d.textContent = s == null ? '' : String(s);
+        return d.innerHTML;
+    }
+
+    function towerLabel(t) {
+        var label = esc(t.callsign || t.name || 'Tower') + ' — ' + esc(t.frequency_mhz) + ' MHz';
+        if (t.distance_km !== undefined && t.distance_km !== null) {
+            label += ' (' + esc(t.distance_km) + ' km' + (t.distance_class ? ', ' + esc(t.distance_class) : '') + ')';
+        }
+        return label;
+    }
+
+    // Rebuild the preset dropdown + manage list from a fresh towers array —
+    // called after every successful add/remove so both stay in sync without a reload.
+    function renderTowers(towers, cachedAt) {
+        towers = towers || [];
+        presetRow.style.display = towers.length ? '' : 'none';
+        emptyMsg.style.display = towers.length ? 'none' : '';
+        if (cachedAt) {
+            presetHelp.textContent = 'From your setup wizard\'s tower search (cached ' + cachedAt.slice(0, 10) + ').';
+        }
+
+        presetSelect.innerHTML = '<option value="">Select a tower…</option>' + towers.map(function(t, i) {
+            return '<option value="' + i + '"' +
+                ' data-callsign="' + esc(t.callsign || '') + '"' +
+                ' data-name="' + esc(t.name || '') + '"' +
+                ' data-lat="' + esc(t.latitude != null ? t.latitude : '') + '"' +
+                ' data-lon="' + esc(t.longitude != null ? t.longitude : '') + '"' +
+                ' data-altitude="' + esc(t.altitude_m != null ? t.altitude_m : 0) + '"' +
+                ' data-frequency="' + esc(t.frequency_mhz != null ? t.frequency_mhz : '') + '">' +
+                towerLabel(t) + '</option>';
+        }).join('');
+
+        manageList.innerHTML = towers.map(function(t, i) {
+            var label = esc(t.callsign || t.name || 'Tower') + ' — ' + esc(t.frequency_mhz) + ' MHz';
+            return '<div class="ssh-item" data-index="' + i + '">' +
+                '<div class="ssh-meta"><div class="ssh-key">' + label + '</div></div>' +
+                '<button type="button" class="ds-btn danger-ghost sm tower-remove-btn" data-index="' + i + '">Remove</button>' +
+            '</div>';
+        }).join('');
+    }
 
     function setField(name, value) {
         var el = form.querySelector('[name="' + name + '"]');
@@ -587,8 +702,8 @@
         el.dispatchEvent(new Event('change', { bubbles: true }));
     }
 
-    select.addEventListener('change', function() {
-        var opt = select.options[select.selectedIndex];
+    presetSelect.addEventListener('change', function() {
+        var opt = presetSelect.options[presetSelect.selectedIndex];
         if (!opt || !opt.value) return;
 
         var name = opt.dataset.callsign || opt.dataset.name || 'Tower';
@@ -600,6 +715,82 @@
             setField('capture.fc', Math.round(parseFloat(opt.dataset.frequency) * 1000000));
         }
     });
+
+    manageList.addEventListener('click', function(e) {
+        var btn = e.target.closest('.tower-remove-btn');
+        if (!btn) return;
+        manageError.style.display = 'none';
+        btn.disabled = true;
+
+        fetch('/towers/cache/remove', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrf },
+            body: JSON.stringify({ index: parseInt(btn.dataset.index, 10) })
+        })
+        .then(function(r) { return r.json(); })
+        .then(function(d) {
+            if (d.success) {
+                renderTowers(d.towers, d.cached_at);
+            } else {
+                manageError.textContent = d.error || 'Failed to remove tower';
+                manageError.style.display = '';
+                btn.disabled = false;
+            }
+        })
+        .catch(function() {
+            manageError.textContent = 'Failed to reach the server — check your connection.';
+            manageError.style.display = '';
+            btn.disabled = false;
+        });
+    });
+
+    if (addForm) {
+        addForm.addEventListener('submit', function(e) {
+            e.preventDefault();
+            addError.style.display = 'none';
+            var submitBtn = addForm.querySelector('button[type="submit"]');
+            submitBtn.disabled = true;
+
+            var payload = {
+                callsign: document.getElementById('towerAddCallsign').value.trim(),
+                frequency_mhz: document.getElementById('towerAddFrequency').value,
+                latitude: document.getElementById('towerAddLatitude').value,
+                longitude: document.getElementById('towerAddLongitude').value,
+                altitude_m: document.getElementById('towerAddAltitude').value || 0,
+            };
+
+            fetch('/towers/cache/add', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrf },
+                body: JSON.stringify(payload)
+            })
+            .then(function(r) { return r.json(); })
+            .then(function(d) {
+                submitBtn.disabled = false;
+                if (d.success) {
+                    renderTowers(d.towers, d.cached_at);
+                    addForm.reset();
+                    try {
+                        var modal = bootstrap.Modal.getInstance(addModalEl);
+                        if (modal) modal.hide();
+                    } catch (err) {}
+                } else {
+                    addError.textContent = d.error || 'Failed to add tower';
+                    addError.style.display = '';
+                }
+            })
+            .catch(function() {
+                submitBtn.disabled = false;
+                addError.textContent = 'Failed to reach the server — check your connection.';
+                addError.style.display = '';
+            });
+        });
+
+        addModalEl.addEventListener('hidden.bs.modal', function() {
+            addForm.reset();
+            addError.style.display = 'none';
+        });
+    }
 })();
 
 // Network panel — status, scan, manual entry toggle, connect + poll

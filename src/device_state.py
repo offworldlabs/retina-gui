@@ -361,6 +361,28 @@ class DeviceState:
             "towers": towers,
         })
 
+    def add_tower_to_cache(self, tower: dict):
+        """Append a manually-entered tower to the cache, creating it if none
+        exists yet (e.g. the wizard's location step was never run)."""
+        data = self.get_towers_cache() or {"lat": None, "lon": None, "towers": []}
+        data["towers"] = (data.get("towers") or []) + [tower]
+        data["cached_at"] = datetime.now().isoformat()
+        self._write_towers_cache(data)
+
+    def remove_tower_from_cache(self, index: int) -> bool:
+        """Remove a tower by its position in the cached list.
+
+        Returns False if there's no cache or the index is out of range.
+        """
+        data = self.get_towers_cache()
+        towers = (data or {}).get("towers") or []
+        if not data or not (0 <= index < len(towers)):
+            return False
+        towers.pop(index)
+        data["cached_at"] = datetime.now().isoformat()
+        self._write_towers_cache(data)
+        return True
+
     def _write_towers_cache(self, data: dict):
         os.makedirs(os.path.dirname(self.towers_cache_file), exist_ok=True)
         with open(self.towers_cache_file, "w") as f:
