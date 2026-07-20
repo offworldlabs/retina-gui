@@ -181,7 +181,10 @@
                 <div class="ds-label-micro" style="margin-bottom:10px;">Manage cached towers</div>
                 <div class="ssh-list" id="towerManageList">
                     {% for tower in towers %}
-                    <div class="ssh-item" data-index="{{ loop.index0 }}">
+                    <div class="ssh-item" data-index="{{ loop.index0 }}"
+                         data-lat="{{ tower.get('latitude') if tower.get('latitude') is not none else '' }}"
+                         data-lon="{{ tower.get('longitude') if tower.get('longitude') is not none else '' }}"
+                         data-frequency="{{ tower.get('frequency_mhz') if tower.get('frequency_mhz') is not none else '' }}">
                         <div class="ssh-meta">
                             <div class="ssh-key">{{ tower.get('callsign') or tower.get('name') or 'Tower' }} — {{ tower.get('frequency_mhz') }} MHz</div>
                         </div>
@@ -687,11 +690,40 @@
 
         manageList.innerHTML = towers.map(function(t, i) {
             var label = esc(t.callsign || t.name || 'Tower') + ' — ' + esc(t.frequency_mhz) + ' MHz';
-            return '<div class="ssh-item" data-index="' + i + '">' +
+            return '<div class="ssh-item" data-index="' + i + '"' +
+                ' data-lat="' + esc(t.latitude != null ? t.latitude : '') + '"' +
+                ' data-lon="' + esc(t.longitude != null ? t.longitude : '') + '"' +
+                ' data-frequency="' + esc(t.frequency_mhz != null ? t.frequency_mhz : '') + '">' +
                 '<div class="ssh-meta"><div class="ssh-key">' + label + '</div></div>' +
                 '<button type="button" class="ds-btn danger-ghost sm tower-remove-btn" data-index="' + i + '">Remove</button>' +
             '</div>';
         }).join('');
+        updateSelectedHighlight();
+    }
+
+    // Highlights whichever manage-list row's lat/lon/frequency matches the
+    // form's current transmitter fields — kept live so it tracks preset
+    // picks, manual edits, and add/remove without a reload.
+    function floatsMatch(a, b) {
+        return Number.isFinite(a) && Number.isFinite(b) && Math.abs(a - b) < 1e-5;
+    }
+
+    function updateSelectedHighlight() {
+        var latEl = form.querySelector('[name="location.tx_latitude"]');
+        var lonEl = form.querySelector('[name="location.tx_longitude"]');
+        var fcEl = form.querySelector('[name="capture.fc"]');
+        var txLat = latEl ? parseFloat(latEl.value) : NaN;
+        var txLon = lonEl ? parseFloat(lonEl.value) : NaN;
+        var fc = fcEl ? parseInt(fcEl.value, 10) : NaN;
+
+        manageList.querySelectorAll('.ssh-item').forEach(function(row) {
+            var rowFreq = parseFloat(row.dataset.frequency);
+            var rowFc = Number.isFinite(rowFreq) ? Math.round(rowFreq * 1000000) : NaN;
+            var isSelected = floatsMatch(parseFloat(row.dataset.lat), txLat) &&
+                              floatsMatch(parseFloat(row.dataset.lon), txLon) &&
+                              Number.isFinite(rowFc) && rowFc === fc;
+            row.classList.toggle('selected', isSelected);
+        });
     }
 
     function setField(name, value) {
@@ -791,6 +823,15 @@
             addError.style.display = 'none';
         });
     }
+
+    // Keep the highlight live for hand-edits too, not just preset picks —
+    // setField() above already fires these same events, so this one
+    // listener set covers both paths.
+    ['location.tx_latitude', 'location.tx_longitude', 'capture.fc'].forEach(function(name) {
+        var el = form.querySelector('[name="' + name + '"]');
+        if (el) el.addEventListener('input', updateSelectedHighlight);
+    });
+    updateSelectedHighlight();
 })();
 
 // Network panel — status, scan, manual entry toggle, connect + poll
