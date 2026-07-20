@@ -37,6 +37,16 @@ TOWER_FINDER_URL = os.environ.get('TOWER_FINDER_URL', 'https://tower-finder.reti
 # blah2_api runs with network_mode: host and listens directly on this port —
 # NOT the :8080 blah2_host nginx proxy, which doesn't forward /capture/* at all.
 BLAH2_API_URL = os.environ.get('BLAH2_API_URL', 'http://localhost:3000')
+# retina-tracker sidecar (network_mode: host, see retina-node's docker-compose.yml)
+RETINA_TRACKER_HOST = os.environ.get('RETINA_TRACKER_HOST', 'localhost')
+RETINA_TRACKER_PORT = int(os.environ.get('RETINA_TRACKER_PORT', '30100'))
+# Path the sidecar streams JSONL track events to (-s flag, see its compose
+# command) — tailed rather than read over the TCP socket, since retina-tracker's
+# --tcp mode is input-only (see retina_tracker_client.py's module docstring).
+RETINA_TRACKER_EVENTS_PATH = os.environ.get('RETINA_TRACKER_EVENTS_PATH',
+    os.path.join(PROJECT_ROOT, 'dev_data', 'retina-tracker-events.jsonl') if DEV_MODE
+    else '/data/retina-node/retina-tracker/output/events.jsonl'
+)
 DEV_MODE = os.environ.get('DEV_MODE', '').lower() in ('1', 'true', 'yes')
 
 # Shared services
@@ -97,10 +107,13 @@ except Exception:
 
 
 from blah2_client import Blah2Client
+from retina_tracker_client import RetinaTrackerClient
 from tracker_capture import TrackerCaptureService
 
 blah2_client = Blah2Client(BLAH2_API_URL)
-tracker_capture = TrackerCaptureService(blah2_client)
+retina_tracker_client = RetinaTrackerClient(
+    RETINA_TRACKER_HOST, RETINA_TRACKER_PORT, RETINA_TRACKER_EVENTS_PATH)
+tracker_capture = TrackerCaptureService(blah2_client, retina_tracker_client)
 # Never auto-start under pytest: conftest.py's app_client fixture reloads this
 # module per-test, and start() spawns a permanent, never-stopped background
 # thread — under pytest that would leak one such thread per test (each making

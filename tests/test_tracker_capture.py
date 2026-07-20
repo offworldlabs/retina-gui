@@ -1,9 +1,9 @@
 """Tests for TrackerCaptureService's always-on capture / lazy-refresh lifecycle.
 
-Stubs retina-tracker's Tracker/get_config so these tests exercise only our
-own threading/history/refresh-gating logic, not retina-tracker's Kalman
-filtering or the JS/Plotly frontend — a dependency's own internals aren't
-re-tested here.
+Uses a FakeRetinaTrackerClient stand-in for the sidecar so these tests
+exercise only our own threading/history/refresh-gating logic, not
+retina-tracker's Kalman filtering (which runs out-of-process now) or the
+JS/Plotly frontend — a dependency's own internals aren't re-tested here.
 """
 
 import queue
@@ -27,15 +27,29 @@ class FakeBlah2Client:
         return self._responses.pop(0)
 
 
-class FakeTracker:
-    """Records process_frame calls instead of doing real Kalman tracking."""
+class FakeRetinaTrackerClient:
+    """Stand-in for RetinaTrackerClient: records send_frame calls, and
+    lets tests simulate the tailer thread's on_event callback synchronously
+    via simulate_event() instead of touching a real socket/file."""
 
-    def __init__(self, config=None, event_writer=None):
-        self.calls = []
-        self.event_writer = event_writer
+    def __init__(self):
+        self.sent_frames = []
+        self._on_event = None
 
-    def process_frame(self, detections, timestamp):
-        self.calls.append((detections, timestamp))
+    def send_frame(self, frame):
+        self.sent_frames.append(frame)
+
+    def start(self, on_event):
+        self._on_event = on_event
+
+    def simulate_event(self, event):
+        assert self._on_event is not None, "start() not called yet"
+        self._on_event(event)
+
+
+def make_service(client=None, tracker_client=None):
+    return tracker_capture.TrackerCaptureService(
+        client or FakeBlah2Client([]), tracker_client or FakeRetinaTrackerClient())
 
 
 def _wait_until(predicate, timeout=2.0, interval=0.02):
@@ -53,12 +67,6 @@ def fast_intervals(monkeypatch):
     monkeypatch.setattr(tracker_capture, "POLL_INTERVAL_S", 0.01)
     monkeypatch.setattr(tracker_capture, "RENDER_INTERVAL_S", 0.03)
     monkeypatch.setattr(tracker_capture, "PRUNE_INTERVAL_S", 0.05)
-
-
-@pytest.fixture(autouse=True)
-def stub_tracker(monkeypatch):
-    monkeypatch.setattr(tracker_capture, "Tracker", FakeTracker)
-    monkeypatch.setattr(tracker_capture, "get_config", lambda: {})
 
 
 def make_frame(ts, delay=1.0, doppler=2.0, snr=3.0):
@@ -165,11 +173,52 @@ def test_history_buffer_to_dict_shape():
     }
 
 
+# ── Sidecar integration ─────────────────────────────────────────────────────
+
+def test_run_pushes_raw_frame_to_tracker_client(monkeypatch):
+    stub_refresh(monkeypatch, None)
+    tracker_client = FakeRetinaTrackerClient()
+    client = FakeBlah2Client([make_frame(1000, delay=1.5, doppler=2.5, snr=4.0)])
+    service = make_service(client, tracker_client)
+    service.start()
+
+    assert _wait_until(lambda: len(tracker_client.sent_frames) == 1)
+    # The raw frame is pushed, not the per-detection dicts frame_to_detections()
+    # builds for add_raw() — retina-tracker's wire format wants the parallel
+    # arrays, not per-detection dicts.
+    assert tracker_client.sent_frames[0] == {
+        "timestamp": 1000, "delay": [1.5], "doppler": [2.5], "snr": [4.0],
+    }
+
+
+def test_on_track_event_writes_into_history_buffer():
+    tracker_client = FakeRetinaTrackerClient()
+    service = make_service(tracker_client=tracker_client)
+    service.start()
+
+    tracker_client.simulate_event({
+        "track_id": "T1",
+        "timestamp": 1000,
+        "length": 1,
+        "detections": [{"timestamp": 1000, "delay": 1.5, "doppler": 2.5, "snr": 4.0}],
+    })
+
+    assert service.history.tracks["T1"] == [(1000, 1.5, 2.5, 4.0)]
+
+
+def test_start_wires_tracker_client_tailer_to_on_track_event():
+    tracker_client = FakeRetinaTrackerClient()
+    service = make_service(tracker_client=tracker_client)
+    service.start()
+
+    assert tracker_client._on_event == service.on_track_event
+
+
 # ── Always-on capture lifecycle ─────────────────────────────────────────────
 
 def test_start_runs_immediately_with_zero_viewers():
     client = FakeBlah2Client([])
-    service = tracker_capture.TrackerCaptureService(client)
+    service = make_service(client)
     service.start()
     assert _wait_until(service.is_running)
 
@@ -177,7 +226,7 @@ def test_start_runs_immediately_with_zero_viewers():
 def test_detach_does_not_stop_capture(monkeypatch):
     stub_refresh(monkeypatch, None)
     client = FakeBlah2Client([])
-    service = tracker_capture.TrackerCaptureService(client)
+    service = make_service(client)
     service.start()
     assert _wait_until(service.is_running)
 
@@ -191,7 +240,7 @@ def test_detach_does_not_stop_capture(monkeypatch):
 def test_no_refresh_without_viewers(monkeypatch):
     calls = stub_refresh(monkeypatch, None)
     client = FakeBlah2Client([make_frame(1000), make_frame(2000), make_frame(3000)])
-    service = tracker_capture.TrackerCaptureService(client)
+    service = make_service(client)
     service.start()
 
     time.sleep(0.3)  # plenty of refresh-interval ticks with data and zero viewers
@@ -201,7 +250,7 @@ def test_no_refresh_without_viewers(monkeypatch):
 def test_refresh_only_after_attach(monkeypatch):
     calls = stub_refresh(monkeypatch, None)
     client = FakeBlah2Client([make_frame(1000)])
-    service = tracker_capture.TrackerCaptureService(client)
+    service = make_service(client)
     service.start()
     time.sleep(0.1)
     assert calls == []  # no viewer yet
@@ -218,7 +267,7 @@ def test_attach_requests_immediate_refresh_without_waiting_full_interval(monkeyp
     monkeypatch.setattr(tracker_capture, "RENDER_INTERVAL_S", 10.0)
     calls = stub_refresh(monkeypatch, None)
     client = FakeBlah2Client([make_frame(1000)])
-    service = tracker_capture.TrackerCaptureService(client)
+    service = make_service(client)
     service.start()
     time.sleep(0.05)  # let the frame land in history before attaching
 
@@ -230,7 +279,7 @@ def test_attach_requests_immediate_refresh_without_waiting_full_interval(monkeyp
 def test_prune_runs_independent_of_viewers(monkeypatch):
     stub_refresh(monkeypatch, None)
     client = FakeBlah2Client([make_frame(1000)])
-    service = tracker_capture.TrackerCaptureService(client)
+    service = make_service(client)
     service.history.window_s = 0  # anything with a timestamp is immediately "old"
     service.start()
 
@@ -249,7 +298,7 @@ def test_refresh_failure_does_not_kill_capture_loop(monkeypatch):
 
     stub_refresh(monkeypatch, None, side_effect=flaky)
     client = FakeBlah2Client([make_frame(1000), make_frame(2000)])
-    service = tracker_capture.TrackerCaptureService(client)
+    service = make_service(client)
     service.start()
 
     q = service.attach()
@@ -276,7 +325,7 @@ def test_request_clear_wipes_history_from_capture_thread():
     # snapshot reset lives in _run() itself, not in _refresh_data().
     now = _now_ms()
     client = FakeBlah2Client([make_frame(now), make_frame(now + 10)])
-    service = tracker_capture.TrackerCaptureService(client)
+    service = make_service(client)
     service.start()
     assert _wait_until(lambda: len(service.history.raw_points) >= 2, timeout=1.0)
 
@@ -291,7 +340,7 @@ def test_request_clear_runs_without_viewers():
     # No viewer ever attached — proves the clear branch is unconditional,
     # same as prune() already is, not gated on has_viewers.
     client = FakeBlah2Client([make_frame(_now_ms())])
-    service = tracker_capture.TrackerCaptureService(client)
+    service = make_service(client)
     service.start()
     assert _wait_until(lambda: len(service.history.raw_points) >= 1, timeout=1.0)
 
@@ -303,7 +352,7 @@ def test_request_clear_runs_without_viewers():
 def test_frame_after_clear_populates_fresh_buffer():
     now = _now_ms()
     client = FakeBlah2Client([make_frame(now), make_frame(now + 10)])
-    service = tracker_capture.TrackerCaptureService(client)
+    service = make_service(client)
     service.start()
     assert _wait_until(lambda: len(service.history.raw_points) >= 2, timeout=1.0)
 
@@ -320,7 +369,7 @@ def test_clear_requested_during_active_capture_does_not_corrupt_state():
     now = _now_ms()
     frames = [make_frame(now + i * 10) for i in range(20)]
     client = FakeBlah2Client(frames)
-    service = tracker_capture.TrackerCaptureService(client)
+    service = make_service(client)
     service.start()
 
     deadline = time.monotonic() + 1.0
