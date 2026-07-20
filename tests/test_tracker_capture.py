@@ -2,10 +2,11 @@
 
 Stubs retina-tracker's Tracker/get_config so these tests exercise only our
 own threading/history/refresh-gating logic, not retina-tracker's Kalman
-filtering — matching tests/test_calibrate.py's approach of not re-testing a
-dependency's own internals.
+filtering or the JS/Plotly frontend — a dependency's own internals aren't
+re-tested here.
 """
 
+import queue
 import time
 from unittest.mock import patch
 
@@ -361,3 +362,38 @@ def test_clear_route_calls_request_clear(app_client):
     assert resp.status_code == 200
     assert resp.get_json() == {"success": True}
     mock_clear.assert_called_once()
+
+
+def test_index_page_renders(app_client):
+    resp = app_client.get('/tracker-preview')
+    assert resp.status_code == 200
+    assert b'Tracker Preview' in resp.data
+    assert b'clearBufferBtn' in resp.data
+
+
+def test_events_route_attaches_yields_message_and_detaches_on_close(app_client):
+    """The SSE connection's lifetime IS the attach()/detach() lifecycle —
+    this is the contract the whole viewer-gated capture design depends on,
+    so it's worth testing at the actual route level, not just against
+    TrackerCaptureService directly."""
+    import app as app_module
+
+    q = queue.Queue()
+    q.put(7)  # pre-queued so the generator's first q.get() returns immediately
+
+    with patch.object(app_module.tracker_capture, 'attach', return_value=q) as mock_attach, \
+         patch.object(app_module.tracker_capture, 'detach') as mock_detach:
+        resp = app_client.get('/tracker-preview/events')
+        assert resp.status_code == 200
+        assert resp.content_type.startswith('text/event-stream')
+
+        # Pull exactly one chunk — the generator pauses at its `yield` and
+        # won't attempt a second (blocking) q.get() until asked for more,
+        # so this can't hang even though the loop itself is infinite.
+        first_chunk = next(resp.response)
+        assert b'"seq": 7' in first_chunk
+
+        resp.close()  # WSGI close() contract -> generator's finally -> detach()
+
+    mock_attach.assert_called_once()
+    mock_detach.assert_called_once_with(q)

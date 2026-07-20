@@ -7,6 +7,7 @@ Python-based web GUI baked into owl-os and deployed to every Retina node. Served
 - **Quick links** to deployed services (Passive Radar / blah2, ADS-B Map / tar1090)
 - **Radar config editor** — schema-driven UI for updating node configuration
 - **Onboarding wizard** — guided setup flow covering OS updates, radar stack install, location, and tower selection
+- **Tracker Preview** — live delay/Doppler plot of blah2's detections and confirmed tracks (via [retina-tracker](https://github.com/offworldlabs/retina-tracker)), for verifying tracking against real data
 - **SSH key management** — add and remove public keys for local access
 - **Cloud services toggle** — enable or disable Mender OTA updates and remote access
 
@@ -38,4 +39,4 @@ pip install pytest
 pytest tests/
 ```
 
-Tests cover routes, device state, install flow, config schema, form generation, Mender client, SSH key validation, and tower search.
+Tests cover routes, device state, install flow, config schema, form generation, Mender client, SSH key validation, tower search, and the tracker-preview capture service.
