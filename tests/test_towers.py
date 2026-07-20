@@ -141,6 +141,30 @@ class TestTowerSearch:
 
         assert app_module.device_state.get_towers_cache() is None
 
+    @patch('routes.towers.http_requests.get')
+    def test_search_caches_only_the_best_few(self, mock_get, app_client):
+        """The tower-finder can return dozens of results (its own default,
+        uncapped by the wizard's search request) — only the best
+        MAX_CACHED_TOWERS get cached, keeping /config's Tower picker usable.
+        The full, uncapped list still goes back to the wizard's own response."""
+        import app as app_module
+        many_towers = [
+            {"callsign": f"T{i}", "frequency_mhz": 100.0 + i, "latitude": 0, "longitude": 0}
+            for i in range(50)
+        ]
+        mock_resp = MagicMock()
+        mock_resp.raise_for_status.return_value = None
+        mock_resp.json.return_value = {"towers": many_towers, "count": 50}
+        mock_get.return_value = mock_resp
+
+        resp = app_client.post('/towers/search', json={'lat': -33.8688, 'lon': 151.2093})
+
+        assert len(resp.get_json()['towers']) == 50
+
+        cached = app_module.device_state.get_towers_cache()
+        assert len(cached['towers']) == 5
+        assert [t['callsign'] for t in cached['towers']] == ['T0', 'T1', 'T2', 'T3', 'T4']
+
 
 class TestTowerCacheAdd:
     """Tests for POST /towers/cache/add route."""

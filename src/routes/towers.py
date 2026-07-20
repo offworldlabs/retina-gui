@@ -8,6 +8,12 @@ from config_manager import ConfigManager
 
 bp = Blueprint('towers', __name__, url_prefix='/towers')
 
+# The tower-finder API already ranks results best-first (signal match, or
+# geography if no measurements); the wizard's own map/table can show all of
+# them, but the cache backing /config's Tower preset picker only needs the
+# best few — capping here keeps that dropdown/manage-list usable.
+MAX_CACHED_TOWERS = 5
+
 
 @bp.route("/search", methods=["POST"])
 def search():
@@ -65,7 +71,7 @@ def search():
         towers = result.get("towers") or []
         if towers:
             try:
-                device_state.save_towers_cache(body["lat"], body["lon"], towers)
+                device_state.save_towers_cache(body["lat"], body["lon"], towers[:MAX_CACHED_TOWERS])
             except Exception as e:
                 app.logger.warning(f"Failed to cache tower search results: {e}")
         return jsonify(result)
