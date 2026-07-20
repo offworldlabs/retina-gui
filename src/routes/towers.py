@@ -8,11 +8,17 @@ from config_manager import ConfigManager
 
 bp = Blueprint('towers', __name__, url_prefix='/towers')
 
+# The tower-finder API already ranks results best-first (signal match, or
+# geography if no measurements); the wizard's own map/table can show all of
+# them, but the cache backing /config's Tower preset picker only needs the
+# best few — capping here keeps that dropdown/manage-list usable.
+MAX_CACHED_TOWERS = 5
+
 
 @bp.route("/search", methods=["POST"])
 def search():
     """Proxy RF-profile tower search to Tower-Finder API."""
-    from app import app, TOWER_FINDER_URL
+    from app import app, TOWER_FINDER_URL, device_state
 
     body = request.get_json()
     if not body:
@@ -61,7 +67,14 @@ def search():
                 timeout=90,
             )
         resp.raise_for_status()
-        return jsonify(resp.json())
+        result = resp.json()
+        towers = result.get("towers") or []
+        if towers:
+            try:
+                device_state.save_towers_cache(body["lat"], body["lon"], towers[:MAX_CACHED_TOWERS])
+            except Exception as e:
+                app.logger.warning(f"Failed to cache tower search results: {e}")
+        return jsonify(result)
     except http_requests.Timeout:
         return jsonify({"error": "Tower search timed out — try again"}), 504
     except http_requests.RequestException as e:
@@ -70,6 +83,65 @@ def search():
     except Exception as e:
         app.logger.error(f"Tower search unexpected error: {e}")
         return jsonify({"error": "Tower search failed — check server logs"}), 500
+
+
+@bp.route("/cache/add", methods=["POST"])
+def cache_add():
+    """Manually add a tower to the cached tower-preset list."""
+    from app import device_state
+
+    body = request.get_json()
+    if not body:
+        return jsonify({"success": False, "error": "Missing JSON body"}), 400
+
+    callsign = (body.get("callsign") or "").strip()
+    try:
+        frequency_mhz = float(body.get("frequency_mhz"))
+        latitude = float(body.get("latitude"))
+        longitude = float(body.get("longitude"))
+        altitude_m = float(body.get("altitude_m") or 0)
+    except (TypeError, ValueError):
+        return jsonify({"success": False, "error": "Frequency, latitude, longitude, and altitude must be numbers"}), 400
+
+    if not callsign:
+        return jsonify({"success": False, "error": "Name/callsign is required"}), 400
+    if not (-90 <= latitude <= 90):
+        return jsonify({"success": False, "error": "Latitude must be between -90 and 90"}), 400
+    if not (-180 <= longitude <= 180):
+        return jsonify({"success": False, "error": "Longitude must be between -180 and 180"}), 400
+
+    device_state.add_tower_to_cache({
+        "callsign": callsign,
+        "name": callsign,
+        "frequency_mhz": frequency_mhz,
+        "latitude": latitude,
+        "longitude": longitude,
+        "altitude_m": altitude_m,
+        "source": "manual",
+    })
+    cache = device_state.get_towers_cache()
+    return jsonify({"success": True, "towers": cache["towers"], "cached_at": cache["cached_at"]})
+
+
+@bp.route("/cache/remove", methods=["POST"])
+def cache_remove():
+    """Remove a tower from the cached tower-preset list by its position."""
+    from app import device_state
+
+    body = request.get_json()
+    if not body or body.get("index") is None:
+        return jsonify({"success": False, "error": "Missing index"}), 400
+
+    try:
+        index = int(body["index"])
+    except (TypeError, ValueError):
+        return jsonify({"success": False, "error": "index must be an integer"}), 400
+
+    if not device_state.remove_tower_from_cache(index):
+        return jsonify({"success": False, "error": "Tower not found"}), 404
+
+    cache = device_state.get_towers_cache() or {}
+    return jsonify({"success": True, "towers": cache.get("towers", []), "cached_at": cache.get("cached_at")})
 
 
 @bp.route("/spectrum/events")

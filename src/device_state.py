@@ -47,6 +47,7 @@ class DeviceState:
         self.mender_conf_backup_path = mender_conf_backup_path
         self.setup_wizard_file = os.path.join(data_dir, "setup-wizard.json")
         self.setup_wizard_completed_flag = os.path.join(data_dir, "setup-wizard-completed")
+        self.towers_cache_file = os.path.join(data_dir, "towers-cache.json")
         self.dev_mode = dev_mode
 
     # ── State Queries ──────────────────────────────────────────
@@ -345,6 +346,57 @@ class DeviceState:
         """Clear wizard state (called on completion)."""
         if os.path.exists(self.setup_wizard_file):
             os.remove(self.setup_wizard_file)
+
+    def save_towers_cache(self, lat: float, lon: float, towers: list):
+        """Cache the wizard's tower-finder search results.
+
+        No expiry: broadcast tower frequencies/locations essentially never
+        change, and a re-run of the wizard's tower step just overwrites this
+        file with a fresh search.
+        """
+        self._write_towers_cache({
+            "lat": lat,
+            "lon": lon,
+            "cached_at": datetime.now().isoformat(),
+            "towers": towers,
+        })
+
+    def add_tower_to_cache(self, tower: dict):
+        """Append a manually-entered tower to the cache, creating it if none
+        exists yet (e.g. the wizard's location step was never run)."""
+        data = self.get_towers_cache() or {"lat": None, "lon": None, "towers": []}
+        data["towers"] = (data.get("towers") or []) + [tower]
+        data["cached_at"] = datetime.now().isoformat()
+        self._write_towers_cache(data)
+
+    def remove_tower_from_cache(self, index: int) -> bool:
+        """Remove a tower by its position in the cached list.
+
+        Returns False if there's no cache or the index is out of range.
+        """
+        data = self.get_towers_cache()
+        towers = (data or {}).get("towers") or []
+        if not data or not (0 <= index < len(towers)):
+            return False
+        towers.pop(index)
+        data["cached_at"] = datetime.now().isoformat()
+        self._write_towers_cache(data)
+        return True
+
+    def _write_towers_cache(self, data: dict):
+        os.makedirs(os.path.dirname(self.towers_cache_file), exist_ok=True)
+        with open(self.towers_cache_file, "w") as f:
+            json.dump(data, f)
+
+    def get_towers_cache(self) -> dict | None:
+        """Get the cached tower search results, or None if never cached."""
+        if not os.path.exists(self.towers_cache_file):
+            return None
+        try:
+            with open(self.towers_cache_file) as f:
+                return json.load(f)
+        except Exception:
+            return None
 
     def has_completed_setup_wizard(self) -> bool:
         """Whether the wizard has ever been completed on this device.

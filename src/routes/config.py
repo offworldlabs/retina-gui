@@ -22,7 +22,7 @@ def _check_wizard_not_active():
 @bp.route("/config")
 def config_page():
     """Configuration page with all settings."""
-    from app import config_mgr, ssh_keys, DEV_MODE
+    from app import config_mgr, ssh_keys, DEV_MODE, device_state
 
     config = config_mgr.load_merged_config()
     retina_installed = config_mgr.is_retina_node_installed() or DEV_MODE or request.args.get('demo') == '1'
@@ -45,6 +45,7 @@ def config_page():
                            location_fields=location_fields,
                            truth_fields=truth_fields,
                            tar1090_fields=tar1090_fields,
+                           towers_cache=device_state.get_towers_cache(),
                            ssh_keys=ssh_keys.get_keys())
 
 
@@ -104,13 +105,14 @@ def save_config():
             all_errors.update(ConfigManager.format_validation_errors(e, 'tar1090'))
 
     if all_errors:
-        from app import ssh_keys, DEV_MODE
+        from app import ssh_keys, DEV_MODE, device_state
         return render_template("config.html",
                                retina_installed=config_mgr.is_retina_node_installed() or DEV_MODE or request.args.get('demo') == '1',
                                capture_fields=schema_to_form_fields(CaptureFormConfig, capture_flat),
                                location_fields=schema_to_form_fields(LocationFormConfig, location_flat),
                                truth_fields=schema_to_form_fields(AdsbTruthConfig, truth_data),
                                tar1090_fields=schema_to_form_fields(Tar1090Config, tar1090_data),
+                               towers_cache=device_state.get_towers_cache(),
                                config_errors=all_errors,
                                ssh_keys=ssh_keys.get_keys())
 
