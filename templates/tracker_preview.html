@@ -107,8 +107,15 @@
 
         // react (not newPlot) for every update, including the first — it
         // preserves the viewer's zoom/pan across refreshes, which is the
-        // whole point of making this interactive.
+        // whole point of making this interactive. react() alone isn't
+        // actually enough for that, though: without a stable uirevision,
+        // Plotly treats each call as a fresh layout and resets the view on
+        // every refresh regardless. Any constant string works here — what
+        // matters is that it's the *same* value call to call, which is what
+        // tells Plotly "this is a data update to an existing view, not a new
+        // plot" and makes it preserve zoom/pan/legend toggles across it.
         Plotly.react(plotDiv, traces, {
+            uirevision: 'tracker-preview',
             xaxis: { title: { text: 'Delay' } },
             yaxis: { title: { text: 'Doppler (Hz)' } },
             // Legend lives below the plot, not floating over it or sharing
