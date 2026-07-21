@@ -113,6 +113,7 @@ except Exception:
     pass
 
 
+from blah2_client import Blah2Client
 from calibrator import Calibrator
 from retina_tracker_client import RetinaTrackerClient
 from tracker_capture import TrackerCaptureService
