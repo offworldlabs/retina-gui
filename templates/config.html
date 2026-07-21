@@ -92,6 +92,7 @@
         <a href="#capture">Capture</a>
         <a href="#truth">ADS-B truth</a>
         <a href="#tar1090">tar1090</a>
+        <a href="#retina-tracker">Retina Tracker</a>
         <h3>Administration</h3>
         <a href="#ssh">SSH access</a>
         <a href="#cloud">Cloud services</a>
@@ -332,6 +333,19 @@
                     {% endif %}
                 </div>
                 {% endif %}
+            </div>
+        </section>
+
+        {# ── Retina Tracker ── #}
+        <section id="retina-tracker" class="cfg-section">
+            <div class="cfg-section-head">
+                <h2>Retina Tracker</h2>
+                <span class="desc">Tuning for the retina-tracker sidecar's track confirmation.</span>
+            </div>
+            <div class="cfg-body" {% if not retina_installed %}style="opacity:.5;pointer-events:none;"{% endif %}>
+                {% for field in retina_tracker_fields %}
+                    {{ render_field(field, 'retina_tracker') }}
+                {% endfor %}
             </div>
         </section>
 

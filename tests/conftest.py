@@ -99,6 +99,9 @@ def sample_merged_config():
             'adsb_source': '192.168.8.183,30005,beast_in',
             'adsblol_fallback': True,
             'adsblol_radius': 40
+        },
+        'retina_tracker': {
+            'min_snr': 7.0
         }
     }
 

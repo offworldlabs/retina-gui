@@ -157,6 +157,7 @@ class ConfigManager:
         location = {}
         truth = {}
         tar1090 = {}
+        retina_tracker = {}
 
         for key, value in form_data.items():
             if value == '':
@@ -182,6 +183,8 @@ class ConfigManager:
                 truth[key[6:]] = parsed  # Remove 'truth.' prefix
             elif key.startswith('tar1090.'):
                 tar1090[key[8:]] = parsed  # Remove 'tar1090.' prefix
+            elif key.startswith('retina_tracker.'):
+                retina_tracker[key[15:]] = parsed  # Remove 'retina_tracker.' prefix
 
         # Handle unchecked checkboxes (they don't get submitted)
         # Only add checkbox defaults if there's other capture data (not just checkboxes)
@@ -197,7 +200,7 @@ class ConfigManager:
         if tar1090 and 'adsblol_fallback' not in tar1090:
             tar1090['adsblol_fallback'] = False
 
-        return capture, location, truth, tar1090
+        return capture, location, truth, tar1090, retina_tracker
 
     def compute_user_overrides(self, submitted_nested, merged_config, existing_user_config, section_key):
         """Compare submitted values against merged config, return only values that differ.

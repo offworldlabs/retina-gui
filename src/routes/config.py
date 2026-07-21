@@ -4,7 +4,7 @@ import subprocess
 from pydantic import ValidationError
 from config_schema import (
     AdsbTruthConfig, Tar1090Config,
-    CaptureFormConfig, LocationFormConfig,
+    CaptureFormConfig, LocationFormConfig, RetinaTrackerConfig,
 )
 from form_utils import schema_to_form_fields
 
@@ -39,12 +39,16 @@ def config_page():
     tar1090_values = config_mgr.parse_tar1090_adsb_source(config)
     tar1090_fields = schema_to_form_fields(Tar1090Config, tar1090_values)
 
+    retina_tracker_values = (config.get('retina_tracker', {}) or {})
+    retina_tracker_fields = schema_to_form_fields(RetinaTrackerConfig, retina_tracker_values)
+
     return render_template("config.html",
                            retina_installed=retina_installed,
                            capture_fields=capture_fields,
                            location_fields=location_fields,
                            truth_fields=truth_fields,
                            tar1090_fields=tar1090_fields,
+                           retina_tracker_fields=retina_tracker_fields,
                            towers_cache=device_state.get_towers_cache(),
                            ssh_keys=ssh_keys.get_keys())
 
@@ -76,7 +80,7 @@ def save_config():
     from app import config_mgr
     from config_manager import ConfigManager
 
-    capture_flat, location_flat, truth_data, tar1090_data = ConfigManager.parse_flat_form_data(request.form.to_dict())
+    capture_flat, location_flat, truth_data, tar1090_data, retina_tracker_data = ConfigManager.parse_flat_form_data(request.form.to_dict())
 
     all_errors = {}
 
@@ -104,6 +108,12 @@ def save_config():
         except ValidationError as e:
             all_errors.update(ConfigManager.format_validation_errors(e, 'tar1090'))
 
+    if retina_tracker_data:
+        try:
+            RetinaTrackerConfig(**retina_tracker_data)
+        except ValidationError as e:
+            all_errors.update(ConfigManager.format_validation_errors(e, 'retina_tracker'))
+
     if all_errors:
         from app import ssh_keys, DEV_MODE, device_state
         return render_template("config.html",
@@ -112,6 +122,7 @@ def save_config():
                                location_fields=schema_to_form_fields(LocationFormConfig, location_flat),
                                truth_fields=schema_to_form_fields(AdsbTruthConfig, truth_data),
                                tar1090_fields=schema_to_form_fields(Tar1090Config, tar1090_data),
+                               retina_tracker_fields=schema_to_form_fields(RetinaTrackerConfig, retina_tracker_data),
                                towers_cache=device_state.get_towers_cache(),
                                config_errors=all_errors,
                                ssh_keys=ssh_keys.get_keys())
@@ -133,7 +144,7 @@ def save_config():
 
     new_user_config = {}
     for key in existing_user:
-        if key not in ('capture', 'location', 'truth', 'tar1090'):
+        if key not in ('capture', 'location', 'truth', 'tar1090', 'retina_tracker'):
             new_user_config[key] = existing_user[key]
 
     if capture_flat:
@@ -156,6 +167,11 @@ def save_config():
         tar1090_overrides = config_mgr.compute_user_overrides(tar1090_nested, merged_config, existing_user, 'tar1090')
         if tar1090_overrides:
             new_user_config['tar1090'] = tar1090_overrides
+
+    if retina_tracker_data:
+        retina_tracker_overrides = config_mgr.compute_user_overrides(retina_tracker_data, merged_config, existing_user, 'retina_tracker')
+        if retina_tracker_overrides:
+            new_user_config['retina_tracker'] = retina_tracker_overrides
 
     config_mgr.save_user_config(new_user_config)
     return redirect(url_for("config.config_page") + "?saved=1")
