@@ -367,3 +367,61 @@ class TestSetupWizardState:
         with open(ds.setup_wizard_file, "w") as f:
             f.write("not json")
         assert ds.get_setup_wizard_step() is None
+
+
+class TestTowersCache:
+    """Test the tower-preset cache: search-populated, manually added/removed."""
+
+    def test_get_returns_none_when_never_cached(self, ds):
+        assert ds.get_towers_cache() is None
+
+    def test_save_and_get(self, ds):
+        ds.save_towers_cache(-33.8688, 151.2093, [{"callsign": "A", "frequency_mhz": 100.0}])
+        cache = ds.get_towers_cache()
+        assert cache["lat"] == -33.8688
+        assert cache["lon"] == 151.2093
+        assert cache["towers"] == [{"callsign": "A", "frequency_mhz": 100.0}]
+
+    def test_save_overwrites_previous_search(self, ds):
+        ds.save_towers_cache(1, 1, [{"callsign": "Old", "frequency_mhz": 1.0}])
+        ds.save_towers_cache(2, 2, [{"callsign": "New", "frequency_mhz": 2.0}])
+        cache = ds.get_towers_cache()
+        assert cache["lat"] == 2
+        assert len(cache["towers"]) == 1
+        assert cache["towers"][0]["callsign"] == "New"
+
+    def test_add_tower_creates_cache_when_none_exists(self, ds):
+        ds.add_tower_to_cache({"callsign": "Manual", "frequency_mhz": 95.5})
+        cache = ds.get_towers_cache()
+        assert cache["towers"] == [{"callsign": "Manual", "frequency_mhz": 95.5}]
+        assert cache["lat"] is None
+
+    def test_add_tower_appends_to_existing_cache(self, ds):
+        ds.save_towers_cache(1, 1, [{"callsign": "A", "frequency_mhz": 100.0}])
+        ds.add_tower_to_cache({"callsign": "B", "frequency_mhz": 200.0})
+        towers = ds.get_towers_cache()["towers"]
+        assert [t["callsign"] for t in towers] == ["A", "B"]
+
+    def test_remove_tower_by_index(self, ds):
+        ds.save_towers_cache(1, 1, [
+            {"callsign": "A", "frequency_mhz": 100.0},
+            {"callsign": "B", "frequency_mhz": 200.0},
+        ])
+        removed = ds.remove_tower_from_cache(0)
+        assert removed is True
+        towers = ds.get_towers_cache()["towers"]
+        assert [t["callsign"] for t in towers] == ["B"]
+
+    def test_remove_tower_out_of_range_returns_false(self, ds):
+        ds.save_towers_cache(1, 1, [{"callsign": "A", "frequency_mhz": 100.0}])
+        assert ds.remove_tower_from_cache(5) is False
+        assert len(ds.get_towers_cache()["towers"]) == 1
+
+    def test_remove_tower_with_no_cache_returns_false(self, ds):
+        assert ds.remove_tower_from_cache(0) is False
+
+    def test_malformed_cache_file_treated_as_none(self, ds):
+        os.makedirs(os.path.dirname(ds.towers_cache_file), exist_ok=True)
+        with open(ds.towers_cache_file, "w") as f:
+            f.write("not json")
+        assert ds.get_towers_cache() is None
