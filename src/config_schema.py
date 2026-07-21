@@ -163,6 +163,19 @@ class AdsbTruthConfig(BaseModel):
 
 
 # ============================================================================
+# retina-tracker Settings
+# ============================================================================
+
+class RetinaTrackerConfig(BaseModel):
+    """retina-tracker sidecar settings (flat for form display).
+
+    Unrelated to blah2's own built-in tracker (process.tracker in
+    capture config) - this tunes github.com/offworldlabs/retina-tracker.
+    """
+    min_snr: float = Field(gt=0, title="Minimum SNR", description="dB. Detections below this are discarded before tracking even begins - too high and the tracker will never confirm a track. Tune to this node's real noise floor.")
+
+
+# ============================================================================
 # tar1090 Settings
 # ============================================================================
 
