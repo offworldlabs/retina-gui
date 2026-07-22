@@ -1,33 +1,52 @@
 """Auto-Calibrate: tune tower/fc, per-tuner gain and LNA state until a track
 confirms.
 
-Strategy ("good, not best"): for each candidate tower, start at maximum gain
-(minimum gain reduction, minimum LNA attenuation), back off in big steps
-until the RF front end runs clean, then dwell at that setting waiting for a
-confirmed track. A confirmed track needs a real aircraft overhead, so dwell
-time dominates the run — the search minimises the number of dwells, not the
-granularity of the gain grid.
+Strategy ("good, not best"): for each candidate tower, start at the *safe*
+end of the gain range (maximum gain reduction, minimum LNA attenuation) —
+never at maximum gain — and step toward more sensitivity in big increments,
+reverting to the last clean step the instant the RF front end overloads,
+then dwell at that setting waiting for a confirmed track. A confirmed track
+needs a real aircraft overhead, so dwell time dominates the run — the search
+minimises the number of dwells, not the granularity of the gain grid.
+
+Starting at the safe end is not a style choice: this search always runs
+with the SDR's hardware AGC disabled (see routes/calibrate.py's AGC guard —
+AGC would otherwise fight the manual gain search), which means there is no
+hardware-level protection against overload at all while a run is in
+progress. Hardware AGC protects the ADC continuously, at hardware speed;
+this software-driven search only checks in every OVERLOAD_SETTLE_SECONDS.
+An earlier version of this search started cold at maximum gain (minimum
+reduction) on the assumption that a couple of seconds at an overloaded
+setting was merely a stability inconvenience to correct after the fact —
+confirmed wrong on a real deployment near a strong broadcast tower, where
+that combination (AGC off, gain pinned at maximum sensitivity) left the
+front end unprotected for long enough to destabilise the SDRplay device
+itself, not just log an overload. Approaching risk from the safe side and
+reverting on the very first sign of trouble bounds the worst-case exposure
+to one step beyond an already-proven-clean value, every time.
 
 Three search variables, adjusted in a fixed priority order per tower (see
 _descend_reference/_descend_surveillance/_descend):
-  1. Reference gain reduction (tuner A) — descend only, no refine. The
-     reference channel just needs to capture the illuminator cleanly; the
-     goal is simply the highest gain that doesn't clip.
-  2. Surveillance gain reduction (tuner B) — descend, then one refine step
-     (claw back 5dB, revert if it re-overloads). This is where MODE_ADSB's
+  1. Reference gain reduction (tuner A) — walks toward more gain only, no
+     refine. The reference channel just needs to capture the illuminator
+     cleanly; the goal is simply the highest gain that doesn't clip.
+  2. Surveillance gain reduction (tuner B) — walks toward more gain, then
+     one refine step once a revert has happened (claw back 5dB, revert
+     again if that re-overloads). This is where MODE_ADSB's
      sensitivity-cycling picks up from (see _dwell_adsb).
   3. LNA state — shared across both tuners (the SDRplay device has no
      per-tuner LNA control). Only touched if gain reduction alone can't
-     clear an overload (i.e. still clipping at gRdB's 59dB ceiling) — gRdB
-     is a downstream/IF-stage control, so it cannot fix a front end that's
-     genuinely saturating on a very strong signal; LNA state (an upstream,
-     RF-stage control) is the escalation path for that. Higher LNA state
-     number means more attenuation, less gain (state 1 = max gain, state 9
-     = min gain — see RspDuo/README.md in blah2-arm). Escalating LNA state
-     resets *only* whichever channel(s) triggered the escalation back to
-     20dB and redescends fresh — a channel that's already clean is left
-     untouched, since more attenuation upstream can never newly overload a
-     channel that wasn't already clipping.
+     clear an overload (i.e. still clipping even at gRdB's safest, 59dB
+     ceiling) — gRdB is a downstream/IF-stage control, so it cannot fix a
+     front end that's genuinely saturating on a very strong signal; LNA
+     state (an upstream, RF-stage control) is the escalation path for
+     that. Higher LNA state number means more attenuation, less gain
+     (state 1 = max gain, state 9 = min gain — see RspDuo/README.md in
+     blah2-arm). Escalating LNA state resets *only* whichever channel(s)
+     triggered the escalation back to the safe ceiling (59dB) and
+     redescends fresh — a channel that's already clean is left untouched,
+     since more attenuation upstream can never newly overload a channel
+     that wasn't already clipping.
 
 Track confirmation goes through the same retina-tracker sidecar container
 tracker-preview uses (github.com/offworldlabs/retina-tracker, run as its own
@@ -394,49 +413,76 @@ class Calibrator:
         (see module docstring: reference just wants "as hot as possible
         without clipping", not surveillance's finer optimisation).
 
+        Starts at the safe ceiling (GAIN_REDUCTION_MAX) and steps toward
+        more gain while clean, reverting to the last settled-clean value
+        the instant overload appears — see module docstring for why this
+        can never start cold at a risky (low-reduction) value.
+
         Returns (gain_a, applied_at_ms, still_overloaded).
         """
-        gain_a = GAIN_REDUCTION_MIN
+        gain_a = GAIN_REDUCTION_MAX
+        clean_gain_a = None
         applied_at = self._apply(fc, gain_a, gain_b, lna_state)
         while True:
             self._sleep(OVERLOAD_SETTLE_SECONDS)
             overload_a, _ = self._read_overload(applied_at)
             descent_log.append({"phase": "reference", "gain_a": gain_a,
                                 "lna_state": lna_state, "overload_a": overload_a})
-            if not overload_a:
+            if overload_a:
+                if clean_gain_a is None:
+                    # Overloaded even at the safety ceiling — gain reduction
+                    # alone can't clear this; caller escalates LNA state.
+                    return gain_a, applied_at, True
+                # Never leave the hardware sitting at the overloaded
+                # candidate — revert to the last proven-clean value.
+                applied_at = self._apply(fc, clean_gain_a, gain_b, lna_state)
+                descent_log.append({"phase": "reference_revert", "gain_a": clean_gain_a,
+                                    "lna_state": lna_state, "reverted_from": gain_a})
+                self._set_current(gain_a=clean_gain_a)
+                return clean_gain_a, applied_at, False
+            clean_gain_a = gain_a
+            if gain_a <= GAIN_REDUCTION_MIN or time.monotonic() >= deadline:
                 return gain_a, applied_at, False
-            if gain_a >= GAIN_REDUCTION_MAX or time.monotonic() >= deadline:
-                return gain_a, applied_at, True
-            gain_a = min(gain_a + DESCENT_STEP_DB, GAIN_REDUCTION_MAX)
+            gain_a = max(gain_a - DESCENT_STEP_DB, GAIN_REDUCTION_MIN)
             self._set_current(gain_a=gain_a)
             applied_at = self._apply(fc, gain_a, gain_b, lna_state)
 
     def _descend_surveillance(self, fc, gain_a, lna_state, descent_log, deadline):
         """Find the highest clean gain for the surveillance tuner (B) only,
         at a fixed lna_state and fixed (already-resolved) gain_a. Same
-        backoff pattern as reference, plus one refine step once clean
-        (claw back REFINE_STEP_DB, revert if it re-overloads).
+        safe-ceiling-first pattern as reference, plus one refine step once
+        a revert has happened (claw back REFINE_STEP_DB, revert if it
+        re-overloads).
 
         Returns (gain_b, applied_at_ms, still_overloaded).
         """
-        gain_b = GAIN_REDUCTION_MIN
-        backed_b = False
+        gain_b = GAIN_REDUCTION_MAX
+        clean_gain_b = None
+        reverted = False
         applied_at = self._apply(fc, gain_a, gain_b, lna_state)
         while True:
             self._sleep(OVERLOAD_SETTLE_SECONDS)
             _, overload_b = self._read_overload(applied_at)
             descent_log.append({"phase": "surveillance", "gain_b": gain_b,
                                 "lna_state": lna_state, "overload_b": overload_b})
-            if not overload_b:
+            if overload_b:
+                if clean_gain_b is None:
+                    return gain_b, applied_at, True
+                applied_at = self._apply(fc, gain_a, clean_gain_b, lna_state)
+                descent_log.append({"phase": "surveillance_revert", "gain_b": clean_gain_b,
+                                    "lna_state": lna_state, "reverted_from": gain_b})
+                gain_b = clean_gain_b
+                reverted = True
+                self._set_current(gain_b=gain_b)
                 break
-            if gain_b >= GAIN_REDUCTION_MAX or time.monotonic() >= deadline:
-                return gain_b, applied_at, True
-            gain_b = min(gain_b + DESCENT_STEP_DB, GAIN_REDUCTION_MAX)
+            clean_gain_b = gain_b
+            if gain_b <= GAIN_REDUCTION_MIN or time.monotonic() >= deadline:
+                break
+            gain_b = max(gain_b - DESCENT_STEP_DB, GAIN_REDUCTION_MIN)
             self._set_current(gain_b=gain_b)
             applied_at = self._apply(fc, gain_a, gain_b, lna_state)
-            backed_b = True
 
-        if backed_b and time.monotonic() < deadline:
+        if reverted and time.monotonic() < deadline:
             refine_b = max(gain_b - REFINE_STEP_DB, GAIN_REDUCTION_MIN)
             self._update(phase="refining")
             self._set_current(gain_b=refine_b)
@@ -468,9 +514,9 @@ class Calibrator:
         """
         lna_state = LNA_STATE_MIN
         gain_a, applied_at, overload_a = self._descend_reference(
-            fc, GAIN_REDUCTION_MIN, lna_state, descent_log, deadline)
+            fc, GAIN_REDUCTION_MAX, lna_state, descent_log, deadline)
 
-        gain_b, overload_b = GAIN_REDUCTION_MIN, False
+        gain_b, overload_b = GAIN_REDUCTION_MAX, False
         if time.monotonic() < deadline:
             gain_b, applied_at, overload_b = self._descend_surveillance(
                 fc, gain_a, lna_state, descent_log, deadline)
@@ -573,7 +619,16 @@ class Calibrator:
             overload_a, overload_b = self._read_overload(applied_at)
             gains_tried.append({"gain_b": gain_b, "overload_b": overload_b})
             if overload_b:
-                break  # more sensitivity than this isn't usable here
+                # More sensitivity than this isn't usable here — never leave
+                # the hardware sitting at the overloaded candidate. A prior
+                # entry normally exists (the first candidate is descent's
+                # already-validated-clean initial_gain_b), but guard anyway
+                # in case RF conditions shifted since descent resolved it.
+                if len(gains_tried) > 1:
+                    previous_gain_b = gains_tried[-2]["gain_b"]
+                    self._apply(fc, gain_a, previous_gain_b, lna_state)
+                    self._set_current(gain_b=previous_gain_b)
+                break
 
             aircraft_seen = False
             last_timestamp = None
@@ -674,8 +729,8 @@ class Calibrator:
                 fc = int(tower["fc"])
                 self._update(phase="descending")
                 self._set_current(tower_index=index, tower_name=tower.get("name"),
-                                  fc=fc, gain_a=GAIN_REDUCTION_MIN,
-                                  gain_b=GAIN_REDUCTION_MIN, lna_state=LNA_STATE_MIN)
+                                  fc=fc, gain_a=GAIN_REDUCTION_MAX,
+                                  gain_b=GAIN_REDUCTION_MAX, lna_state=LNA_STATE_MIN)
                 # New geometry — a track confirmed at the previous tower (or
                 # an earlier gain candidate at this one) means nothing here.
                 self._tracker_client.reset()
