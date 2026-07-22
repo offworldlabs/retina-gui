@@ -17,7 +17,12 @@ import time
 
 
 class RetinaTrackerClient:
-    """Best-effort TCP sender + JSONL file tailer for retina-tracker."""
+    """Best-effort TCP sender + JSONL file tailer for retina-tracker.
+
+    The sidecar's TCP server accepts one connection at a time, so every
+    feature that talks to a given sidecar (tracker-preview, Auto-Calibrate)
+    must share the same client instance rather than each opening their own
+    connection — see add_listener()."""
 
     def __init__(self, host, port, events_path, poll_interval=0.2, connect_timeout=3):
         self._host = host
@@ -29,6 +34,8 @@ class RetinaTrackerClient:
         self._sock = None
         self._tail_thread = None
         self._stop = threading.Event()
+        self._listeners = []
+        self._listeners_lock = threading.Lock()
 
     # ── Sending frames ─────────────────────────────────────────
 
@@ -53,6 +60,15 @@ class RetinaTrackerClient:
                 except OSError:
                     self._close_sock()
 
+    def reset(self):
+        """Tell the sidecar to clear its Tracker's in-progress and completed
+        state in place (see retina_tracker/tracker.py::Tracker.reset()) —
+        used by Auto-Calibrate between candidate towers, since a confirmed
+        track only means something at the geometry (fc/tx position) it was
+        seen at. A real detection frame never carries a "type" key, so this
+        can never be mistaken for one."""
+        self.send_frame({"type": "RESET"})
+
     def _connect(self):
         try:
             self._sock = socket.create_connection(
@@ -73,13 +89,22 @@ class RetinaTrackerClient:
     # ── Tailing track events ───────────────────────────────────
 
     def start(self, on_event):
-        """Begin tailing the events file on a background thread, calling
-        on_event(event_dict) for each new JSONL line. Call once."""
+        """Back-compat alias for add_listener()."""
+        self.add_listener(on_event)
+
+    def add_listener(self, on_event):
+        """Register on_event(event_dict) to be called for every new JSONL
+        line tailed from the events file. Multiple listeners are supported
+        (e.g. tracker-preview and Auto-Calibrate both tailing the same
+        sidecar's output) — the tail thread itself is started once, on the
+        first call."""
+        with self._listeners_lock:
+            self._listeners.append(on_event)
         if self._tail_thread is not None and self._tail_thread.is_alive():
             return
         self._stop.clear()
         self._tail_thread = threading.Thread(
-            target=self._tail_loop, args=(on_event,), daemon=True)
+            target=self._tail_loop, daemon=True)
         self._tail_thread.start()
 
     def stop(self):
@@ -87,7 +112,7 @@ class RetinaTrackerClient:
         with self._send_lock:
             self._close_sock()
 
-    def _tail_loop(self, on_event):
+    def _tail_loop(self):
         # Start from current EOF, not 0 — a fresh attach shouldn't replay
         # a run's entire history, only events from here on.
         try:
@@ -132,6 +157,9 @@ class RetinaTrackerClient:
                         event = json.loads(raw_line.decode("utf-8"))
                     except (UnicodeDecodeError, json.JSONDecodeError):
                         continue
-                    on_event(event)
+                    with self._listeners_lock:
+                        listeners = list(self._listeners)
+                    for listener in listeners:
+                        listener(event)
 
             time.sleep(self._poll_interval)

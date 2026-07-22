@@ -6,7 +6,6 @@ import requests as http_requests
 from calibrator import (
     GAIN_REDUCTION_MIN, GAIN_REDUCTION_MAX, LNA_STATE_MIN, LNA_STATE_MAX,
     MODE_TRACK, MODE_ADSB, VALID_MODES,
-    DEFAULT_ADSB_DELAY_TOLERANCE, DEFAULT_ADSB_DOPPLER_TOLERANCE,
 )
 
 bp = Blueprint('calibrate', __name__, url_prefix='/calibrate')
@@ -137,22 +136,16 @@ def start():
     if mode not in VALID_MODES:
         return jsonify({"success": False, "error": f"Invalid mode: {mode}"}), 400
     if mode == MODE_ADSB:
-        # Benched for now — the engine code is deliberately left in place
-        # (stale, still on blah2's own tracker) to revisit later, but it
-        # isn't available to users. See calibrator.py's module docstring.
+        # Engine support is complete (see calibrator.py's module docstring),
+        # but exposing it to users is a separate decision not yet made.
         return jsonify({"success": False,
                         "error": "ADS-B verified mode is not currently available"}), 409
-
-    adsb_delay_tolerance = DEFAULT_ADSB_DELAY_TOLERANCE
-    adsb_doppler_tolerance = DEFAULT_ADSB_DOPPLER_TOLERANCE
 
     if not device_state.acquire_calibration_lock():
         return jsonify({"success": False,
                         "error": "Auto-calibration already in progress"}), 409
 
-    started, error = calibrator.start(towers, original, mode=mode,
-                                      adsb_delay_tolerance=adsb_delay_tolerance,
-                                      adsb_doppler_tolerance=adsb_doppler_tolerance)
+    started, error = calibrator.start(towers, original, mode=mode)
     if not started:
         device_state.release_calibration_lock()
         return jsonify({"success": False, "error": error}), 409

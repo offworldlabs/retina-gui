@@ -29,36 +29,50 @@ _descend_reference/_descend_surveillance/_descend):
      untouched, since more attenuation upstream can never newly overload a
      channel that wasn't already clipping.
 
-Track confirmation runs entirely in this process: a fresh retina-tracker
-(github.com/offworldlabs/retina-tracker) Tracker instance per tower is fed
-the same detection frames already being polled, and its own ACTIVE state is
-the success signal — not blah2's own built-in tracker, which the client has
-found to be unreliable on real data. Reset scope is per-tower only (matching
-blah2's own fc-triggered reset): since any confirmed track ends the search
-immediately, finer-grained reset scope has no effect on correctness.
+Track confirmation goes through the same retina-tracker sidecar container
+tracker-preview uses (github.com/offworldlabs/retina-tracker, run as its own
+process — see retina_tracker_client.py), not a tracker built in-process here
+or blah2's own built-in tracker, which the client has found unreliable on
+real data. That sidecar's TCP server accepts one connection at a time, so
+every detection frame is pushed to it via the shared RetinaTrackerClient's
+send_frame() and confirmed-track events are received through a listener
+callback (_on_track_event) registered once with that same client — the one
+tracker-preview already tails. Because a confirmed track from one candidate
+tower is physically meaningless at another (different fc/tx position means
+different delay/Doppler geometry), a {"type": "RESET"} message clears the
+sidecar's tracker in place before each tower's descent+dwell (see
+RetinaTrackerClient.reset()) — mirroring blah2's own fc-triggered tracker
+reset. Reset scope is per-tower only: since any confirmed track ends the
+search immediately, finer-grained reset scope has no effect on correctness.
+Evidence grading is coarser than an in-process tracker could offer
+(EVIDENCE_NONE/DETECTIONS/ACTIVE only, no tentative/associated distinction)
+— the sidecar's events stream only reports confirmed (ACTIVE) tracks, the
+same visibility tracker-preview itself has.
 
 Two success modes, with genuinely different dwell strategies:
-  - MODE_TRACK (default): any track reaching ASSOCIATED/ACTIVE state
-    (nActive > 0) counts as success. No independent way to tell "bad gain"
-    from "no aircraft right now", so this mode is time-boxed — each tower
-    gets a fair share of the overall budget (see _run) and gives up when
-    that runs out.
-  - MODE_ADSB: a confirmed track only counts if its delay/doppler also
-    matches a real aircraft's expected position (from blah2_api's
-    /api/adsb2dd, computed for the node's actual rx/tx geometry and fc).
-    Because that gives an independent, ground-truth answer to "is there
-    even anything to detect right now", this mode has **no time division**
-    (see _dwell_adsb): it waits for an ADS-B-confirmed aircraft with no
-    timeout — absence of traffic is never the search's fault — and only
-    treats a candidate as failed once a real aircraft was actually in range
-    and still went unmatched. Gain then steps toward more sensitivity and
-    tries again; once gain candidates for a tower are exhausted (floor or
-    re-overload), the run moves to the next tower.
+  - MODE_TRACK (default): any confirmed-track event counts as success (the
+    sidecar only ever emits one once a track has been promoted to ACTIVE —
+    see retina_tracker/tracker.py::process_frame). No independent way to
+    tell "bad gain" from "no aircraft right now", so this mode is
+    time-boxed — each tower gets a fair share of the overall budget (see
+    _run) and gives up when that runs out.
+  - MODE_ADSB: a confirmed-track event only counts if the sidecar's own
+    tracker matched it to a real aircraft (retina-tracker's Track class does
+    this matching natively, from the same per-detection "adsb" field
+    blah2_api already attaches to /api/detection when truth.adsb.enabled —
+    see _dwell_adsb) — an event carrying a non-null adsb_hex is the success
+    signal. Because that gives an independent, ground-truth answer to "is
+    there even anything to detect right now", this mode has **no time
+    division** (see _dwell_adsb): it waits for an ADS-B-confirmed aircraft
+    with no timeout — absence of traffic is never the search's fault — and
+    only treats a candidate as failed once a real aircraft was actually in
+    range and still went unmatched. Gain then steps toward more sensitivity
+    and tries again; once gain candidates for a tower are exhausted (floor
+    or re-overload), the run moves to the next tower.
 
-    MODE_ADSB is currently benched — deliberately left stale (still using
-    blah2's own tracker, not migrated to retina-tracker) and blocked at the
-    route level (routes/calibrate.py) so it isn't reachable by users. Kept
-    in place rather than removed since it's meant to be revisited later.
+    The engine supports MODE_ADSB fully, but routes/calibrate.py still
+    rejects mode=adsb at the /start endpoint — exposing it to users is a
+    separate decision not yet made.
 
 Nothing is written to user.yml during a run; candidates are applied via
 blah2's live retune channel only. On any non-success terminal state the
@@ -74,9 +88,6 @@ import copy
 import threading
 import time
 from datetime import datetime, timezone
-
-from retina_tracker.config import get_config as get_retina_tracker_config
-from retina_tracker.tracker import Tracker as RetinaTracker
 
 # Gain reduction bounds (dB) — mirror blah2's RspDuo limits.
 GAIN_REDUCTION_MIN = 20
@@ -130,27 +141,20 @@ MODE_TRACK = "track"
 MODE_ADSB = "adsb"
 VALID_MODES = (MODE_TRACK, MODE_ADSB)
 
-# ADS-B match tolerances (dB/Hz-ish units matching blah2's own delay/doppler
-# bins) — overridden from the node's truth.adsb.* config by routes/calibrate.py;
-# these are just sane fallbacks for direct/test use.
-DEFAULT_ADSB_DELAY_TOLERANCE = 2.0
-DEFAULT_ADSB_DOPPLER_TOLERANCE = 5.0
-
 # Track-evidence levels, worst to best, for ranking best attempts. Mode-
-# agnostic — always reflects how far blah2's own tracker got; MODE_ADSB
+# agnostic — always reflects how far the sidecar's tracker got; MODE_ADSB
 # layers an additional match requirement on top for success specifically
-# (see _dwell), not a different evidence scale.
+# (see _dwell_adsb), not a different evidence scale. Coarser than an
+# in-process tracker could offer: the sidecar's events stream only reports
+# confirmed (ACTIVE) tracks, so there's no tentative/associated distinction
+# visible from out here.
 EVIDENCE_NONE = 0
 EVIDENCE_DETECTIONS = 1
-EVIDENCE_TENTATIVE = 2
-EVIDENCE_ASSOCIATED = 3
-EVIDENCE_ACTIVE = 4
+EVIDENCE_ACTIVE = 2
 
 EVIDENCE_LABELS = {
     EVIDENCE_NONE: "no detections seen",
-    EVIDENCE_DETECTIONS: "detections seen, no track initiated",
-    EVIDENCE_TENTATIVE: "tentative tracks initiated, none associated",
-    EVIDENCE_ASSOCIATED: "tracks associated, none confirmed",
+    EVIDENCE_DETECTIONS: "detections seen, no confirmed track",
     EVIDENCE_ACTIVE: "confirmed track",
 }
 
@@ -167,17 +171,6 @@ def _utcnow():
     return datetime.now(timezone.utc).isoformat()
 
 
-def _frame_to_detections(frame):
-    """Convert a Blah2Client.get_detection() frame into retina-tracker's
-    per-detection dicts. Mirrors retina_tracker's own
-    server.py::process_streaming_frame conversion."""
-    delays = frame.get("delay", [])
-    dopplers = frame.get("doppler", [])
-    snrs = frame.get("snr", [])
-    return [{"delay": delay, "doppler": doppler, "snr": snr}
-            for delay, doppler, snr in zip(delays, dopplers, snrs)]
-
-
 class Calibrator:
     """Runs the calibration search in a background thread.
 
@@ -186,12 +179,21 @@ class Calibrator:
     DeviceState and is managed by the caller (routes/calibrate.py).
     """
 
-    def __init__(self, blah2_client):
+    def __init__(self, blah2_client, retina_tracker_client):
         self._client = blah2_client
+        self._tracker_client = retina_tracker_client
         self._lock = threading.Lock()
         self._cancel = threading.Event()
         self._thread = None
         self._status = self._idle_status()
+        # Latest confirmed-track event the sidecar has emitted (see
+        # _on_track_event) — read via _take_confirmed_event().
+        self._last_confirmed_event = None
+        # Deferred to start() rather than done here: __init__ runs at app
+        # boot regardless of whether a run ever happens, and registering
+        # eagerly would start retina_tracker_client's tail thread that early
+        # too (see app.py's own tracker_capture.start() pytest-leak note).
+        self._listener_registered = False
         # Called with the final status dict when a run reaches a terminal
         # state (telemetry hook). Exceptions are swallowed.
         self.on_complete = None
@@ -231,9 +233,7 @@ class Calibrator:
         return status
 
     def start(self, towers, original, budget_seconds=TOTAL_BUDGET_SECONDS,
-              dwell_seconds=None, mode=MODE_TRACK,
-              adsb_delay_tolerance=DEFAULT_ADSB_DELAY_TOLERANCE,
-              adsb_doppler_tolerance=DEFAULT_ADSB_DOPPLER_TOLERANCE):
+              dwell_seconds=None, mode=MODE_TRACK):
         """Start a run. Returns (started, error).
 
         towers: list of {"name": str, "fc": int Hz} — first entry is dwelt on
@@ -244,7 +244,9 @@ class Calibrator:
         Leave as None to divide the remaining time evenly across the
         remaining towers each time a new tower starts (the production path).
         mode: MODE_TRACK (any confirmed track) or MODE_ADSB (confirmed track
-        that also matches a real aircraft's expected position). Callers are
+        that also matches a real aircraft's expected position, per the
+        node's own truth.adsb.delay_tolerance/doppler_tolerance config — the
+        sidecar's tracker applies these, not this class). Callers are
         responsible for checking truth.adsb.enabled before using MODE_ADSB —
         this class doesn't have access to the node's config.
         """
@@ -254,6 +256,10 @@ class Calibrator:
             return False, "No candidate towers"
         if mode not in VALID_MODES:
             return False, f"Invalid mode: {mode}"
+
+        if not self._listener_registered:
+            self._tracker_client.add_listener(self._on_track_event)
+            self._listener_registered = True
 
         with self._lock:
             self._status = self._idle_status()
@@ -272,8 +278,7 @@ class Calibrator:
         self._cancel.clear()
         self._thread = threading.Thread(
             target=self._run, args=(list(towers), dict(original),
-                                    budget_seconds, dwell_seconds, mode,
-                                    adsb_delay_tolerance, adsb_doppler_tolerance),
+                                    budget_seconds, dwell_seconds, mode),
             daemon=True)
         self._thread.start()
         return True, None
@@ -309,6 +314,31 @@ class Calibrator:
         while time.monotonic() < deadline:
             self._check_cancel(ignore_cancel=ignore_cancel)
             time.sleep(min(0.2, max(0.0, deadline - time.monotonic())))
+
+    # ── retina-tracker sidecar events ───────────────────────────
+
+    def _on_track_event(self, event):
+        """Registered once (see start()) with the shared RetinaTrackerClient.
+        Runs on its tail thread, not the calibration thread. The sidecar
+        only ever emits an event for a track that already has an id, which
+        it only assigns on ACTIVE promotion (see
+        retina_tracker/tracker.py::process_frame) — so receiving an event at
+        all already means "confirmed", nothing further to check here."""
+        with self._lock:
+            self._last_confirmed_event = event
+
+    def _take_confirmed_event(self, min_timestamp):
+        """The latest confirmed event, if it's no older than min_timestamp
+        (normally the current candidate's applied_at). Guards against a
+        confirmed event generated by a previous, now-irrelevant tower or
+        gain candidate still being in flight — the tail thread polls the
+        sidecar's output file on its own schedule, independent of when we
+        move on to the next candidate."""
+        with self._lock:
+            event = self._last_confirmed_event
+        if event is not None and event.get("timestamp", 0) >= min_timestamp:
+            return event
+        return None
 
     # ── Retune protocol ────────────────────────────────────────
 
@@ -460,16 +490,13 @@ class Calibrator:
         return gain_a, gain_b, lna_state, applied_at
 
     def _dwell(self, tower, fc, gain_a, gain_b, lna_state, applied_at, dwell_deadline,
-               tower_entry, tracker):
-        """MODE_TRACK's dwell: feed live detections through a local
-        retina-tracker instance (see module docstring for why — blah2's own
-        tracker is not trusted here) until it confirms an ACTIVE track, or
-        dwell_deadline passes. Returns a result dict on success, None if the
-        dwell budget expires. (MODE_ADSB uses _dwell_adsb instead, still on
-        blah2's own tracker — see the module docstring.)
-
-        tracker: a fresh retina_tracker.Tracker for this tower (reset scope
-        is per-tower, not per-gain-candidate — see module docstring).
+               tower_entry):
+        """MODE_TRACK's dwell: push live detections to the shared
+        retina-tracker sidecar (see module docstring for why — blah2's own
+        tracker is not trusted here) and wait for it to emit a confirmed
+        (ACTIVE) track event, or dwell_deadline passes. Returns a result
+        dict on success, None if the dwell budget expires. (MODE_ADSB uses
+        _dwell_adsb instead — see the module docstring.)
         """
         self._update(phase="dwelling")
         max_evidence = EVIDENCE_NONE
@@ -484,27 +511,22 @@ class Calibrator:
             if (detection and timestamp != last_timestamp
                     and timestamp is not None and timestamp >= applied_at):
                 last_timestamp = timestamp
-                frame_detections = _frame_to_detections(detection)
-                tracker.process_frame(frame_detections, timestamp)
+                self._tracker_client.send_frame(detection)
 
-                if frame_detections:
+                delays = detection.get("delay") or []
+                if delays:
                     max_evidence = max(max_evidence, EVIDENCE_DETECTIONS)
-                    max_detections = max(max_detections, len(frame_detections))
+                    max_detections = max(max_detections, len(delays))
 
-                active_tracks = tracker.get_active_tracks()
-                if active_tracks:
-                    tower_entry["outcome"] = "confirmed_track"
-                    tower_entry["max_evidence"] = EVIDENCE_ACTIVE
-                    return {
-                        "tower_name": tower.get("name"), "fc": fc,
-                        "gain_a": gain_a, "gain_b": gain_b,
-                        "track_id": active_tracks[0].id,
-                    }
-                elif any(t.state_status.name in ("ASSOCIATED", "COASTING")
-                         for t in tracker.tracks):
-                    max_evidence = max(max_evidence, EVIDENCE_ASSOCIATED)
-                elif tracker.tracks:
-                    max_evidence = max(max_evidence, EVIDENCE_TENTATIVE)
+            confirmed = self._take_confirmed_event(applied_at)
+            if confirmed is not None:
+                tower_entry["outcome"] = "confirmed_track"
+                tower_entry["max_evidence"] = EVIDENCE_ACTIVE
+                return {
+                    "tower_name": tower.get("name"), "fc": fc,
+                    "gain_a": gain_a, "gain_b": gain_b,
+                    "track_id": confirmed.get("track_id"),
+                }
 
             self._maybe_update_best_attempt(tower, fc, gain_a, gain_b, lna_state,
                                             max_evidence, max_detections)
@@ -515,18 +537,23 @@ class Calibrator:
         tower_entry["max_detections"] = max_detections
         return None
 
-    def _dwell_adsb(self, tower, fc, gain_a, initial_gain_b, lna_state, tower_entry,
-                     adsb_delay_tolerance, adsb_doppler_tolerance):
+    def _dwell_adsb(self, tower, fc, gain_a, initial_gain_b, lna_state, tower_entry):
         """MODE_ADSB's dwell: no time budget. Starting from descent's clean
         (no-overload) gainReductionB, wait for ADS-B truth to confirm a real
         aircraft is actually observable — unbounded, since no traffic isn't
-        a tuning problem — then keep checking every poll for a matching
-        confirmed track for as long as some aircraft stays in range. If
-        every aircraft that showed up leaves again unmatched, that gain
-        candidate has had its genuine chance: step gainReductionB toward
-        max sensitivity (re-checking overload first) and try again. Returns
-        a result dict on success, None once candidates are exhausted for
-        this tower (sensitivity floor or re-overload).
+        a tuning problem — then keep checking every poll for a confirmed
+        track that also matches a real aircraft, for as long as some
+        aircraft stays in range. The match itself is done by the sidecar's
+        own tracker natively (retina-tracker's Track class initialises from
+        a detection's "adsb" field — populated per-detection by blah2_api's
+        /api/detection when truth.adsb.enabled, using the node's own
+        truth.adsb.delay_tolerance/doppler_tolerance — so a confirmed event
+        carrying a non-null adsb_hex already is the match). If every
+        aircraft that showed up leaves again unmatched, that gain candidate
+        has had its genuine chance: step gainReductionB toward max
+        sensitivity (re-checking overload first) and try again. Returns a
+        result dict on success, None once candidates are exhausted for this
+        tower (sensitivity floor or re-overload).
 
         gainReductionA stays fixed at descent's value throughout — it's the
         surveillance channel (B) whose sensitivity determines whether a
@@ -549,54 +576,46 @@ class Calibrator:
                 break  # more sensitivity than this isn't usable here
 
             aircraft_seen = False
+            last_timestamp = None
             while True:
                 self._check_cancel()
                 reason_override = None
 
                 adsb_tracks = self._client.get_adsb_tracks()
-                tracker = self._client.get_tracker()
-                active_tracks = []
-                if tracker and tracker.get("timestamp", 0) >= applied_at:
-                    active_tracks = [t for t in (tracker.get("data") or [])
-                                     if t.get("state") == "ACTIVE"]
+
+                detection = self._client.get_detection()
+                timestamp = detection.get("timestamp") if detection else None
+                if (detection and timestamp != last_timestamp
+                        and timestamp is not None and timestamp >= applied_at):
+                    last_timestamp = timestamp
+                    self._tracker_client.send_frame(detection)
+                    delays = detection.get("delay") or []
+                    if delays:
+                        max_evidence = max(max_evidence, EVIDENCE_DETECTIONS)
+                        max_detections = max(max_detections, len(delays))
+
+                confirmed = self._take_confirmed_event(applied_at)
+                if confirmed is not None:
+                    max_evidence = max(max_evidence, EVIDENCE_ACTIVE)
 
                 if adsb_tracks:
                     aircraft_seen = True
-                    if active_tracks:
-                        matched_track, matched_aircraft = self._find_adsb_match(
-                            active_tracks, adsb_tracks,
-                            adsb_delay_tolerance, adsb_doppler_tolerance)
-                        if matched_track is not None:
-                            tower_entry["outcome"] = "confirmed_track"
-                            tower_entry["max_evidence"] = EVIDENCE_ACTIVE
-                            tower_entry["gains_tried"] = gains_tried
-                            return {
-                                "tower_name": tower.get("name"), "fc": fc,
-                                "gain_a": gain_a, "gain_b": gain_b,
-                                "track_id": matched_track.get("id"),
-                                "adsb_hex": matched_aircraft.get("hex"),
-                                "adsb_flight": matched_aircraft.get("flight"),
-                            }
+                    if confirmed is not None and confirmed.get("adsb_hex"):
+                        tower_entry["outcome"] = "confirmed_track"
+                        tower_entry["max_evidence"] = EVIDENCE_ACTIVE
+                        tower_entry["gains_tried"] = gains_tried
+                        return {
+                            "tower_name": tower.get("name"), "fc": fc,
+                            "gain_a": gain_a, "gain_b": gain_b,
+                            "track_id": confirmed.get("track_id"),
+                            "adsb_hex": confirmed.get("adsb_hex"),
+                        }
+                    if confirmed is not None:
                         reason_override = "confirmed track, but doesn't match a known aircraft"
                 elif aircraft_seen:
                     # every aircraft we had a real shot at is gone,
                     # unmatched — this candidate's opportunity is over
                     break
-
-                if active_tracks:
-                    max_evidence = max(max_evidence, EVIDENCE_ACTIVE)
-                elif tracker and (tracker.get("nAssociated", 0) > 0
-                                   or tracker.get("nCoasting", 0) > 0):
-                    max_evidence = max(max_evidence, EVIDENCE_ASSOCIATED)
-                elif tracker and tracker.get("nTentative", 0) > 0:
-                    max_evidence = max(max_evidence, EVIDENCE_TENTATIVE)
-
-                detection = self._client.get_detection()
-                if detection and detection.get("timestamp", 0) >= applied_at:
-                    count = len(detection.get("delay") or [])
-                    if count > 0:
-                        max_evidence = max(max_evidence, EVIDENCE_DETECTIONS)
-                        max_detections = max(max_detections, count)
 
                 self._maybe_update_best_attempt(tower, fc, gain_a, gain_b, lna_state,
                                                 max_evidence, max_detections,
@@ -613,27 +632,6 @@ class Calibrator:
         tower_entry["max_detections"] = max_detections
         tower_entry["gains_tried"] = gains_tried
         return None
-
-    @staticmethod
-    def _find_adsb_match(active_tracks, adsb_tracks, delay_tol, doppler_tol):
-        """First ACTIVE track whose delay/doppler falls within tolerance of
-        a currently-visible ADS-B aircraft's expected position. Returns
-        (track, aircraft) or (None, None) — including when adsb_tracks is
-        None/empty (feed unreachable or no aircraft in range right now)."""
-        if not adsb_tracks:
-            return None, None
-        for track in active_tracks:
-            t_delay, t_doppler = track.get("delay"), track.get("doppler")
-            if t_delay is None or t_doppler is None:
-                continue
-            for aircraft in adsb_tracks.values():
-                a_delay, a_doppler = aircraft.get("delay"), aircraft.get("doppler")
-                if a_delay is None or a_doppler is None:
-                    continue
-                if (abs(t_delay - a_delay) <= delay_tol
-                        and abs(t_doppler - a_doppler) <= doppler_tol):
-                    return track, aircraft
-        return None, None
 
     def _maybe_update_best_attempt(self, tower, fc, gain_a, gain_b, lna_state,
                                    evidence, max_detections, reason=None):
@@ -660,8 +658,7 @@ class Calibrator:
 
     # ── Run loop ───────────────────────────────────────────────
 
-    def _run(self, towers, original, budget_seconds, dwell_seconds, mode,
-             adsb_delay_tolerance, adsb_doppler_tolerance):
+    def _run(self, towers, original, budget_seconds, dwell_seconds, mode):
         result = None
         error = None
         state = "failed"
@@ -679,6 +676,11 @@ class Calibrator:
                 self._set_current(tower_index=index, tower_name=tower.get("name"),
                                   fc=fc, gain_a=GAIN_REDUCTION_MIN,
                                   gain_b=GAIN_REDUCTION_MIN, lna_state=LNA_STATE_MIN)
+                # New geometry — a track confirmed at the previous tower (or
+                # an earlier gain candidate at this one) means nothing here.
+                self._tracker_client.reset()
+                with self._lock:
+                    self._last_confirmed_event = None
                 # tower_entry stays thread-local until the tower is finished —
                 # it is only shared (appended to status history) once the run
                 # thread stops mutating it
@@ -718,8 +720,7 @@ class Calibrator:
 
                     if mode == MODE_ADSB:
                         result = self._dwell_adsb(tower, fc, gain_a, gain_b, lna_state,
-                                                  tower_entry, adsb_delay_tolerance,
-                                                  adsb_doppler_tolerance)
+                                                  tower_entry)
                     elif time.monotonic() >= descent_deadline:
                         # Descent alone used this tower's whole budget —
                         # be honest that it was never actually watched,
@@ -729,9 +730,8 @@ class Calibrator:
                         result = None
                     else:
                         dwell_started = time.monotonic()
-                        tracker = RetinaTracker(config=get_retina_tracker_config())
                         result = self._dwell(tower, fc, gain_a, gain_b, lna_state, applied_at,
-                                             descent_deadline, tower_entry, tracker)
+                                             descent_deadline, tower_entry)
                         tower_entry["dwell_seconds"] = round(time.monotonic() - dwell_started, 1)
                 finally:
                     self._append_history(tower_entry)

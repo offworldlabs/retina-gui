@@ -119,9 +119,9 @@ from retina_tracker_client import RetinaTrackerClient
 from tracker_capture import TrackerCaptureService
 
 blah2_client = Blah2Client(BLAH2_API_URL)
-calibrator = Calibrator(blah2_client)
 retina_tracker_client = RetinaTrackerClient(
     RETINA_TRACKER_HOST, RETINA_TRACKER_PORT, RETINA_TRACKER_EVENTS_PATH)
+calibrator = Calibrator(blah2_client, retina_tracker_client)
 tracker_capture = TrackerCaptureService(blah2_client, retina_tracker_client)
 
 

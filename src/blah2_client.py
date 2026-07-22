@@ -58,10 +58,6 @@ class Blah2Client:
         """Latest per-CPI CFAR detections: {timestamp, delay[], doppler[], snr[]}."""
         return self._get_json("/api/detection")
 
-    def get_tracker(self):
-        """Latest track snapshot: {timestamp, nActive, ..., data[]}."""
-        return self._get_json("/api/tracker")
-
     def get_adsb_tracks(self):
         """Current ADS-B aircraft, extrapolated to expected delay/doppler for
         this node's rx/tx geometry and fc — {hex: {delay, doppler, ...}}.
