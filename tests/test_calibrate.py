@@ -44,7 +44,8 @@ class FakeBlah2Client:
     tuning or the fake clock.
     """
 
-    def __init__(self, overload_rule=None, detection=None, adsb_tracks=None):
+    def __init__(self, overload_rule=None, detection=None, adsb_tracks=None,
+                 retune_fail_rule=None, rf_status_fail_rule=None):
         self.clock_ms = 1000
         self.generation = 0
         self.applied = []
@@ -54,6 +55,10 @@ class FakeBlah2Client:
         self.overload_rule = overload_rule or (lambda fc, ga, gb, lna: (False, False))
         self.detection = detection or (lambda client: None)
         self.adsb_tracks = adsb_tracks or (lambda client: None)
+        # Simulates a candidate that wedges the device outright rather than
+        # cleanly reporting overload — see calibrator.py's _probe/_safe_revert.
+        self.retune_fail_rule = retune_fail_rule or (lambda fc, ga, gb, lna: False)
+        self.rf_status_fail_rule = rf_status_fail_rule or (lambda fc, ga, gb, lna: False)
 
     def _now(self):
         self.clock_ms += 10
@@ -66,6 +71,8 @@ class FakeBlah2Client:
     def retune(self, fc, gain_a, gain_b, lna_state):
         if self.retune_error:
             return None, self.retune_error
+        if self.retune_fail_rule(fc, gain_a, gain_b, lna_state):
+            return None, "simulated retune failure"
         self.generation += 1
         self.applied.append({
             "fc": fc, "gain_a": gain_a, "gain_b": gain_b, "lna_state": lna_state,
@@ -90,6 +97,8 @@ class FakeBlah2Client:
         if not self.rf_enabled or not self.applied:
             return None
         cur = self.applied[-1]
+        if self.rf_status_fail_rule(cur["fc"], cur["gain_a"], cur["gain_b"], cur["lna_state"]):
+            return None
         overload_a, overload_b = self.overload_rule(
             cur["fc"], cur["gain_a"], cur["gain_b"], cur["lna_state"])
         return {"overloadA": overload_a, "overloadB": overload_b,
@@ -210,6 +219,7 @@ def fast(monkeypatch):
     monkeypatch.setattr(calmod, "OVERLOAD_SETTLE_SECONDS", 0.01)
     monkeypatch.setattr(calmod, "ACK_TIMEOUT_SECONDS", 0.1)
     monkeypatch.setattr(calmod, "ACK_POLL_SECONDS", 0.005)
+    monkeypatch.setattr(calmod, "APPLY_RETRY_DELAY_SECONDS", 0.01)
     monkeypatch.setattr(calmod, "RF_STATUS_TIMEOUT_SECONDS", 0.1)
     monkeypatch.setattr(calmod, "RF_STATUS_POLL_SECONDS", 0.005)
     monkeypatch.setattr(calmod, "DWELL_POLL_SECONDS", 0.01)
@@ -344,6 +354,89 @@ class TestLnaEscalation:
         assert status["state"] == "done"
         assert status["result"]["gain_a"] == GAIN_REDUCTION_MAX
         assert status["result"]["lna_state"] == LNA_STATE_MAX
+
+
+class TestDeviceCrashHandling:
+    """On real hardware, a bad gain candidate doesn't always just report
+    overload cleanly — it can wedge the SDRplay device outright, surfacing
+    as a retune/rf-status failure instead. See calibrator.py's
+    _probe/_safe_revert: these failures are folded into the same
+    overload-handling branches as a clean overload reading, rather than
+    aborting the whole multi-tower run.
+    """
+
+    def test_retune_failure_reverts_to_last_clean(self, fast):
+        # 59 -> 49 clean, 39's retune itself fails outright (device wedge,
+        # not a clean overload reading) -> reverts to 49.
+        client = FakeBlah2Client(
+            retune_fail_rule=lambda fc, ga, gb, lna: ga == 39,
+            detection=moving_track_detections())
+        tracker_client = FakeRetinaTrackerClient(confirm_after=1)
+        status = run_to_completion(Calibrator(client, tracker_client), [TOWER])
+        assert status["state"] == "done"
+        assert status["result"]["gain_a"] == 49
+
+        descent = status["history"][0]["descent"]
+        failed_entry = next(e for e in descent if e.get("gain_a") == 39)
+        assert failed_entry["device_error"] is True
+        assert status["history"][0]["device_error"] is True
+
+    def test_rf_status_failure_reverts_to_last_clean(self, fast):
+        # Same shape, but the retune itself acks fine and it's the
+        # subsequent rf-status read that goes quiet — exercises _probe's
+        # other propagation point distinctly from the retune-ack one.
+        client = FakeBlah2Client(
+            rf_status_fail_rule=lambda fc, ga, gb, lna: ga == 39,
+            detection=moving_track_detections())
+        tracker_client = FakeRetinaTrackerClient(confirm_after=1)
+        status = run_to_completion(Calibrator(client, tracker_client), [TOWER])
+        assert status["state"] == "done"
+        assert status["result"]["gain_a"] == 49
+
+        descent = status["history"][0]["descent"]
+        failed_entry = next(e for e in descent if e.get("gain_a") == 39)
+        assert failed_entry["device_error"] is True
+
+    def test_revert_failure_is_graceful_not_fatal(self, fast):
+        """Mirrors the real incident: once the device wedges it stays
+        wedged (needs a manual out-of-band restart, not just a different
+        gain value) — so the revert-of-the-revert itself also fails. Must
+        still reach an ordinary terminal state, not surface a raw
+        'Retune failed' run-ending error."""
+        wedged = {"on": False}
+        def retune_fail_rule(fc, ga, gb, lna):
+            if ga <= 39:
+                wedged["on"] = True
+            return wedged["on"]
+        client = FakeBlah2Client(retune_fail_rule=retune_fail_rule)
+        tracker_client = FakeRetinaTrackerClient()  # never confirms
+        status = run_to_completion(Calibrator(client, tracker_client), [TOWER])
+        assert status["state"] == "failed"
+        assert "Retune failed" not in status["error"]
+        assert status["history"][0]["device_error"] is True
+
+    def test_device_crash_at_one_tower_does_not_abort_whole_run(self, fast):
+        """The regression test for the actual reported bug: today, any
+        retune/rf-status failure anywhere propagates uncaught all the way
+        to _run()'s outer handler and ends the entire multi-tower run.
+        Tower one's frequency always fails to retune; tower two is
+        completely normal and confirms a track — the run must fall through
+        to tower two, not die after tower one."""
+        tower_two_track = moving_track_detections()
+        def detection(client):
+            if client.current and client.current["fc"] == TOWER_TWO["fc"]:
+                return tower_two_track(client)
+            return None
+        client = FakeBlah2Client(
+            retune_fail_rule=lambda fc, ga, gb, lna: fc == TOWER["fc"],
+            detection=detection)
+        tracker_client = FakeRetinaTrackerClient(confirm_after=1)
+        status = run_to_completion(Calibrator(client, tracker_client),
+                                   [TOWER, TOWER_TWO])
+        assert status["state"] == "done"
+        assert status["result"]["tower_name"] == "Tower Two"
+        assert len(status["history"]) == 2
+        assert status["history"][0].get("device_error") is True
 
 
 class TestDwell:
@@ -638,25 +731,32 @@ class TestAdsbMode:
 
 class TestFailureModes:
     def test_unreachable_blah2_fails_the_run(self, fast):
+        # A permanently broken retune is now folded into the same
+        # overload-handling path as a device wedge (see _probe/_safe_revert)
+        # rather than aborting the run outright — this tower can never
+        # confirm anything, so the run still correctly ends "failed", just
+        # via the ordinary no-track path rather than surfacing "Retune
+        # failed" directly. history[0]["device_error"] is what now proves
+        # blah2 was genuinely unreachable, not just "no aircraft."
         client = FakeBlah2Client()
         client.retune_error = "connection refused"
         status = run_to_completion(Calibrator(client, FakeRetinaTrackerClient()), [TOWER])
         assert status["state"] == "failed"
-        assert "Retune failed" in status["error"]
+        assert status["history"][0]["device_error"] is True
 
     def test_missing_ack_fails_the_run(self, fast):
         client = FakeBlah2Client()
         client.ack_enabled = False
         status = run_to_completion(Calibrator(client, FakeRetinaTrackerClient()), [TOWER])
         assert status["state"] == "failed"
-        assert "acknowledge" in status["error"]
+        assert status["history"][0]["device_error"] is True
 
     def test_missing_rf_status_fails_the_run(self, fast):
         client = FakeBlah2Client(detection=moving_track_detections())
         client.rf_enabled = False
         status = run_to_completion(Calibrator(client, FakeRetinaTrackerClient()), [TOWER])
         assert status["state"] == "failed"
-        assert "RF status" in status["error"]
+        assert status["history"][0]["device_error"] is True
 
     def test_ignore_cancel_lets_apply_proceed_despite_a_pending_cancel(self, fast):
         """The restore-on-failure path must not be abortable by a second

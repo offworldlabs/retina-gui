@@ -25,6 +25,16 @@ itself, not just log an overload. Approaching risk from the safe side and
 reverting on the very first sign of trouble bounds the worst-case exposure
 to one step beyond an already-proven-clean value, every time.
 
+This same hardware doesn't always fail safely even with that discipline:
+a bad candidate can wedge the device outright rather than just report
+overload (see _probe/_safe_revert) — the retune never acks, or rf-status
+goes quiet, surfacing as a CalibrationError instead of a clean reading.
+Every descent/dwell step treats that failure exactly like an overload
+reading at that candidate (revert to the last proven-clean value, or
+escalate LNA state if there's no clean value yet) rather than letting it
+abort the whole multi-tower run — a wedge is, if anything, a stronger
+signal that this candidate is unusable, not a different kind of problem.
+
 Three search variables, adjusted in a fixed priority order per tower (see
 _descend_reference/_descend_surveillance/_descend):
   1. Reference gain reduction (tuner A) — walks toward more gain only, no
@@ -135,6 +145,7 @@ ADSB_DESCENT_DEADLINE_SECONDS = 120
 # Retune protocol timing.
 ACK_TIMEOUT_SECONDS = 2.0
 ACK_POLL_SECONDS = 0.2
+APPLY_RETRY_DELAY_SECONDS = 0.5
 RF_STATUS_TIMEOUT_SECONDS = 6.0
 RF_STATUS_POLL_SECONDS = 0.3
 OVERLOAD_SETTLE_SECONDS = 2.0
@@ -374,7 +385,7 @@ class Calibrator:
             generation, error = self._client.retune(fc, gain_a, gain_b, lna_state)
             if generation is None:
                 last_error = error
-                self._sleep(0.5, ignore_cancel=ignore_cancel)
+                self._sleep(APPLY_RETRY_DELAY_SECONDS, ignore_cancel=ignore_cancel)
                 continue
             deadline = time.monotonic() + ACK_TIMEOUT_SECONDS
             while time.monotonic() < deadline:
@@ -403,6 +414,65 @@ class Calibrator:
             "blah2 is not reporting RF status — it may be running an older "
             "version without live-tune support")
 
+    def _probe(self, fc, gain_a, gain_b, lna_state, fallback_applied_at):
+        """Apply one gain/LNA candidate and read back whether it overloaded,
+        settling in between — one full "try a candidate" step of the
+        descent loops (and of _dwell_adsb's gain-cycling loop).
+
+        On this hardware, a bad candidate doesn't always just report
+        overload cleanly — it can wedge the SDRplay device outright,
+        surfacing as a CalibrationError from _apply (no retune ack) or
+        _read_overload (no fresh rf-status) instead of a clean overloadA/B
+        reading (see module docstring). Folding either failure into
+        overload_a=overload_b=True lets callers reuse their existing
+        overload-handling branches (revert to the last-clean value, or
+        escalate LNA state if there's no clean value yet) unchanged —
+        forcing *both* flags true even for a single-tuner caller is
+        deliberate: a device error means neither channel's state is
+        actually known, and erring toward "assume the worst, back off"
+        matches this module's safe-descent philosophy.
+
+        fallback_applied_at: used as applied_at when the candidate's own
+        retune never completed (nothing new is actually known to be
+        applied) — normally the previous candidate's own applied_at, or 0
+        for the very first candidate of a fresh call.
+
+        Returns (applied_at_ms, overload_a, overload_b, device_error_detail).
+        device_error_detail is None on a normal probe, or the
+        CalibrationError's message when the candidate didn't survive.
+        """
+        try:
+            applied_at = self._apply(fc, gain_a, gain_b, lna_state)
+        except CalibrationError as e:
+            return fallback_applied_at, True, True, str(e)
+        self._sleep(OVERLOAD_SETTLE_SECONDS)
+        try:
+            overload_a, overload_b = self._read_overload(applied_at)
+        except CalibrationError as e:
+            return applied_at, True, True, str(e)
+        return applied_at, overload_a, overload_b, None
+
+    def _safe_revert(self, fc, gain_a, gain_b, lna_state, fallback_applied_at):
+        """Best-effort re-apply of a previously-proven-safe candidate, after
+        a later candidate overloaded (or didn't survive being tried).
+        Never raises: if the device won't even take the revert — e.g. it's
+        still wedged — that's not a new fatal condition to propagate. The
+        gain value the caller reports already reflects our best guess at a
+        safe setting; the caller's dwell will simply fail to confirm a
+        track (same as any other no-signal outcome) if the hardware is
+        genuinely gone, and the run moves on to the next tower exactly
+        like any other no-track outcome (see _run()).
+
+        Returns (applied_at_ms, device_error_detail). device_error_detail
+        is None on success, or the failure's message if the revert itself
+        didn't survive — fallback_applied_at is returned unchanged in that
+        case, since nothing new is actually known to have been applied.
+        """
+        try:
+            return self._apply(fc, gain_a, gain_b, lna_state), None
+        except CalibrationError as e:
+            return fallback_applied_at, str(e)
+
     # ── Search stages ──────────────────────────────────────────
 
     def _descend_reference(self, fc, gain_b, lna_state, descent_log, deadline):
@@ -416,28 +486,40 @@ class Calibrator:
         Starts at the safe ceiling (GAIN_REDUCTION_MAX) and steps toward
         more gain while clean, reverting to the last settled-clean value
         the instant overload appears — see module docstring for why this
-        can never start cold at a risky (low-reduction) value.
+        can never start cold at a risky (low-reduction) value. A retune or
+        rf-status failure for a candidate (see _probe) is treated exactly
+        like an overload reading at that candidate — this hardware doesn't
+        always fail safely.
 
         Returns (gain_a, applied_at_ms, still_overloaded).
         """
         gain_a = GAIN_REDUCTION_MAX
         clean_gain_a = None
-        applied_at = self._apply(fc, gain_a, gain_b, lna_state)
+        applied_at, overload_a, _, device_error = self._probe(
+            fc, gain_a, gain_b, lna_state, 0)
         while True:
-            self._sleep(OVERLOAD_SETTLE_SECONDS)
-            overload_a, _ = self._read_overload(applied_at)
-            descent_log.append({"phase": "reference", "gain_a": gain_a,
-                                "lna_state": lna_state, "overload_a": overload_a})
+            entry = {"phase": "reference", "gain_a": gain_a,
+                    "lna_state": lna_state, "overload_a": overload_a}
+            if device_error:
+                entry["device_error"] = True
+                entry["device_error_detail"] = device_error
+            descent_log.append(entry)
             if overload_a:
                 if clean_gain_a is None:
-                    # Overloaded even at the safety ceiling — gain reduction
+                    # Overloaded even at the safety ceiling (or the device
+                    # never survived the safety ceiling) — gain reduction
                     # alone can't clear this; caller escalates LNA state.
                     return gain_a, applied_at, True
                 # Never leave the hardware sitting at the overloaded
                 # candidate — revert to the last proven-clean value.
-                applied_at = self._apply(fc, clean_gain_a, gain_b, lna_state)
-                descent_log.append({"phase": "reference_revert", "gain_a": clean_gain_a,
-                                    "lna_state": lna_state, "reverted_from": gain_a})
+                applied_at, revert_error = self._safe_revert(
+                    fc, clean_gain_a, gain_b, lna_state, applied_at)
+                revert_entry = {"phase": "reference_revert", "gain_a": clean_gain_a,
+                                "lna_state": lna_state, "reverted_from": gain_a}
+                if revert_error:
+                    revert_entry["device_error"] = True
+                    revert_entry["device_error_detail"] = revert_error
+                descent_log.append(revert_entry)
                 self._set_current(gain_a=clean_gain_a)
                 return clean_gain_a, applied_at, False
             clean_gain_a = gain_a
@@ -445,7 +527,8 @@ class Calibrator:
                 return gain_a, applied_at, False
             gain_a = max(gain_a - DESCENT_STEP_DB, GAIN_REDUCTION_MIN)
             self._set_current(gain_a=gain_a)
-            applied_at = self._apply(fc, gain_a, gain_b, lna_state)
+            applied_at, overload_a, _, device_error = self._probe(
+                fc, gain_a, gain_b, lna_state, applied_at)
 
     def _descend_surveillance(self, fc, gain_a, lna_state, descent_log, deadline):
         """Find the highest clean gain for the surveillance tuner (B) only,
@@ -454,23 +537,35 @@ class Calibrator:
         a revert has happened (claw back REFINE_STEP_DB, revert if it
         re-overloads).
 
+        A retune or rf-status failure for a candidate (see _probe) is
+        treated exactly like an overload reading at that candidate — this
+        hardware doesn't always fail safely.
+
         Returns (gain_b, applied_at_ms, still_overloaded).
         """
         gain_b = GAIN_REDUCTION_MAX
         clean_gain_b = None
         reverted = False
-        applied_at = self._apply(fc, gain_a, gain_b, lna_state)
+        applied_at, _, overload_b, device_error = self._probe(
+            fc, gain_a, gain_b, lna_state, 0)
         while True:
-            self._sleep(OVERLOAD_SETTLE_SECONDS)
-            _, overload_b = self._read_overload(applied_at)
-            descent_log.append({"phase": "surveillance", "gain_b": gain_b,
-                                "lna_state": lna_state, "overload_b": overload_b})
+            entry = {"phase": "surveillance", "gain_b": gain_b,
+                    "lna_state": lna_state, "overload_b": overload_b}
+            if device_error:
+                entry["device_error"] = True
+                entry["device_error_detail"] = device_error
+            descent_log.append(entry)
             if overload_b:
                 if clean_gain_b is None:
                     return gain_b, applied_at, True
-                applied_at = self._apply(fc, gain_a, clean_gain_b, lna_state)
-                descent_log.append({"phase": "surveillance_revert", "gain_b": clean_gain_b,
-                                    "lna_state": lna_state, "reverted_from": gain_b})
+                applied_at, revert_error = self._safe_revert(
+                    fc, gain_a, clean_gain_b, lna_state, applied_at)
+                revert_entry = {"phase": "surveillance_revert", "gain_b": clean_gain_b,
+                                "lna_state": lna_state, "reverted_from": gain_b}
+                if revert_error:
+                    revert_entry["device_error"] = True
+                    revert_entry["device_error_detail"] = revert_error
+                descent_log.append(revert_entry)
                 gain_b = clean_gain_b
                 reverted = True
                 self._set_current(gain_b=gain_b)
@@ -480,20 +575,24 @@ class Calibrator:
                 break
             gain_b = max(gain_b - DESCENT_STEP_DB, GAIN_REDUCTION_MIN)
             self._set_current(gain_b=gain_b)
-            applied_at = self._apply(fc, gain_a, gain_b, lna_state)
+            applied_at, _, overload_b, device_error = self._probe(
+                fc, gain_a, gain_b, lna_state, applied_at)
 
         if reverted and time.monotonic() < deadline:
             refine_b = max(gain_b - REFINE_STEP_DB, GAIN_REDUCTION_MIN)
             self._update(phase="refining")
             self._set_current(gain_b=refine_b)
-            applied_at = self._apply(fc, gain_a, refine_b, lna_state)
-            self._sleep(OVERLOAD_SETTLE_SECONDS)
-            _, overload_b = self._read_overload(applied_at)
-            descent_log.append({"phase": "surveillance_refine", "gain_b": refine_b,
-                                "lna_state": lna_state, "overload_b": overload_b})
+            applied_at, _, overload_b, device_error = self._probe(
+                fc, gain_a, refine_b, lna_state, applied_at)
+            entry = {"phase": "surveillance_refine", "gain_b": refine_b,
+                    "lna_state": lna_state, "overload_b": overload_b}
+            if device_error:
+                entry["device_error"] = True
+                entry["device_error_detail"] = device_error
+            descent_log.append(entry)
             if overload_b:
                 self._set_current(gain_b=gain_b)
-                applied_at = self._apply(fc, gain_a, gain_b, lna_state)
+                applied_at, _ = self._safe_revert(fc, gain_a, gain_b, lna_state, applied_at)
             else:
                 gain_b = refine_b
 
@@ -607,17 +706,21 @@ class Calibrator:
         """
         self._update(phase="dwelling")
         gain_b = initial_gain_b
+        applied_at = 0
         gains_tried = []
         max_evidence = EVIDENCE_NONE
         max_detections = 0
 
         while True:
             self._check_cancel()
-            applied_at = self._apply(fc, gain_a, gain_b, lna_state)
             self._set_current(gain_a=gain_a, gain_b=gain_b)
-            self._sleep(OVERLOAD_SETTLE_SECONDS)
-            overload_a, overload_b = self._read_overload(applied_at)
-            gains_tried.append({"gain_b": gain_b, "overload_b": overload_b})
+            applied_at, overload_a, overload_b, device_error = self._probe(
+                fc, gain_a, gain_b, lna_state, applied_at)
+            entry = {"gain_b": gain_b, "overload_b": overload_b}
+            if device_error:
+                entry["device_error"] = True
+                entry["device_error_detail"] = device_error
+            gains_tried.append(entry)
             if overload_b:
                 # More sensitivity than this isn't usable here — never leave
                 # the hardware sitting at the overloaded candidate. A prior
@@ -626,7 +729,8 @@ class Calibrator:
                 # in case RF conditions shifted since descent resolved it.
                 if len(gains_tried) > 1:
                     previous_gain_b = gains_tried[-2]["gain_b"]
-                    self._apply(fc, gain_a, previous_gain_b, lna_state)
+                    applied_at, _ = self._safe_revert(
+                        fc, gain_a, previous_gain_b, lna_state, applied_at)
                     self._set_current(gain_b=previous_gain_b)
                 break
 
@@ -789,6 +893,9 @@ class Calibrator:
                                              descent_deadline, tower_entry)
                         tower_entry["dwell_seconds"] = round(time.monotonic() - dwell_started, 1)
                 finally:
+                    if (any(e.get("device_error") for e in tower_entry.get("descent", ())) or
+                            any(e.get("device_error") for e in tower_entry.get("gains_tried", ()))):
+                        tower_entry["device_error"] = True
                     self._append_history(tower_entry)
                     self._update_progress(towers_tried=index + 1)
 
