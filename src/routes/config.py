@@ -53,6 +53,13 @@ def config_page():
                            ssh_keys=ssh_keys.get_keys())
 
 
+@bp.route("/config/rf-status")
+def rf_status():
+    """Live per-tuner RF overload + peak dBFS, proxied from blah2's API."""
+    from app import blah2_client
+    return jsonify(blah2_client.get_rf_status() or {})
+
+
 @bp.route("/ssh-keys", methods=["POST"])
 def add_key():
     from app import ssh_keys

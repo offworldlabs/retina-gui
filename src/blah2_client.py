@@ -26,3 +26,8 @@ class Blah2Client:
     def get_detection(self):
         """Latest per-CPI CFAR detections: {timestamp, delay[], doppler[], snr[]}."""
         return self._get_json("/api/detection")
+
+    def get_rf_status(self):
+        """Per-tuner RF overload state + peak dBFS: {overloadA, overloadB,
+        peakDbfsA, peakDbfsB, timestamp}."""
+        return self._get_json("/capture/rf-status")
