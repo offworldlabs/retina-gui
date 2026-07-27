@@ -27,8 +27,9 @@ to one step beyond an already-proven-clean value, every time.
 
 This same hardware doesn't always fail safely even with that discipline:
 a bad candidate can wedge the device outright rather than just report
-overload (see _probe/_safe_revert) — the retune never acks, or rf-status
-goes quiet, surfacing as a CalibrationError instead of a clean reading.
+overload (see _probe/_safe_revert) — the retune never acks, or
+overload-status goes quiet, surfacing as a CalibrationError instead of a
+clean reading.
 Every descent/dwell step treats that failure exactly like an overload
 reading at that candidate (revert to the last proven-clean value, or
 escalate LNA state if there's no clean value yet) rather than letting it
@@ -108,7 +109,7 @@ blah2's live retune channel only. On any non-success terminal state the
 original tuning is restored. Persisting a successful result is a separate,
 explicit step (POST /calibrate/apply).
 
-All blah2-side timestamps (retune appliedAt, rf-status, detection/tracker
+All blah2-side timestamps (retune appliedAt, overload-status, detection/tracker
 CPI timestamps) share blah2's system clock, so freshness comparisons never
 mix clock domains.
 """
@@ -401,17 +402,18 @@ class Calibrator:
             f"Retune failed: {last_error} — is the radar running?")
 
     def _read_overload(self, applied_at_ms):
-        """Overload flags from an rf-status report newer than applied_at_ms."""
+        """Overload flags from an overload-status report newer than
+        applied_at_ms."""
         deadline = time.monotonic() + RF_STATUS_TIMEOUT_SECONDS
         while time.monotonic() < deadline:
             self._check_cancel()
-            rf = self._client.get_rf_status()
+            rf = self._client.get_overload_status()
             if rf and rf.get("timestamp", 0) >= applied_at_ms:
                 self._update_rf(rf.get("overloadA"), rf.get("overloadB"))
                 return bool(rf.get("overloadA")), bool(rf.get("overloadB"))
             time.sleep(RF_STATUS_POLL_SECONDS)
         raise CalibrationError(
-            "blah2 is not reporting RF status — it may be running an older "
+            "blah2 is not reporting overload status — it may be running an older "
             "version without live-tune support")
 
     def _probe(self, fc, gain_a, gain_b, lna_state, fallback_applied_at):
@@ -422,8 +424,8 @@ class Calibrator:
         On this hardware, a bad candidate doesn't always just report
         overload cleanly — it can wedge the SDRplay device outright,
         surfacing as a CalibrationError from _apply (no retune ack) or
-        _read_overload (no fresh rf-status) instead of a clean overloadA/B
-        reading (see module docstring). Folding either failure into
+        _read_overload (no fresh overload-status) instead of a clean
+        overloadA/B reading (see module docstring). Folding either failure into
         overload_a=overload_b=True lets callers reuse their existing
         overload-handling branches (revert to the last-clean value, or
         escalate LNA state if there's no clean value yet) unchanged —
@@ -487,9 +489,9 @@ class Calibrator:
         more gain while clean, reverting to the last settled-clean value
         the instant overload appears — see module docstring for why this
         can never start cold at a risky (low-reduction) value. A retune or
-        rf-status failure for a candidate (see _probe) is treated exactly
-        like an overload reading at that candidate — this hardware doesn't
-        always fail safely.
+        overload-status failure for a candidate (see _probe) is treated
+        exactly like an overload reading at that candidate — this hardware
+        doesn't always fail safely.
 
         Returns (gain_a, applied_at_ms, still_overloaded).
         """
@@ -537,7 +539,7 @@ class Calibrator:
         a revert has happened (claw back REFINE_STEP_DB, revert if it
         re-overloads).
 
-        A retune or rf-status failure for a candidate (see _probe) is
+        A retune or overload-status failure for a candidate (see _probe) is
         treated exactly like an overload reading at that candidate — this
         hardware doesn't always fail safely.
 

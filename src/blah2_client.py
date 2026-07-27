@@ -50,9 +50,13 @@ class Blah2Client:
         """Last retune blah2 actually applied: {generation, fc, ..., appliedAt}."""
         return self._get_json("/capture/retune/status")
 
-    def get_rf_status(self):
-        """Per-tuner RF overload state: {overloadA, overloadB, timestamp}."""
-        return self._get_json("/capture/rf-status")
+    def get_overload_status(self):
+        """Per-tuner RF overload state: {overloadA, overloadB, timestamp}.
+        Deliberately its own endpoint, not /capture/rf-status — that path
+        belongs to the (unrelated) peak-dBFS meter feature; the two datasets
+        have no shared consumer, so they stay on separate endpoints rather
+        than being coupled together just because they're both RF status."""
+        return self._get_json("/capture/overload-status")
 
     def get_detection(self):
         """Latest per-CPI CFAR detections: {timestamp, delay[], doppler[], snr[]}."""

@@ -45,7 +45,7 @@ class FakeBlah2Client:
     """
 
     def __init__(self, overload_rule=None, detection=None, adsb_tracks=None,
-                 retune_fail_rule=None, rf_status_fail_rule=None):
+                 retune_fail_rule=None, overload_status_fail_rule=None):
         self.clock_ms = 1000
         self.generation = 0
         self.applied = []
@@ -58,7 +58,7 @@ class FakeBlah2Client:
         # Simulates a candidate that wedges the device outright rather than
         # cleanly reporting overload — see calibrator.py's _probe/_safe_revert.
         self.retune_fail_rule = retune_fail_rule or (lambda fc, ga, gb, lna: False)
-        self.rf_status_fail_rule = rf_status_fail_rule or (lambda fc, ga, gb, lna: False)
+        self.overload_status_fail_rule = overload_status_fail_rule or (lambda fc, ga, gb, lna: False)
 
     def _now(self):
         self.clock_ms += 10
@@ -93,11 +93,11 @@ class FakeBlah2Client:
             "appliedAt": last["applied_at"],
         }
 
-    def get_rf_status(self):
+    def get_overload_status(self):
         if not self.rf_enabled or not self.applied:
             return None
         cur = self.applied[-1]
-        if self.rf_status_fail_rule(cur["fc"], cur["gain_a"], cur["gain_b"], cur["lna_state"]):
+        if self.overload_status_fail_rule(cur["fc"], cur["gain_a"], cur["gain_b"], cur["lna_state"]):
             return None
         overload_a, overload_b = self.overload_rule(
             cur["fc"], cur["gain_a"], cur["gain_b"], cur["lna_state"])
@@ -359,7 +359,7 @@ class TestLnaEscalation:
 class TestDeviceCrashHandling:
     """On real hardware, a bad gain candidate doesn't always just report
     overload cleanly — it can wedge the SDRplay device outright, surfacing
-    as a retune/rf-status failure instead. See calibrator.py's
+    as a retune/overload-status failure instead. See calibrator.py's
     _probe/_safe_revert: these failures are folded into the same
     overload-handling branches as a clean overload reading, rather than
     aborting the whole multi-tower run.
@@ -381,12 +381,12 @@ class TestDeviceCrashHandling:
         assert failed_entry["device_error"] is True
         assert status["history"][0]["device_error"] is True
 
-    def test_rf_status_failure_reverts_to_last_clean(self, fast):
+    def test_overload_status_failure_reverts_to_last_clean(self, fast):
         # Same shape, but the retune itself acks fine and it's the
-        # subsequent rf-status read that goes quiet — exercises _probe's
-        # other propagation point distinctly from the retune-ack one.
+        # subsequent overload-status read that goes quiet — exercises
+        # _probe's other propagation point distinctly from the retune-ack one.
         client = FakeBlah2Client(
-            rf_status_fail_rule=lambda fc, ga, gb, lna: ga == 39,
+            overload_status_fail_rule=lambda fc, ga, gb, lna: ga == 39,
             detection=moving_track_detections())
         tracker_client = FakeRetinaTrackerClient(confirm_after=1)
         status = run_to_completion(Calibrator(client, tracker_client), [TOWER])
@@ -417,8 +417,8 @@ class TestDeviceCrashHandling:
 
     def test_device_crash_at_one_tower_does_not_abort_whole_run(self, fast):
         """The regression test for the actual reported bug: today, any
-        retune/rf-status failure anywhere propagates uncaught all the way
-        to _run()'s outer handler and ends the entire multi-tower run.
+        retune/overload-status failure anywhere propagates uncaught all the
+        way to _run()'s outer handler and ends the entire multi-tower run.
         Tower one's frequency always fails to retune; tower two is
         completely normal and confirms a track — the run must fall through
         to tower two, not die after tower one."""
