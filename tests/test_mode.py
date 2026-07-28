@@ -296,3 +296,28 @@ class TestConfigTelemetryHooks:
             error = mode_module.run_config_merger_and_restart(temp_dir)
         assert error is not None
         mock_send.assert_not_called()
+
+    @patch('time.sleep')
+    @patch('subprocess.run')
+    def test_settles_between_sdrplay_restart_and_container_recreate(
+            self, mock_run, mock_sleep, app_client, temp_dir):
+        """The settle-time fix's whole point (diagnosed live tonight): the
+        sdrplay.service restart and the container recreate must not race."""
+        import routes.mode as mode_module
+        order = []
+
+        def record_run(*a, **k):
+            order.append(('run', a[0]))
+            return MagicMock(returncode=0, stdout='', stderr='')
+        mock_run.side_effect = record_run
+        mock_sleep.side_effect = lambda s: order.append(('sleep', s))
+
+        error = mode_module.run_config_merger_and_restart(temp_dir)
+        assert error is None
+
+        sleep_calls = [i for i, (kind, _) in enumerate(order) if kind == 'sleep']
+        assert len(sleep_calls) == 1
+        i = sleep_calls[0]
+        assert order[i][1] == mode_module.SDRPLAY_RESTART_SETTLE_SECONDS
+        assert 'systemctl' in order[i - 1][1]            # restart happened right before
+        assert '--force-recreate' in order[i + 1][1]     # recreate happens right after

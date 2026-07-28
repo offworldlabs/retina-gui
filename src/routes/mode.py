@@ -1,10 +1,19 @@
 import os
 import subprocess
+import time
 from flask import Blueprint, jsonify, request
 
 bp = Blueprint('mode', __name__)
 
 _mode_cache = 'radar'  # default mode if file read fails (e.g. dev environment without /data OR on startup before mode is set at least once)
+
+# The sdrplay_apiService restart and the immediately-following container
+# recreate used to race with no settle time in between — diagnosed live
+# on jonathan-node-2 as a repeated cause of the SDRplay device wedging
+# outright (not just a bad gain candidate). This window gives the
+# service time to finish reinitialising the USB device before blah2 (or
+# Auto-Calibrate's AGC fallback — see agc_fallback.py) claims it again.
+SDRPLAY_RESTART_SETTLE_SECONDS = 30
 
 
 def get_current_mode():
@@ -79,6 +88,11 @@ def run_config_merger_and_restart(retina_node_path: str, trigger: str = 'config_
     # Non-fatal: no-op on dev machines without sdrplay.service.
     subprocess.run(['systemctl', 'restart', 'sdrplay.service'],
                    capture_output=True, timeout=30)
+
+    # See SDRPLAY_RESTART_SETTLE_SECONDS — without this, recreating the
+    # containers immediately after the restart request returns has
+    # repeatedly wedged the SDRplay device on real hardware.
+    time.sleep(SDRPLAY_RESTART_SETTLE_SECONDS)
 
     result = subprocess.run(
         ['docker', 'compose', '-p', 'retina-node', 'up', '-d', '--force-recreate'],

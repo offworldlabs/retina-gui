@@ -121,7 +121,7 @@ class FakeRetinaTrackerClient:
     means "never confirms" — for tests exercising the no-track path.
     """
 
-    def __init__(self, confirm_after=None, adsb_hex=None):
+    def __init__(self, confirm_after=None, adsb_hex=None, confirm_from_reset=0):
         self.sent_frames = []
         self.reset_calls = 0
         self._listeners = []
@@ -129,11 +129,19 @@ class FakeRetinaTrackerClient:
         self._adsb_hex = adsb_hex
         self._frame_count = 0
         self._next_track_id = 0
+        # Only allow confirmation once this many reset() calls have
+        # already happened — each tower's own descent+dwell, and the AGC
+        # fallback, each call reset() exactly once before their own
+        # dwell begins. Default 0 preserves today's behaviour for every
+        # existing call site.
+        self._confirm_from_reset = confirm_from_reset
 
     def send_frame(self, frame):
         self.sent_frames.append(frame)
         self._frame_count += 1
-        if self._confirm_after is not None and self._frame_count == self._confirm_after:
+        if (self._confirm_after is not None
+                and self._frame_count == self._confirm_after
+                and self.reset_calls > self._confirm_from_reset):
             self._next_track_id += 1
             self._emit({
                 "track_id": f"T{self._next_track_id}",
@@ -151,6 +159,25 @@ class FakeRetinaTrackerClient:
     def _emit(self, event):
         for listener in list(self._listeners):
             listener(event)
+
+
+class FakeAgcFallbackClient:
+    """Scripted stand-in for AgcFallbackClient — no real subprocess/Docker
+    calls. Records every apply() call so tests can assert on the
+    enable/disable sequence (fc, bandwidth_number, gain_a, gain_b,
+    lna_state) without touching config-merger or Docker.
+    """
+    def __init__(self, enable_result=(True, None), disable_result=(True, None)):
+        self.calls = []
+        self._enable_result = enable_result
+        self._disable_result = disable_result
+
+    def apply(self, fc, bandwidth_number, gain_a, gain_b, lna_state):
+        self.calls.append({"fc": fc, "bandwidth_number": bandwidth_number,
+                           "gain_a": gain_a, "gain_b": gain_b, "lna_state": lna_state})
+        if bandwidth_number == calmod.AGC_FALLBACK_BANDWIDTH_NUMBER:
+            return self._enable_result
+        return self._disable_result
 
 
 ORIGINAL = {"fc": 98_000_000, "gain_a": 40, "gain_b": 41, "lna_state": 4}
@@ -224,9 +251,10 @@ def fast(monkeypatch):
     monkeypatch.setattr(calmod, "RF_STATUS_POLL_SECONDS", 0.005)
     monkeypatch.setattr(calmod, "DWELL_POLL_SECONDS", 0.01)
     monkeypatch.setattr(calmod, "TRACKER_FEED_POLL_SECONDS", 0.01)
+    monkeypatch.setattr(calmod, "AGC_FALLBACK_DWELL_SECONDS", 0.05)
 
 
-def run_to_completion(cal, towers, original=ORIGINAL, budget=10, dwell=0.5):
+def run_to_completion(cal, towers, original=ORIGINAL, budget=10, dwell=3.0):
     started, error = cal.start(towers, original, budget_seconds=budget,
                                dwell_seconds=dwell)
     assert started, error
@@ -237,9 +265,10 @@ def run_to_completion(cal, towers, original=ORIGINAL, budget=10, dwell=0.5):
 
 class TestDescent:
     def test_clean_signal_walks_to_gain_floor(self, fast):
-        # Starts at the safe ceiling (59dB) and walks toward more gain
-        # while clean — with nothing ever overloading, it lands at the
-        # sensitivity floor rather than stopping early.
+        # Starts at the safe corner (59dB, lna_state=9) and walks toward
+        # more gain *and* more LNA sensitivity while everything stays
+        # clean — lands at the sensitivity floor on both axes rather than
+        # stopping early anywhere.
         client = FakeBlah2Client(detection=moving_track_detections())
         tracker_client = FakeRetinaTrackerClient(confirm_after=1)
         status = run_to_completion(Calibrator(client, tracker_client), [TOWER])
@@ -248,10 +277,22 @@ class TestDescent:
         assert status["result"]["gain_b"] == GAIN_REDUCTION_MIN
         assert status["result"]["lna_state"] == LNA_STATE_MIN
 
+        # Prove the walk actually happened lna_state-by-lna_state all the
+        # way down from the safe corner (9), not a coincidence of both
+        # ends matching.
+        descent = status["history"][0]["descent"]
+        lna_descent_states = [e["lna_state"] for e in descent if e["phase"] == "lna_descent"]
+        assert lna_descent_states == list(range(LNA_STATE_MAX - 1, LNA_STATE_MIN - 1, -1))
+
     def test_reference_reverts_alone_with_no_refine(self, fast):
         # tuner A overloads below 30 dB reduction; B is always clean.
         # Reference gets no refine step (see module docstring) — it just
-        # reverts to the last clean step the moment it overloads.
+        # reverts to the last clean step the moment it overloads. This
+        # rule is lna-independent, so the identical pattern repeats at
+        # every lna_state the search tries (9 down to 1) before landing
+        # on the same final values regardless — lna_state itself isn't
+        # asserted here since it always ends at LNA_STATE_MIN in this
+        # scenario, same as the plain clean-signal case.
         client = FakeBlah2Client(
             overload_rule=lambda fc, ga, gb, lna: (ga < 30, False),
             detection=moving_track_detections())
@@ -263,7 +304,9 @@ class TestDescent:
         assert status["result"]["gain_b"] == GAIN_REDUCTION_MIN
 
     def test_surveillance_refine_keeps_lower_gain_when_clean(self, fast):
-        # B overloads below 32: descent reverts to 39, refine's 34 stays clean
+        # B overloads below 32: descent reverts to 39, refine's 34 stays
+        # clean. lna-independent rule, so this repeats identically at
+        # every lna_state tried and lands on the same gain_b regardless.
         client = FakeBlah2Client(
             overload_rule=lambda fc, ga, gb, lna: (False, gb < 32),
             detection=moving_track_detections())
@@ -275,6 +318,8 @@ class TestDescent:
     def test_surveillance_refine_reverts_when_it_reoverloads(self, fast):
         # B overloads below 37: descent reverts to 39, refine's 34
         # re-overloads (34 < 37) so it must revert back to 39.
+        # lna-independent rule, so this repeats identically at every
+        # lna_state tried and lands on the same gain_b regardless.
         client = FakeBlah2Client(
             overload_rule=lambda fc, ga, gb, lna: (False, gb < 37),
             detection=moving_track_detections())
@@ -285,16 +330,17 @@ class TestDescent:
 
     def test_persistent_overload_stops_at_gain_and_lna_ceiling(self, fast):
         # B overloads no matter what gain or LNA state — even the safety
-        # ceiling itself overloads, so descent must terminate at max gain
-        # reduction *and* max LNA state, not loop forever, and the dwell
-        # may still proceed ("good, not best").
+        # corner itself (59dB, lna_state=9) overloads, so descent must
+        # stop right there rather than trying more sensitive LNA states
+        # it already knows are worse. There's no ladder to climb in this
+        # design: starting at the safe end means "still overloaded at
+        # the safe corner" is immediately terminal, not a multi-step
+        # escalation — dwell may still proceed regardless ("good, not
+        # best").
         client = FakeBlah2Client(
             overload_rule=lambda fc, ga, gb, lna: (False, True),
             detection=moving_track_detections())
         tracker_client = FakeRetinaTrackerClient(confirm_after=1)
-        # Each LNA escalation's surveillance redo now overloads immediately
-        # at the safety ceiling (1 retune, not a multi-step climb), so this
-        # has more headroom than it needs — kept generous regardless.
         status = run_to_completion(Calibrator(client, tracker_client), [TOWER], dwell=5)
         assert status["state"] == "done"
         assert status["result"]["gain_b"] == GAIN_REDUCTION_MAX
@@ -304,28 +350,50 @@ class TestDescent:
         """A deadline in the past must still let reference's first
         settle+read complete (so the returned state stays consistent with
         what was actually applied), but must not attempt surveillance's
-        phase or any LNA escalation at all."""
+        phase or any LNA sensitivity step at all."""
         import time
         client = FakeBlah2Client(
             overload_rule=lambda fc, ga, gb, lna: (ga < 40, False))
         cal = Calibrator(client, FakeRetinaTrackerClient())
         gain_a, gain_b, lna_state, applied_at = cal._descend(
             TOWER["fc"], [], deadline=time.monotonic() - 1)
-        # Reference's first (safe-ceiling) probe at 59dB doesn't overload
-        # (59 >= 40), so it returns immediately without ever touching
-        # surveillance — gain_b stays at its own safe-ceiling default, not
-        # whatever reference happened to land on.
+        # Reference's first (safe-corner) probe at 59dB, lna_state=9
+        # doesn't overload (59 >= 40), so it returns immediately without
+        # ever touching surveillance — gain_b stays at its own
+        # safe-ceiling default, and lna_state stays at its own
+        # safe-ceiling default (9), not whatever reference happened to
+        # land on.
         assert (gain_a, gain_b, lna_state) == (
-            GAIN_REDUCTION_MAX, GAIN_REDUCTION_MAX, LNA_STATE_MIN)
+            GAIN_REDUCTION_MAX, GAIN_REDUCTION_MAX, LNA_STATE_MAX)
         assert len(client.applied) == 1  # only reference's first candidate
 
+    def test_first_candidate_is_the_fully_safe_corner(self, fast):
+        """The headline safety property this fix exists to guarantee: the
+        very first candidate ever applied for a fresh tower is the
+        fully-safe corner of the whole three-variable search space (max
+        gain reduction on both tuners, max LNA state) — never anything
+        more sensitive, even for the very first retune of a run."""
+        client = FakeBlah2Client(detection=moving_track_detections())
+        tracker_client = FakeRetinaTrackerClient(confirm_after=1)
+        status = run_to_completion(Calibrator(client, tracker_client), [TOWER])
+        assert status["state"] == "done"
+        first = client.applied[0]
+        assert (first["fc"], first["gain_a"], first["gain_b"], first["lna_state"]) == (
+            TOWER["fc"], GAIN_REDUCTION_MAX, GAIN_REDUCTION_MAX, LNA_STATE_MAX)
 
-class TestLnaEscalation:
-    def test_escalates_only_when_gain_alone_cant_clear_it(self, fast):
-        """Reference only clears once lna_state >= 3, regardless of gain.
-        Surveillance is clean from the very first candidate and must never
-        be redone across the escalation — proving the optimisation (only
-        redo the channel that actually triggered escalation)."""
+
+class TestLnaDescent:
+    def test_lna_descent_reverts_when_reference_cant_clear_it(self, fast):
+        """Reference only clears once lna_state >= 3, regardless of gain;
+        surveillance never overloads on its own. Under the "redo both
+        channels at every more-sensitive LNA step" design, surveillance's
+        descent is freshly repeated at every lna_state tried (9 down to
+        2, inclusive of the level that ultimately fails) even though it's
+        reference, not surveillance, that trips the revert — proving
+        there's no "only redo the triggering channel" shortcut in this
+        direction (see module docstring: that optimisation only ever
+        applied to descending toward *more* attenuation, never toward
+        more sensitivity)."""
         client = FakeBlah2Client(
             overload_rule=lambda fc, ga, gb, lna: (lna < 3, False),
             detection=moving_track_detections())
@@ -333,19 +401,31 @@ class TestLnaEscalation:
         status = run_to_completion(Calibrator(client, tracker_client), [TOWER])
         assert status["state"] == "done"
         assert status["result"]["gain_a"] == GAIN_REDUCTION_MIN  # clean once lna=3, walks to floor
-        assert status["result"]["gain_b"] == GAIN_REDUCTION_MIN  # never touched after its one pass
+        assert status["result"]["gain_b"] == GAIN_REDUCTION_MIN
         assert status["result"]["lna_state"] == 3
 
         descent = status["history"][0]["descent"]
         surveillance_entries = [e for e in descent if e.get("phase") == "surveillance"]
-        # All from the single initial pass (lna_state=1) — never re-invoked
-        # at an escalated LNA state, proving the "only redo the triggering
-        # channel" optimisation. (Entry *count* isn't the right signal here:
-        # a single clean pass now walks the whole grid to the floor, so it
-        # naturally produces several entries on its own.)
-        assert all(e["lna_state"] == 1 for e in surveillance_entries)
+        surveillance_lna_states = {e["lna_state"] for e in surveillance_entries}
+        # Surveillance is freshly redone at every lna_state tried,
+        # including lna_state=2 (where reference ultimately fails and the
+        # whole triple reverts) — there's no "skip the channel that
+        # didn't trigger this step" shortcut when moving toward more
+        # sensitivity.
+        assert surveillance_lna_states == set(range(2, LNA_STATE_MAX + 1))
 
-    def test_escalation_exhausted_reports_max_lna_state(self, fast):
+        revert_entry = next(e for e in descent if e["phase"] == "lna_descent_revert")
+        assert revert_entry["lna_state"] == 3
+        assert revert_entry["reverted_from_lna_state"] == 2
+
+    def test_persistent_reference_overload_stops_at_lna_ceiling_immediately(self, fast):
+        """A overloads no matter what gain or LNA state — even the safety
+        corner (59dB, lna_state=9) itself overloads, so the search must
+        stop right there rather than trying more sensitive LNA states it
+        already knows are worse. There's no ladder to climb anymore: the
+        search starts at the safe end and only ever moves toward more
+        sensitivity, so "no clean value even at the safe corner" is
+        immediately terminal, not a multi-step escalation."""
         client = FakeBlah2Client(
             overload_rule=lambda fc, ga, gb, lna: (True, False),
             detection=moving_track_detections())
@@ -354,6 +434,63 @@ class TestLnaEscalation:
         assert status["state"] == "done"
         assert status["result"]["gain_a"] == GAIN_REDUCTION_MAX
         assert status["result"]["lna_state"] == LNA_STATE_MAX
+
+    def test_lna_descent_reverts_partway_to_last_proven_safe_triple(self, fast):
+        """B overloads unconditionally once lna_state drops below 6 (any
+        gain) — descent walks cleanly to the sensitivity floor at
+        lna_state=9,8,7,6, then trying lna_state=5 immediately overloads
+        surveillance at the safety ceiling, so the whole (gain_a,
+        gain_b, lna_state) triple must revert to the last state fully
+        proven clean (the floor at lna_state=6), not just surveillance's
+        own gain."""
+        client = FakeBlah2Client(
+            overload_rule=lambda fc, ga, gb, lna: (False, lna < 6),
+            detection=moving_track_detections())
+        tracker_client = FakeRetinaTrackerClient(confirm_after=1)
+        status = run_to_completion(Calibrator(client, tracker_client), [TOWER])
+        assert status["state"] == "done"
+        assert status["result"]["gain_a"] == GAIN_REDUCTION_MIN
+        assert status["result"]["gain_b"] == GAIN_REDUCTION_MIN
+        assert status["result"]["lna_state"] == 6
+
+        descent = status["history"][0]["descent"]
+        revert_entry = next(e for e in descent if e["phase"] == "lna_descent_revert")
+        assert revert_entry["gain_a"] == GAIN_REDUCTION_MIN
+        assert revert_entry["gain_b"] == GAIN_REDUCTION_MIN
+        assert revert_entry["lna_state"] == 6
+        assert revert_entry["reverted_from_lna_state"] == 5
+
+    def test_lna_descent_redoes_reference_even_when_surveillance_is_the_one_that_breaks(self, fast):
+        """Mirror of test_lna_descent_reverts_when_reference_cant_clear_it:
+        reference never overloads on its own, but B overloads
+        unconditionally once lna_state drops below 4. Reference's descent
+        must still be freshly redone at every lna_state tried, including
+        the one where it's surveillance (not reference) that ultimately
+        overloads and triggers the whole-triple revert — proving
+        reference isn't assumed-safe just because it wasn't the channel
+        that broke."""
+        client = FakeBlah2Client(
+            overload_rule=lambda fc, ga, gb, lna: (False, lna < 4),
+            detection=moving_track_detections())
+        tracker_client = FakeRetinaTrackerClient(confirm_after=1)
+        status = run_to_completion(Calibrator(client, tracker_client), [TOWER])
+        assert status["state"] == "done"
+        assert status["result"]["gain_a"] == GAIN_REDUCTION_MIN
+        assert status["result"]["gain_b"] == GAIN_REDUCTION_MIN
+        assert status["result"]["lna_state"] == 4
+
+        descent = status["history"][0]["descent"]
+        reference_entries = [e for e in descent if e.get("phase") == "reference"]
+        reference_lna_states = {e["lna_state"] for e in reference_entries}
+        # Reference is freshly redone at every lna_state tried, including
+        # lna_state=3 (where surveillance ultimately fails and the whole
+        # triple reverts) — proving reference isn't skipped just because
+        # it wasn't the channel that triggered the revert.
+        assert reference_lna_states == set(range(3, LNA_STATE_MAX + 1))
+
+        revert_entry = next(e for e in descent if e["phase"] == "lna_descent_revert")
+        assert revert_entry["lna_state"] == 4
+        assert revert_entry["reverted_from_lna_state"] == 3
 
 
 class TestDeviceCrashHandling:
@@ -438,6 +575,34 @@ class TestDeviceCrashHandling:
         assert len(status["history"]) == 2
         assert status["history"][0].get("device_error") is True
 
+    def test_device_error_during_lna_descent_loop_reverts_gracefully(self, fast):
+        """A device-crash-style failure (retune never acks) specifically
+        at lna_state=7 — after two clean, successful LNA-descent steps (9,
+        8) have already completed — must compose with the new outer loop
+        exactly like an ordinary overload reading: revert the whole
+        triple to the last proven-safe state (the floor at lna_state=8)
+        and stop trying more sensitivity, without aborting the tower's
+        run. Distinct from this class's other tests, which only exercise
+        a device error during the very first (lna_state=9) pass."""
+        client = FakeBlah2Client(
+            retune_fail_rule=lambda fc, ga, gb, lna: lna == 7,
+            detection=moving_track_detections())
+        tracker_client = FakeRetinaTrackerClient(confirm_after=1)
+        status = run_to_completion(Calibrator(client, tracker_client), [TOWER])
+        assert status["state"] == "done"
+        assert status["result"]["gain_a"] == GAIN_REDUCTION_MIN
+        assert status["result"]["gain_b"] == GAIN_REDUCTION_MIN
+        assert status["result"]["lna_state"] == 8
+
+        descent = status["history"][0]["descent"]
+        failed_entries = [e for e in descent if e.get("lna_state") == 7 and e.get("device_error")]
+        assert failed_entries, "expected a device_error entry logged at lna_state=7"
+
+        revert_entry = next(e for e in descent if e["phase"] == "lna_descent_revert")
+        assert revert_entry["lna_state"] == 8
+        assert revert_entry["reverted_from_lna_state"] == 7
+        assert revert_entry.get("device_error") is not True  # the revert itself succeeded
+
 
 class TestDwell:
     def test_success_leaves_blah2_on_winner(self, fast):
@@ -451,20 +616,28 @@ class TestDwell:
         assert client.current["fc"] == TOWER["fc"]
         assert client.current["gain_a"] == status["result"]["gain_a"]
 
-    def test_no_track_restores_original(self, fast):
+    def test_no_track_anywhere_leaves_top_tower_at_its_resolved_gain(self, fast):
+        """A run that genuinely finds no track anywhere no longer restores
+        the arbitrary pre-run 'original' tuning — it leaves the device on
+        the top-ranked tower's own resolved (gain_a, gain_b, lna_state)
+        from that tower's own manual descent. Nothing ever overloads here,
+        so that resolved point is the sensitivity floor, not a fixed
+        "safe corner" — proving the fallback reuses the real resolved
+        value rather than a separately-hardcoded one."""
         client = FakeBlah2Client()  # no detections at all — never confirms
         status = run_to_completion(Calibrator(client, FakeRetinaTrackerClient()), [TOWER])
         assert status["state"] == "failed"
         assert "No confirmed track" in status["error"]
-        assert client.current["fc"] == ORIGINAL["fc"]
-        assert client.current["gain_a"] == ORIGINAL["gain_a"]
-        assert client.current["gain_b"] == ORIGINAL["gain_b"]
-        assert client.current["lna_state"] == ORIGINAL["lna_state"]
-        # status must reflect the real (restored) hardware state, not the
-        # last failed candidate it was still showing mid-run
-        assert status["current"]["fc"] == ORIGINAL["fc"]
-        assert status["current"]["gain_a"] == ORIGINAL["gain_a"]
-        assert status["current"]["gain_b"] == ORIGINAL["gain_b"]
+        assert client.current["fc"] == TOWER["fc"]
+        assert client.current["gain_a"] == GAIN_REDUCTION_MIN
+        assert client.current["gain_b"] == GAIN_REDUCTION_MIN
+        assert client.current["lna_state"] == LNA_STATE_MIN
+        # status must reflect the real hardware state, not the arbitrary
+        # pre-run tuning and not a stale mid-run candidate
+        assert status["current"]["fc"] == TOWER["fc"]
+        assert status["current"]["gain_a"] == GAIN_REDUCTION_MIN
+        assert status["current"]["gain_b"] == GAIN_REDUCTION_MIN
+        assert status["current"]["lna_state"] == LNA_STATE_MIN
 
     def test_cancel_restores_original(self, fast):
         import time
@@ -544,11 +717,11 @@ class TestMultiTower:
         and no tower silently starved to zero."""
         client = FakeBlah2Client()
         cal = Calibrator(client, FakeRetinaTrackerClient())
-        # A default-clean descent now walks the whole grid to the floor
-        # (~10 retune+settle cycles, not ~2) before any dwelling happens —
-        # a bit more budget than before keeps this comfortably clear of
-        # scheduling jitter under the `fast` fixture.
-        started, error = cal.start([TOWER, TOWER_TWO], ORIGINAL, budget_seconds=1.2)
+        # A default-clean descent now walks the whole LNA ladder to the
+        # floor (~90 retune+settle cycles across all 9 lna_states, not
+        # ~10 at one) before any dwelling happens — comfortably more
+        # budget than before keeps this clear of scheduling jitter.
+        started, error = cal.start([TOWER, TOWER_TWO], ORIGINAL, budget_seconds=6.0)
         assert started, error
         cal._thread.join(timeout=10)
         status = cal.get_status()
@@ -572,6 +745,128 @@ class TestMultiTower:
         status = cal.get_status()
         assert status["state"] == "failed"
         assert any(e["outcome"] == "skipped_no_time" for e in status["history"])
+
+
+class TestNoTrackFallback:
+    """When the whole search finds no confirmed track anywhere, the device
+    is left on the top-ranked tower's own resolved (gain_a, gain_b,
+    lna_state) — not the arbitrary pre-run 'original' tuning — optionally
+    after one last-resort attempt with hardware AGC on (see
+    calibrator.py's _apply_top_tower_fallback/_run_agc_fallback)."""
+
+    def test_no_track_fallback_lands_on_top_tower_not_last_tried(self, fast):
+        client = FakeBlah2Client()  # never overloads, never confirms
+        status = run_to_completion(Calibrator(client, FakeRetinaTrackerClient()),
+                                   [TOWER, TOWER_TWO])
+        assert status["state"] == "failed"
+        assert client.current["fc"] == TOWER["fc"]
+        assert client.current["fc"] != TOWER_TWO["fc"]
+
+    def test_no_track_fallback_uses_resolved_gain_not_a_fixed_corner(self, fast):
+        """B overloads below 37dB: descent reverts to 39 (not the 59dB
+        safe ceiling) at every lna_state tried, landing at lna_state=1.
+        The fallback must reuse that specific resolved value, not a
+        separately-hardcoded safe corner."""
+        client = FakeBlah2Client(
+            overload_rule=lambda fc, ga, gb, lna: (False, gb < 37))
+        status = run_to_completion(Calibrator(client, FakeRetinaTrackerClient()), [TOWER])
+        assert status["state"] == "failed"
+        assert client.current["fc"] == TOWER["fc"]
+        assert client.current["gain_a"] == GAIN_REDUCTION_MIN
+        assert client.current["gain_b"] == 39
+        assert client.current["lna_state"] == LNA_STATE_MIN
+
+    def test_agc_fallback_succeeds_after_manual_search_exhausted(self, fast):
+        client = FakeBlah2Client(detection=moving_track_detections())
+        tracker_client = FakeRetinaTrackerClient(confirm_after=1, confirm_from_reset=1)
+        fake_agc = FakeAgcFallbackClient()
+        status = run_to_completion(
+            Calibrator(client, tracker_client, fake_agc), [TOWER])
+        assert status["state"] == "done"
+        assert status["result"]["bandwidth_number"] == calmod.AGC_FALLBACK_BANDWIDTH_NUMBER
+        assert len(fake_agc.calls) == 1  # no disable call — succeeded
+        assert fake_agc.calls[0]["fc"] == TOWER["fc"]
+        assert fake_agc.calls[0]["bandwidth_number"] == calmod.AGC_FALLBACK_BANDWIDTH_NUMBER
+        # surveillance/LNA are the top tower's own resolved values, not a
+        # fixed corner — AGC doesn't manage either of them
+        assert fake_agc.calls[0]["gain_b"] == GAIN_REDUCTION_MIN
+        assert fake_agc.calls[0]["lna_state"] == LNA_STATE_MIN
+
+    def test_agc_fallback_also_fails_leaves_top_tower_at_resolved_gain(self, fast):
+        client = FakeBlah2Client()  # never confirms, at manual search or AGC
+        tracker_client = FakeRetinaTrackerClient()
+        fake_agc = FakeAgcFallbackClient()
+        status = run_to_completion(
+            Calibrator(client, tracker_client, fake_agc), [TOWER])
+        assert status["state"] == "failed"
+        assert len(fake_agc.calls) == 2  # enable, then disable
+        disable_call = fake_agc.calls[1]
+        assert disable_call["bandwidth_number"] == calmod.AGC_BANDWIDTH_OFF
+        assert disable_call["gain_b"] == GAIN_REDUCTION_MIN
+        assert disable_call["lna_state"] == LNA_STATE_MIN
+        # The AGC path never calls blah2_client.retune() directly — the
+        # calibrator's own status is the one that reflects reality here.
+        assert status["current"]["fc"] == TOWER["fc"]
+        assert status["current"]["gain_a"] == GAIN_REDUCTION_MIN
+        assert status["current"]["gain_b"] == GAIN_REDUCTION_MIN
+        assert status["current"]["lna_state"] == LNA_STATE_MIN
+
+    def test_agc_fallback_attempted_once_per_run_not_per_tower(self, fast):
+        client = FakeBlah2Client()  # never confirms anywhere
+        tracker_client = FakeRetinaTrackerClient()
+        fake_agc = FakeAgcFallbackClient()
+        status = run_to_completion(
+            Calibrator(client, tracker_client, fake_agc), [TOWER, TOWER_TWO])
+        assert status["state"] == "failed"
+        assert len(fake_agc.calls) == 2  # enable + disable, regardless of tower count
+
+    def test_agc_enable_failure_falls_back_to_plain_top_tower_fallback(self, fast):
+        client = FakeBlah2Client()
+        tracker_client = FakeRetinaTrackerClient()
+        fake_agc = FakeAgcFallbackClient(enable_result=(False, "config-merger failed"))
+        status = run_to_completion(
+            Calibrator(client, tracker_client, fake_agc), [TOWER])
+        assert status["state"] == "failed"
+        assert len(fake_agc.calls) == 1  # no disable attempt — nothing was ever turned on
+        assert "could not be enabled" in status["error"]
+        # the plain live-retune path does touch blah2_client directly
+        assert client.current["fc"] == TOWER["fc"]
+        assert client.current["gain_a"] == GAIN_REDUCTION_MIN
+        assert client.current["gain_b"] == GAIN_REDUCTION_MIN
+        assert client.current["lna_state"] == LNA_STATE_MIN
+
+    def test_agc_disable_failure_still_terminates_the_run(self, fast):
+        client = FakeBlah2Client()
+        tracker_client = FakeRetinaTrackerClient()
+        fake_agc = FakeAgcFallbackClient(disable_result=(False, "restart failed"))
+        status = run_to_completion(
+            Calibrator(client, tracker_client, fake_agc), [TOWER])
+        assert status["state"] == "failed"
+        assert "could not be turned back off" in status["error"]
+
+    def test_agc_fallback_cancelled_mid_dwell_turns_agc_back_off(self, fast, monkeypatch):
+        import time
+        monkeypatch.setattr(calmod, "AGC_FALLBACK_DWELL_SECONDS", 5)
+        client = FakeBlah2Client()  # never confirms
+        tracker_client = FakeRetinaTrackerClient()
+        fake_agc = FakeAgcFallbackClient()
+        cal = Calibrator(client, tracker_client, fake_agc)
+        started, error = cal.start([TOWER], ORIGINAL, budget_seconds=30, dwell_seconds=0.01)
+        assert started, error
+
+        deadline = time.monotonic() + 10
+        while time.monotonic() < deadline:
+            if cal.get_status()["phase"] == "agc_dwelling":
+                break
+            time.sleep(0.01)
+        else:
+            raise AssertionError("never reached agc_dwelling phase")
+
+        cal.cancel()
+        cal._thread.join(timeout=10)
+        status = cal.get_status()
+        assert status["state"] == "cancelled"
+        assert fake_agc.calls[-1]["bandwidth_number"] == calmod.AGC_BANDWIDTH_OFF
 
 
 class TestTrackerSidecarIntegration:
@@ -661,9 +956,11 @@ class TestAdsbMode:
         assert status["history"][0]["gains_tried"] == [
             {"gain_b": GAIN_REDUCTION_MIN, "overload_b": False}]
         assert "doesn't match a known aircraft" in status["best_attempt"]["reason"]
-        # restored, same invariant as every other non-success outcome
-        assert client.current["fc"] == ORIGINAL["fc"]
-        assert client.current["gain_a"] == ORIGINAL["gain_a"]
+        # No track anywhere -> left on the top tower's own resolved gain
+        # (the sensitivity floor here, since nothing ever overloads),
+        # not the arbitrary pre-run 'original' tuning.
+        assert client.current["fc"] == TOWER["fc"]
+        assert client.current["gain_a"] == GAIN_REDUCTION_MIN
 
     def test_cycles_toward_more_sensitivity_then_stops_on_reoverload(self, fast):
         """Descent reverts B to 39, refine lands at 34 (59->49->39 clean,

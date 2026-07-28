@@ -2,8 +2,10 @@
 confirms.
 
 Strategy ("good, not best"): for each candidate tower, start at the *safe*
-end of the gain range (maximum gain reduction, minimum LNA attenuation) —
-never at maximum gain — and step toward more sensitivity in big increments,
+end of every search axis (maximum gain reduction, maximum LNA state — the
+least sensitive setting on both) — never at maximum gain or maximum
+sensitivity on either axis — and step toward more sensitivity in big
+increments,
 reverting to the last clean step the instant the RF front end overloads,
 then dwell at that setting waiting for a confirmed track. A confirmed track
 needs a real aircraft overhead, so dwell time dominates the run — the search
@@ -31,10 +33,12 @@ overload (see _probe/_safe_revert) — the retune never acks, or
 overload-status goes quiet, surfacing as a CalibrationError instead of a
 clean reading.
 Every descent/dwell step treats that failure exactly like an overload
-reading at that candidate (revert to the last proven-clean value, or
-escalate LNA state if there's no clean value yet) rather than letting it
-abort the whole multi-tower run — a wedge is, if anything, a stronger
-signal that this candidate is unusable, not a different kind of problem.
+reading at that candidate (revert to the last proven-safe value — a
+single channel's own gain, or, for LNA state, the whole (gain_a, gain_b,
+lna_state) triple together — or, if there's no clean value yet even at
+the safety ceiling, stop there) rather than letting it abort the whole
+multi-tower run — a wedge is, if anything, a stronger signal that this
+candidate is unusable, not a different kind of problem.
 
 Three search variables, adjusted in a fixed priority order per tower (see
 _descend_reference/_descend_surveillance/_descend):
@@ -46,18 +50,36 @@ _descend_reference/_descend_surveillance/_descend):
      again if that re-overloads). This is where MODE_ADSB's
      sensitivity-cycling picks up from (see _dwell_adsb).
   3. LNA state — shared across both tuners (the SDRplay device has no
-     per-tuner LNA control). Only touched if gain reduction alone can't
-     clear an overload (i.e. still clipping even at gRdB's safest, 59dB
-     ceiling) — gRdB is a downstream/IF-stage control, so it cannot fix a
-     front end that's genuinely saturating on a very strong signal; LNA
-     state (an upstream, RF-stage control) is the escalation path for
-     that. Higher LNA state number means more attenuation, less gain
-     (state 1 = max gain, state 9 = min gain — see RspDuo/README.md in
-     blah2-arm). Escalating LNA state resets *only* whichever channel(s)
-     triggered the escalation back to the safe ceiling (59dB) and
-     redescends fresh — a channel that's already clean is left untouched,
-     since more attenuation upstream can never newly overload a channel
-     that wasn't already clipping.
+     per-tuner LNA control), so it's resolved as a single outer loop
+     around both tuners' gain descents rather than a fourth per-tuner
+     step. Higher LNA state number means more attenuation, less gain
+     (state 1 = max gain/least attenuation, state 9 = min gain/most
+     attenuation — see RspDuo/README.md in blah2-arm) — so LNA state's
+     *safe* end is its highest number, just like gain reduction's,
+     though for a different physical reason (gRdB's max is max
+     downstream/IF-stage attenuation; LNA's max is max upstream/RF-stage
+     attenuation). Every tower's search starts at lna_state=9 with both
+     tuners' gain descended per steps 1-2 above; if both come back clean
+     (or as clean as gain reduction alone can make them), the search
+     tries one step more sensitive (lna_state - 1) and redescends *both*
+     tuners' gain fresh from the 59dB ceiling — unlike gain reduction's
+     own descent, where reverting to more attenuation can never newly
+     overload an already-clean channel, moving LNA state toward more
+     sensitivity is a fundamentally different direction: it can newly
+     overload a channel that was clean a moment ago, so both tuners must
+     be freshly reproved at every step, with no "only redo the
+     triggering channel" shortcut. The instant either channel overloads
+     (or hits a device error) at a new, more-sensitive lna_state, the
+     whole (gain_a, gain_b, lna_state) triple reverts together to the
+     last state fully proven clean — not a per-channel revert, since LNA
+     is one shared register and a mismatched-LNA-state combination
+     across the two tuners isn't physically meaningful — and the search
+     stops there. If gain reduction alone still can't clear an overload
+     even at lna_state=9 (i.e. still clipping at the safest corner of
+     the whole search space), that's a terminal condition for this
+     tower: there's no safer LNA state to retreat to, so the search
+     stops immediately rather than exploring more sensitive states it
+     already knows are worse.
 
 Track confirmation goes through the same retina-tracker sidecar container
 tracker-preview uses (github.com/offworldlabs/retina-tracker, run as its own
@@ -104,10 +126,28 @@ Two success modes, with genuinely different dwell strategies:
     rejects mode=adsb at the /start endpoint — exposing it to users is a
     separate decision not yet made.
 
-Nothing is written to user.yml during a run; candidates are applied via
-blah2's live retune channel only. On any non-success terminal state the
-original tuning is restored. Persisting a successful result is a separate,
-explicit step (POST /calibrate/apply).
+Nothing is written to user.yml during a run, with one narrow, explicit
+exception: if every tower's manual gain/LNA search fails to confirm a
+track anywhere, one last-resort attempt is made with hardware AGC turned
+on at the top-ranked tower's frequency (see _run_agc_fallback) — this is
+the only point in a run that touches user.yml/config-merger/Docker, via
+an injected collaborator (see agc_fallback.py), never directly. AGC only
+drives the reference tuner's gain — the surveillance tuner and the
+shared LNA state are not managed by it, so they're set to the top-ranked
+tower's own resolved (gain_b, lna_state) from its own manual descent
+(captured in _run, reused by both this AGC attempt and the fallback
+below), not left unprotected. On a genuine user cancellation or an
+unexpected/CalibrationError exception, the original tuning is restored,
+unchanged from before. On the no-track-anywhere outcome specifically, the
+device is instead left on the top-ranked tower's own resolved, already
+proven-not-to-overload operating point (optionally after the AGC attempt
+above) — not the arbitrary pre-run tuning. That resolved point already
+degrades to the safe (max gain reduction, max LNA state) corner on its
+own whenever the top tower's own descent never found anything better —
+see _descend_reference/_descend_surveillance's own terminal branches —
+so there's no separate "is this still safe" check needed here.
+Persisting a successful result is a separate, explicit step (POST
+/calibrate/apply).
 
 All blah2-side timestamps (retune appliedAt, overload-status, detection/tracker
 CPI timestamps) share blah2's system clock, so freshness comparisons never
@@ -167,6 +207,23 @@ TRACKER_FEED_POLL_SECONDS = 0.2
 # Overall run budget.
 TOTAL_BUDGET_SECONDS = 600
 
+# AGC last-resort fallback (see module docstring): once every tower's
+# manual gain/LNA search has failed, exactly one additional attempt is
+# made at the top-ranked tower's frequency with hardware AGC on instead
+# of manual gain search on the reference tuner only. 5 matches
+# routes/calibrate.py's AGC_BANDWIDTHS — the lowest of the three valid
+# AGC-on settings, the most conservative choice for a one-shot attempt
+# this late in an already-possibly-troubled run.
+AGC_FALLBACK_BANDWIDTH_NUMBER = 5
+AGC_BANDWIDTH_OFF = 0
+
+# How long to dwell (waiting for a confirmed track) once AGC is on and
+# the capture stack has restarted. Its own fixed budget, not derived from
+# TOTAL_BUDGET_SECONDS/the per-tower division — this only runs once the
+# whole tower rotation is already exhausted, so it isn't stealing time
+# from towers that already had their turn.
+AGC_FALLBACK_DWELL_SECONDS = 90
+
 # Success modes.
 MODE_TRACK = "track"
 MODE_ADSB = "adsb"
@@ -210,9 +267,14 @@ class Calibrator:
     DeviceState and is managed by the caller (routes/calibrate.py).
     """
 
-    def __init__(self, blah2_client, retina_tracker_client):
+    def __init__(self, blah2_client, retina_tracker_client, agc_fallback_client=None):
         self._client = blah2_client
         self._tracker_client = retina_tracker_client
+        # Optional third collaborator (see agc_fallback.py) — the run's
+        # once-per-run AGC last resort. None (the default, used by most
+        # existing tests) simply skips Feature 2; the top-tower fallback
+        # still applies on its own (see _run()).
+        self._agc_fallback = agc_fallback_client
         self._lock = threading.Lock()
         self._cancel = threading.Event()
         self._thread = None
@@ -427,8 +489,9 @@ class Calibrator:
         _read_overload (no fresh overload-status) instead of a clean
         overloadA/B reading (see module docstring). Folding either failure into
         overload_a=overload_b=True lets callers reuse their existing
-        overload-handling branches (revert to the last-clean value, or
-        escalate LNA state if there's no clean value yet) unchanged —
+        overload-handling branches (revert to the last proven-safe
+        value — a single channel's own gain, or, for LNA state, the
+        whole (gain_a, gain_b, lna_state) triple together) unchanged —
         forcing *both* flags true even for a single-tuner caller is
         deliberate: a device error means neither channel's state is
         actually known, and erring toward "assume the worst, back off"
@@ -602,18 +665,37 @@ class Calibrator:
 
     def _descend(self, fc, descent_log, deadline):
         """Run the three-variable search in priority order: reference gain,
-        then surveillance gain, then (only if either is still overloaded at
-        its 59dB ceiling) escalate LNA state — resetting and redescending
-        only whichever channel(s) actually triggered the escalation, since
-        an already-clean channel can never be newly overloaded by more
-        upstream attenuation. See module docstring for the full rationale.
+        then surveillance gain, both starting at the *safe* end of every
+        axis (max gain reduction, max LNA state — see module docstring for
+        why LNA state's safe end is its *highest* number, not its lowest).
+        Once a (gain_a, gain_b) pair comes back clean — or as clean as gain
+        reduction alone can make it — at the current lna_state, the search
+        tries one step more sensitive (lna_state - 1) and redescends *both*
+        tuners' gain fresh from the 59dB ceiling: unlike gain reduction's
+        own descent, where retreating to more attenuation can never newly
+        overload an already-clean channel, moving lna_state toward more
+        sensitivity is a fundamentally different direction that can newly
+        overload a channel that was clean a moment ago — so both tuners
+        are always freshly reproved, with no "only redo the triggering
+        channel" shortcut. The instant either channel overloads (or hits a
+        device error) at a new, more-sensitive lna_state, the whole
+        (gain_a, gain_b, lna_state) triple reverts together to the last
+        state fully proven clean and the search stops there — not a
+        per-channel revert, since LNA state is a single register shared by
+        both tuners and a mismatched-lna-state combination across them
+        isn't physically meaningful. If gain reduction alone still can't
+        clear an overload even at lna_state=9 (the safest corner of the
+        whole search space), that's immediately terminal for this tower:
+        there's no safer LNA state to retreat to, so the search stops
+        right there rather than climbing a ladder toward states it
+        already knows are worse.
 
         deadline: this tower's shared descent+dwell budget (monotonic
         clock). Never exceeded — see _descend_reference/_descend_surveillance.
 
         Returns (gain_a, gain_b, lna_state, applied_at_ms).
         """
-        lna_state = LNA_STATE_MIN
+        lna_state = LNA_STATE_MAX
         gain_a, applied_at, overload_a = self._descend_reference(
             fc, GAIN_REDUCTION_MAX, lna_state, descent_log, deadline)
 
@@ -622,30 +704,56 @@ class Calibrator:
             gain_b, applied_at, overload_b = self._descend_surveillance(
                 fc, gain_a, lna_state, descent_log, deadline)
 
-        while ((overload_a or overload_b) and lna_state < LNA_STATE_MAX
+        while (not overload_a and not overload_b and lna_state > LNA_STATE_MIN
                and time.monotonic() < deadline):
-            lna_state += 1
+            safe_gain_a, safe_gain_b, safe_lna_state = gain_a, gain_b, lna_state
+            lna_state -= 1
             self._set_current(lna_state=lna_state)
-            descent_log.append({"phase": "lna_escalation", "lna_state": lna_state})
-            if overload_a:
-                gain_a, applied_at, overload_a = self._descend_reference(
-                    fc, gain_b, lna_state, descent_log, deadline)
-            if overload_b:
-                gain_b, applied_at, overload_b = self._descend_surveillance(
-                    fc, gain_a, lna_state, descent_log, deadline)
+            descent_log.append({"phase": "lna_descent", "lna_state": lna_state})
+
+            new_gain_a, applied_at, overload_a = self._descend_reference(
+                fc, GAIN_REDUCTION_MAX, lna_state, descent_log, deadline)
+            new_gain_b, overload_b = GAIN_REDUCTION_MAX, False
+            if time.monotonic() < deadline:
+                new_gain_b, applied_at, overload_b = self._descend_surveillance(
+                    fc, new_gain_a, lna_state, descent_log, deadline)
+
+            if overload_a or overload_b:
+                applied_at, revert_error = self._safe_revert(
+                    fc, safe_gain_a, safe_gain_b, safe_lna_state, applied_at)
+                revert_entry = {
+                    "phase": "lna_descent_revert",
+                    "gain_a": safe_gain_a, "gain_b": safe_gain_b,
+                    "lna_state": safe_lna_state,
+                    "reverted_from_lna_state": lna_state,
+                }
+                if revert_error:
+                    revert_entry["device_error"] = True
+                    revert_entry["device_error_detail"] = revert_error
+                descent_log.append(revert_entry)
+                gain_a, gain_b, lna_state = safe_gain_a, safe_gain_b, safe_lna_state
+                self._set_current(gain_a=gain_a, gain_b=gain_b, lna_state=lna_state)
+                break
+
+            gain_a, gain_b = new_gain_a, new_gain_b
 
         return gain_a, gain_b, lna_state, applied_at
 
     def _dwell(self, tower, fc, gain_a, gain_b, lna_state, applied_at, dwell_deadline,
-               tower_entry):
+               tower_entry, phase_label="dwelling"):
         """MODE_TRACK's dwell: push live detections to the shared
         retina-tracker sidecar (see module docstring for why — blah2's own
         tracker is not trusted here) and wait for it to emit a confirmed
         (ACTIVE) track event, or dwell_deadline passes. Returns a result
         dict on success, None if the dwell budget expires. (MODE_ADSB uses
         _dwell_adsb instead — see the module docstring.)
+
+        phase_label: lets the AGC last-resort fallback (see
+        _run_agc_fallback) report a distinct "agc_dwelling" phase instead
+        of the ordinary per-tower "dwelling" — everything else about this
+        method is identical either way.
         """
-        self._update(phase="dwelling")
+        self._update(phase=phase_label)
         max_evidence = EVIDENCE_NONE
         max_detections = 0
         last_timestamp = None
@@ -817,12 +925,159 @@ class Calibrator:
             current.update(kwargs)
             self._status["current"] = current
 
+    def _apply_top_tower_fallback(self, top_tower, top_fc, gain_a, gain_b, lna_state):
+        """Feature 1's core: leave blah2 tuned to the top-ranked tower's
+        frequency at its own resolved (gain_a, gain_b, lna_state) — the
+        values that tower's own manual search already proved don't
+        overload — rather than the arbitrary pre-run 'original' tuning.
+        Not a separately-fixed "safe corner": see module docstring for
+        why the resolved triple already degrades to the safe corner on
+        its own whenever the top tower's own descent never found
+        anything better. Best-effort and swallows its own failure,
+        exactly like the original-tuning restore this replaces for the
+        no-track-anywhere case — if blah2 is genuinely unreachable,
+        nothing more can be done from here (restart:always re-reads
+        config.yml).
+        """
+        self._update(phase="restoring")
+        try:
+            self._apply(top_fc, gain_a, gain_b, lna_state, ignore_cancel=True)
+            self._set_current(tower_index=0, tower_name=top_tower.get("name"),
+                              fc=top_fc, gain_a=gain_a, gain_b=gain_b,
+                              lna_state=lna_state)
+        except Exception:
+            pass
+
+    def _run_agc_fallback(self, top_tower, top_fc, gain_a, gain_b, lna_state):
+        """The run's very last resort (see module docstring): try
+        hardware AGC once, at the top-ranked tower's frequency only,
+        after every tower's manual gain/LNA search has already failed.
+        Not part of blah2's live retune protocol — turning AGC on/off
+        goes through the injected _agc_fallback collaborator (kept out
+        of this class's own Flask/subprocess/Docker-free design).
+
+        AGC only drives the reference tuner (A)'s gain — the
+        surveillance tuner (B) and the shared LNA state are NOT managed
+        by it at all, so both still need real, proven-not-to-overload
+        values or surveillance has zero overload protection during this
+        attempt. gain_a/gain_b/lna_state here are the top tower's own
+        resolved values from its own manual descent (see _run) — gain_a
+        is a don't-care placeholder once AGC takes over live, but
+        gain_b/lna_state are load-bearing for real.
+
+        Reuses _dwell (MODE_TRACK's "any confirmed track" criterion)
+        regardless of the run's own mode — MODE_ADSB isn't reachable via
+        routes/calibrate.py today, so this keeps the fallback simple
+        rather than plumbing MODE_ADSB's stricter aircraft-matching
+        through a config-driven (not gain-driven) AGC state. Revisit if
+        MODE_ADSB is ever exposed.
+
+        applied_at=0 for the dwell's staleness guard is deliberate, not
+        an oversight: unlike a live retune, there's no real "applied at"
+        timestamp for a config-file-driven container restart, but the
+        blah2 container was just fully recreated, so there's no stale
+        pre-restart detection data that could wrongly pass the guard —
+        safety instead comes from the explicit reset() + confirmed-event
+        clear immediately below, exactly as every tower transition
+        already relies on.
+
+        The enable step (self._agc_fallback.apply(...), a real
+        subprocess/Docker call) is not itself cancellable mid-flight —
+        only the dwell afterward checks for cancellation. Accepted:
+        matches how every other blocking subprocess call in this
+        codebase already behaves.
+
+        Returns (result, error, cancelled):
+          - result: a success dict (same shape as _dwell's, plus
+            bandwidth_number for /calibrate/apply to persist), or None.
+          - error: a human-readable failure reason to append to the
+            run's existing "no confirmed track" message, or None on
+            success.
+          - cancelled: True if the user's cancel is what ended this
+            attempt (caller should report state="cancelled", not
+            "failed").
+
+        Whatever happens, AGC is never left on: any non-success path
+        here turns it back off and re-applies the top tower's own
+        resolved values at top_fc before returning — this method fully
+        owns the terminal device state for this branch; _run()'s own
+        restore-original logic must not also run afterwards (see _run()).
+        """
+        self._update(phase="agc_fallback")
+        self._tracker_client.reset()
+        with self._lock:
+            self._last_confirmed_event = None
+        self._set_current(tower_index=0, tower_name=top_tower.get("name"),
+                          fc=top_fc, gain_a=None, gain_b=gain_b, lna_state=lna_state)
+
+        ok, apply_error = self._agc_fallback.apply(
+            top_fc, AGC_FALLBACK_BANDWIDTH_NUMBER, gain_a, gain_b, lna_state)
+        if not ok:
+            # AGC was never actually turned on — nothing to turn back
+            # off. Fall through to the plain (live-retune) top-tower
+            # fallback.
+            self._apply_top_tower_fallback(top_tower, top_fc, gain_a, gain_b, lna_state)
+            return None, f"Tried hardware AGC as a last resort, but it could not be enabled: {apply_error}", False
+
+        self._set_current(gain_a=gain_a, gain_b=gain_b, lna_state=lna_state)
+
+        tower_entry = {"tower_name": top_tower.get("name"), "fc": top_fc,
+                       "descent": [], "outcome": "not_reached", "agc": True}
+        dwell_deadline = time.monotonic() + AGC_FALLBACK_DWELL_SECONDS
+        try:
+            result = self._dwell(top_tower, top_fc, gain_a, gain_b, lna_state,
+                                 applied_at=0, dwell_deadline=dwell_deadline,
+                                 tower_entry=tower_entry, phase_label="agc_dwelling")
+        except _Cancelled:
+            self._append_history(tower_entry)
+            # Best-effort cleanup even on cancel — AGC must never be left
+            # on silently (see module docstring).
+            self._agc_fallback.apply(top_fc, AGC_BANDWIDTH_OFF, gain_a, gain_b, lna_state)
+            self._set_current(tower_index=0, tower_name=top_tower.get("name"),
+                              fc=top_fc, gain_a=gain_a, gain_b=gain_b,
+                              lna_state=lna_state)
+            return None, "Cancelled by user", True
+
+        self._append_history(tower_entry)
+        if result is not None:
+            # gain_a here is the placeholder written alongside AGC, not
+            # what AGC is actually running at any instant — accurate
+            # enough to persist (config needs *some* valid number even
+            # under AGC) without pretending to know AGC's live gain.
+            # gain_b/lna_state are the real, load-bearing values.
+            # bandwidth_number tells /calibrate/apply to persist AGC-on
+            # (see routes/calibrate.py).
+            result["lna_state"] = lna_state
+            result["bandwidth_number"] = AGC_FALLBACK_BANDWIDTH_NUMBER
+            return result, None, False
+
+        off_ok, off_error = self._agc_fallback.apply(
+            top_fc, AGC_BANDWIDTH_OFF, gain_a, gain_b, lna_state)
+        if not off_ok:
+            return None, (
+                "Also tried hardware AGC as a last resort — still no confirmed "
+                f"track, and AGC could not be turned back off automatically "
+                f"({off_error}); check the Capture config's AGC Bandwidth setting."), False
+
+        self._set_current(tower_index=0, tower_name=top_tower.get("name"),
+                          fc=top_fc, gain_a=gain_a, gain_b=gain_b, lna_state=lna_state)
+        return None, ("Also tried hardware AGC as a last resort at the "
+                      "top-ranked tower — still no confirmed track."), False
+
     # ── Run loop ───────────────────────────────────────────────
 
     def _run(self, towers, original, budget_seconds, dwell_seconds, mode):
         result = None
         error = None
         state = "failed"
+        no_track_fallback_applied = False
+        # Captured the moment towers[0]'s own _descend() returns (below)
+        # — the top-ranked tower's own resolved, proven-not-to-overload
+        # operating point. Serves both the no-track-anywhere fallback and
+        # the AGC last resort's surveillance/LNA values (see module
+        # docstring) — None until/unless tower index 0 is actually
+        # reached.
+        top_tower_resolved = None
         run_deadline = time.monotonic() + budget_seconds
 
         try:
@@ -836,7 +1091,7 @@ class Calibrator:
                 self._update(phase="descending")
                 self._set_current(tower_index=index, tower_name=tower.get("name"),
                                   fc=fc, gain_a=GAIN_REDUCTION_MAX,
-                                  gain_b=GAIN_REDUCTION_MAX, lna_state=LNA_STATE_MIN)
+                                  gain_b=GAIN_REDUCTION_MAX, lna_state=LNA_STATE_MAX)
                 # New geometry — a track confirmed at the previous tower (or
                 # an earlier gain candidate at this one) means nothing here.
                 self._tracker_client.reset()
@@ -877,6 +1132,8 @@ class Calibrator:
                     tower_entry["final_gain_a"] = gain_a
                     tower_entry["final_gain_b"] = gain_b
                     tower_entry["final_lna_state"] = lna_state
+                    if index == 0:
+                        top_tower_resolved = (gain_a, gain_b, lna_state)
                     self._set_current(gain_a=gain_a, gain_b=gain_b, lna_state=lna_state)
 
                     if mode == MODE_ADSB:
@@ -917,6 +1174,38 @@ class Calibrator:
                              "— this may simply mean no aircraft was overhead "
                              "during this run, not that the tuning is wrong.")
 
+                # A cancel arriving right as the last tower's dwell ended
+                # must still take the plain cancellation path (restore
+                # original) below, not commit to the slow AGC/top-tower
+                # fallback that follows.
+                self._check_cancel()
+
+                if towers and top_tower_resolved is not None:
+                    top_tower = towers[0]
+                    top_fc = int(top_tower["fc"])
+                    gain_a, gain_b, lna_state = top_tower_resolved
+                    if self._agc_fallback is not None:
+                        agc_result, agc_error, agc_cancelled = self._run_agc_fallback(
+                            top_tower, top_fc, gain_a, gain_b, lna_state)
+                        if agc_result is not None:
+                            result = agc_result
+                            state = "done"
+                            error = None
+                        elif agc_cancelled:
+                            state = "cancelled"
+                            error = "Cancelled by user"
+                        else:
+                            state = "failed"
+                            error = f"{error} {agc_error}" if agc_error else error
+                    else:
+                        self._apply_top_tower_fallback(top_tower, top_fc, gain_a, gain_b, lna_state)
+                    no_track_fallback_applied = True
+                # else: towers is empty, or the run's own deadline
+                # expired before towers[0]'s descent ever ran (both
+                # unreachable in ordinary production use) — fall through
+                # to the generic restore-original logic below, since
+                # there's no fresh top-tower data to fall back to.
+
         except _Cancelled:
             state = "cancelled"
             error = "Cancelled by user"
@@ -927,12 +1216,15 @@ class Calibrator:
             state = "failed"
             error = f"Unexpected error: {e}"
 
-        # Restore the original tuning on any non-success outcome so a failed
-        # run never leaves blah2 parked on a random candidate. ignore_cancel
-        # is required, not just belt-and-suspenders: a second cancel click
-        # while this is in flight must not be able to abort it, or blah2
-        # could be left tuned to the last (failed) candidate.
-        if state != "done":
+        # Restore the original tuning on any non-success outcome, UNLESS
+        # the no-track-anywhere fallback above already left blah2 on the
+        # top tower's own proven-safe tuning (see module docstring) —
+        # applying 'original' on top of that would silently undo it.
+        # ignore_cancel is required, not just belt-and-suspenders: a
+        # second cancel click while this is in flight must not be able
+        # to abort it, or blah2 could be left tuned to the last (failed)
+        # candidate.
+        if state != "done" and not no_track_fallback_applied:
             self._update(phase="restoring")
             try:
                 self._apply(original["fc"], original["gain_a"], original["gain_b"],

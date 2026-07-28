@@ -190,6 +190,7 @@ def apply():
     device = dict(capture.get('device', {}) or {})
     device['gainReduction'] = [int(result['gain_a']), int(result['gain_b'])]
     device['lnaState'] = int(result['lna_state'])
+    device['bandwidthNumber'] = int(result.get('bandwidth_number', 0))
     capture['device'] = device
     user_config['capture'] = capture
     config_mgr.save_user_config(user_config)
