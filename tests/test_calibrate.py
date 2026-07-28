@@ -5,9 +5,7 @@ SDR hardware) and a scripted FakeRetinaTrackerClient (no real socket or
 background tail thread) — see calibrator.py's module docstring for why
 confirmation goes through the shared retina-tracker sidecar rather than an
 in-process tracker or blah2's own. Route guards run against the Flask test
-client. Telemetry is no longer calibration-specific — see
-test_config_telemetry.py and the hook-point tests in
-test_mode.py/test_towers.py/test_app.py.
+client.
 
 FakeRetinaTrackerClient doesn't reimplement retina-tracker's Kalman/GNN
 association — it's a controllable stand-in: send_frame() is scripted to

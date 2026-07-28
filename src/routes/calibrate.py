@@ -196,7 +196,7 @@ def apply():
     config_mgr.save_user_config(user_config)
 
     try:
-        error = run_config_merger_and_restart(RETINA_NODE_PATH, trigger='calibrate_apply')
+        error = run_config_merger_and_restart(RETINA_NODE_PATH)
         if error:
             return jsonify({"success": True, "applied": False, "error": error})
     except subprocess.TimeoutExpired:

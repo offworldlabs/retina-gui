@@ -37,10 +37,6 @@ TOWER_FINDER_URL = os.environ.get('TOWER_FINDER_URL', 'https://tower-finder.reti
 # blah2_api runs with network_mode: host and listens directly on this port —
 # NOT the :8080 blah2_host nginx proxy, which doesn't forward /capture/* at all.
 BLAH2_API_URL = os.environ.get('BLAH2_API_URL', 'http://localhost:3000')
-# Empty = telemetry disabled; set to the config-snapshot ingest endpoint to
-# enable. Renamed from CALIBRATION_TELEMETRY_URL — telemetry now covers every
-# config-apply/mode-switch action, not just Auto-Calibrate.
-CONFIG_TELEMETRY_URL = os.environ.get('CONFIG_TELEMETRY_URL', '')
 # retina-tracker sidecar (network_mode: host, see retina-node's docker-compose.yml)
 RETINA_TRACKER_HOST = os.environ.get('RETINA_TRACKER_HOST', 'localhost')
 RETINA_TRACKER_PORT = int(os.environ.get('RETINA_TRACKER_PORT', '30100'))
@@ -128,13 +124,7 @@ tracker_capture = TrackerCaptureService(blah2_client, retina_tracker_client)
 
 
 def _on_calibration_complete(status):
-    """Runs on the calibration thread when a run reaches a terminal state.
-
-    No telemetry here — a config snapshot is only meaningful once a result is
-    actually persisted (see routes/calibrate.py's apply(), which triggers one
-    via run_config_merger_and_restart), not on every terminal state including
-    failures/cancels that change nothing on disk.
-    """
+    """Runs on the calibration thread when a run reaches a terminal state."""
     device_state.release_calibration_lock()
 
 

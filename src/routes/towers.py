@@ -223,7 +223,7 @@ def select():
 
     if config_mgr.is_retina_node_installed():
         try:
-            error = run_config_merger_and_restart(RETINA_NODE_PATH, trigger='tower_select')
+            error = run_config_merger_and_restart(RETINA_NODE_PATH)
             if error:
                 return jsonify({"success": True, "applied": False, "error": error})
             return jsonify({"success": True, "applied": True})

@@ -288,7 +288,7 @@ class Calibrator:
         # too (see app.py's own tracker_capture.start() pytest-leak note).
         self._listener_registered = False
         # Called with the final status dict when a run reaches a terminal
-        # state (telemetry hook). Exceptions are swallowed.
+        # state. Exceptions are swallowed.
         self.on_complete = None
 
     @staticmethod

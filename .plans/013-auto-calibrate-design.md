@@ -155,7 +155,7 @@ winner; persisting to disk is a separate, explicit user action.
   added specifically so the whole ack/`TuneState`/tracker-reset chain is
   testable without real hardware (see Tier 2 below).
 
-## Implementation — retina-gui (orchestrator, UI, telemetry)
+## Implementation — retina-gui (orchestrator, UI)
 
 - `Blah2Client` — the first-ever HTTP link from retina-gui to blah2_api
   (previously all interaction was `docker compose` lifecycle management).
@@ -175,14 +175,6 @@ winner; persisting to disk is a separate, explicit user action.
   phase/tower/gain/live-overload/elapsed, a best-attempt summary on
   failure/timeout, and an explicit "Persist to config" button on success
   (never auto-applied, since a restart is involved).
-- Telemetry (2026-07-14 redesign, superseding the original per-run version):
-  no longer calibration-specific. A full config-snapshot POST to
-  `CONFIG_TELEMETRY_URL` (empty = disabled, renamed from
-  `CALIBRATION_TELEMETRY_URL`) fires app-wide, fire-and-forget, whenever any
-  config-applying action succeeds (`/calibrate/apply` included, alongside
-  `/towers/select`, `/config/apply`, and mode switches) — see
-  [012-auto-calibrate-telemetry.md](012-auto-calibrate-telemetry.md). The
-  server-side ingest app itself is out of scope for this project.
 
 ## Key decisions and why
 
@@ -200,16 +192,14 @@ winner; persisting to disk is a separate, explicit user action.
   minimizes the *number of dwells*, not the granularity of the gain search.
 - **Max 5 towers, best-ranked.** Bounds the ~10 minute budget; reuses the
   tower-finder's existing rank ordering rather than inventing new scoring.
-- **Telemetry sent unconditionally, one summary per run.** Keeps the client
-  side simple; the ingest service is a deliberately separate, later project.
 
 ## Verification strategy (tiered, no hardware until the last one)
 
 - **Tier 0 — done.** `testTracker` unit tests (`reset`/`set_lambda`
   correctness), `api/test_retune.js` (22/22, full endpoint round-trip against
   a real running `server.js`), retina-gui `pytest` (301 passed, 28 new —
-  descent/dwell/cleanup logic, route guards, lock exclusion, telemetry
-  payloads, all against a scripted fake blah2 client).
+  descent/dwell/cleanup logic, route guards, lock exclusion, all against a
+  scripted fake blah2 client).
 - **Tier 1 — real build.** An ARM64 Docker build (via `buildx`/QEMU,
   matching the Pi5 production target and the repo's own CI) rather than a
   syntax-check against hand-assembled headers — validates every touched file
@@ -256,4 +246,7 @@ context switch, not because either is confirmed a bug:
 - Descent/refine step sizes and dwell budget are principled estimates from
   CPI/M-N timing — expect to tune them empirically once real hardware data
   is available.
-- The server-side telemetry ingest application is a separate project.
+- Telemetry (client-side config-snapshot hook + server-side ingest) was
+  removed from this branch entirely (2026-07-28) — it's a separate concern
+  from the search/workflow this project covers, and will be tackled as its
+  own issue instead.

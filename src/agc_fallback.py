@@ -71,8 +71,7 @@ class AgcFallbackClient:
         # sidesteps the ordering problem entirely.
         from routes.mode import run_config_merger_and_restart
         try:
-            error = run_config_merger_and_restart(
-                self._config_mgr.retina_node_path, trigger='calibrate_agc_fallback')
+            error = run_config_merger_and_restart(self._config_mgr.retina_node_path)
             return error is None, error
         except subprocess.TimeoutExpired:
             return False, "Command timed out"
