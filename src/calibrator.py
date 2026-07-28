@@ -136,7 +136,11 @@ drives the reference tuner's gain — the surveillance tuner and the
 shared LNA state are not managed by it, so they're set to the top-ranked
 tower's own resolved (gain_b, lna_state) from its own manual descent
 (captured in _run, reused by both this AGC attempt and the fallback
-below), not left unprotected. On a genuine user cancellation or an
+below), not left unprotected. blah2 is confirmed alive (posting fresh
+detections) before the attempt commits to a full track-watching dwell —
+a container can report "started" while still failing to acquire the SDR
+internally, and that failure shouldn't read the same as an empty sky. On
+a genuine user cancellation or an
 unexpected/CalibrationError exception, the original tuning is restored,
 unchanged from before. On the no-track-anywhere outcome specifically, the
 device is instead left on the top-ranked tower's own resolved, already
@@ -223,6 +227,16 @@ AGC_BANDWIDTH_OFF = 0
 # whole tower rotation is already exhausted, so it isn't stealing time
 # from towers that already had their turn.
 AGC_FALLBACK_DWELL_SECONDS = 90
+
+# Sub-window at the start of the AGC dwell spent confirming blah2 is
+# actually alive (posting fresh /api/detection frames) before committing
+# to the rest of the dwell watching for a track. Carved out of (not
+# added to) AGC_FALLBACK_DWELL_SECONDS, so the AGC phase's total
+# worst-case duration doesn't grow. 20s is generous against blah2's
+# typical ~0.5-1s CPI cadence (tracker-preview's own measured baseline is
+# ~900ms) plus whatever residual startup time the container needs right
+# after the restart above.
+AGC_HEALTH_CHECK_TIMEOUT_SECONDS = 20
 
 # Success modes.
 MODE_TRACK = "track"
@@ -948,6 +962,60 @@ class Calibrator:
         except Exception:
             pass
 
+    def _wait_for_live_data(self, applied_at, deadline):
+        """True the moment blah2 posts any fresh /api/detection frame —
+        any content, even an empty one, is proof its capture loop is
+        actually running — newer than applied_at. False if deadline
+        passes with no such frame.
+
+        Distinct from _dwell's own freshness check: this only asks "is
+        data flowing at all", not "is there a track" — used by
+        _run_agc_fallback to catch a container that came up per Docker
+        but never actually acquired the SDR (exactly tonight's live
+        failure mode), rather than silently burning the whole AGC dwell
+        waiting for a track that can never arrive.
+        """
+        while time.monotonic() < deadline:
+            self._check_cancel()
+            detection = self._client.get_detection()
+            timestamp = detection.get("timestamp") if detection else None
+            if timestamp is not None and timestamp >= applied_at:
+                return True
+            self._sleep(TRACKER_FEED_POLL_SECONDS)
+        return False
+
+    def _disable_agc_and_report(self, top_tower, top_fc, gain_a, gain_b,
+                                lna_state, reason):
+        """Shared terminal step for every AGC-fallback path that ends
+        without a confirmed track (device-health failure or dwell
+        timeout): turn AGC back off and revert to the top tower's own
+        resolved values, then report `reason` — or, if the revert itself
+        couldn't be applied, fold that failure into the message instead
+        of silently swallowing it.
+        """
+        off_ok, off_error = self._agc_fallback.apply(
+            top_fc, AGC_BANDWIDTH_OFF, gain_a, gain_b, lna_state)
+        if not off_ok:
+            return None, (
+                f"{reason} AGC could not be turned back off automatically "
+                f"({off_error}); check the Capture config's AGC Bandwidth "
+                f"setting."), False
+        self._set_current(tower_index=0, tower_name=top_tower.get("name"),
+                          fc=top_fc, gain_a=gain_a, gain_b=gain_b,
+                          lna_state=lna_state)
+        return None, reason, False
+
+    def _cancel_during_agc_fallback(self, top_tower, top_fc, gain_a, gain_b,
+                                    lna_state):
+        """Best-effort cleanup when the user cancels mid-health-check or
+        mid-dwell — AGC must never be left on silently (see module
+        docstring)."""
+        self._agc_fallback.apply(top_fc, AGC_BANDWIDTH_OFF, gain_a, gain_b, lna_state)
+        self._set_current(tower_index=0, tower_name=top_tower.get("name"),
+                          fc=top_fc, gain_a=gain_a, gain_b=gain_b,
+                          lna_state=lna_state)
+        return None, "Cancelled by user", True
+
     def _run_agc_fallback(self, top_tower, top_fc, gain_a, gain_b, lna_state):
         """The run's very last resort (see module docstring): try
         hardware AGC once, at the top-ranked tower's frequency only,
@@ -972,20 +1040,30 @@ class Calibrator:
         through a config-driven (not gain-driven) AGC state. Revisit if
         MODE_ADSB is ever exposed.
 
-        applied_at=0 for the dwell's staleness guard is deliberate, not
-        an oversight: unlike a live retune, there's no real "applied at"
-        timestamp for a config-file-driven container restart, but the
-        blah2 container was just fully recreated, so there's no stale
-        pre-restart detection data that could wrongly pass the guard —
-        safety instead comes from the explicit reset() + confirmed-event
-        clear immediately below, exactly as every tower transition
-        already relies on.
+        applied_at=0 for both the health check's and the dwell's staleness
+        guards is deliberate, not an oversight: unlike a live retune,
+        there's no real "applied at" timestamp for a config-file-driven
+        container restart, but the blah2 container was just fully
+        recreated, so there's no stale pre-restart detection data that
+        could wrongly pass either guard — safety instead comes from the
+        explicit reset() + confirmed-event clear immediately below,
+        exactly as every tower transition already relies on.
+
+        Before committing to the full track-watching dwell, a bounded
+        sub-window (AGC_HEALTH_CHECK_TIMEOUT_SECONDS) confirms blah2 is
+        actually alive — any fresh /api/detection frame at all, not
+        graded for evidence — since a container can report "started" to
+        Docker while still crash-looping internally on a device it never
+        acquired (confirmed live tonight). Skipping straight to a revert
+        on that failure, rather than dwelling the full window regardless,
+        avoids reporting a plain "no confirmed track" for what's actually
+        a hardware fault.
 
         The enable step (self._agc_fallback.apply(...), a real
         subprocess/Docker call) is not itself cancellable mid-flight —
-        only the dwell afterward checks for cancellation. Accepted:
-        matches how every other blocking subprocess call in this
-        codebase already behaves.
+        only the health check and dwell afterward check for cancellation.
+        Accepted: matches how every other blocking subprocess call in
+        this codebase already behaves.
 
         Returns (result, error, cancelled):
           - result: a success dict (same shape as _dwell's, plus
@@ -999,9 +1077,11 @@ class Calibrator:
 
         Whatever happens, AGC is never left on: any non-success path
         here turns it back off and re-applies the top tower's own
-        resolved values at top_fc before returning — this method fully
-        owns the terminal device state for this branch; _run()'s own
-        restore-original logic must not also run afterwards (see _run()).
+        resolved values at top_fc before returning (see
+        _disable_agc_and_report/_cancel_during_agc_fallback) — this
+        method fully owns the terminal device state for this branch;
+        _run()'s own restore-original logic must not also run afterwards
+        (see _run()).
         """
         self._update(phase="agc_fallback")
         self._tracker_client.reset()
@@ -1021,22 +1101,38 @@ class Calibrator:
 
         self._set_current(gain_a=gain_a, gain_b=gain_b, lna_state=lna_state)
 
+        # One overall deadline for the whole AGC phase — the health check
+        # gets up to its own sub-budget (never exceeding this), and the
+        # dwell afterward just uses whatever's left of this same window,
+        # so a quick health check hands back nearly the full dwell.
+        agc_phase_deadline = time.monotonic() + AGC_FALLBACK_DWELL_SECONDS
+        health_check_deadline = min(
+            time.monotonic() + AGC_HEALTH_CHECK_TIMEOUT_SECONDS, agc_phase_deadline)
+
+        self._update(phase="agc_verifying_device")
+        try:
+            device_alive = self._wait_for_live_data(applied_at=0, deadline=health_check_deadline)
+        except _Cancelled:
+            return self._cancel_during_agc_fallback(top_tower, top_fc, gain_a, gain_b, lna_state)
+
         tower_entry = {"tower_name": top_tower.get("name"), "fc": top_fc,
                        "descent": [], "outcome": "not_reached", "agc": True}
-        dwell_deadline = time.monotonic() + AGC_FALLBACK_DWELL_SECONDS
+        if not device_alive:
+            tower_entry["outcome"] = "device_not_ready"
+            self._append_history(tower_entry)
+            return self._disable_agc_and_report(
+                top_tower, top_fc, gain_a, gain_b, lna_state,
+                "Tried hardware AGC as a last resort, but blah2 never "
+                "reported live detections after the restart — the SDR "
+                "device may not have been acquired.")
+
         try:
             result = self._dwell(top_tower, top_fc, gain_a, gain_b, lna_state,
-                                 applied_at=0, dwell_deadline=dwell_deadline,
+                                 applied_at=0, dwell_deadline=agc_phase_deadline,
                                  tower_entry=tower_entry, phase_label="agc_dwelling")
         except _Cancelled:
             self._append_history(tower_entry)
-            # Best-effort cleanup even on cancel — AGC must never be left
-            # on silently (see module docstring).
-            self._agc_fallback.apply(top_fc, AGC_BANDWIDTH_OFF, gain_a, gain_b, lna_state)
-            self._set_current(tower_index=0, tower_name=top_tower.get("name"),
-                              fc=top_fc, gain_a=gain_a, gain_b=gain_b,
-                              lna_state=lna_state)
-            return None, "Cancelled by user", True
+            return self._cancel_during_agc_fallback(top_tower, top_fc, gain_a, gain_b, lna_state)
 
         self._append_history(tower_entry)
         if result is not None:
@@ -1051,18 +1147,10 @@ class Calibrator:
             result["bandwidth_number"] = AGC_FALLBACK_BANDWIDTH_NUMBER
             return result, None, False
 
-        off_ok, off_error = self._agc_fallback.apply(
-            top_fc, AGC_BANDWIDTH_OFF, gain_a, gain_b, lna_state)
-        if not off_ok:
-            return None, (
-                "Also tried hardware AGC as a last resort — still no confirmed "
-                f"track, and AGC could not be turned back off automatically "
-                f"({off_error}); check the Capture config's AGC Bandwidth setting."), False
-
-        self._set_current(tower_index=0, tower_name=top_tower.get("name"),
-                          fc=top_fc, gain_a=gain_a, gain_b=gain_b, lna_state=lna_state)
-        return None, ("Also tried hardware AGC as a last resort at the "
-                      "top-ranked tower — still no confirmed track."), False
+        return self._disable_agc_and_report(
+            top_tower, top_fc, gain_a, gain_b, lna_state,
+            "Also tried hardware AGC as a last resort at the top-ranked "
+            "tower — still no confirmed track.")
 
     # ── Run loop ───────────────────────────────────────────────
 

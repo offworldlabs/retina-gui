@@ -250,6 +250,7 @@ def fast(monkeypatch):
     monkeypatch.setattr(calmod, "DWELL_POLL_SECONDS", 0.01)
     monkeypatch.setattr(calmod, "TRACKER_FEED_POLL_SECONDS", 0.01)
     monkeypatch.setattr(calmod, "AGC_FALLBACK_DWELL_SECONDS", 0.05)
+    monkeypatch.setattr(calmod, "AGC_HEALTH_CHECK_TIMEOUT_SECONDS", 0.05)
 
 
 def run_to_completion(cal, towers, original=ORIGINAL, budget=10, dwell=3.0):
@@ -845,7 +846,10 @@ class TestNoTrackFallback:
     def test_agc_fallback_cancelled_mid_dwell_turns_agc_back_off(self, fast, monkeypatch):
         import time
         monkeypatch.setattr(calmod, "AGC_FALLBACK_DWELL_SECONDS", 5)
-        client = FakeBlah2Client()  # never confirms
+        # Fresh detections so the device-health check passes and the run
+        # actually reaches agc_dwelling (not device_not_ready) — never
+        # confirms a track, though, so it just sits there until cancelled.
+        client = FakeBlah2Client(detection=moving_track_detections())
         tracker_client = FakeRetinaTrackerClient()
         fake_agc = FakeAgcFallbackClient()
         cal = Calibrator(client, tracker_client, fake_agc)
@@ -859,6 +863,62 @@ class TestNoTrackFallback:
             time.sleep(0.01)
         else:
             raise AssertionError("never reached agc_dwelling phase")
+
+        cal.cancel()
+        cal._thread.join(timeout=10)
+        status = cal.get_status()
+        assert status["state"] == "cancelled"
+        assert fake_agc.calls[-1]["bandwidth_number"] == calmod.AGC_BANDWIDTH_OFF
+
+    def test_agc_health_check_failure_reverts_without_dwelling(self, fast):
+        """blah2 never posts a single fresh detection after the AGC
+        restart (default FakeBlah2Client — no detections at all) — this
+        must be caught as a device-health failure and reverted
+        immediately, not treated as an ordinary 'dwelled the whole
+        window, no track' result."""
+        client = FakeBlah2Client()
+        tracker_client = FakeRetinaTrackerClient()
+        fake_agc = FakeAgcFallbackClient()
+        status = run_to_completion(
+            Calibrator(client, tracker_client, fake_agc), [TOWER])
+        assert status["state"] == "failed"
+        assert len(fake_agc.calls) == 2  # enable, then disable — same cleanup as any other failure
+        agc_entry = next(e for e in status["history"] if e.get("agc"))
+        assert agc_entry["outcome"] == "device_not_ready"
+        assert "may not have been acquired" in status["error"]
+
+    def test_agc_health_check_passes_then_dwells_normally(self, fast):
+        """Fresh detections flow (health check passes), but no track ever
+        confirms — must still reach the ordinary no-track outcome, not
+        device_not_ready. Proves the health check doesn't false-positive
+        on a genuinely healthy device that simply found nothing."""
+        client = FakeBlah2Client(detection=moving_track_detections())
+        tracker_client = FakeRetinaTrackerClient()  # never confirms
+        fake_agc = FakeAgcFallbackClient()
+        status = run_to_completion(
+            Calibrator(client, tracker_client, fake_agc), [TOWER])
+        assert status["state"] == "failed"
+        agc_entry = next(e for e in status["history"] if e.get("agc"))
+        assert agc_entry["outcome"] == "no_confirmed_track"
+        assert "still no confirmed track" in status["error"]
+
+    def test_agc_health_check_cancelled_turns_agc_back_off(self, fast, monkeypatch):
+        import time
+        monkeypatch.setattr(calmod, "AGC_HEALTH_CHECK_TIMEOUT_SECONDS", 5)
+        client = FakeBlah2Client()  # never posts a detection
+        tracker_client = FakeRetinaTrackerClient()
+        fake_agc = FakeAgcFallbackClient()
+        cal = Calibrator(client, tracker_client, fake_agc)
+        started, error = cal.start([TOWER], ORIGINAL, budget_seconds=30, dwell_seconds=0.01)
+        assert started, error
+
+        deadline = time.monotonic() + 10
+        while time.monotonic() < deadline:
+            if cal.get_status()["phase"] == "agc_verifying_device":
+                break
+            time.sleep(0.01)
+        else:
+            raise AssertionError("never reached agc_verifying_device phase")
 
         cal.cancel()
         cal._thread.join(timeout=10)
