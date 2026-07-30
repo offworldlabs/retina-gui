@@ -280,6 +280,27 @@
                     <span class="help" style="margin:0;">Automatically tune tower and gain until a confirmed aircraft track appears (~10 min).</span>
                 </div>
                 <div class="divider"></div>
+                <div class="cfg-row" style="padding:6px 0 2px;">
+                    <div class="label-col"><label>Signal peak</label><span class="help">Live peak level relative to clipping. 0 dBFS = saturated.</span></div>
+                </div>
+                <div class="peak-meter">
+                    <div class="ladder-row">
+                        <div class="ladder-name">Reference<span class="sub">Tuner A</span></div>
+                        <div class="ladder-track" id="peakTrackA"></div>
+                        <div class="ladder-value" id="peakValA">—</div>
+                    </div>
+                    <div class="ladder-row">
+                        <div class="ladder-name">Surveillance<span class="sub">Tuner B</span></div>
+                        <div class="ladder-track" id="peakTrackB"></div>
+                        <div class="ladder-value" id="peakValB">—</div>
+                    </div>
+                    <div class="ladder-scale-row">
+                        <div class="ladder-name-spacer"></div>
+                        <div class="ladder-ticks" id="peakTicks"></div>
+                        <div class="ladder-value-spacer"></div>
+                    </div>
+                </div>
+                <div class="divider"></div>
                 {% for field in capture_fields %}
                     {{ render_field(field, 'capture') }}
                 {% endfor %}
@@ -1508,6 +1529,158 @@ if (discardBtn) discardBtn.addEventListener('click', () => location.reload());
     modalEl.addEventListener('hidden.bs.modal', function() {
         if (pollTimer) { clearTimeout(pollTimer); pollTimer = null; }
     });
+})();
+
+// Live per-tuner peak dBFS meter in the Capture section — rack-ladder style,
+// PPM-like ballistics (instant attack, timed decay) smooth the raw ~1s reports
+// from /config/rf-status into a settled reading instead of a jumpy one.
+(function() {
+    var trackA = document.getElementById('peakTrackA');
+    var trackB = document.getElementById('peakTrackB');
+    var valA = document.getElementById('peakValA');
+    var valB = document.getElementById('peakValB');
+    var ticksEl = document.getElementById('peakTicks');
+    if (!trackA || !trackB) return;
+
+    var FLOOR = -60, CEIL = 0, SEGMENTS = 24, DECAY_PER_SEC = 14;
+    var TICKS = [-60, -48, -36, -24, -12, -6, 0];
+
+    [trackA, trackB].forEach(function(track) {
+        for (var i = 0; i < SEGMENTS; i++) {
+            var seg = document.createElement('div');
+            seg.className = 'seg';
+            track.appendChild(seg);
+        }
+    });
+    TICKS.forEach(function(t) {
+        var lbl = document.createElement('div');
+        lbl.className = 't';
+        lbl.textContent = t;
+        ticksEl.appendChild(lbl);
+    });
+
+    function pct(dbfs) { return Math.min(100, Math.max(0, (dbfs - FLOOR) / (CEIL - FLOOR) * 100)); }
+    function segColor(i, n) {
+        var frac = i / n;
+        if (frac > 0.85) return 'var(--danger)';
+        if (frac > 0.6) return 'var(--warn)';
+        return 'var(--ok)';
+    }
+    function paintLadder(track, dbfs) {
+        var segs = track.children;
+        var n = segs.length;
+        var lit = Math.round((pct(dbfs) / 100) * n);
+        for (var i = 0; i < n; i++) {
+            segs[i].style.background = (i < lit) ? segColor(i, n) : '';
+        }
+    }
+    function paintLadderAlarm(track) {
+        var segs = track.children;
+        for (var i = 0; i < segs.length; i++) segs[i].style.background = 'var(--danger)';
+    }
+    function makeBallistics(start) {
+        // PPM-style ballistics: instant attack (snap up to a new, louder
+        // report), timed decay (ease down toward a quieter report instead of
+        // snapping). `raw` always reflects the latest report — it is NOT a
+        // running max — so `current` has something below it to decay toward.
+        var state = { current: start, raw: start, hasData: false };
+        return {
+            feed: function(newRaw) {
+                state.hasData = true;
+                state.raw = newRaw;
+                if (newRaw > state.current) state.current = newRaw;
+            },
+            clear: function() { state.hasData = false; },
+            tick: function(dtSec) {
+                if (state.current > state.raw) {
+                    state.current = Math.max(state.raw, state.current - DECAY_PER_SEC * dtSec);
+                }
+                return state;
+            }
+        };
+    }
+
+    var ballA = makeBallistics(FLOOR), ballB = makeBallistics(FLOOR);
+    var last = performance.now();
+
+    // Missing rf-status data isn't itself a hardware alarm — blah2 is
+    // intentionally stopped in spectrum/SDRconnect mode, and a single dropped
+    // poll or container restart is normal. Only escalate to "no signal" when
+    // radar mode says blah2 *should* be running and data has stayed missing
+    // for a sustained period (e.g. an overload-induced device crash).
+    var ALARM_GAP_MS = 4000;
+    var currentMode = null;   // unknown until checked; only re-checked while data is missing
+    var missingSinceMs = null;
+
+    // blah2 clamps peak to a minimum of 1 sample before taking log10 (to
+    // avoid log(0)), so "device never actually delivered a sample" reads as
+    // exactly 20*log10(1/32767) ≈ -90.3 dBFS — not "very quiet", which a real
+    // connected front end's own thermal noise would never actually reach.
+    // Treat a reading at/near that floor the same as missing data.
+    var NO_CAPTURE_THRESHOLD = -89;
+    function isFloorReading(dbfs) { return dbfs <= NO_CAPTURE_THRESHOLD; }
+
+    function isAlarming() {
+        return currentMode === 'radar' && missingSinceMs != null
+            && (performance.now() - missingSinceMs) >= ALARM_GAP_MS;
+    }
+
+    function frame(now) {
+        var dt = Math.min(0.25, (now - last) / 1000);
+        last = now;
+        var a = ballA.tick(dt), b = ballB.tick(dt);
+        if (isAlarming()) {
+            paintLadderAlarm(trackA); paintLadderAlarm(trackB);
+            valA.textContent = 'no signal'; valA.className = 'ladder-value alarm';
+            valB.textContent = 'no signal'; valB.className = 'ladder-value alarm';
+        } else {
+            valA.className = 'ladder-value'; valB.className = 'ladder-value';
+            if (a.hasData) {
+                paintLadder(trackA, a.current);
+                valA.innerHTML = a.current.toFixed(1) + '<span class="unit">dBFS</span>';
+            } else {
+                paintLadder(trackA, FLOOR - 1);
+                valA.textContent = '—';
+            }
+            if (b.hasData) {
+                paintLadder(trackB, b.current);
+                valB.innerHTML = b.current.toFixed(1) + '<span class="unit">dBFS</span>';
+            } else {
+                paintLadder(trackB, FLOOR - 1);
+                valB.textContent = '—';
+            }
+        }
+        requestAnimationFrame(frame);
+    }
+    requestAnimationFrame(frame);
+
+    function pollCapturePeak() {
+        fetch('/config/rf-status')
+            .then(function(r) { return r.json(); })
+            .then(function(s) {
+                var noCapture = s.peakDbfsA == null || s.peakDbfsB == null
+                    || isFloorReading(s.peakDbfsA) || isFloorReading(s.peakDbfsB);
+                if (noCapture) {
+                    if (missingSinceMs == null) missingSinceMs = performance.now();
+                    ballA.clear(); ballB.clear();
+                    // Refresh mode only while it actually matters (data missing) —
+                    // no extra request during normal healthy operation.
+                    return fetch('/api/mode')
+                        .then(function(r) { return r.json(); })
+                        .then(function(m) { currentMode = m.mode; })
+                        .catch(function() {});
+                }
+                missingSinceMs = null;
+                ballA.feed(s.peakDbfsA);
+                ballB.feed(s.peakDbfsB);
+            })
+            .catch(function() {
+                if (missingSinceMs == null) missingSinceMs = performance.now();
+                ballA.clear(); ballB.clear();
+            })
+            .then(function() { setTimeout(pollCapturePeak, 1000); });
+    }
+    pollCapturePeak();
 })();
 </script>
 {% endblock %}

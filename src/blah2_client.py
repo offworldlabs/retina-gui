@@ -67,3 +67,8 @@ class Blah2Client:
         this node's rx/tx geometry and fc — {hex: {delay, doppler, ...}}.
         None on failure or if truth.adsb.enabled is false on the node."""
         return self._get_json("/api/adsb2dd")
+
+    def get_rf_status(self):
+        """Per-tuner RF overload state + peak dBFS: {overloadA, overloadB,
+        peakDbfsA, peakDbfsB, timestamp}."""
+        return self._get_json("/capture/rf-status")
