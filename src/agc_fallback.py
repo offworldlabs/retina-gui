@@ -18,6 +18,17 @@ of mocking Flask/subprocess/Docker.
 """
 
 import subprocess
+import threading
+
+# Backstop for the fresh thread the config-merger/restart step runs on
+# (see apply()) — the underlying function already self-bounds via its own
+# internal subprocess timeouts (config-merger 60s + spectrum stop/rm ~90s
+# + systemctl restart 30s + settle + up --force-recreate 120s), so this
+# is just a defensive upper bound in case something hangs in a way that
+# ignores those. A Python thread can't be force-killed, so past this
+# point apply() just reports failure and moves on — the thread may still
+# be running in the background.
+RESTART_THREAD_JOIN_TIMEOUT_SECONDS = 300
 
 
 class AgcFallbackClient:
@@ -45,6 +56,21 @@ class AgcFallbackClient:
 
         Returns (success: bool, error: str|None). Never raises — mirrors
         every existing Flask-route caller of run_config_merger_and_restart.
+
+        The config-merger/restart step runs on a fresh, dedicated thread
+        rather than directly on whatever thread called apply() — for
+        Auto-Calibrate, that's the Calibrator's own long-running
+        background thread, already alive and busy (retuning, polling)
+        for the ~10-minute search duration by the time this runs.
+        Confirmed live (jonathan-node-2): the identical subprocess call
+        reliably completed in seconds when run from a fresh shell or a
+        normal Flask request thread (exactly what /config/apply already
+        gets), but hung past a 240s timeout when called directly from
+        the calibrator's thread in that state. Root cause not fully
+        confirmed, but this matches the one real structural difference
+        between the two call sites, and costs nothing to apply
+        defensively for every caller of this method, not just the one
+        that exposed it.
         """
         if self._dev_mode:
             return True, None
@@ -70,12 +96,25 @@ class AgcFallbackClient:
         # importing routes.mode at call time, not module load time,
         # sidesteps the ordering problem entirely.
         from routes.mode import run_config_merger_and_restart
-        try:
-            error = run_config_merger_and_restart(self._config_mgr.retina_node_path)
-            return error is None, error
-        except subprocess.TimeoutExpired:
+
+        outcome = {}
+
+        def run_restart():
+            try:
+                outcome['error'] = run_config_merger_and_restart(
+                    self._config_mgr.retina_node_path)
+            except subprocess.TimeoutExpired:
+                outcome['error'] = "Command timed out"
+            except FileNotFoundError:
+                outcome['error'] = "docker not found — is it installed?"
+            except Exception as e:
+                outcome['error'] = str(e)
+
+        thread = threading.Thread(target=run_restart, daemon=True)
+        thread.start()
+        thread.join(timeout=RESTART_THREAD_JOIN_TIMEOUT_SECONDS)
+        if thread.is_alive():
             return False, "Command timed out"
-        except FileNotFoundError:
-            return False, "docker not found — is it installed?"
-        except Exception as e:
-            return False, str(e)
+
+        error = outcome.get('error')
+        return error is None, error

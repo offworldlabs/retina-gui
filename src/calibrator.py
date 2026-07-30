@@ -1093,11 +1093,20 @@ class Calibrator:
         ok, apply_error = self._agc_fallback.apply(
             top_fc, AGC_FALLBACK_BANDWIDTH_NUMBER, gain_a, gain_b, lna_state)
         if not ok:
-            # AGC was never actually turned on — nothing to turn back
-            # off. Fall through to the plain (live-retune) top-tower
-            # fallback.
-            self._apply_top_tower_fallback(top_tower, top_fc, gain_a, gain_b, lna_state)
-            return None, f"Tried hardware AGC as a last resort, but it could not be enabled: {apply_error}", False
+            # A failed enable does NOT mean nothing was written — the
+            # config write happens before the restart attempt inside
+            # _agc_fallback.apply(), so a restart that times out or
+            # otherwise fails can still leave user.yml permanently
+            # pointed at AGC-on on disk (confirmed live: this happened
+            # exactly once, silently blocking every future Auto-Calibrate
+            # run via the AGC guard until noticed by hand). Route through
+            # the same disable-and-revert helper as every other failure
+            # path so the persisted config is always written back to the
+            # safe off-state, not just corrected in live (in-memory)
+            # tuning via _apply_top_tower_fallback.
+            return self._disable_agc_and_report(
+                top_tower, top_fc, gain_a, gain_b, lna_state,
+                f"Tried hardware AGC as a last resort, but it could not be enabled: {apply_error}")
 
         self._set_current(gain_a=gain_a, gain_b=gain_b, lna_state=lna_state)
 

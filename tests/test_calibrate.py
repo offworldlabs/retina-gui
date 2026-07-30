@@ -819,20 +819,44 @@ class TestNoTrackFallback:
         assert status["state"] == "failed"
         assert len(fake_agc.calls) == 2  # enable + disable, regardless of tower count
 
-    def test_agc_enable_failure_falls_back_to_plain_top_tower_fallback(self, fast):
+    def test_agc_enable_failure_also_reverts_persisted_config(self, fast):
+        """A failed enable doesn't mean nothing was written — the config
+        write happens before the restart attempt inside
+        AgcFallbackClient.apply(), so a restart that fails can still
+        leave user.yml permanently pointed at AGC-on (confirmed live).
+        The enable-failure path must write the safe config back too, not
+        just correct the live (in-memory) tuning."""
         client = FakeBlah2Client()
         tracker_client = FakeRetinaTrackerClient()
         fake_agc = FakeAgcFallbackClient(enable_result=(False, "config-merger failed"))
         status = run_to_completion(
             Calibrator(client, tracker_client, fake_agc), [TOWER])
         assert status["state"] == "failed"
-        assert len(fake_agc.calls) == 1  # no disable attempt — nothing was ever turned on
+        assert len(fake_agc.calls) == 2  # enable attempt, then the safe revert-write
         assert "could not be enabled" in status["error"]
-        # the plain live-retune path does touch blah2_client directly
-        assert client.current["fc"] == TOWER["fc"]
-        assert client.current["gain_a"] == GAIN_REDUCTION_MIN
-        assert client.current["gain_b"] == GAIN_REDUCTION_MIN
-        assert client.current["lna_state"] == LNA_STATE_MIN
+        revert_call = fake_agc.calls[1]
+        assert revert_call["bandwidth_number"] == calmod.AGC_BANDWIDTH_OFF
+        assert revert_call["gain_b"] == GAIN_REDUCTION_MIN
+        assert revert_call["lna_state"] == LNA_STATE_MIN
+        # The AGC path never calls blah2_client.retune() directly here —
+        # the calibrator's own status is the one that reflects reality.
+        assert status["current"]["fc"] == TOWER["fc"]
+        assert status["current"]["gain_a"] == GAIN_REDUCTION_MIN
+        assert status["current"]["gain_b"] == GAIN_REDUCTION_MIN
+        assert status["current"]["lna_state"] == LNA_STATE_MIN
+
+    def test_agc_enable_and_revert_both_fail_still_terminates_gracefully(self, fast):
+        client = FakeBlah2Client()
+        tracker_client = FakeRetinaTrackerClient()
+        fake_agc = FakeAgcFallbackClient(
+            enable_result=(False, "config-merger failed"),
+            disable_result=(False, "restart also failed"))
+        status = run_to_completion(
+            Calibrator(client, tracker_client, fake_agc), [TOWER])
+        assert status["state"] == "failed"
+        assert len(fake_agc.calls) == 2
+        assert "could not be enabled" in status["error"]
+        assert "could not be turned back off" in status["error"]
 
     def test_agc_disable_failure_still_terminates_the_run(self, fast):
         client = FakeBlah2Client()
