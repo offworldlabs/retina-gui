@@ -106,7 +106,7 @@ class AgcFallbackClient:
             except subprocess.TimeoutExpired:
                 outcome['error'] = "Command timed out"
             except FileNotFoundError:
-                outcome['error'] = "docker not found — is it installed?"
+                outcome['error'] = "docker not found. Is it installed?"
             except Exception as e:
                 outcome['error'] = str(e)
 

@@ -100,7 +100,7 @@ def install():
     # correct regardless of how long the run has been going.
     if calibrator.is_running():
         return jsonify({"success": False,
-                        "error": "Auto-calibration is running — cancel it before installing an update"}), 409
+                        "error": "Auto-calibration is running. Cancel it before installing an update"}), 409
 
     if DEV_MODE:
         version_tag = requested_version or DEV_VERSIONS[0]

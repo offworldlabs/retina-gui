@@ -110,7 +110,7 @@ def set_mode():
     # 20-minute staleness window, but is_running() is always correct.
     if calibrator.is_running() or device_state.is_calibration_locked()[0]:
         return jsonify({'success': False,
-                        'error': 'Auto-calibration is running — cancel it before switching modes'}), 409
+                        'error': 'Auto-calibration is running. Cancel it before switching modes'}), 409
 
     node_installed = config_mgr.is_retina_node_installed()
     current_mode = get_current_mode()

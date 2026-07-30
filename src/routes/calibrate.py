@@ -87,7 +87,7 @@ def start():
         return jsonify({"success": False, "error": "retina-node is not installed"}), 409
     if get_current_mode() != 'radar':
         return jsonify({"success": False,
-                        "error": "Radar is not running — switch back to radar mode first"}), 409
+                        "error": "Radar is not running. Switch back to radar mode first"}), 409
 
     ok, reason = device_state.can_start_calibration()
     if not ok:
@@ -102,7 +102,7 @@ def start():
             "success": False,
             "error": "Hardware AGC is enabled (AGC Bandwidth setting). "
                      "Auto-calibrate tunes gain manually and cannot run with "
-                     "AGC active — set AGC Bandwidth to 0 in the Capture "
+                     "AGC active. Set AGC Bandwidth to 0 in the Capture "
                      "config first.",
         }), 409
 
@@ -113,7 +113,7 @@ def start():
     lna_state = device.get('lnaState')
     if fc is None or gain_reduction[0] is None or lna_state is None:
         return jsonify({"success": False,
-                        "error": "Capture config is incomplete — finish setup first"}), 409
+                        "error": "Capture config is incomplete. Finish setup first"}), 409
 
     def clamp(value, lo, hi):
         return max(lo, min(hi, int(value)))
@@ -203,7 +203,7 @@ def apply():
         return jsonify({"success": True, "applied": False, "error": "Command timed out"})
     except FileNotFoundError:
         return jsonify({"success": False, "applied": False,
-                        "error": "docker not found — is it installed?"})
+                        "error": "docker not found. Is it installed?"})
     except Exception as e:
         return jsonify({"success": True, "applied": False, "error": str(e)})
 

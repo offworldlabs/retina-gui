@@ -588,7 +588,7 @@
                     <div style="display:flex;flex-direction:column;gap:8px;margin-bottom:6px;">
                         <label style="display:flex;gap:8px;align-items:flex-start;cursor:pointer;">
                             <input type="radio" name="calMode" value="track" checked style="margin-top:3px;">
-                            <span><strong>Standard</strong> — any track blah2 confirms, within a ~10 minute
+                            <span><strong>Standard</strong>: any track blah2 confirms, within a ~10 minute
                                 budget (fast, but a persistent clutter/multipath return can occasionally pass
                                 confirmation too).</span>
                         </label>
@@ -603,13 +603,13 @@
                 </div>
                 <div id="calDetail" style="display:none;">
                     <div style="display:grid;grid-template-columns:auto 1fr;gap:2px 14px;font-family:var(--mono,monospace);font-size:12.5px;">
-                        <span style="color:var(--ink-3);">Mode</span><span id="calModeDisplay">—</span>
-                        <span style="color:var(--ink-3);">Tower</span><span id="calTower">—</span>
-                        <span style="color:var(--ink-3);">Frequency</span><span id="calFc">—</span>
-                        <span style="color:var(--ink-3);">Gain reduction</span><span id="calGains">—</span>
-                        <span style="color:var(--ink-3);">LNA state</span><span id="calLna">—</span>
-                        <span style="color:var(--ink-3);">RF overload</span><span id="calOverload">—</span>
-                        <span style="color:var(--ink-3);">Elapsed</span><span id="calElapsed">—</span>
+                        <span style="color:var(--ink-3);">Mode</span><span id="calModeDisplay">-</span>
+                        <span style="color:var(--ink-3);">Tower</span><span id="calTower">-</span>
+                        <span style="color:var(--ink-3);">Frequency</span><span id="calFc">-</span>
+                        <span style="color:var(--ink-3);">Gain reduction</span><span id="calGains">-</span>
+                        <span style="color:var(--ink-3);">LNA state</span><span id="calLna">-</span>
+                        <span style="color:var(--ink-3);">RF overload</span><span id="calOverload">-</span>
+                        <span style="color:var(--ink-3);">Elapsed</span><span id="calElapsed">-</span>
                     </div>
                 </div>
                 <div id="calBest" style="display:none;margin-top:10px;padding:8px 10px;background:var(--surface-2,rgba(128,128,128,.08));border-radius:6px;font-size:12.5px;"></div>
@@ -1316,7 +1316,7 @@ if (discardBtn) discardBtn.addEventListener('click', () => location.reload());
     var lastStatus = null;
 
     var PHASE_LABELS = {
-        descending: 'Maximizing gain — backing off overload…',
+        descending: 'Maximizing gain, backing off overload…',
         refining: 'Refining gain…',
         dwelling: 'Watching for aircraft…',
         restoring: 'Restoring original tuning…'
@@ -1344,23 +1344,23 @@ if (discardBtn) discardBtn.addEventListener('click', () => location.reload());
             if (status.current) {
                 detail.style.display = '';
                 document.getElementById('calModeDisplay').textContent =
-                    MODE_LABELS[status.mode] || status.mode || '—';
+                    MODE_LABELS[status.mode] || status.mode || '-';
                 var towersTotal = (status.progress && status.progress.towers_total) || 1;
                 document.getElementById('calTower').textContent =
-                    (status.current.tower_name || '—') + '  (' + ((status.current.tower_index || 0) + 1) + '/' + towersTotal + ')';
+                    (status.current.tower_name || '-') + '  (' + ((status.current.tower_index || 0) + 1) + '/' + towersTotal + ')';
                 document.getElementById('calFc').textContent = mhz(status.current.fc);
                 document.getElementById('calGains').textContent =
                     'A ' + status.current.gain_a + ' dB / B ' + status.current.gain_b + ' dB';
                 document.getElementById('calLna').textContent =
-                    (status.current.lna_state == null) ? '—' : status.current.lna_state;
+                    (status.current.lna_state == null) ? '-' : status.current.lna_state;
                 var rf = status.rf || {};
                 document.getElementById('calOverload').textContent =
-                    (rf.overload_a == null) ? '—'
+                    (rf.overload_a == null) ? '-'
                     : ('A ' + (rf.overload_a ? 'OVERLOAD' : 'ok') + ' / B ' + (rf.overload_b ? 'OVERLOAD' : 'ok'));
                 var progress = status.progress || {};
                 document.getElementById('calElapsed').textContent =
                     (progress.budget_seconds == null)
-                        ? fmtSeconds(progress.elapsed_seconds || 0) + ' (no time limit — waiting for traffic)'
+                        ? fmtSeconds(progress.elapsed_seconds || 0) + ' (no time limit, waiting for traffic)'
                         : fmtSeconds(progress.elapsed_seconds || 0) + ' of ' + fmtSeconds(progress.budget_seconds);
             }
             if (status.best_attempt) {
@@ -1368,7 +1368,7 @@ if (discardBtn) discardBtn.addEventListener('click', () => location.reload());
                 best.textContent = 'Best so far: ' + mhz(status.best_attempt.fc)
                     + ', gain A ' + status.best_attempt.gain_a + ' / B ' + status.best_attempt.gain_b
                     + ', LNA state ' + status.best_attempt.lna_state
-                    + ' — ' + status.best_attempt.reason;
+                    + ': ' + status.best_attempt.reason;
             }
             return;
         }
@@ -1376,7 +1376,7 @@ if (discardBtn) discardBtn.addEventListener('click', () => location.reload());
         // terminal states
         setTerminalButtons();
         if (status.state === 'done' && status.result) {
-            phaseText.textContent = 'Calibrated — confirmed track ' + (status.result.track_id || '');
+            phaseText.textContent = 'Calibrated, confirmed track ' + (status.result.track_id || '');
             detail.style.display = 'none';
             best.style.display = 'none';
             resultEl.style.display = '';
@@ -1387,7 +1387,7 @@ if (discardBtn) discardBtn.addEventListener('click', () => location.reload());
                 + mhz(status.result.fc) + ', gain reduction A ' + status.result.gain_a
                 + ' dB / B ' + status.result.gain_b + ' dB, LNA state ' + status.result.lna_state
                 + '.' + adsbNote
-                + '<br>The radar is running with this tuning now — persist it to keep it after restarts.';
+                + '<br>The radar is running with this tuning now. Persist it to keep it after restarts.';
             applyBtn.style.display = '';
         } else {
             phaseText.textContent = status.state === 'cancelled' ? 'Cancelled' : 'No calibration found';
@@ -1398,7 +1398,7 @@ if (discardBtn) discardBtn.addEventListener('click', () => location.reload());
                 best.innerHTML = 'Closest attempt: ' + mhz(status.best_attempt.fc)
                     + ', gain A ' + status.best_attempt.gain_a + ' / B ' + status.best_attempt.gain_b
                     + ', LNA state ' + status.best_attempt.lna_state
-                    + ' — ' + status.best_attempt.reason
+                    + ': ' + status.best_attempt.reason
                     + '.<br>Try entering these in the Capture fields below as a starting point.';
             }
         }
@@ -1466,7 +1466,7 @@ if (discardBtn) discardBtn.addEventListener('click', () => location.reload());
             setTerminalButtons();
             phaseText.textContent = 'Could not start';
             errorEl.style.display = '';
-            errorEl.textContent = 'Request failed — is the GUI reachable?';
+            errorEl.textContent = 'Request failed. Is the GUI reachable?';
         });
     });
 

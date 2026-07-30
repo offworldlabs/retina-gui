@@ -475,7 +475,7 @@ class Calibrator:
                 time.sleep(ACK_POLL_SECONDS)
             last_error = "blah2 did not acknowledge the retune"
         raise CalibrationError(
-            f"Retune failed: {last_error} — is the radar running?")
+            f"Retune failed: {last_error}. Is the radar running?")
 
     def _read_overload(self, applied_at_ms):
         """Overload flags from an overload-status report newer than
@@ -489,7 +489,7 @@ class Calibrator:
                 return bool(rf.get("overloadA")), bool(rf.get("overloadB"))
             time.sleep(RF_STATUS_POLL_SECONDS)
         raise CalibrationError(
-            "blah2 is not reporting overload status — it may be running an older "
+            "blah2 is not reporting overload status. It may be running an older "
             "version without live-tune support")
 
     def _probe(self, fc, gain_a, gain_b, lna_state, fallback_applied_at):
@@ -1132,7 +1132,7 @@ class Calibrator:
             return self._disable_agc_and_report(
                 top_tower, top_fc, gain_a, gain_b, lna_state,
                 "Tried hardware AGC as a last resort, but blah2 never "
-                "reported live detections after the restart — the SDR "
+                "reported live detections after the restart. The SDR "
                 "device may not have been acquired.")
 
         try:
@@ -1159,7 +1159,7 @@ class Calibrator:
         return self._disable_agc_and_report(
             top_tower, top_fc, gain_a, gain_b, lna_state,
             "Also tried hardware AGC as a last resort at the top-ranked "
-            "tower — still no confirmed track.")
+            "tower; still no confirmed track.")
 
     # ── Run loop ───────────────────────────────────────────────
 
@@ -1262,13 +1262,13 @@ class Calibrator:
 
             if result is None and error is None:
                 if mode == MODE_ADSB:
-                    error = ("No ADS-B-verified track — every candidate tower "
+                    error = ("No ADS-B-verified track: every candidate tower "
                              "and gain setting was tried, but no confirmed "
                              "track ever matched a real aircraft while one "
                              "was actually in range.")
                 else:
-                    error = ("No confirmed track found within the time budget "
-                             "— this may simply mean no aircraft was overhead "
+                    error = ("No confirmed track found within the time budget. "
+                             "This may simply mean no aircraft was overhead "
                              "during this run, not that the tuning is wrong.")
 
                 # A cancel arriving right as the last tower's dwell ended
