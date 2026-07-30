@@ -87,6 +87,9 @@ try:
 except OSError:
     pass
 
+# A calibration run cannot survive a GUI restart — any lock left behind is stale
+device_state.release_calibration_lock()
+
 # Enforce radar at the Docker level: stop and remove retina-spectrum if it is running.
 # retina-spectrum is only allowed while the wizard location step or config toggle is active.
 if config_mgr.is_retina_node_installed():
@@ -107,13 +110,26 @@ except Exception:
 
 
 from blah2_client import Blah2Client
+from calibrator import Calibrator
+from agc_fallback import AgcFallbackClient
 from retina_tracker_client import RetinaTrackerClient
 from tracker_capture import TrackerCaptureService
 
 blah2_client = Blah2Client(BLAH2_API_URL)
 retina_tracker_client = RetinaTrackerClient(
     RETINA_TRACKER_HOST, RETINA_TRACKER_PORT, RETINA_TRACKER_EVENTS_PATH)
+agc_fallback_client = AgcFallbackClient(config_mgr, dev_mode=DEV_MODE)
+calibrator = Calibrator(blah2_client, retina_tracker_client, agc_fallback_client)
 tracker_capture = TrackerCaptureService(blah2_client, retina_tracker_client)
+
+
+def _on_calibration_complete(status):
+    """Runs on the calibration thread when a run reaches a terminal state."""
+    device_state.release_calibration_lock()
+
+
+calibrator.on_complete = _on_calibration_complete
+
 # Never auto-start under pytest: conftest.py's app_client fixture reloads this
 # module per-test, and start() spawns a permanent, never-stopped background
 # thread — under pytest that would leak one such thread per test (each making
@@ -156,6 +172,7 @@ from routes.setup import bp as setup_bp
 from routes.towers import bp as towers_bp
 from routes.mode import bp as mode_bp
 from routes.network import bp as network_bp
+from routes.calibrate import bp as calibrate_bp
 from routes.tracker_preview import bp as tracker_preview_bp
 
 app.register_blueprint(home_bp)
@@ -165,6 +182,7 @@ app.register_blueprint(setup_bp)
 app.register_blueprint(towers_bp)
 app.register_blueprint(mode_bp)
 app.register_blueprint(network_bp)
+app.register_blueprint(calibrate_bp)
 app.register_blueprint(tracker_preview_bp)
 
 

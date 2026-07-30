@@ -254,3 +254,19 @@ class TestCloudToggleBlockedDuringInstall:
         ds.release_install_lock()
         success, _ = ds.set_cloud_services(False)
         assert success is True
+
+
+class TestInstallBlockedDuringCalibration:
+    """calibrator.is_running() is checked directly at the /mender/install
+    route, not just device_state.can_start_install()'s lock file — because
+    MODE_ADSB has no time limit, a genuine multi-hour run would outlive the
+    lock file's own 20-minute staleness window, but is_running() never lies."""
+
+    def test_install_refused_while_calibration_is_running(self, app_client):
+        import app as app_module
+        with patch.object(app_module.calibrator, 'is_running', return_value=True):
+            response = app_client.post('/mender/install',
+                                       data=json.dumps({}),
+                                       content_type='application/json')
+        assert response.status_code == 409
+        assert 'calibrat' in json.loads(response.data)['error'].lower()

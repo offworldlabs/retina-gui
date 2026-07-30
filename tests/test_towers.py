@@ -112,8 +112,9 @@ class TestTowerSearch:
         assert forwarded['source'] == 'us'
 
     @patch('routes.towers.http_requests.get')
-    def test_search_caches_results(self, mock_get, app_client):
-        """A successful search with towers populates the device_state cache."""
+    def test_search_caches_results_for_auto_calibrate(self, mock_get, app_client):
+        """A successful search with towers populates the device_state cache
+        that Auto-Calibrate's alternate-tower lookup prefers."""
         import app as app_module
         mock_resp = MagicMock()
         mock_resp.raise_for_status.return_value = None

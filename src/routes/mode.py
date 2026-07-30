@@ -1,10 +1,19 @@
 import os
 import subprocess
+import time
 from flask import Blueprint, jsonify, request
 
 bp = Blueprint('mode', __name__)
 
 _mode_cache = 'radar'  # default mode if file read fails (e.g. dev environment without /data OR on startup before mode is set at least once)
+
+# The sdrplay_apiService restart and the immediately-following container
+# recreate used to race with no settle time in between — diagnosed live
+# on jonathan-node-2 as a repeated cause of the SDRplay device wedging
+# outright (not just a bad gain candidate). This window gives the
+# service time to finish reinitialising the USB device before blah2 (or
+# Auto-Calibrate's AGC fallback — see agc_fallback.py) claims it again.
+SDRPLAY_RESTART_SETTLE_SECONDS = 30
 
 
 def get_current_mode():
@@ -63,6 +72,11 @@ def run_config_merger_and_restart(retina_node_path: str) -> str | None:
     subprocess.run(['systemctl', 'restart', 'sdrplay.service'],
                    capture_output=True, timeout=30)
 
+    # See SDRPLAY_RESTART_SETTLE_SECONDS — without this, recreating the
+    # containers immediately after the restart request returns has
+    # repeatedly wedged the SDRplay device on real hardware.
+    time.sleep(SDRPLAY_RESTART_SETTLE_SECONDS)
+
     result = subprocess.run(
         ['docker', 'compose', '-p', 'retina-node', 'up', '-d', '--force-recreate'],
         cwd=retina_node_path,
@@ -81,12 +95,22 @@ def get_mode():
 
 @bp.route('/api/mode', methods=['POST'])
 def set_mode():
-    from app import RETINA_NODE_PATH, config_mgr
+    from app import RETINA_NODE_PATH, config_mgr, calibrator, device_state
 
     data = request.get_json(silent=True) or {}
     mode = data.get('mode')
     if mode not in ('radar', 'spectrum', 'sdrconnect'):
         return jsonify({'success': False, 'error': 'Invalid mode'}), 400
+
+    # Every branch below (including 'radar', which force-recreates the
+    # containers) stops or restarts blah2 — any of that would yank the SDR
+    # out from under an active calibration run. Checking calibrator.is_running()
+    # directly (not just the lock file) matters because MODE_ADSB has no time
+    # limit: a genuine multi-hour run would outlive the lock file's own
+    # 20-minute staleness window, but is_running() is always correct.
+    if calibrator.is_running() or device_state.is_calibration_locked()[0]:
+        return jsonify({'success': False,
+                        'error': 'Auto-calibration is running. Cancel it before switching modes'}), 409
 
     node_installed = config_mgr.is_retina_node_installed()
     current_mode = get_current_mode()

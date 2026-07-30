@@ -1,8 +1,9 @@
 """HTTP client for the blah2_api service.
 
-Isolates all blah2_api HTTP calls so tracker_capture's logic can be tested
-against a fake client. All getters return parsed JSON dicts or None on any
-transport/parse failure — callers treat None as "no data yet".
+Isolates all blah2_api HTTP calls so the calibrator's and tracker_capture's
+logic can each be tested against a fake client. All getters return parsed
+JSON dicts or None on any transport/parse failure — callers treat None as
+"no data yet".
 """
 
 import requests
@@ -23,9 +24,49 @@ class Blah2Client:
         except (requests.RequestException, ValueError):
             return None
 
+    def retune(self, fc, gain_a, gain_b, lna_state):
+        """Request a live retune. Returns (generation, error)."""
+        try:
+            resp = requests.post(
+                f"{self.base_url}/capture/retune",
+                json={
+                    "fc": int(fc),
+                    "gainReductionA": int(gain_a),
+                    "gainReductionB": int(gain_b),
+                    "lnaState": int(lna_state),
+                },
+                timeout=self.timeout,
+            )
+            body = resp.json()
+            if resp.status_code == 200 and body.get("success"):
+                return body.get("generation"), None
+            return None, body.get("error") or f"HTTP {resp.status_code}"
+        except requests.RequestException as e:
+            return None, str(e)
+        except ValueError:
+            return None, "invalid response from blah2_api"
+
+    def get_retune_status(self):
+        """Last retune blah2 actually applied: {generation, fc, ..., appliedAt}."""
+        return self._get_json("/capture/retune/status")
+
+    def get_overload_status(self):
+        """Per-tuner RF overload state: {overloadA, overloadB, timestamp}.
+        Deliberately its own endpoint, not /capture/rf-status — that path
+        belongs to the (unrelated) peak-dBFS meter feature; the two datasets
+        have no shared consumer, so they stay on separate endpoints rather
+        than being coupled together just because they're both RF status."""
+        return self._get_json("/capture/overload-status")
+
     def get_detection(self):
         """Latest per-CPI CFAR detections: {timestamp, delay[], doppler[], snr[]}."""
         return self._get_json("/api/detection")
+
+    def get_adsb_tracks(self):
+        """Current ADS-B aircraft, extrapolated to expected delay/doppler for
+        this node's rx/tx geometry and fc — {hex: {delay, doppler, ...}}.
+        None on failure or if truth.adsb.enabled is false on the node."""
+        return self._get_json("/api/adsb2dd")
 
     def get_rf_status(self):
         """Per-tuner RF overload state + peak dBFS: {overloadA, overloadB,
