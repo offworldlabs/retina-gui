@@ -111,15 +111,13 @@ except Exception:
 
 from blah2_client import Blah2Client
 from calibrator import Calibrator
-from agc_fallback import AgcFallbackClient
 from retina_tracker_client import RetinaTrackerClient
 from tracker_capture import TrackerCaptureService
 
 blah2_client = Blah2Client(BLAH2_API_URL)
 retina_tracker_client = RetinaTrackerClient(
     RETINA_TRACKER_HOST, RETINA_TRACKER_PORT, RETINA_TRACKER_EVENTS_PATH)
-agc_fallback_client = AgcFallbackClient(config_mgr, dev_mode=DEV_MODE)
-calibrator = Calibrator(blah2_client, retina_tracker_client, agc_fallback_client)
+calibrator = Calibrator(blah2_client, retina_tracker_client)
 tracker_capture = TrackerCaptureService(blah2_client, retina_tracker_client)
 
 

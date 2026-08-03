@@ -190,7 +190,11 @@ def apply():
     device = dict(capture.get('device', {}) or {})
     device['gainReduction'] = [int(result['gain_a']), int(result['gain_b'])]
     device['lnaState'] = int(result['lna_state'])
-    device['bandwidthNumber'] = int(result.get('bandwidth_number', 0))
+    # Always assert AGC off: a calibration result is by definition a manual
+    # gain/LNA operating point (the AGC guard above refuses to run against
+    # hardware AGC), so persisting one must never inherit a stale AGC-on
+    # bandwidth from whatever was in user.yml before.
+    device['bandwidthNumber'] = 0
     capture['device'] = device
     user_config['capture'] = capture
     config_mgr.save_user_config(user_config)

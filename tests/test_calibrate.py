@@ -159,25 +159,6 @@ class FakeRetinaTrackerClient:
             listener(event)
 
 
-class FakeAgcFallbackClient:
-    """Scripted stand-in for AgcFallbackClient — no real subprocess/Docker
-    calls. Records every apply() call so tests can assert on the
-    enable/disable sequence (fc, bandwidth_number, gain_a, gain_b,
-    lna_state) without touching config-merger or Docker.
-    """
-    def __init__(self, enable_result=(True, None), disable_result=(True, None)):
-        self.calls = []
-        self._enable_result = enable_result
-        self._disable_result = disable_result
-
-    def apply(self, fc, bandwidth_number, gain_a, gain_b, lna_state):
-        self.calls.append({"fc": fc, "bandwidth_number": bandwidth_number,
-                           "gain_a": gain_a, "gain_b": gain_b, "lna_state": lna_state})
-        if bandwidth_number == calmod.AGC_FALLBACK_BANDWIDTH_NUMBER:
-            return self._enable_result
-        return self._disable_result
-
-
 ORIGINAL = {"fc": 98_000_000, "gain_a": 40, "gain_b": 41, "lna_state": 4}
 TOWER = {"name": "Tower One", "fc": 98_000_000}
 TOWER_TWO = {"name": "Tower Two", "fc": 105_100_000}
@@ -249,8 +230,6 @@ def fast(monkeypatch):
     monkeypatch.setattr(calmod, "RF_STATUS_POLL_SECONDS", 0.005)
     monkeypatch.setattr(calmod, "DWELL_POLL_SECONDS", 0.01)
     monkeypatch.setattr(calmod, "TRACKER_FEED_POLL_SECONDS", 0.01)
-    monkeypatch.setattr(calmod, "AGC_FALLBACK_DWELL_SECONDS", 0.05)
-    monkeypatch.setattr(calmod, "AGC_HEALTH_CHECK_TIMEOUT_SECONDS", 0.05)
 
 
 def run_to_completion(cal, towers, original=ORIGINAL, budget=10, dwell=3.0):
@@ -749,9 +728,8 @@ class TestMultiTower:
 class TestNoTrackFallback:
     """When the whole search finds no confirmed track anywhere, the device
     is left on the top-ranked tower's own resolved (gain_a, gain_b,
-    lna_state) — not the arbitrary pre-run 'original' tuning — optionally
-    after one last-resort attempt with hardware AGC on (see
-    calibrator.py's _apply_top_tower_fallback/_run_agc_fallback)."""
+    lna_state) — not the arbitrary pre-run 'original' tuning (see
+    calibrator.py's _apply_top_tower_fallback)."""
 
     def test_no_track_fallback_lands_on_top_tower_not_last_tried(self, fast):
         client = FakeBlah2Client()  # never overloads, never confirms
@@ -774,181 +752,6 @@ class TestNoTrackFallback:
         assert client.current["gain_a"] == GAIN_REDUCTION_MIN
         assert client.current["gain_b"] == 39
         assert client.current["lna_state"] == LNA_STATE_MIN
-
-    def test_agc_fallback_succeeds_after_manual_search_exhausted(self, fast):
-        client = FakeBlah2Client(detection=moving_track_detections())
-        tracker_client = FakeRetinaTrackerClient(confirm_after=1, confirm_from_reset=1)
-        fake_agc = FakeAgcFallbackClient()
-        status = run_to_completion(
-            Calibrator(client, tracker_client, fake_agc), [TOWER])
-        assert status["state"] == "done"
-        assert status["result"]["bandwidth_number"] == calmod.AGC_FALLBACK_BANDWIDTH_NUMBER
-        assert len(fake_agc.calls) == 1  # no disable call — succeeded
-        assert fake_agc.calls[0]["fc"] == TOWER["fc"]
-        assert fake_agc.calls[0]["bandwidth_number"] == calmod.AGC_FALLBACK_BANDWIDTH_NUMBER
-        # surveillance/LNA are the top tower's own resolved values, not a
-        # fixed corner — AGC doesn't manage either of them
-        assert fake_agc.calls[0]["gain_b"] == GAIN_REDUCTION_MIN
-        assert fake_agc.calls[0]["lna_state"] == LNA_STATE_MIN
-
-    def test_agc_fallback_also_fails_leaves_top_tower_at_resolved_gain(self, fast):
-        client = FakeBlah2Client()  # never confirms, at manual search or AGC
-        tracker_client = FakeRetinaTrackerClient()
-        fake_agc = FakeAgcFallbackClient()
-        status = run_to_completion(
-            Calibrator(client, tracker_client, fake_agc), [TOWER])
-        assert status["state"] == "failed"
-        assert len(fake_agc.calls) == 2  # enable, then disable
-        disable_call = fake_agc.calls[1]
-        assert disable_call["bandwidth_number"] == calmod.AGC_BANDWIDTH_OFF
-        assert disable_call["gain_b"] == GAIN_REDUCTION_MIN
-        assert disable_call["lna_state"] == LNA_STATE_MIN
-        # The AGC path never calls blah2_client.retune() directly — the
-        # calibrator's own status is the one that reflects reality here.
-        assert status["current"]["fc"] == TOWER["fc"]
-        assert status["current"]["gain_a"] == GAIN_REDUCTION_MIN
-        assert status["current"]["gain_b"] == GAIN_REDUCTION_MIN
-        assert status["current"]["lna_state"] == LNA_STATE_MIN
-
-    def test_agc_fallback_attempted_once_per_run_not_per_tower(self, fast):
-        client = FakeBlah2Client()  # never confirms anywhere
-        tracker_client = FakeRetinaTrackerClient()
-        fake_agc = FakeAgcFallbackClient()
-        status = run_to_completion(
-            Calibrator(client, tracker_client, fake_agc), [TOWER, TOWER_TWO])
-        assert status["state"] == "failed"
-        assert len(fake_agc.calls) == 2  # enable + disable, regardless of tower count
-
-    def test_agc_enable_failure_also_reverts_persisted_config(self, fast):
-        """A failed enable doesn't mean nothing was written — the config
-        write happens before the restart attempt inside
-        AgcFallbackClient.apply(), so a restart that fails can still
-        leave user.yml permanently pointed at AGC-on (confirmed live).
-        The enable-failure path must write the safe config back too, not
-        just correct the live (in-memory) tuning."""
-        client = FakeBlah2Client()
-        tracker_client = FakeRetinaTrackerClient()
-        fake_agc = FakeAgcFallbackClient(enable_result=(False, "config-merger failed"))
-        status = run_to_completion(
-            Calibrator(client, tracker_client, fake_agc), [TOWER])
-        assert status["state"] == "failed"
-        assert len(fake_agc.calls) == 2  # enable attempt, then the safe revert-write
-        assert "could not be enabled" in status["error"]
-        revert_call = fake_agc.calls[1]
-        assert revert_call["bandwidth_number"] == calmod.AGC_BANDWIDTH_OFF
-        assert revert_call["gain_b"] == GAIN_REDUCTION_MIN
-        assert revert_call["lna_state"] == LNA_STATE_MIN
-        # The AGC path never calls blah2_client.retune() directly here —
-        # the calibrator's own status is the one that reflects reality.
-        assert status["current"]["fc"] == TOWER["fc"]
-        assert status["current"]["gain_a"] == GAIN_REDUCTION_MIN
-        assert status["current"]["gain_b"] == GAIN_REDUCTION_MIN
-        assert status["current"]["lna_state"] == LNA_STATE_MIN
-
-    def test_agc_enable_and_revert_both_fail_still_terminates_gracefully(self, fast):
-        client = FakeBlah2Client()
-        tracker_client = FakeRetinaTrackerClient()
-        fake_agc = FakeAgcFallbackClient(
-            enable_result=(False, "config-merger failed"),
-            disable_result=(False, "restart also failed"))
-        status = run_to_completion(
-            Calibrator(client, tracker_client, fake_agc), [TOWER])
-        assert status["state"] == "failed"
-        assert len(fake_agc.calls) == 2
-        assert "could not be enabled" in status["error"]
-        assert "could not be turned back off" in status["error"]
-
-    def test_agc_disable_failure_still_terminates_the_run(self, fast):
-        client = FakeBlah2Client()
-        tracker_client = FakeRetinaTrackerClient()
-        fake_agc = FakeAgcFallbackClient(disable_result=(False, "restart failed"))
-        status = run_to_completion(
-            Calibrator(client, tracker_client, fake_agc), [TOWER])
-        assert status["state"] == "failed"
-        assert "could not be turned back off" in status["error"]
-
-    def test_agc_fallback_cancelled_mid_dwell_turns_agc_back_off(self, fast, monkeypatch):
-        import time
-        monkeypatch.setattr(calmod, "AGC_FALLBACK_DWELL_SECONDS", 5)
-        # Fresh detections so the device-health check passes and the run
-        # actually reaches agc_dwelling (not device_not_ready) — never
-        # confirms a track, though, so it just sits there until cancelled.
-        client = FakeBlah2Client(detection=moving_track_detections())
-        tracker_client = FakeRetinaTrackerClient()
-        fake_agc = FakeAgcFallbackClient()
-        cal = Calibrator(client, tracker_client, fake_agc)
-        started, error = cal.start([TOWER], ORIGINAL, budget_seconds=30, dwell_seconds=0.01)
-        assert started, error
-
-        deadline = time.monotonic() + 10
-        while time.monotonic() < deadline:
-            if cal.get_status()["phase"] == "agc_dwelling":
-                break
-            time.sleep(0.01)
-        else:
-            raise AssertionError("never reached agc_dwelling phase")
-
-        cal.cancel()
-        cal._thread.join(timeout=10)
-        status = cal.get_status()
-        assert status["state"] == "cancelled"
-        assert fake_agc.calls[-1]["bandwidth_number"] == calmod.AGC_BANDWIDTH_OFF
-
-    def test_agc_health_check_failure_reverts_without_dwelling(self, fast):
-        """blah2 never posts a single fresh detection after the AGC
-        restart (default FakeBlah2Client — no detections at all) — this
-        must be caught as a device-health failure and reverted
-        immediately, not treated as an ordinary 'dwelled the whole
-        window, no track' result."""
-        client = FakeBlah2Client()
-        tracker_client = FakeRetinaTrackerClient()
-        fake_agc = FakeAgcFallbackClient()
-        status = run_to_completion(
-            Calibrator(client, tracker_client, fake_agc), [TOWER])
-        assert status["state"] == "failed"
-        assert len(fake_agc.calls) == 2  # enable, then disable — same cleanup as any other failure
-        agc_entry = next(e for e in status["history"] if e.get("agc"))
-        assert agc_entry["outcome"] == "device_not_ready"
-        assert "may not have been acquired" in status["error"]
-
-    def test_agc_health_check_passes_then_dwells_normally(self, fast):
-        """Fresh detections flow (health check passes), but no track ever
-        confirms — must still reach the ordinary no-track outcome, not
-        device_not_ready. Proves the health check doesn't false-positive
-        on a genuinely healthy device that simply found nothing."""
-        client = FakeBlah2Client(detection=moving_track_detections())
-        tracker_client = FakeRetinaTrackerClient()  # never confirms
-        fake_agc = FakeAgcFallbackClient()
-        status = run_to_completion(
-            Calibrator(client, tracker_client, fake_agc), [TOWER])
-        assert status["state"] == "failed"
-        agc_entry = next(e for e in status["history"] if e.get("agc"))
-        assert agc_entry["outcome"] == "no_confirmed_track"
-        assert "still no confirmed track" in status["error"]
-
-    def test_agc_health_check_cancelled_turns_agc_back_off(self, fast, monkeypatch):
-        import time
-        monkeypatch.setattr(calmod, "AGC_HEALTH_CHECK_TIMEOUT_SECONDS", 5)
-        client = FakeBlah2Client()  # never posts a detection
-        tracker_client = FakeRetinaTrackerClient()
-        fake_agc = FakeAgcFallbackClient()
-        cal = Calibrator(client, tracker_client, fake_agc)
-        started, error = cal.start([TOWER], ORIGINAL, budget_seconds=30, dwell_seconds=0.01)
-        assert started, error
-
-        deadline = time.monotonic() + 10
-        while time.monotonic() < deadline:
-            if cal.get_status()["phase"] == "agc_verifying_device":
-                break
-            time.sleep(0.01)
-        else:
-            raise AssertionError("never reached agc_verifying_device phase")
-
-        cal.cancel()
-        cal._thread.join(timeout=10)
-        status = cal.get_status()
-        assert status["state"] == "cancelled"
-        assert fake_agc.calls[-1]["bandwidth_number"] == calmod.AGC_BANDWIDTH_OFF
 
 
 class TestTrackerSidecarIntegration:
