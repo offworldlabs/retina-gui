@@ -126,32 +126,33 @@ Two success modes, with genuinely different dwell strategies:
     rejects mode=adsb at the /start endpoint — exposing it to users is a
     separate decision not yet made.
 
-Nothing is written to user.yml during a run, with one narrow, explicit
-exception: if every tower's manual gain/LNA search fails to confirm a
-track anywhere, one last-resort attempt is made with hardware AGC turned
-on at the top-ranked tower's frequency (see _run_agc_fallback) — this is
-the only point in a run that touches user.yml/config-merger/Docker, via
-an injected collaborator (see agc_fallback.py), never directly. AGC only
-drives the reference tuner's gain — the surveillance tuner and the
-shared LNA state are not managed by it, so they're set to the top-ranked
-tower's own resolved (gain_b, lna_state) from its own manual descent
-(captured in _run, reused by both this AGC attempt and the fallback
-below), not left unprotected. blah2 is confirmed alive (posting fresh
-detections) before the attempt commits to a full track-watching dwell —
-a container can report "started" while still failing to acquire the SDR
-internally, and that failure shouldn't read the same as an empty sky. On
-a genuine user cancellation or an
-unexpected/CalibrationError exception, the original tuning is restored,
-unchanged from before. On the no-track-anywhere outcome specifically, the
-device is instead left on the top-ranked tower's own resolved, already
-proven-not-to-overload operating point (optionally after the AGC attempt
-above) — not the arbitrary pre-run tuning. That resolved point already
-degrades to the safe (max gain reduction, max LNA state) corner on its
-own whenever the top tower's own descent never found anything better —
-see _descend_reference/_descend_surveillance's own terminal branches —
-so there's no separate "is this still safe" check needed here.
-Persisting a successful result is a separate, explicit step (POST
-/calibrate/apply).
+Nothing is written to user.yml during a run, and nothing here touches
+config-merger or Docker: every setting this engine applies goes through
+blah2's live retune protocol (see blah2_client.retune) and is in-memory
+only. That keeps the whole run on sub-second HTTP calls and keeps this
+module free of any Flask/subprocess/Docker import. Persisting a
+successful result is a separate, explicit step (POST /calibrate/apply).
+
+On a genuine user cancellation or an unexpected/CalibrationError
+exception, the original tuning is restored, unchanged from before. On
+the no-track-anywhere outcome specifically, the device is instead left
+on the top-ranked tower's own resolved, already proven-not-to-overload
+operating point — not the arbitrary pre-run tuning. That resolved point
+already degrades to the safe (max gain reduction, max LNA state) corner
+on its own whenever the top tower's own descent never found anything
+better — see _descend_reference/_descend_surveillance's own terminal
+branches — so there's no separate "is this still safe" check needed here.
+
+A hardware-AGC last resort used to run at this point (one AGC-on attempt
+at the top-ranked tower after every manual search had failed). It was
+removed: AGC only drives the reference tuner, whose manual descent
+already walks to the highest gain that doesn't clip — the same operating
+point AGC converges to — while the dominant reason a run fails is simply
+that no aircraft was overhead, which AGC cannot influence. Reaching it
+also cost two full config-merger + container-recreate cycles inside a
+live run, the only Docker coupling this engine had. Users who want
+hardware AGC can still set it directly in the Capture config; the AGC
+guard in routes/calibrate.py refuses to start a manual search against it.
 
 All blah2-side timestamps (retune appliedAt, overload-status, detection/tracker
 CPI timestamps) share blah2's system clock, so freshness comparisons never
@@ -211,33 +212,6 @@ TRACKER_FEED_POLL_SECONDS = 0.2
 # Overall run budget.
 TOTAL_BUDGET_SECONDS = 600
 
-# AGC last-resort fallback (see module docstring): once every tower's
-# manual gain/LNA search has failed, exactly one additional attempt is
-# made at the top-ranked tower's frequency with hardware AGC on instead
-# of manual gain search on the reference tuner only. 5 matches
-# routes/calibrate.py's AGC_BANDWIDTHS — the lowest of the three valid
-# AGC-on settings, the most conservative choice for a one-shot attempt
-# this late in an already-possibly-troubled run.
-AGC_FALLBACK_BANDWIDTH_NUMBER = 5
-AGC_BANDWIDTH_OFF = 0
-
-# How long to dwell (waiting for a confirmed track) once AGC is on and
-# the capture stack has restarted. Its own fixed budget, not derived from
-# TOTAL_BUDGET_SECONDS/the per-tower division — this only runs once the
-# whole tower rotation is already exhausted, so it isn't stealing time
-# from towers that already had their turn.
-AGC_FALLBACK_DWELL_SECONDS = 90
-
-# Sub-window at the start of the AGC dwell spent confirming blah2 is
-# actually alive (posting fresh /api/detection frames) before committing
-# to the rest of the dwell watching for a track. Carved out of (not
-# added to) AGC_FALLBACK_DWELL_SECONDS, so the AGC phase's total
-# worst-case duration doesn't grow. 20s is generous against blah2's
-# typical ~0.5-1s CPI cadence (tracker-preview's own measured baseline is
-# ~900ms) plus whatever residual startup time the container needs right
-# after the restart above.
-AGC_HEALTH_CHECK_TIMEOUT_SECONDS = 20
-
 # Success modes.
 MODE_TRACK = "track"
 MODE_ADSB = "adsb"
@@ -281,14 +255,9 @@ class Calibrator:
     DeviceState and is managed by the caller (routes/calibrate.py).
     """
 
-    def __init__(self, blah2_client, retina_tracker_client, agc_fallback_client=None):
+    def __init__(self, blah2_client, retina_tracker_client):
         self._client = blah2_client
         self._tracker_client = retina_tracker_client
-        # Optional third collaborator (see agc_fallback.py) — the run's
-        # once-per-run AGC last resort. None (the default, used by most
-        # existing tests) simply skips Feature 2; the top-tower fallback
-        # still applies on its own (see _run()).
-        self._agc_fallback = agc_fallback_client
         self._lock = threading.Lock()
         self._cancel = threading.Event()
         self._thread = None
@@ -754,20 +723,15 @@ class Calibrator:
         return gain_a, gain_b, lna_state, applied_at
 
     def _dwell(self, tower, fc, gain_a, gain_b, lna_state, applied_at, dwell_deadline,
-               tower_entry, phase_label="dwelling"):
+               tower_entry):
         """MODE_TRACK's dwell: push live detections to the shared
         retina-tracker sidecar (see module docstring for why — blah2's own
         tracker is not trusted here) and wait for it to emit a confirmed
         (ACTIVE) track event, or dwell_deadline passes. Returns a result
         dict on success, None if the dwell budget expires. (MODE_ADSB uses
         _dwell_adsb instead — see the module docstring.)
-
-        phase_label: lets the AGC last-resort fallback (see
-        _run_agc_fallback) report a distinct "agc_dwelling" phase instead
-        of the ordinary per-tower "dwelling" — everything else about this
-        method is identical either way.
         """
-        self._update(phase=phase_label)
+        self._update(phase="dwelling")
         max_evidence = EVIDENCE_NONE
         max_detections = 0
         last_timestamp = None
@@ -962,205 +926,6 @@ class Calibrator:
         except Exception:
             pass
 
-    def _wait_for_live_data(self, applied_at, deadline):
-        """True the moment blah2 posts any fresh /api/detection frame —
-        any content, even an empty one, is proof its capture loop is
-        actually running — newer than applied_at. False if deadline
-        passes with no such frame.
-
-        Distinct from _dwell's own freshness check: this only asks "is
-        data flowing at all", not "is there a track" — used by
-        _run_agc_fallback to catch a container that came up per Docker
-        but never actually acquired the SDR (exactly tonight's live
-        failure mode), rather than silently burning the whole AGC dwell
-        waiting for a track that can never arrive.
-        """
-        while time.monotonic() < deadline:
-            self._check_cancel()
-            detection = self._client.get_detection()
-            timestamp = detection.get("timestamp") if detection else None
-            if timestamp is not None and timestamp >= applied_at:
-                return True
-            self._sleep(TRACKER_FEED_POLL_SECONDS)
-        return False
-
-    def _disable_agc_and_report(self, top_tower, top_fc, gain_a, gain_b,
-                                lna_state, reason):
-        """Shared terminal step for every AGC-fallback path that ends
-        without a confirmed track (device-health failure or dwell
-        timeout): turn AGC back off and revert to the top tower's own
-        resolved values, then report `reason` — or, if the revert itself
-        couldn't be applied, fold that failure into the message instead
-        of silently swallowing it.
-        """
-        off_ok, off_error = self._agc_fallback.apply(
-            top_fc, AGC_BANDWIDTH_OFF, gain_a, gain_b, lna_state)
-        if not off_ok:
-            return None, (
-                f"{reason} AGC could not be turned back off automatically "
-                f"({off_error}); check the Capture config's AGC Bandwidth "
-                f"setting."), False
-        self._set_current(tower_index=0, tower_name=top_tower.get("name"),
-                          fc=top_fc, gain_a=gain_a, gain_b=gain_b,
-                          lna_state=lna_state)
-        return None, reason, False
-
-    def _cancel_during_agc_fallback(self, top_tower, top_fc, gain_a, gain_b,
-                                    lna_state):
-        """Best-effort cleanup when the user cancels mid-health-check or
-        mid-dwell — AGC must never be left on silently (see module
-        docstring)."""
-        self._agc_fallback.apply(top_fc, AGC_BANDWIDTH_OFF, gain_a, gain_b, lna_state)
-        self._set_current(tower_index=0, tower_name=top_tower.get("name"),
-                          fc=top_fc, gain_a=gain_a, gain_b=gain_b,
-                          lna_state=lna_state)
-        return None, "Cancelled by user", True
-
-    def _run_agc_fallback(self, top_tower, top_fc, gain_a, gain_b, lna_state):
-        """The run's very last resort (see module docstring): try
-        hardware AGC once, at the top-ranked tower's frequency only,
-        after every tower's manual gain/LNA search has already failed.
-        Not part of blah2's live retune protocol — turning AGC on/off
-        goes through the injected _agc_fallback collaborator (kept out
-        of this class's own Flask/subprocess/Docker-free design).
-
-        AGC only drives the reference tuner (A)'s gain — the
-        surveillance tuner (B) and the shared LNA state are NOT managed
-        by it at all, so both still need real, proven-not-to-overload
-        values or surveillance has zero overload protection during this
-        attempt. gain_a/gain_b/lna_state here are the top tower's own
-        resolved values from its own manual descent (see _run) — gain_a
-        is a don't-care placeholder once AGC takes over live, but
-        gain_b/lna_state are load-bearing for real.
-
-        Reuses _dwell (MODE_TRACK's "any confirmed track" criterion)
-        regardless of the run's own mode — MODE_ADSB isn't reachable via
-        routes/calibrate.py today, so this keeps the fallback simple
-        rather than plumbing MODE_ADSB's stricter aircraft-matching
-        through a config-driven (not gain-driven) AGC state. Revisit if
-        MODE_ADSB is ever exposed.
-
-        applied_at=0 for both the health check's and the dwell's staleness
-        guards is deliberate, not an oversight: unlike a live retune,
-        there's no real "applied at" timestamp for a config-file-driven
-        container restart, but the blah2 container was just fully
-        recreated, so there's no stale pre-restart detection data that
-        could wrongly pass either guard — safety instead comes from the
-        explicit reset() + confirmed-event clear immediately below,
-        exactly as every tower transition already relies on.
-
-        Before committing to the full track-watching dwell, a bounded
-        sub-window (AGC_HEALTH_CHECK_TIMEOUT_SECONDS) confirms blah2 is
-        actually alive — any fresh /api/detection frame at all, not
-        graded for evidence — since a container can report "started" to
-        Docker while still crash-looping internally on a device it never
-        acquired (confirmed live tonight). Skipping straight to a revert
-        on that failure, rather than dwelling the full window regardless,
-        avoids reporting a plain "no confirmed track" for what's actually
-        a hardware fault.
-
-        The enable step (self._agc_fallback.apply(...), a real
-        subprocess/Docker call) is not itself cancellable mid-flight —
-        only the health check and dwell afterward check for cancellation.
-        Accepted: matches how every other blocking subprocess call in
-        this codebase already behaves.
-
-        Returns (result, error, cancelled):
-          - result: a success dict (same shape as _dwell's, plus
-            bandwidth_number for /calibrate/apply to persist), or None.
-          - error: a human-readable failure reason to append to the
-            run's existing "no confirmed track" message, or None on
-            success.
-          - cancelled: True if the user's cancel is what ended this
-            attempt (caller should report state="cancelled", not
-            "failed").
-
-        Whatever happens, AGC is never left on: any non-success path
-        here turns it back off and re-applies the top tower's own
-        resolved values at top_fc before returning (see
-        _disable_agc_and_report/_cancel_during_agc_fallback) — this
-        method fully owns the terminal device state for this branch;
-        _run()'s own restore-original logic must not also run afterwards
-        (see _run()).
-        """
-        self._update(phase="agc_fallback")
-        self._tracker_client.reset()
-        with self._lock:
-            self._last_confirmed_event = None
-        self._set_current(tower_index=0, tower_name=top_tower.get("name"),
-                          fc=top_fc, gain_a=None, gain_b=gain_b, lna_state=lna_state)
-
-        ok, apply_error = self._agc_fallback.apply(
-            top_fc, AGC_FALLBACK_BANDWIDTH_NUMBER, gain_a, gain_b, lna_state)
-        if not ok:
-            # A failed enable does NOT mean nothing was written — the
-            # config write happens before the restart attempt inside
-            # _agc_fallback.apply(), so a restart that times out or
-            # otherwise fails can still leave user.yml permanently
-            # pointed at AGC-on on disk (confirmed live: this happened
-            # exactly once, silently blocking every future Auto-Calibrate
-            # run via the AGC guard until noticed by hand). Route through
-            # the same disable-and-revert helper as every other failure
-            # path so the persisted config is always written back to the
-            # safe off-state, not just corrected in live (in-memory)
-            # tuning via _apply_top_tower_fallback.
-            return self._disable_agc_and_report(
-                top_tower, top_fc, gain_a, gain_b, lna_state,
-                f"Tried hardware AGC as a last resort, but it could not be enabled: {apply_error}")
-
-        self._set_current(gain_a=gain_a, gain_b=gain_b, lna_state=lna_state)
-
-        # One overall deadline for the whole AGC phase — the health check
-        # gets up to its own sub-budget (never exceeding this), and the
-        # dwell afterward just uses whatever's left of this same window,
-        # so a quick health check hands back nearly the full dwell.
-        agc_phase_deadline = time.monotonic() + AGC_FALLBACK_DWELL_SECONDS
-        health_check_deadline = min(
-            time.monotonic() + AGC_HEALTH_CHECK_TIMEOUT_SECONDS, agc_phase_deadline)
-
-        self._update(phase="agc_verifying_device")
-        try:
-            device_alive = self._wait_for_live_data(applied_at=0, deadline=health_check_deadline)
-        except _Cancelled:
-            return self._cancel_during_agc_fallback(top_tower, top_fc, gain_a, gain_b, lna_state)
-
-        tower_entry = {"tower_name": top_tower.get("name"), "fc": top_fc,
-                       "descent": [], "outcome": "not_reached", "agc": True}
-        if not device_alive:
-            tower_entry["outcome"] = "device_not_ready"
-            self._append_history(tower_entry)
-            return self._disable_agc_and_report(
-                top_tower, top_fc, gain_a, gain_b, lna_state,
-                "Tried hardware AGC as a last resort, but blah2 never "
-                "reported live detections after the restart. The SDR "
-                "device may not have been acquired.")
-
-        try:
-            result = self._dwell(top_tower, top_fc, gain_a, gain_b, lna_state,
-                                 applied_at=0, dwell_deadline=agc_phase_deadline,
-                                 tower_entry=tower_entry, phase_label="agc_dwelling")
-        except _Cancelled:
-            self._append_history(tower_entry)
-            return self._cancel_during_agc_fallback(top_tower, top_fc, gain_a, gain_b, lna_state)
-
-        self._append_history(tower_entry)
-        if result is not None:
-            # gain_a here is the placeholder written alongside AGC, not
-            # what AGC is actually running at any instant — accurate
-            # enough to persist (config needs *some* valid number even
-            # under AGC) without pretending to know AGC's live gain.
-            # gain_b/lna_state are the real, load-bearing values.
-            # bandwidth_number tells /calibrate/apply to persist AGC-on
-            # (see routes/calibrate.py).
-            result["lna_state"] = lna_state
-            result["bandwidth_number"] = AGC_FALLBACK_BANDWIDTH_NUMBER
-            return result, None, False
-
-        return self._disable_agc_and_report(
-            top_tower, top_fc, gain_a, gain_b, lna_state,
-            "Also tried hardware AGC as a last resort at the top-ranked "
-            "tower; still no confirmed track.")
-
     # ── Run loop ───────────────────────────────────────────────
 
     def _run(self, towers, original, budget_seconds, dwell_seconds, mode):
@@ -1170,9 +935,8 @@ class Calibrator:
         no_track_fallback_applied = False
         # Captured the moment towers[0]'s own _descend() returns (below)
         # — the top-ranked tower's own resolved, proven-not-to-overload
-        # operating point. Serves both the no-track-anywhere fallback and
-        # the AGC last resort's surveillance/LNA values (see module
-        # docstring) — None until/unless tower index 0 is actually
+        # operating point, used by the no-track-anywhere fallback (see
+        # module docstring). None until/unless tower index 0 is actually
         # reached.
         top_tower_resolved = None
         run_deadline = time.monotonic() + budget_seconds
@@ -1273,29 +1037,15 @@ class Calibrator:
 
                 # A cancel arriving right as the last tower's dwell ended
                 # must still take the plain cancellation path (restore
-                # original) below, not commit to the slow AGC/top-tower
-                # fallback that follows.
+                # original) below, not commit to the top-tower fallback
+                # that follows.
                 self._check_cancel()
 
                 if towers and top_tower_resolved is not None:
                     top_tower = towers[0]
                     top_fc = int(top_tower["fc"])
                     gain_a, gain_b, lna_state = top_tower_resolved
-                    if self._agc_fallback is not None:
-                        agc_result, agc_error, agc_cancelled = self._run_agc_fallback(
-                            top_tower, top_fc, gain_a, gain_b, lna_state)
-                        if agc_result is not None:
-                            result = agc_result
-                            state = "done"
-                            error = None
-                        elif agc_cancelled:
-                            state = "cancelled"
-                            error = "Cancelled by user"
-                        else:
-                            state = "failed"
-                            error = f"{error} {agc_error}" if agc_error else error
-                    else:
-                        self._apply_top_tower_fallback(top_tower, top_fc, gain_a, gain_b, lna_state)
+                    self._apply_top_tower_fallback(top_tower, top_fc, gain_a, gain_b, lna_state)
                     no_track_fallback_applied = True
                 # else: towers is empty, or the run's own deadline
                 # expired before towers[0]'s descent ever ran (both

@@ -11,8 +11,8 @@ _mode_cache = 'radar'  # default mode if file read fails (e.g. dev environment w
 # recreate used to race with no settle time in between — diagnosed live
 # on jonathan-node-2 as a repeated cause of the SDRplay device wedging
 # outright (not just a bad gain candidate). This window gives the
-# service time to finish reinitialising the USB device before blah2 (or
-# Auto-Calibrate's AGC fallback — see agc_fallback.py) claims it again.
+# service time to finish reinitialising the USB device before blah2
+# claims it again.
 SDRPLAY_RESTART_SETTLE_SECONDS = 30
 
 
