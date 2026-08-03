@@ -209,7 +209,7 @@ def set_mode():
 
             result = subprocess.run(
                 ['docker', 'compose', '-p', 'retina-node', 'up', '-d', '--force-recreate',
-                 'blah2', 'blah2_api', 'blah2_web', 'blah2_host'],
+                 'blah2', 'blah2_api', 'blah2_web', 'blah2_host', 'retina-tracker'],
                 cwd=RETINA_NODE_PATH,
                 capture_output=True, text=True, timeout=120
             )
@@ -279,7 +279,7 @@ def enforce_radar_mode(retina_node_path: str) -> None:
                        capture_output=True, timeout=30)
         subprocess.run(
             ['docker', 'compose', '-p', 'retina-node', 'up', '-d', '--force-recreate',
-             'blah2', 'blah2_api', 'blah2_web', 'blah2_host'],
+             'blah2', 'blah2_api', 'blah2_web', 'blah2_host', 'retina-tracker'],
             cwd=retina_node_path, capture_output=True, timeout=120
         )
     except Exception:
