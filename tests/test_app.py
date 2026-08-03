@@ -538,17 +538,23 @@ class TestApplyConfigRoute:
         data = json.loads(response.data)
         assert data['success'] is True
 
-        # Should have called docker compose twice
-        assert mock_run.call_count == 2
+        # config-merger, stop retina-spectrum, rm retina-spectrum,
+        # restart sdrplay.service, then recreate the stack
+        assert mock_run.call_count == 5
 
-        # Check first call (config-merger)
-        first_call = mock_run.call_args_list[0]
-        assert 'config-merger' in first_call[0][0]
+        assert 'config-merger' in mock_run.call_args_list[0][0][0]
 
-        # Check second call (up -d --force-recreate)
-        second_call = mock_run.call_args_list[1]
-        assert 'up' in second_call[0][0]
-        assert '--force-recreate' in second_call[0][0]
+        stop_args = mock_run.call_args_list[1][0][0]
+        assert 'stop' in stop_args and 'retina-spectrum' in stop_args
+
+        rm_args = mock_run.call_args_list[2][0][0]
+        assert 'rm' in rm_args and 'retina-spectrum' in rm_args
+
+        assert mock_run.call_args_list[3][0][0] == ['systemctl', 'restart', 'sdrplay.service']
+
+        up_args = mock_run.call_args_list[4][0][0]
+        assert 'up' in up_args
+        assert '--force-recreate' in up_args
 
     @patch('subprocess.run')
     def test_apply_config_merger_fails(self, mock_run, app_client):
@@ -568,8 +574,12 @@ class TestApplyConfigRoute:
     @patch('subprocess.run')
     def test_apply_restart_fails(self, mock_run, app_client):
         """Apply should return error if restart fails."""
-        # First call succeeds, second fails
+        # config-merger, stop/rm retina-spectrum and the sdrplay restart all
+        # succeed; only the final stack recreate fails.
         mock_run.side_effect = [
+            MagicMock(returncode=0, stdout='', stderr=''),
+            MagicMock(returncode=0, stdout='', stderr=''),
+            MagicMock(returncode=0, stdout='', stderr=''),
             MagicMock(returncode=0, stdout='', stderr=''),
             MagicMock(returncode=1, stdout='', stderr='restart error')
         ]

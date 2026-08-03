@@ -147,18 +147,31 @@ class TestSetMode:
 
         assert response.status_code == 200
         assert json.loads(response.data)['success'] is True
-        assert mock_run.call_count == 2
+        # stop retina-spectrum, rm retina-spectrum, restart sdrplay, up the radar stack
+        assert mock_run.call_count == 4
 
         stop_spectrum_args = mock_run.call_args_list[0][0][0]
         assert stop_spectrum_args[:4] == ['docker', 'compose', '-p', 'retina-node']
         assert 'stop' in stop_spectrum_args
         assert 'retina-spectrum' in stop_spectrum_args
 
-        start_args = mock_run.call_args_list[1][0][0]
-        assert start_args[:4] == ['docker', 'compose', '-p', 'retina-node']
-        assert 'start' in start_args
-        for svc in ('blah2', 'blah2_api', 'blah2_web', 'blah2_host'):
-            assert svc in start_args
+        rm_spectrum_args = mock_run.call_args_list[1][0][0]
+        assert 'rm' in rm_spectrum_args
+        assert 'retina-spectrum' in rm_spectrum_args
+
+        assert mock_run.call_args_list[2][0][0] == ['systemctl', 'restart', 'sdrplay.service']
+
+        up_args = mock_run.call_args_list[3][0][0]
+        assert up_args[:4] == ['docker', 'compose', '-p', 'retina-node']
+        assert 'up' in up_args
+        assert '--force-recreate' in up_args
+        # blah2_web/blah2_host read no config but were stopped on the way into
+        # spectrum mode, so they must be named here or they stay stopped.
+        # retina-tracker bind-mounts the config dir and reads config.yml at
+        # startup (--blah2-config), so it must be recreated to pick up any
+        # config change made while spectrum mode was active.
+        for svc in ('blah2', 'blah2_api', 'blah2_web', 'blah2_host', 'retina-tracker'):
+            assert svc in up_args
 
     @patch('subprocess.run')
     def test_switch_to_spectrum_writes_mode_file(self, mock_run, app_client, temp_dir):
@@ -215,16 +228,24 @@ class TestSetMode:
         assert 'timed out' in data['error'].lower()
 
     @patch('subprocess.run')
-    def test_mode_file_not_written_on_failure(self, mock_run, app_client, temp_dir):
-        """Mode file must not be updated when docker commands fail."""
+    def test_spectrum_mode_file_written_before_docker_even_on_failure(
+            self, mock_run, app_client, temp_dir):
+        """The spectrum transition writes mode.txt *before* touching Docker,
+        deliberately (see set_mode): the cron watchdog reads that file, and
+        if it were written only after a successful stop it could see blah2
+        down mid-transition and fire a spurious stack restart. A failed
+        transition therefore still leaves mode.txt == 'spectrum'."""
         mock_run.return_value = MagicMock(returncode=1, stdout='', stderr='error')
 
-        app_client.post('/api/mode',
-                        data=json.dumps({'mode': 'spectrum'}),
-                        content_type='application/json')
+        response = app_client.post('/api/mode',
+                                   data=json.dumps({'mode': 'spectrum'}),
+                                   content_type='application/json')
 
-        mode_file = os.path.join(temp_dir, 'mode.txt')
-        assert not os.path.exists(mode_file)
+        assert response.status_code == 500
+        assert json.loads(response.data)['success'] is False
+
+        with open(os.path.join(temp_dir, 'mode.txt')) as f:
+            assert f.read().strip() == 'spectrum'
 
 
 class TestHomepageModeRendering:
