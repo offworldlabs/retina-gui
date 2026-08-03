@@ -93,11 +93,17 @@ device_state.release_calibration_lock()
 # Enforce radar at the Docker level: stop and remove retina-spectrum if it is running.
 # retina-spectrum is only allowed while the wizard location step or config toggle is active.
 if config_mgr.is_retina_node_installed():
+    from restart_lock import restart_lock, OPPORTUNISTIC_TIMEOUT_SECONDS
     try:
-        subprocess.run(['docker', 'compose', '-p', 'retina-node', 'stop', 'retina-spectrum'],
-                       cwd=RETINA_NODE_PATH, capture_output=True, timeout=60)
-        subprocess.run(['docker', 'compose', '-p', 'retina-node', 'rm', '-sf', 'retina-spectrum'],
-                       cwd=RETINA_NODE_PATH, capture_output=True, timeout=30)
+        # Opportunistic, and deliberately so: this runs before Flask serves
+        # anything, so a long wait here delays the whole GUI coming up. If
+        # something else holds the lock it is mid-restart and will stop
+        # retina-spectrum itself, so skipping costs nothing.
+        with restart_lock(DATA_DIR, timeout=OPPORTUNISTIC_TIMEOUT_SECONDS):
+            subprocess.run(['docker', 'compose', '-p', 'retina-node', 'stop', 'retina-spectrum'],
+                           cwd=RETINA_NODE_PATH, capture_output=True, timeout=60)
+            subprocess.run(['docker', 'compose', '-p', 'retina-node', 'rm', '-sf', 'retina-spectrum'],
+                           cwd=RETINA_NODE_PATH, capture_output=True, timeout=30)
     except Exception:
         pass
 

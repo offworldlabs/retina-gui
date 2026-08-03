@@ -47,6 +47,14 @@ DEFAULT_TIMEOUT_SECONDS = 90
 # wait out a long-running operation ahead of it rather than fail.
 BACKGROUND_TIMEOUT_SECONDS = 600
 
+# Fire-and-forget callers — GUI startup, and the wizard's navigate-away
+# beacon — where nobody is waiting on the result and whoever holds the lock
+# is already performing a restart that subsumes what this caller wanted
+# (both only stop/remove retina-spectrum, which every restart path does
+# defensively anyway). They give up quickly rather than queue: blocking GUI
+# startup behind a two-minute restart would be strictly worse than skipping.
+OPPORTUNISTIC_TIMEOUT_SECONDS = 10
+
 POLL_SECONDS = 0.25
 
 
@@ -59,15 +67,23 @@ def lock_path(data_dir):
 
 
 @contextmanager
-def restart_lock(data_dir, timeout=DEFAULT_TIMEOUT_SECONDS):
+def restart_lock(data_dir, timeout=None):
     """Hold the stack-restart lock for the duration of the block.
 
-    Raises RestartBusy if it can't be acquired within `timeout` seconds.
+    Raises RestartBusy if it can't be acquired within `timeout` seconds,
+    defaulting to DEFAULT_TIMEOUT_SECONDS. Resolved here rather than as a
+    default argument so the module constant stays adjustable at runtime — a
+    default argument binds once at import and silently ignores any later
+    change, which makes the wait untunable and every contention test pay the
+    full production timeout.
+
     Polls rather than using a blocking flock so the wait is bounded without
     needing signals/alarms, which would not be safe on a Flask worker thread.
     """
     import time
 
+    if timeout is None:
+        timeout = DEFAULT_TIMEOUT_SECONDS
     path = lock_path(data_dir)
     try:
         os.makedirs(data_dir, exist_ok=True)

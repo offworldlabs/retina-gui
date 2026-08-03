@@ -332,7 +332,26 @@ def enforce_radar_mode(retina_node_path: str) -> None:
     Called on wizard completion so the node is always left in a clean radar
     state regardless of what happened during the wizard flow. Non-fatal: errors
     are swallowed so callers don't need to handle them.
+
+    Takes the restart lock like every other recreate path — this one matters
+    more than its "wizard completion" description suggests, because the
+    Mender install path also calls it from a background thread to recover a
+    failed install (see mender_routes), where nothing else would be
+    coordinating it with a concurrent apply. Failing to get the lock is
+    swallowed along with everything else here: whoever holds it is already
+    performing a restart, which leaves the stack up regardless.
     """
+    from app import DATA_DIR
+    from restart_lock import restart_lock
+
+    try:
+        with restart_lock(DATA_DIR):
+            _enforce_radar_mode_locked(retina_node_path)
+    except Exception:
+        pass
+
+
+def _enforce_radar_mode_locked(retina_node_path: str) -> None:
     try:
         subprocess.run(
             ['docker', 'compose', '-p', 'retina-node', 'stop', 'retina-spectrum'],
@@ -363,14 +382,20 @@ def release_spectrum():
     wizard location step mid-flow. Returns 204 — callers do not inspect the
     response body.
     """
-    from app import RETINA_NODE_PATH, config_mgr
+    from app import DATA_DIR, RETINA_NODE_PATH, config_mgr
+    from restart_lock import restart_lock, OPPORTUNISTIC_TIMEOUT_SECONDS
+
     if not config_mgr.is_retina_node_installed():
         return '', 204
     try:
-        subprocess.run(['docker', 'compose', '-p', 'retina-node', 'stop', 'retina-spectrum'],
-                       cwd=RETINA_NODE_PATH, capture_output=True, timeout=60)
-        subprocess.run(['docker', 'compose', '-p', 'retina-node', 'rm', '-sf', 'retina-spectrum'],
-                       cwd=RETINA_NODE_PATH, capture_output=True, timeout=30)
+        # Opportunistic: a beacon nobody waits on, and every restart path
+        # already stops retina-spectrum defensively, so giving up when the
+        # lock is busy loses nothing.
+        with restart_lock(DATA_DIR, timeout=OPPORTUNISTIC_TIMEOUT_SECONDS):
+            subprocess.run(['docker', 'compose', '-p', 'retina-node', 'stop', 'retina-spectrum'],
+                           cwd=RETINA_NODE_PATH, capture_output=True, timeout=60)
+            subprocess.run(['docker', 'compose', '-p', 'retina-node', 'rm', '-sf', 'retina-spectrum'],
+                           cwd=RETINA_NODE_PATH, capture_output=True, timeout=30)
         _write_mode('radar')
     except Exception:
         pass

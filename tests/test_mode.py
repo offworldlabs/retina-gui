@@ -2,8 +2,12 @@
 import json
 import os
 import subprocess
+import threading
+import time
 import pytest
 from unittest.mock import patch, MagicMock, call
+
+from restart_lock import is_locked, restart_lock
 
 
 @pytest.fixture(autouse=True)
@@ -273,6 +277,119 @@ class TestHomepageModeRendering:
         response = app_client.get('/')
         assert b'Passive Radar' not in response.data
         assert b'49152' not in response.data
+
+
+class TestRestartLockCoverage:
+    """Every path that recreates or removes containers must hold the restart
+    lock — a `docker compose down` landing inside another caller's
+    `up -d --force-recreate` is what renames containers to <hash>_<name> and
+    leaves the daemon rejecting the real name as already in use."""
+
+    def test_enforce_radar_mode_takes_the_lock(self, app_client, temp_dir, monkeypatch):
+        import routes.mode as mode_module
+        import app as app_module
+        monkeypatch.setattr(app_module, 'DATA_DIR', temp_dir)
+
+        held = []
+        with patch('subprocess.run') as mock_run:
+            mock_run.side_effect = lambda *a, **k: (
+                held.append(is_locked(temp_dir)), MagicMock(returncode=0))[1]
+            mode_module.enforce_radar_mode(temp_dir)
+
+        assert held, "enforce_radar_mode ran no commands"
+        assert all(held), "ran docker commands without holding the lock"
+        assert is_locked(temp_dir) is False, "lock not released"
+
+    def test_enforce_radar_mode_skips_when_lock_is_busy(self, app_client, temp_dir, monkeypatch):
+        """Non-fatal by contract: whoever holds the lock is already
+        restarting, so this must not raise or hang."""
+        import routes.mode as mode_module
+        import app as app_module
+        import restart_lock as rl
+        monkeypatch.setattr(app_module, 'DATA_DIR', temp_dir)
+        monkeypatch.setattr(rl, 'DEFAULT_TIMEOUT_SECONDS', 0.1)
+
+        with restart_lock(temp_dir):
+            with patch('subprocess.run') as mock_run:
+                started = time.monotonic()
+                mode_module.enforce_radar_mode(temp_dir)
+                elapsed = time.monotonic() - started
+        assert mock_run.call_count == 0
+        assert elapsed < 5, f"waited {elapsed:.1f}s — timeout not honoured"
+
+    def test_release_spectrum_takes_the_lock(self, app_client, temp_dir, monkeypatch):
+        import app as app_module
+        monkeypatch.setattr(app_module, 'DATA_DIR', temp_dir)
+
+        held = []
+        with patch('subprocess.run') as mock_run:
+            mock_run.side_effect = lambda *a, **k: (
+                held.append(is_locked(temp_dir)), MagicMock(returncode=0))[1]
+            response = app_client.post('/api/mode/release-spectrum')
+
+        assert response.status_code == 204
+        assert held and all(held)
+        assert is_locked(temp_dir) is False
+
+    def test_release_spectrum_gives_up_quickly_when_busy(self, app_client, temp_dir, monkeypatch):
+        """A sendBeacon nobody waits on must not block the request thread."""
+        import app as app_module
+        import restart_lock as rl
+        monkeypatch.setattr(app_module, 'DATA_DIR', temp_dir)
+        monkeypatch.setattr(rl, 'OPPORTUNISTIC_TIMEOUT_SECONDS', 0.1)
+
+        with restart_lock(temp_dir):
+            with patch('subprocess.run') as mock_run:
+                started = time.monotonic()
+                response = app_client.post('/api/mode/release-spectrum')
+                elapsed = time.monotonic() - started
+
+        assert response.status_code == 204
+        assert mock_run.call_count == 0
+        assert elapsed < 5, f"blocked for {elapsed:.1f}s on a fire-and-forget beacon"
+
+
+class TestNoSelfDeadlock:
+    """flock is not re-entrant, so a nested acquire from the same process
+    blocks against itself forever. These are the two call chains where that
+    is a live risk."""
+
+    def test_enforce_radar_mode_does_not_nest_inside_its_own_lock(
+            self, app_client, temp_dir, monkeypatch):
+        import routes.mode as mode_module
+        import app as app_module
+        monkeypatch.setattr(app_module, 'DATA_DIR', temp_dir)
+
+        with patch('subprocess.run') as mock_run:
+            mock_run.return_value = MagicMock(returncode=0, stdout='', stderr='')
+            done = threading.Event()
+
+            def run():
+                mode_module.enforce_radar_mode(temp_dir)
+                done.set()
+
+            t = threading.Thread(target=run, daemon=True)
+            t.start()
+            assert done.wait(timeout=20), "enforce_radar_mode deadlocked on its own lock"
+
+    def test_shared_restart_fn_does_not_nest(self, app_client, temp_dir, monkeypatch):
+        import routes.mode as mode_module
+        import app as app_module
+        monkeypatch.setattr(app_module, 'DATA_DIR', temp_dir)
+
+        with patch('subprocess.run') as mock_run:
+            mock_run.return_value = MagicMock(returncode=0, stdout='', stderr='')
+            done = threading.Event()
+            result = {}
+
+            def run():
+                result['error'] = mode_module.run_config_merger_and_restart(temp_dir)
+                done.set()
+
+            t = threading.Thread(target=run, daemon=True)
+            t.start()
+            assert done.wait(timeout=20), "run_config_merger_and_restart deadlocked"
+            assert result['error'] is None
 
 
 class TestRestartSettleTime:
