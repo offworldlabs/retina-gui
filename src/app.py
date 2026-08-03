@@ -94,6 +94,7 @@ device_state.release_calibration_lock()
 # retina-spectrum is only allowed while the wizard location step or config toggle is active.
 if config_mgr.is_retina_node_installed():
     from restart_lock import restart_lock, OPPORTUNISTIC_TIMEOUT_SECONDS
+    from stack_reconcile import find_stale_containers, reconcile
     try:
         # Opportunistic, and deliberately so: this runs before Flask serves
         # anything, so a long wait here delays the whole GUI coming up. If
@@ -104,6 +105,25 @@ if config_mgr.is_retina_node_installed():
                            cwd=RETINA_NODE_PATH, capture_output=True, timeout=60)
             subprocess.run(['docker', 'compose', '-p', 'retina-node', 'rm', '-sf', 'retina-spectrum'],
                            cwd=RETINA_NODE_PATH, capture_output=True, timeout=30)
+
+            # Repair a recreate this process was killed in the middle of.
+            # systemd kills retina-gui's whole control group, so a crash, a
+            # restart or a redeploy during an apply takes the `docker
+            # compose` child with it — potentially after it renamed a
+            # container but before it removed the old one. Nothing else
+            # clears that, and it survives reboots: every apply from here on
+            # would fail on the name conflict. Cheap when there is nothing
+            # to do (one `docker ps`), so it runs unconditionally.
+            stale = find_stale_containers()
+            if stale:
+                app.logger.warning(
+                    f"Found {len(stale)} container(s) left half-created by an "
+                    f"interrupted restart: {', '.join(stale)}. Repairing.")
+                removed, error = reconcile(RETINA_NODE_PATH)
+                if error:
+                    app.logger.error(f"Startup repair failed: {error}")
+                else:
+                    app.logger.warning(f"Startup repair removed: {', '.join(removed)}")
     except Exception:
         pass
 

@@ -44,6 +44,7 @@ PHASE_LABELS = {
     'restarting_sdr': 'Restarting the SDR service',
     'settling': 'Waiting for the SDR to settle',
     'recreating': 'Restarting radar services',
+    'repairing': 'Cleaning up after an interrupted restart',
 }
 
 
