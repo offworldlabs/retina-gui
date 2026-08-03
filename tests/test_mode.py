@@ -279,6 +279,104 @@ class TestHomepageModeRendering:
         assert b'49152' not in response.data
 
 
+CONFLICT_OUTPUT = (
+    'Error response from daemon: Error when allocating new name: Conflict. '
+    'The container name "/tar1090" is already in use by container "56f30a56ce9b".'
+)
+
+
+class TestRepairAfterInterruptedRecreate:
+    """A recreate killed between compose's rename and its remove leaves a
+    container squatting the name compose next needs. Nothing else clears it,
+    so without this repair every later apply fails identically, forever."""
+
+    def _run_apply(self, temp_dir, run_side_effect):
+        import routes.mode as mode_module
+        with patch('subprocess.run', side_effect=run_side_effect):
+            return mode_module.run_config_merger_and_restart(temp_dir)
+
+    def test_recreate_timeout_triggers_a_repair(self, app_client, temp_dir):
+        seen = []
+
+        def side_effect(args, **kwargs):
+            seen.append(args)
+            if '--force-recreate' in args:
+                raise subprocess.TimeoutExpired(cmd='docker', timeout=300)
+            if args[:3] == ['docker', 'ps', '-a']:
+                return MagicMock(returncode=0, stdout='56f30a56ce9b_tar1090\n', stderr='')
+            return MagicMock(returncode=0, stdout='', stderr='')
+
+        error = self._run_apply(temp_dir, side_effect)
+
+        assert error is not None and 'timed out' in error.lower()
+        assert 'cleaned up 1' in error.lower(), f"no repair reported: {error}"
+        assert any(a[:3] == ['docker', 'rm', '-f'] for a in seen), "never removed the stale container"
+
+    def test_name_conflict_triggers_a_repair(self, app_client, temp_dir):
+        seen = []
+
+        def side_effect(args, **kwargs):
+            seen.append(args)
+            if '--force-recreate' in args:
+                return MagicMock(returncode=1, stdout='', stderr=CONFLICT_OUTPUT)
+            if args[:3] == ['docker', 'ps', '-a']:
+                return MagicMock(returncode=0, stdout='56f30a56ce9b_tar1090\n', stderr='')
+            return MagicMock(returncode=0, stdout='', stderr='')
+
+        error = self._run_apply(temp_dir, side_effect)
+
+        assert error is not None
+        assert 'cleaned up 1' in error.lower(), f"no repair reported: {error}"
+        assert any(a[:3] == ['docker', 'rm', '-f'] for a in seen)
+
+    def test_unrelated_failure_does_not_trigger_a_repair(self, app_client, temp_dir):
+        """Repair removes containers — it must not fire on every failure."""
+        seen = []
+
+        def side_effect(args, **kwargs):
+            seen.append(args)
+            if '--force-recreate' in args:
+                return MagicMock(returncode=1, stdout='', stderr='no such image: blah2:v9')
+            return MagicMock(returncode=0, stdout='', stderr='')
+
+        error = self._run_apply(temp_dir, side_effect)
+
+        assert 'no such image' in error
+        assert not any(a[:3] == ['docker', 'rm', '-f'] for a in seen), \
+            "removed containers for an unrelated failure"
+
+    def test_repair_with_nothing_stale_says_so(self, app_client, temp_dir):
+        def side_effect(args, **kwargs):
+            if '--force-recreate' in args:
+                raise subprocess.TimeoutExpired(cmd='docker', timeout=300)
+            if args[:3] == ['docker', 'ps', '-a']:
+                return MagicMock(returncode=0, stdout='blah2\ntar1090\n', stderr='')
+            return MagicMock(returncode=0, stdout='', stderr='')
+
+        error = self._run_apply(temp_dir, side_effect)
+        assert 'no half-created containers' in error.lower()
+
+    def test_repair_failure_is_surfaced_not_swallowed(self, app_client, temp_dir):
+        def side_effect(args, **kwargs):
+            if '--force-recreate' in args:
+                raise subprocess.TimeoutExpired(cmd='docker', timeout=300)
+            if args[:3] == ['docker', 'ps', '-a']:
+                return MagicMock(returncode=0, stdout='56f30a56ce9b_tar1090\n', stderr='')
+            if args[:3] == ['docker', 'rm', '-f']:
+                return MagicMock(returncode=1, stdout='', stderr='resource busy')
+            return MagicMock(returncode=0, stdout='', stderr='')
+
+        error = self._run_apply(temp_dir, side_effect)
+        assert 'automatic repair also failed' in error.lower()
+
+    def test_conflict_detection_matches_the_real_daemon_message(self):
+        import routes.mode as mode_module
+        assert mode_module._is_name_conflict(CONFLICT_OUTPUT)
+        assert not mode_module._is_name_conflict('no such image: blah2:v9')
+        assert not mode_module._is_name_conflict('')
+        assert not mode_module._is_name_conflict(None)
+
+
 class TestRestartLockCoverage:
     """Every path that recreates or removes containers must hold the restart
     lock — a `docker compose down` landing inside another caller's

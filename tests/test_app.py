@@ -576,6 +576,66 @@ class TestApplyConfigRoute:
         assert data['settle_remaining'] == 12
 
 
+class TestApplyDuringMenderInstall:
+    """A Mender install replaces the compose manifests an apply's
+    config-merger runs against, and mender-update's own docker commands sit
+    outside the restart lock — so an apply can genuinely run concurrently
+    with them. It would also report success having skipped the restart
+    entirely, since the install sets mode.txt to 'spectrum'."""
+
+    def _installing(self, app_module):
+        return patch.object(app_module.device_state, 'is_any_update_in_progress',
+                            return_value=(True, 'Installing retina-node-v0.5.0'))
+
+    def test_config_apply_refused(self, app_client):
+        import app as app_module
+        with self._installing(app_module), \
+             patch.object(app_module, 'apply_service') as svc:
+            response = app_client.post('/config/apply')
+
+        assert response.status_code == 409
+        body = json.loads(response.data)
+        assert body['success'] is False
+        assert 'Installing retina-node-v0.5.0' in body['error']
+        svc.request.assert_not_called()
+
+    def test_tower_select_refused(self, app_client):
+        import app as app_module
+        payload = {"rx_latitude": -33.8688, "rx_longitude": 151.2093,
+                   "rx_altitude": 45.0, "tx_latitude": -33.82,
+                   "tx_longitude": 151.185, "tx_altitude": 100.0,
+                   "tx_callsign": "ATN6"}
+        with self._installing(app_module), \
+             patch.object(app_module, 'apply_service') as svc:
+            response = app_client.post('/towers/select', data=json.dumps(payload),
+                                       content_type='application/json')
+
+        assert response.status_code == 409
+        assert 'Installing' in json.loads(response.data)['error']
+        svc.request.assert_not_called()
+
+    def test_mode_switch_refused(self, app_client):
+        import app as app_module
+        with self._installing(app_module), patch('subprocess.run') as mock_run:
+            response = app_client.post('/api/mode', data=json.dumps({'mode': 'spectrum'}),
+                                       content_type='application/json')
+
+        assert response.status_code == 409
+        assert 'Installing' in json.loads(response.data)['error']
+        assert mock_run.call_count == 0, "touched docker during an install"
+
+    def test_allowed_again_once_the_install_finishes(self, app_client):
+        import app as app_module
+        with patch.object(app_module.device_state, 'is_any_update_in_progress',
+                          return_value=(False, None)), \
+             patch.object(app_module, 'apply_service') as svc:
+            svc.request.return_value = {'state': 'running'}
+            response = app_client.post('/config/apply')
+
+        assert response.status_code == 202
+        svc.request.assert_called_once_with()
+
+
 class TestSSHKeysRoutes:
     """Test SSH key management routes."""
 
