@@ -2,8 +2,12 @@
 import json
 import os
 import subprocess
+import threading
+import time
 import pytest
 from unittest.mock import patch, MagicMock, call
+
+from restart_lock import is_locked, restart_lock
 
 
 @pytest.fixture(autouse=True)
@@ -275,33 +279,180 @@ class TestHomepageModeRendering:
         assert b'49152' not in response.data
 
 
+class TestRestartLockCoverage:
+    """Every path that recreates or removes containers must hold the restart
+    lock — a `docker compose down` landing inside another caller's
+    `up -d --force-recreate` is what renames containers to <hash>_<name> and
+    leaves the daemon rejecting the real name as already in use."""
+
+    def test_enforce_radar_mode_takes_the_lock(self, app_client, temp_dir, monkeypatch):
+        import routes.mode as mode_module
+        import app as app_module
+        monkeypatch.setattr(app_module, 'DATA_DIR', temp_dir)
+
+        held = []
+        with patch('subprocess.run') as mock_run:
+            mock_run.side_effect = lambda *a, **k: (
+                held.append(is_locked(temp_dir)), MagicMock(returncode=0))[1]
+            mode_module.enforce_radar_mode(temp_dir)
+
+        assert held, "enforce_radar_mode ran no commands"
+        assert all(held), "ran docker commands without holding the lock"
+        assert is_locked(temp_dir) is False, "lock not released"
+
+    def test_enforce_radar_mode_skips_when_lock_is_busy(self, app_client, temp_dir, monkeypatch):
+        """Non-fatal by contract: whoever holds the lock is already
+        restarting, so this must not raise or hang."""
+        import routes.mode as mode_module
+        import app as app_module
+        import restart_lock as rl
+        monkeypatch.setattr(app_module, 'DATA_DIR', temp_dir)
+        monkeypatch.setattr(rl, 'DEFAULT_TIMEOUT_SECONDS', 0.1)
+
+        with restart_lock(temp_dir):
+            with patch('subprocess.run') as mock_run:
+                started = time.monotonic()
+                mode_module.enforce_radar_mode(temp_dir)
+                elapsed = time.monotonic() - started
+        assert mock_run.call_count == 0
+        assert elapsed < 5, f"waited {elapsed:.1f}s — timeout not honoured"
+
+    def test_release_spectrum_takes_the_lock(self, app_client, temp_dir, monkeypatch):
+        import app as app_module
+        monkeypatch.setattr(app_module, 'DATA_DIR', temp_dir)
+
+        held = []
+        with patch('subprocess.run') as mock_run:
+            mock_run.side_effect = lambda *a, **k: (
+                held.append(is_locked(temp_dir)), MagicMock(returncode=0))[1]
+            response = app_client.post('/api/mode/release-spectrum')
+
+        assert response.status_code == 204
+        assert held and all(held)
+        assert is_locked(temp_dir) is False
+
+    def test_release_spectrum_gives_up_quickly_when_busy(self, app_client, temp_dir, monkeypatch):
+        """A sendBeacon nobody waits on must not block the request thread."""
+        import app as app_module
+        import restart_lock as rl
+        monkeypatch.setattr(app_module, 'DATA_DIR', temp_dir)
+        monkeypatch.setattr(rl, 'OPPORTUNISTIC_TIMEOUT_SECONDS', 0.1)
+
+        with restart_lock(temp_dir):
+            with patch('subprocess.run') as mock_run:
+                started = time.monotonic()
+                response = app_client.post('/api/mode/release-spectrum')
+                elapsed = time.monotonic() - started
+
+        assert response.status_code == 204
+        assert mock_run.call_count == 0
+        assert elapsed < 5, f"blocked for {elapsed:.1f}s on a fire-and-forget beacon"
+
+
+class TestNoSelfDeadlock:
+    """flock is not re-entrant, so a nested acquire from the same process
+    blocks against itself forever. These are the two call chains where that
+    is a live risk."""
+
+    def test_enforce_radar_mode_does_not_nest_inside_its_own_lock(
+            self, app_client, temp_dir, monkeypatch):
+        import routes.mode as mode_module
+        import app as app_module
+        monkeypatch.setattr(app_module, 'DATA_DIR', temp_dir)
+
+        with patch('subprocess.run') as mock_run:
+            mock_run.return_value = MagicMock(returncode=0, stdout='', stderr='')
+            done = threading.Event()
+
+            def run():
+                mode_module.enforce_radar_mode(temp_dir)
+                done.set()
+
+            t = threading.Thread(target=run, daemon=True)
+            t.start()
+            assert done.wait(timeout=20), "enforce_radar_mode deadlocked on its own lock"
+
+    def test_shared_restart_fn_does_not_nest(self, app_client, temp_dir, monkeypatch):
+        import routes.mode as mode_module
+        import app as app_module
+        monkeypatch.setattr(app_module, 'DATA_DIR', temp_dir)
+
+        with patch('subprocess.run') as mock_run:
+            mock_run.return_value = MagicMock(returncode=0, stdout='', stderr='')
+            done = threading.Event()
+            result = {}
+
+            def run():
+                result['error'] = mode_module.run_config_merger_and_restart(temp_dir)
+                done.set()
+
+            t = threading.Thread(target=run, daemon=True)
+            t.start()
+            assert done.wait(timeout=20), "run_config_merger_and_restart deadlocked"
+            assert result['error'] is None
+
+
 class TestRestartSettleTime:
     """run_config_merger_and_restart() is the shared choke point every
     config-applying/mode-switching route funnels through (/api/mode,
     /towers/select, /calibrate/apply, /config/save+apply, wizard
     completion) — testing it here covers all of them at once."""
 
-    @patch('time.sleep')
     @patch('subprocess.run')
     def test_settles_between_sdrplay_restart_and_container_recreate(
-            self, mock_run, mock_sleep, app_client, temp_dir):
+            self, mock_run, app_client, temp_dir, monkeypatch):
         """The settle-time fix's whole point (diagnosed live tonight): the
-        sdrplay.service restart and the container recreate must not race."""
+        sdrplay.service restart and the container recreate must not race.
+
+        The settle is slept in ~1s chunks so callers can show a countdown
+        (see _settle), so this asserts the *total* time slept and that every
+        chunk of it falls between the restart and the recreate — not a
+        single flat sleep call, which is an implementation detail.
+        """
         import routes.mode as mode_module
+        monkeypatch.setattr(mode_module, 'SDRPLAY_RESTART_SETTLE_SECONDS', 30)
+
         order = []
+        clock = {'t': 0.0}
+        monkeypatch.setattr(mode_module.time, 'monotonic', lambda: clock['t'])
+
+        def fake_sleep(seconds):
+            clock['t'] += seconds
+            order.append(('sleep', seconds))
+        monkeypatch.setattr(mode_module.time, 'sleep', fake_sleep)
 
         def record_run(*a, **k):
             order.append(('run', a[0]))
             return MagicMock(returncode=0, stdout='', stderr='')
         mock_run.side_effect = record_run
-        mock_sleep.side_effect = lambda s: order.append(('sleep', s))
 
         error = mode_module.run_config_merger_and_restart(temp_dir)
         assert error is None
 
-        sleep_calls = [i for i, (kind, _) in enumerate(order) if kind == 'sleep']
-        assert len(sleep_calls) == 1
-        i = sleep_calls[0]
-        assert order[i][1] == mode_module.SDRPLAY_RESTART_SETTLE_SECONDS
-        assert 'systemctl' in order[i - 1][1]            # restart happened right before
-        assert '--force-recreate' in order[i + 1][1]     # recreate happens right after
+        sleep_idx = [i for i, (kind, _) in enumerate(order) if kind == 'sleep']
+        assert sleep_idx, "never settled"
+        assert sum(order[i][1] for i in sleep_idx) == 30
+
+        restart_idx = next(i for i, (kind, arg) in enumerate(order)
+                           if kind == 'run' and 'systemctl' in arg)
+        recreate_idx = next(i for i, (kind, arg) in enumerate(order)
+                            if kind == 'run' and '--force-recreate' in arg)
+        assert restart_idx < min(sleep_idx)
+        assert max(sleep_idx) < recreate_idx
+
+    @patch('subprocess.run')
+    def test_reports_each_phase_in_order(self, mock_run, app_client, temp_dir):
+        """The UI's progress display depends on these phases arriving in
+        order — a silent apply is what got clicked twice in the first place."""
+        import routes.mode as mode_module
+        mock_run.return_value = MagicMock(returncode=0, stdout='', stderr='')
+
+        phases = []
+        error = mode_module.run_config_merger_and_restart(
+            temp_dir, on_phase=lambda phase, detail=None: phases.append(phase))
+
+        assert error is None
+        assert phases[0] == 'waiting_for_lock'
+        assert [p for p in phases if p != 'settling'] == [
+            'waiting_for_lock', 'merging', 'stopping_spectrum',
+            'restarting_sdr', 'recreating']

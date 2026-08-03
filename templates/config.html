@@ -1129,34 +1129,59 @@
     scan();
 })();
 
-// Auto-apply after successful save redirect
+// Auto-apply after successful save redirect.
+// The apply runs on the server's own thread — this only kicks it off and
+// then reports progress, so a slow apply (~45s, mostly the SDR settle
+// window) can't be mistaken for a hang and re-clicked into a second,
+// colliding docker compose run.
 if (window.location.search.includes('saved=1')) {
     history.replaceState({}, '', window.location.pathname);
     const btn = document.getElementById('applyBtn');
     const status = document.getElementById('applyStatus');
     if (btn) {
+        const spinner = '<span class="spinner-border spinner-border-sm" style="width:.8em;height:.8em;border-width:1.5px;"></span> ';
         btn.disabled = true;
-        btn.innerHTML = '<span class="spinner-border spinner-border-sm" style="width:.8em;height:.8em;border-width:1.5px;"></span> Applying…';
+        btn.innerHTML = spinner + 'Applying…';
+
+        const fail = msg => {
+            status.style.color = 'var(--danger)';
+            status.textContent = msg;
+            btn.disabled = false;
+            btn.textContent = 'Apply changes';
+        };
+
+        const poll = () => {
+            fetch('/config/apply/status')
+                .then(r => r.json())
+                .then(s => {
+                    if (s.state === 'running') {
+                        let label = s.phase_label || 'Applying…';
+                        if (s.phase === 'settling' && s.settle_remaining) {
+                            label += ' (' + s.settle_remaining + 's)';
+                        }
+                        if (s.queued) label += ' — your latest changes are queued';
+                        btn.innerHTML = spinner + label;
+                        status.style.color = '';
+                        status.textContent = '';
+                        setTimeout(poll, 1000);
+                    } else if (s.state === 'failed') {
+                        fail(s.error || 'Failed to apply');
+                    } else {
+                        status.style.color = 'var(--ok)';
+                        status.textContent = 'Applied successfully!';
+                        setTimeout(() => { window.location.href = '/config'; }, 800);
+                    }
+                })
+                .catch(() => setTimeout(poll, 2000));  // transient: keep watching
+        };
+
         fetch('/config/apply', { method: 'POST', headers: {'X-CSRFToken': document.querySelector('meta[name="csrf-token"]').content} })
             .then(r => r.json())
             .then(data => {
-                if (data.success) {
-                    status.style.color = 'var(--ok)';
-                    status.textContent = 'Applied successfully!';
-                    setTimeout(() => { window.location.href = '/config'; }, 800);
-                } else {
-                    status.style.color = 'var(--danger)';
-                    status.textContent = data.error || 'Failed to apply';
-                    btn.disabled = false;
-                    btn.textContent = 'Apply changes';
-                }
+                if (data.success === false) { fail(data.error || 'Failed to apply'); return; }
+                poll();
             })
-            .catch(e => {
-                status.style.color = 'var(--danger)';
-                status.textContent = 'Error: ' + e.message;
-                btn.disabled = false;
-                btn.textContent = 'Apply changes';
-            });
+            .catch(e => fail('Error: ' + e.message));
     }
 }
 

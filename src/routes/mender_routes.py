@@ -187,11 +187,21 @@ def install():
             except Exception:
                 pass
             if already_installed:
+                # The lock is taken around this `down` only, not the whole
+                # install: an install runs for minutes and _recover() below
+                # calls enforce_radar_mode, which takes the lock itself —
+                # holding it across all of that would deadlock against
+                # ourselves, since flock is not re-entrant (see restart_lock).
+                # Long timeout because abandoning the down and installing on
+                # top of running containers is worse than waiting.
+                from app import DATA_DIR
+                from restart_lock import restart_lock, BACKGROUND_TIMEOUT_SECONDS
                 try:
-                    subprocess.run(
-                        ["docker", "compose", "-p", "retina-node", "down"],
-                        capture_output=True, timeout=60
-                    )
+                    with restart_lock(DATA_DIR, timeout=BACKGROUND_TIMEOUT_SECONDS):
+                        subprocess.run(
+                            ["docker", "compose", "-p", "retina-node", "down"],
+                            capture_output=True, timeout=60
+                        )
                 except Exception as e:
                     app.logger.warning(f"Pre-install docker down failed (continuing): {e}")
             success, error = mender.install_from_url(download_url)

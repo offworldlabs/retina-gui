@@ -39,12 +39,61 @@ def _write_mode(mode):
         pass  # dev: no /data — in-memory cache is the fallback
 
 
-def run_config_merger_and_restart(retina_node_path: str) -> str | None:
+def _settle(seconds, on_phase):
+    """Sleep out the SDRplay settle window, reporting the remaining time.
+
+    Chunked rather than one flat sleep purely so callers can show a
+    countdown: this window is two thirds of a whole apply's wall time, and
+    a progress display that sits silent through it is indistinguishable
+    from a hang — which is what drove users to click Apply a second time
+    and collide two `docker compose` runs in the first place.
+    """
+    deadline = time.monotonic() + seconds
+    while True:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            return
+        on_phase('settling', int(remaining) + 1)
+        time.sleep(min(1.0, remaining))
+
+
+def run_config_merger_and_restart(retina_node_path: str, on_phase=None,
+                                  lock_timeout=None) -> str | None:
     """Run config-merger then, in radar mode, restart services.
 
+    Holds the stack-restart lock (see restart_lock.py) for the whole
+    operation, settle window included, so the cron watchdog and every other
+    caller queue behind it instead of interleaving `docker compose` runs
+    against the same project.
+
+    lock_timeout: how long to wait for that lock. Defaults to the short,
+    request-shaped wait, because /towers/select and /calibrate/apply still
+    call this inline on a Flask request thread and must not hang a browser
+    for minutes. ApplyService, which runs off-request, passes the long one.
+
+    on_phase: optional callback(phase, detail) for progress reporting.
     Returns an error string on failure, None on success.
     Lets TimeoutExpired and FileNotFoundError propagate — callers handle them.
     """
+    from app import DATA_DIR
+    from restart_lock import restart_lock, RestartBusy, DEFAULT_TIMEOUT_SECONDS
+
+    on_phase = on_phase or (lambda phase, detail=None: None)
+    if lock_timeout is None:
+        lock_timeout = DEFAULT_TIMEOUT_SECONDS
+
+    on_phase('waiting_for_lock', None)
+    try:
+        with restart_lock(DATA_DIR, timeout=lock_timeout):
+            return _run_config_merger_and_restart_locked(
+                retina_node_path, on_phase)
+    except RestartBusy as e:
+        return str(e)
+
+
+def _run_config_merger_and_restart_locked(retina_node_path, on_phase):
+    """The body of run_config_merger_and_restart, with the lock held."""
+    on_phase('merging', None)
     result = subprocess.run(
         ['docker', 'compose', '-p', 'retina-node', 'run', '--rm', 'config-merger'],
         cwd=retina_node_path,
@@ -58,6 +107,7 @@ def run_config_merger_and_restart(retina_node_path: str) -> str | None:
 
     # Defensive: ensure retina-spectrum is stopped before bringing the radar stack up.
     # Non-fatal — retina-spectrum may already be stopped.
+    on_phase('stopping_spectrum', None)
     try:
         subprocess.run(['docker', 'compose', '-p', 'retina-node', 'stop', 'retina-spectrum'],
                        cwd=retina_node_path, capture_output=True, timeout=60)
@@ -69,14 +119,16 @@ def run_config_merger_and_restart(retina_node_path: str) -> str | None:
     # Force a clean sdrplay_apiService restart so the USB device is properly
     # re-initialised before blah2 claims it.  Mirrors what the watchdog does.
     # Non-fatal: no-op on dev machines without sdrplay.service.
+    on_phase('restarting_sdr', None)
     subprocess.run(['systemctl', 'restart', 'sdrplay.service'],
                    capture_output=True, timeout=30)
 
     # See SDRPLAY_RESTART_SETTLE_SECONDS — without this, recreating the
     # containers immediately after the restart request returns has
     # repeatedly wedged the SDRplay device on real hardware.
-    time.sleep(SDRPLAY_RESTART_SETTLE_SECONDS)
+    _settle(SDRPLAY_RESTART_SETTLE_SECONDS, on_phase)
 
+    on_phase('recreating', None)
     result = subprocess.run(
         ['docker', 'compose', '-p', 'retina-node', 'up', '-d', '--force-recreate'],
         cwd=retina_node_path,
@@ -121,110 +173,127 @@ def set_mode():
             _write_mode(mode)
             return jsonify({'success': True, 'mode': mode})
 
-        if mode == 'spectrum':
-            # Write mode first so the watchdog guard fires immediately and cannot
-            # see blah2 stopped mid-transition and trigger a spurious stack restart.
-            _write_mode(mode)
-
-            if current_mode == 'sdrconnect':
-                subprocess.run(['systemctl', 'stop', 'sdrconnect.service'],
-                               capture_output=True, timeout=30)
-            else:
-                result = subprocess.run(
-                    ['docker', 'compose', '-p', 'retina-node', 'stop',
-                     'blah2', 'blah2_api', 'blah2_web', 'blah2_host'],
-                    cwd=RETINA_NODE_PATH,
-                    capture_output=True, text=True, timeout=60
-                )
-                if result.returncode != 0:
-                    return jsonify({'success': False,
-                                    'error': f'Failed to stop blah2: {result.stderr or result.stdout}'}), 500
-
-            result = subprocess.run(
-                ['docker', 'compose', '-p', 'retina-node', '--profile', 'spectrum', 'up', '-d', 'retina-spectrum'],
-                cwd=RETINA_NODE_PATH,
-                capture_output=True, text=True, timeout=120
-            )
-            if result.returncode != 0:
-                return jsonify({'success': False,
-                                'error': f'Failed to start retina-spectrum: {result.stderr or result.stdout}'}), 500
-
-        elif mode == 'sdrconnect':
-            # Write mode first, same reasoning as the spectrum transition above.
-            _write_mode(mode)
-
-            if current_mode == 'spectrum':
-                subprocess.run(['docker', 'compose', '-p', 'retina-node', 'stop', 'retina-spectrum'],
-                               cwd=RETINA_NODE_PATH, capture_output=True, timeout=60)
-                subprocess.run(['docker', 'compose', '-p', 'retina-node', 'rm', '-sf', 'retina-spectrum'],
-                               cwd=RETINA_NODE_PATH, capture_output=True, timeout=30)
-            else:
-                result = subprocess.run(
-                    ['docker', 'compose', '-p', 'retina-node', 'stop',
-                     'blah2', 'blah2_api', 'blah2_web', 'blah2_host'],
-                    cwd=RETINA_NODE_PATH,
-                    capture_output=True, text=True, timeout=60
-                )
-                if result.returncode != 0:
-                    return jsonify({'success': False,
-                                    'error': f'Failed to stop blah2: {result.stderr or result.stdout}'}), 500
-
-            # Force a clean sdrplay_apiService restart so the USB device is
-            # properly re-initialised before SDRconnect claims it.  Non-fatal.
-            subprocess.run(['systemctl', 'restart', 'sdrplay.service'],
-                           capture_output=True, timeout=30)
-
-            result = subprocess.run(['systemctl', 'start', 'sdrconnect.service'],
-                                    capture_output=True, text=True, timeout=30)
-            if result.returncode != 0:
-                return jsonify({'success': False,
-                                'error': f'Failed to start sdrconnect.service: {result.stderr or result.stdout}'}), 500
-
-        else:  # radar
-            if current_mode == 'sdrconnect':
-                subprocess.run(['systemctl', 'stop', 'sdrconnect.service'],
-                               capture_output=True, timeout=30)
-            else:
-                result = subprocess.run(
-                    ['docker', 'compose', '-p', 'retina-node', 'stop', 'retina-spectrum'],
-                    cwd=RETINA_NODE_PATH,
-                    capture_output=True, text=True, timeout=60
-                )
-                if result.returncode != 0:
-                    return jsonify({'success': False,
-                                    'error': f'Failed to stop retina-spectrum: {result.stderr or result.stdout}'}), 500
-
-                # Remove the stopped container so it cannot be auto-restarted and
-                # so the SDR device is cleanly released before blah2 starts.
-                subprocess.run(
-                    ['docker', 'compose', '-p', 'retina-node', 'rm', '-sf', 'retina-spectrum'],
-                    cwd=RETINA_NODE_PATH,
-                    capture_output=True, text=True, timeout=30
-                )
-
-            # Force a clean sdrplay_apiService restart so the USB device is
-            # properly re-initialised before blah2 claims it.  Non-fatal.
-            subprocess.run(['systemctl', 'restart', 'sdrplay.service'],
-                           capture_output=True, timeout=30)
-
-            result = subprocess.run(
-                ['docker', 'compose', '-p', 'retina-node', 'up', '-d', '--force-recreate',
-                 'blah2', 'blah2_api', 'blah2_web', 'blah2_host', 'retina-tracker'],
-                cwd=RETINA_NODE_PATH,
-                capture_output=True, text=True, timeout=120
-            )
-            if result.returncode != 0:
-                return jsonify({'success': False,
-                                'error': f'Failed to start blah2: {result.stderr or result.stdout}'}), 500
-
-            _write_mode(mode)
-
-        return jsonify({'success': True, 'mode': mode})
+        from app import DATA_DIR
+        from restart_lock import restart_lock, RestartBusy
+        try:
+            with restart_lock(DATA_DIR):
+                return _set_mode_locked(mode, current_mode, RETINA_NODE_PATH)
+        except RestartBusy as e:
+            return jsonify({'success': False, 'error': str(e)}), 409
 
     except subprocess.TimeoutExpired:
         return jsonify({'success': False, 'error': 'Command timed out'}), 500
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
+
+
+def _set_mode_locked(mode, current_mode, retina_node_path):
+    """The Docker/systemd half of set_mode, with the restart lock held.
+
+    Split out of set_mode purely so the lock scope is the whole transition
+    and not just one command: every branch here stops or starts containers
+    that another caller (a config apply, the cron watchdog) may be
+    recreating at the same instant.
+    """
+    if mode == 'spectrum':
+        # Write mode first so the watchdog guard fires immediately and cannot
+        # see blah2 stopped mid-transition and trigger a spurious stack restart.
+        _write_mode(mode)
+
+        if current_mode == 'sdrconnect':
+            subprocess.run(['systemctl', 'stop', 'sdrconnect.service'],
+                           capture_output=True, timeout=30)
+        else:
+            result = subprocess.run(
+                ['docker', 'compose', '-p', 'retina-node', 'stop',
+                 'blah2', 'blah2_api', 'blah2_web', 'blah2_host'],
+                cwd=retina_node_path,
+                capture_output=True, text=True, timeout=60
+            )
+            if result.returncode != 0:
+                return jsonify({'success': False,
+                                'error': f'Failed to stop blah2: {result.stderr or result.stdout}'}), 500
+
+        result = subprocess.run(
+            ['docker', 'compose', '-p', 'retina-node', '--profile', 'spectrum', 'up', '-d', 'retina-spectrum'],
+            cwd=retina_node_path,
+            capture_output=True, text=True, timeout=120
+        )
+        if result.returncode != 0:
+            return jsonify({'success': False,
+                            'error': f'Failed to start retina-spectrum: {result.stderr or result.stdout}'}), 500
+
+    elif mode == 'sdrconnect':
+        # Write mode first, same reasoning as the spectrum transition above.
+        _write_mode(mode)
+
+        if current_mode == 'spectrum':
+            subprocess.run(['docker', 'compose', '-p', 'retina-node', 'stop', 'retina-spectrum'],
+                           cwd=retina_node_path, capture_output=True, timeout=60)
+            subprocess.run(['docker', 'compose', '-p', 'retina-node', 'rm', '-sf', 'retina-spectrum'],
+                           cwd=retina_node_path, capture_output=True, timeout=30)
+        else:
+            result = subprocess.run(
+                ['docker', 'compose', '-p', 'retina-node', 'stop',
+                 'blah2', 'blah2_api', 'blah2_web', 'blah2_host'],
+                cwd=retina_node_path,
+                capture_output=True, text=True, timeout=60
+            )
+            if result.returncode != 0:
+                return jsonify({'success': False,
+                                'error': f'Failed to stop blah2: {result.stderr or result.stdout}'}), 500
+
+        # Force a clean sdrplay_apiService restart so the USB device is
+        # properly re-initialised before SDRconnect claims it.  Non-fatal.
+        subprocess.run(['systemctl', 'restart', 'sdrplay.service'],
+                       capture_output=True, timeout=30)
+
+        result = subprocess.run(['systemctl', 'start', 'sdrconnect.service'],
+                                capture_output=True, text=True, timeout=30)
+        if result.returncode != 0:
+            return jsonify({'success': False,
+                            'error': f'Failed to start sdrconnect.service: {result.stderr or result.stdout}'}), 500
+
+    else:  # radar
+        if current_mode == 'sdrconnect':
+            subprocess.run(['systemctl', 'stop', 'sdrconnect.service'],
+                           capture_output=True, timeout=30)
+        else:
+            result = subprocess.run(
+                ['docker', 'compose', '-p', 'retina-node', 'stop', 'retina-spectrum'],
+                cwd=retina_node_path,
+                capture_output=True, text=True, timeout=60
+            )
+            if result.returncode != 0:
+                return jsonify({'success': False,
+                                'error': f'Failed to stop retina-spectrum: {result.stderr or result.stdout}'}), 500
+
+            # Remove the stopped container so it cannot be auto-restarted and
+            # so the SDR device is cleanly released before blah2 starts.
+            subprocess.run(
+                ['docker', 'compose', '-p', 'retina-node', 'rm', '-sf', 'retina-spectrum'],
+                cwd=retina_node_path,
+                capture_output=True, text=True, timeout=30
+            )
+
+        # Force a clean sdrplay_apiService restart so the USB device is
+        # properly re-initialised before blah2 claims it.  Non-fatal.
+        subprocess.run(['systemctl', 'restart', 'sdrplay.service'],
+                       capture_output=True, timeout=30)
+
+        result = subprocess.run(
+            ['docker', 'compose', '-p', 'retina-node', 'up', '-d', '--force-recreate',
+             'blah2', 'blah2_api', 'blah2_web', 'blah2_host', 'retina-tracker'],
+            cwd=retina_node_path,
+            capture_output=True, text=True, timeout=120
+        )
+        if result.returncode != 0:
+            return jsonify({'success': False,
+                            'error': f'Failed to start blah2: {result.stderr or result.stdout}'}), 500
+
+        _write_mode(mode)
+
+    return jsonify({'success': True, 'mode': mode})
 
 
 @bp.route('/api/spectrum/ready', methods=['GET'])
@@ -263,7 +332,26 @@ def enforce_radar_mode(retina_node_path: str) -> None:
     Called on wizard completion so the node is always left in a clean radar
     state regardless of what happened during the wizard flow. Non-fatal: errors
     are swallowed so callers don't need to handle them.
+
+    Takes the restart lock like every other recreate path — this one matters
+    more than its "wizard completion" description suggests, because the
+    Mender install path also calls it from a background thread to recover a
+    failed install (see mender_routes), where nothing else would be
+    coordinating it with a concurrent apply. Failing to get the lock is
+    swallowed along with everything else here: whoever holds it is already
+    performing a restart, which leaves the stack up regardless.
     """
+    from app import DATA_DIR
+    from restart_lock import restart_lock
+
+    try:
+        with restart_lock(DATA_DIR):
+            _enforce_radar_mode_locked(retina_node_path)
+    except Exception:
+        pass
+
+
+def _enforce_radar_mode_locked(retina_node_path: str) -> None:
     try:
         subprocess.run(
             ['docker', 'compose', '-p', 'retina-node', 'stop', 'retina-spectrum'],
@@ -294,14 +382,20 @@ def release_spectrum():
     wizard location step mid-flow. Returns 204 — callers do not inspect the
     response body.
     """
-    from app import RETINA_NODE_PATH, config_mgr
+    from app import DATA_DIR, RETINA_NODE_PATH, config_mgr
+    from restart_lock import restart_lock, OPPORTUNISTIC_TIMEOUT_SECONDS
+
     if not config_mgr.is_retina_node_installed():
         return '', 204
     try:
-        subprocess.run(['docker', 'compose', '-p', 'retina-node', 'stop', 'retina-spectrum'],
-                       cwd=RETINA_NODE_PATH, capture_output=True, timeout=60)
-        subprocess.run(['docker', 'compose', '-p', 'retina-node', 'rm', '-sf', 'retina-spectrum'],
-                       cwd=RETINA_NODE_PATH, capture_output=True, timeout=30)
+        # Opportunistic: a beacon nobody waits on, and every restart path
+        # already stops retina-spectrum defensively, so giving up when the
+        # lock is busy loses nothing.
+        with restart_lock(DATA_DIR, timeout=OPPORTUNISTIC_TIMEOUT_SECONDS):
+            subprocess.run(['docker', 'compose', '-p', 'retina-node', 'stop', 'retina-spectrum'],
+                           cwd=RETINA_NODE_PATH, capture_output=True, timeout=60)
+            subprocess.run(['docker', 'compose', '-p', 'retina-node', 'rm', '-sf', 'retina-spectrum'],
+                           cwd=RETINA_NODE_PATH, capture_output=True, timeout=30)
         _write_mode('radar')
     except Exception:
         pass

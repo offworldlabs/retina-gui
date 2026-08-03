@@ -1,5 +1,4 @@
 from flask import Blueprint, render_template, request, redirect, url_for, jsonify
-import subprocess
 
 from pydantic import ValidationError
 from config_schema import (
@@ -186,27 +185,28 @@ def save_config():
 
 @bp.route("/config/apply", methods=["POST"])
 def apply_config():
-    """Run config-merger and restart services.
+    """Start a config apply and return immediately.
+
+    The work (config-merger, then in radar mode a stack restart) runs on a
+    background thread — see apply_service.py for why it is not done inline
+    on this request. Poll /config/apply/status for progress.
 
     In spectrum mode only config-merger runs — blah2 is intentionally stopped
     and must not be restarted until the user switches back to radar mode.
     """
-    from app import config_mgr, RETINA_NODE_PATH, DEV_MODE
-    from routes.mode import run_config_merger_and_restart
+    from app import apply_service, config_mgr, DEV_MODE
 
     if DEV_MODE:
-        return jsonify({"success": True})
+        return jsonify({"success": True, "status": apply_service.request()})
 
     if not config_mgr.is_retina_node_installed():
         return jsonify({"success": False, "error": "retina-node not installed"}), 400
 
-    try:
-        error = run_config_merger_and_restart(RETINA_NODE_PATH)
-        if error:
-            return jsonify({"success": False, "error": error}), 500
-        return jsonify({"success": True})
+    return jsonify({"success": True, "status": apply_service.request()}), 202
 
-    except subprocess.TimeoutExpired:
-        return jsonify({"success": False, "error": "Command timed out"}), 500
-    except Exception as e:
-        return jsonify({"success": False, "error": str(e)}), 500
+
+@bp.route("/config/apply/status", methods=["GET"])
+def apply_config_status():
+    """Progress of the current or most recent config apply."""
+    from app import apply_service
+    return jsonify(apply_service.get_status())
