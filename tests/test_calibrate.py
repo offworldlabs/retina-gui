@@ -1111,7 +1111,6 @@ class TestRoutes:
 
     def test_apply_writes_user_config(self, app_client, config_files):
         import app as app_module
-        import routes.mode as mode_module
         done = {
             "state": "done",
             "started_at": "2026-07-08T00:00:00+00:00",
@@ -1120,12 +1119,16 @@ class TestRoutes:
                        "track_id": "0A3F"},
         }
         with patch.object(app_module.calibrator, 'get_status', return_value=done), \
-             patch.object(mode_module, 'run_config_merger_and_restart',
-                          return_value=None):
+             patch.object(app_module.apply_service, 'request',
+                          return_value={"state": "running"}) as queued:
             resp = app_client.post('/calibrate/apply')
-        assert resp.status_code == 200
+        # The tuning is written synchronously; the merge+restart is queued, so
+        # this returns immediately rather than blocking the browser for ~45s.
+        assert resp.status_code == 202
         body = resp.get_json()
-        assert body["success"] is True and body["applied"] is True
+        assert body["success"] is True
+        assert body["status"]["state"] == "running"
+        queued.assert_called_once_with()
 
         user_path, _ = config_files
         with open(user_path) as f:
