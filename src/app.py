@@ -109,11 +109,13 @@ except Exception:
     pass
 
 
+from apply_service import ApplyService
 from blah2_client import Blah2Client
 from calibrator import Calibrator
 from retina_tracker_client import RetinaTrackerClient
 from tracker_capture import TrackerCaptureService
 
+apply_service = ApplyService(RETINA_NODE_PATH, dev_mode=DEV_MODE)
 blah2_client = Blah2Client(BLAH2_API_URL)
 retina_tracker_client = RetinaTrackerClient(
     RETINA_TRACKER_HOST, RETINA_TRACKER_PORT, RETINA_TRACKER_EVENTS_PATH)

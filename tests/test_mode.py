@@ -281,27 +281,61 @@ class TestRestartSettleTime:
     /towers/select, /calibrate/apply, /config/save+apply, wizard
     completion) — testing it here covers all of them at once."""
 
-    @patch('time.sleep')
     @patch('subprocess.run')
     def test_settles_between_sdrplay_restart_and_container_recreate(
-            self, mock_run, mock_sleep, app_client, temp_dir):
+            self, mock_run, app_client, temp_dir, monkeypatch):
         """The settle-time fix's whole point (diagnosed live tonight): the
-        sdrplay.service restart and the container recreate must not race."""
+        sdrplay.service restart and the container recreate must not race.
+
+        The settle is slept in ~1s chunks so callers can show a countdown
+        (see _settle), so this asserts the *total* time slept and that every
+        chunk of it falls between the restart and the recreate — not a
+        single flat sleep call, which is an implementation detail.
+        """
         import routes.mode as mode_module
+        monkeypatch.setattr(mode_module, 'SDRPLAY_RESTART_SETTLE_SECONDS', 30)
+
         order = []
+        clock = {'t': 0.0}
+        monkeypatch.setattr(mode_module.time, 'monotonic', lambda: clock['t'])
+
+        def fake_sleep(seconds):
+            clock['t'] += seconds
+            order.append(('sleep', seconds))
+        monkeypatch.setattr(mode_module.time, 'sleep', fake_sleep)
 
         def record_run(*a, **k):
             order.append(('run', a[0]))
             return MagicMock(returncode=0, stdout='', stderr='')
         mock_run.side_effect = record_run
-        mock_sleep.side_effect = lambda s: order.append(('sleep', s))
 
         error = mode_module.run_config_merger_and_restart(temp_dir)
         assert error is None
 
-        sleep_calls = [i for i, (kind, _) in enumerate(order) if kind == 'sleep']
-        assert len(sleep_calls) == 1
-        i = sleep_calls[0]
-        assert order[i][1] == mode_module.SDRPLAY_RESTART_SETTLE_SECONDS
-        assert 'systemctl' in order[i - 1][1]            # restart happened right before
-        assert '--force-recreate' in order[i + 1][1]     # recreate happens right after
+        sleep_idx = [i for i, (kind, _) in enumerate(order) if kind == 'sleep']
+        assert sleep_idx, "never settled"
+        assert sum(order[i][1] for i in sleep_idx) == 30
+
+        restart_idx = next(i for i, (kind, arg) in enumerate(order)
+                           if kind == 'run' and 'systemctl' in arg)
+        recreate_idx = next(i for i, (kind, arg) in enumerate(order)
+                            if kind == 'run' and '--force-recreate' in arg)
+        assert restart_idx < min(sleep_idx)
+        assert max(sleep_idx) < recreate_idx
+
+    @patch('subprocess.run')
+    def test_reports_each_phase_in_order(self, mock_run, app_client, temp_dir):
+        """The UI's progress display depends on these phases arriving in
+        order — a silent apply is what got clicked twice in the first place."""
+        import routes.mode as mode_module
+        mock_run.return_value = MagicMock(returncode=0, stdout='', stderr='')
+
+        phases = []
+        error = mode_module.run_config_merger_and_restart(
+            temp_dir, on_phase=lambda phase, detail=None: phases.append(phase))
+
+        assert error is None
+        assert phases[0] == 'waiting_for_lock'
+        assert [p for p in phases if p != 'settling'] == [
+            'waiting_for_lock', 'merging', 'stopping_spectrum',
+            'restarting_sdr', 'recreating']

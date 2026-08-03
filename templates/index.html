@@ -315,24 +315,54 @@ document.querySelectorAll('.svc-card[data-port]').forEach(function(el) {
 {% endif %}
 {% if retina_node_version %}
 <script>
+// Kicks off a server-side restart and then polls for progress — see
+// apply_service.py. The button stays disabled until the run reaches a
+// terminal state, so it can't be clicked into a second, colliding
+// docker compose run against the same project.
 document.getElementById('applyRestartBtn').addEventListener('click', function() {
     const btn = this;
     const status = document.getElementById('applyRestartStatus');
     if (btn.disabled) return;
+    const spinner = '<span class="spinner-border spinner-border-sm" style="width:.8em;height:.8em;border-width:1.5px;"></span> ';
+    const idleLabel = '<svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 0 0-15-6.7L3 8"/><path d="M3 3v5h5"/><path d="M3 12a9 9 0 0 0 15 6.7L21 16"/><path d="M21 21v-5h-5"/></svg> Restart services';
     btn.disabled = true;
-    btn.innerHTML = '<span class="spinner-border spinner-border-sm" style="width:.8em;height:.8em;border-width:1.5px;"></span> Restarting…';
+    btn.innerHTML = spinner + 'Restarting…';
     status.textContent = '';
+
+    const finish = (ok, msg) => {
+        status.style.color = ok ? 'var(--ok)' : 'var(--danger)';
+        status.textContent = msg;
+        btn.disabled = false;
+        btn.innerHTML = idleLabel;
+    };
+
+    const poll = () => {
+        fetch('/config/apply/status')
+            .then(r => r.json())
+            .then(s => {
+                if (s.state === 'running') {
+                    let label = s.phase_label || 'Restarting…';
+                    if (s.phase === 'settling' && s.settle_remaining) {
+                        label += ' (' + s.settle_remaining + 's)';
+                    }
+                    btn.innerHTML = spinner + label;
+                    setTimeout(poll, 1000);
+                } else if (s.state === 'failed') {
+                    finish(false, s.error || 'Failed');
+                } else {
+                    finish(true, 'Applied.');
+                }
+            })
+            .catch(() => setTimeout(poll, 2000));  // transient: keep watching
+    };
+
     fetch('/config/apply', { method: 'POST', headers: {'X-CSRFToken': document.querySelector('meta[name="csrf-token"]').content} })
         .then(r => r.json())
         .then(data => {
-            if (data.success) { status.style.color = 'var(--ok)';     status.textContent = 'Applied.'; }
-            else              { status.style.color = 'var(--danger)'; status.textContent = data.error || 'Failed'; }
+            if (data.success === false) { finish(false, data.error || 'Failed'); return; }
+            poll();
         })
-        .catch(e => { status.style.color = 'var(--danger)'; status.textContent = 'Error: ' + e.message; })
-        .finally(() => {
-            btn.disabled = false;
-            btn.innerHTML = '<svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 0 0-15-6.7L3 8"/><path d="M3 3v5h5"/><path d="M3 12a9 9 0 0 0 15 6.7L21 16"/><path d="M21 21v-5h-5"/></svg> Restart services';
-        });
+        .catch(e => finish(false, 'Error: ' + e.message));
 });
 </script>
 {% endif %}

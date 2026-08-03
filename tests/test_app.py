@@ -518,7 +518,13 @@ class TestRetinaTrackerSave:
 
 
 class TestApplyConfigRoute:
-    """Test the /config/apply POST route."""
+    """The /config/apply POST + /config/apply/status GET pair.
+
+    Apply is asynchronous now (see apply_service.py): the POST only starts
+    the work and returns, so these cover the route's contract with the
+    service. The service's own behaviour — coalescing, phase reporting,
+    error capture — is covered in test_apply_service.py.
+    """
 
     def test_apply_not_installed(self, app_client_no_retina):
         """Apply should fail when retina-node not installed."""
@@ -528,79 +534,46 @@ class TestApplyConfigRoute:
         assert data['success'] is False
         assert 'not installed' in data['error']
 
-    @patch('subprocess.run')
-    def test_apply_success(self, mock_run, app_client):
-        """Apply should run docker commands on success."""
-        mock_run.return_value = MagicMock(returncode=0, stdout='', stderr='')
+    def test_apply_starts_the_service_and_returns_immediately(self, app_client):
+        import app as app_module
+        with patch.object(app_module, 'apply_service') as svc:
+            svc.request.return_value = {'state': 'running', 'phase': 'merging'}
+            response = app_client.post('/config/apply')
 
-        response = app_client.post('/config/apply')
-        assert response.status_code == 200
+        assert response.status_code == 202
         data = json.loads(response.data)
         assert data['success'] is True
+        assert data['status']['state'] == 'running'
+        svc.request.assert_called_once_with()
 
-        # config-merger, stop retina-spectrum, rm retina-spectrum,
-        # restart sdrplay.service, then recreate the stack
-        assert mock_run.call_count == 5
+    def test_repeat_apply_is_delegated_not_duplicated(self, app_client):
+        """The route always forwards to the one shared service, which is what
+        makes a second click coalesce rather than start a second docker
+        compose run. The coalescing itself is covered in test_apply_service.py.
+        """
+        import app as app_module
+        with patch.object(app_module, 'apply_service') as svc:
+            svc.request.return_value = {'state': 'running', 'queued': True}
+            app_client.post('/config/apply')
+            response = app_client.post('/config/apply')
 
-        assert 'config-merger' in mock_run.call_args_list[0][0][0]
+        assert svc.request.call_count == 2
+        assert json.loads(response.data)['status']['queued'] is True
 
-        stop_args = mock_run.call_args_list[1][0][0]
-        assert 'stop' in stop_args and 'retina-spectrum' in stop_args
+    def test_apply_status_reports_the_service_status(self, app_client):
+        import app as app_module
+        with patch.object(app_module, 'apply_service') as svc:
+            svc.get_status.return_value = {
+                'state': 'running', 'phase': 'settling',
+                'phase_label': 'Waiting for the SDR to settle',
+                'settle_remaining': 12,
+            }
+            response = app_client.get('/config/apply/status')
 
-        rm_args = mock_run.call_args_list[2][0][0]
-        assert 'rm' in rm_args and 'retina-spectrum' in rm_args
-
-        assert mock_run.call_args_list[3][0][0] == ['systemctl', 'restart', 'sdrplay.service']
-
-        up_args = mock_run.call_args_list[4][0][0]
-        assert 'up' in up_args
-        assert '--force-recreate' in up_args
-
-    @patch('subprocess.run')
-    def test_apply_config_merger_fails(self, mock_run, app_client):
-        """Apply should return error if config-merger fails."""
-        mock_run.return_value = MagicMock(
-            returncode=1,
-            stdout='',
-            stderr='config-merger error message'
-        )
-
-        response = app_client.post('/config/apply')
-        assert response.status_code == 500
+        assert response.status_code == 200
         data = json.loads(response.data)
-        assert data['success'] is False
-        assert 'config-merger failed' in data['error']
-
-    @patch('subprocess.run')
-    def test_apply_restart_fails(self, mock_run, app_client):
-        """Apply should return error if restart fails."""
-        # config-merger, stop/rm retina-spectrum and the sdrplay restart all
-        # succeed; only the final stack recreate fails.
-        mock_run.side_effect = [
-            MagicMock(returncode=0, stdout='', stderr=''),
-            MagicMock(returncode=0, stdout='', stderr=''),
-            MagicMock(returncode=0, stdout='', stderr=''),
-            MagicMock(returncode=0, stdout='', stderr=''),
-            MagicMock(returncode=1, stdout='', stderr='restart error')
-        ]
-
-        response = app_client.post('/config/apply')
-        assert response.status_code == 500
-        data = json.loads(response.data)
-        assert data['success'] is False
-        assert 'restart failed' in data['error']
-
-    @patch('subprocess.run')
-    def test_apply_timeout(self, mock_run, app_client):
-        """Apply should handle timeout gracefully."""
-        import subprocess
-        mock_run.side_effect = subprocess.TimeoutExpired(cmd='docker', timeout=60)
-
-        response = app_client.post('/config/apply')
-        assert response.status_code == 500
-        data = json.loads(response.data)
-        assert data['success'] is False
-        assert 'timed out' in data['error'].lower()
+        assert data['phase'] == 'settling'
+        assert data['settle_remaining'] == 12
 
 
 class TestSSHKeysRoutes:
