@@ -1,5 +1,4 @@
 from flask import Blueprint, jsonify, request, Response, stream_with_context
-import subprocess
 
 import requests as http_requests
 from pydantic import ValidationError
@@ -172,13 +171,14 @@ def spectrum_events():
 
 @bp.route("/select", methods=["POST"])
 def select():
-    """Save RX + TX location to user.yml, run config-merger, and restart services.
+    """Save RX + TX location to user.yml, then queue a config apply.
 
-    In spectrum mode only config-merger runs — blah2 is intentionally stopped
-    and must not be restarted until the user switches back to radar mode.
+    The apply runs on the shared background queue (see apply_service.py) —
+    poll /config/apply/status for progress. In spectrum mode it only runs
+    config-merger: blah2 is intentionally stopped and must not be restarted
+    until the user switches back to radar mode.
     """
-    from app import config_mgr, get_node_id, RETINA_NODE_PATH
-    from routes.mode import run_config_merger_and_restart
+    from app import apply_service, config_mgr, device_state, get_node_id
 
     data = request.get_json()
     if not data:
@@ -221,18 +221,19 @@ def select():
 
     config_mgr.save_user_config(new_user_config)
 
-    if config_mgr.is_retina_node_installed():
-        try:
-            error = run_config_merger_and_restart(RETINA_NODE_PATH)
-            if error:
-                return jsonify({"success": True, "applied": False, "error": error})
-            return jsonify({"success": True, "applied": True})
+    if not config_mgr.is_retina_node_installed():
+        return jsonify({"success": True, "applied": False})
 
-        except subprocess.TimeoutExpired:
-            return jsonify({"success": True, "applied": False, "error": "Command timed out"})
-        except FileNotFoundError:
-            return jsonify({"success": False, "applied": False, "error": "docker not found — is it installed?"})
-        except Exception as e:
-            return jsonify({"success": True, "applied": False, "error": str(e)})
+    in_progress, reason = device_state.is_any_update_in_progress()
+    if in_progress:
+        return jsonify({"success": False,
+                        "error": f"{reason}. Choose a tower once it finishes."}), 409
 
-    return jsonify({"success": True, "applied": False})
+    # The config write above is a local file write and stays synchronous — it
+    # must be visible to anything that reads user.yml the moment this returns.
+    # Only the slow part (config-merger plus a stack restart, ~45s) is handed
+    # to the shared queue, which is what stops this request blocking a browser
+    # for minutes when it lands behind another restart. Poll
+    # /config/apply/status for progress; the queue always merges whatever is
+    # in user.yml when it runs, so it necessarily picks up the write above.
+    return jsonify({"success": True, "status": apply_service.request()}), 202

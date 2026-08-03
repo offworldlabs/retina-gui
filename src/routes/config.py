@@ -194,13 +194,26 @@ def apply_config():
     In spectrum mode only config-merger runs — blah2 is intentionally stopped
     and must not be restarted until the user switches back to radar mode.
     """
-    from app import apply_service, config_mgr, DEV_MODE
+    from app import apply_service, config_mgr, device_state, DEV_MODE
 
     if DEV_MODE:
         return jsonify({"success": True, "status": apply_service.request()})
 
     if not config_mgr.is_retina_node_installed():
         return jsonify({"success": False, "error": "retina-node not installed"}), 400
+
+    # Refuse during a Mender install rather than queue behind it. The install
+    # replaces the compose manifests this apply's config-merger runs against,
+    # and mender-update's own docker commands are outside the restart lock —
+    # so an apply here can genuinely run concurrently with them. It would also
+    # report success having skipped the restart entirely, since the install
+    # sets mode.txt to 'spectrum'. An install can end in a rollback or reboot,
+    # so holding the apply across it and then applying to a stack that may
+    # have been replaced underneath is worse than asking the user to retry.
+    in_progress, reason = device_state.is_any_update_in_progress()
+    if in_progress:
+        return jsonify({"success": False,
+                        "error": f"{reason}. Apply your changes once it finishes."}), 409
 
     return jsonify({"success": True, "status": apply_service.request()}), 202
 

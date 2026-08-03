@@ -1,5 +1,4 @@
 from flask import Blueprint, jsonify, request
-import subprocess
 
 import requests as http_requests
 
@@ -169,10 +168,13 @@ def cancel():
 
 @bp.route("/apply", methods=["POST"])
 def apply():
-    """Persist a successful calibration result: write user.yml and do the
-    one-time config-merger + service restart (mirrors /towers/select)."""
-    from app import calibrator, config_mgr, device_state, RETINA_NODE_PATH
-    from routes.mode import run_config_merger_and_restart
+    """Persist a successful calibration result: write user.yml, then queue the
+    config-merger + service restart (mirrors /towers/select).
+
+    can_start_calibration() below already covers a Mender install in progress,
+    which is why this route needs no separate update guard.
+    """
+    from app import apply_service, calibrator, config_mgr, device_state
 
     run_status = calibrator.get_status()
     result = run_status.get("result")
@@ -199,16 +201,8 @@ def apply():
     user_config['capture'] = capture
     config_mgr.save_user_config(user_config)
 
-    try:
-        error = run_config_merger_and_restart(RETINA_NODE_PATH)
-        if error:
-            return jsonify({"success": True, "applied": False, "error": error})
-    except subprocess.TimeoutExpired:
-        return jsonify({"success": True, "applied": False, "error": "Command timed out"})
-    except FileNotFoundError:
-        return jsonify({"success": False, "applied": False,
-                        "error": "docker not found. Is it installed?"})
-    except Exception as e:
-        return jsonify({"success": True, "applied": False, "error": str(e)})
-
-    return jsonify({"success": True, "applied": True})
+    # The user.yml write above stays synchronous — it must be on disk before
+    # this returns. Only the slow merge+restart goes to the shared queue,
+    # which always merges whatever is in user.yml when it runs, so it picks up
+    # the write above. Poll /config/apply/status for progress.
+    return jsonify({"success": True, "status": apply_service.request()}), 202

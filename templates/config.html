@@ -1533,23 +1533,41 @@ if (discardBtn) discardBtn.addEventListener('click', () => location.reload());
         })
         .then(function(r) { return r.json(); })
         .then(function(d) {
-            if (d.success && d.applied) {
+            if (!d.success) { calApplyFailed(d.error || 'Apply failed'); return; }
+            // The tuning is already written to user.yml; the merge and restart
+            // run on the server's shared queue (see apply_service.py).
+            pollCalApply();
+        })
+        .catch(function() { calApplyFailed('Apply request failed'); });
+    });
+
+    function calApplyFailed(message) {
+        applyBtn.disabled = false;
+        applyBtn.textContent = 'Persist to config';
+        errorEl.style.display = '';
+        errorEl.textContent = message;
+    }
+
+    function pollCalApply() {
+        fetch('/config/apply/status')
+        .then(function(r) { return r.json(); })
+        .then(function(s) {
+            if (s.state === 'running') {
+                var label = s.phase_label || 'Applying';
+                if (s.phase === 'settling' && s.settle_remaining) {
+                    label += ' (' + s.settle_remaining + 's)';
+                }
+                applyBtn.innerHTML = '<span class="spinner-border spinner-border-sm" style="width:.8em;height:.8em;border-width:1.5px;"></span> ' + label + '…';
+                setTimeout(pollCalApply, 1000);
+            } else if (s.state === 'failed') {
+                calApplyFailed(s.error || 'Apply failed');
+            } else {
                 applyBtn.style.display = 'none';
                 resultEl.innerHTML += '<br><strong>Saved and applied.</strong> Services are restarting with the new tuning.';
-            } else {
-                applyBtn.disabled = false;
-                applyBtn.textContent = 'Persist to config';
-                errorEl.style.display = '';
-                errorEl.textContent = d.error || 'Apply failed';
             }
         })
-        .catch(function() {
-            applyBtn.disabled = false;
-            applyBtn.textContent = 'Persist to config';
-            errorEl.style.display = '';
-            errorEl.textContent = 'Apply request failed';
-        });
-    });
+        .catch(function() { setTimeout(pollCalApply, 2000); });  // transient: keep watching
+    }
 
     modalEl.addEventListener('hidden.bs.modal', function() {
         if (pollTimer) { clearTimeout(pollTimer); pollTimer = null; }

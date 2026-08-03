@@ -1061,6 +1061,31 @@ function initSetupWizard(resumeStep, highestStepName, devMode, isRerun, demoMode
                     frequency_mhz: selectedTower.frequency_mhz
                 };
 
+                function pollApply() {
+                    fetch('/config/apply/status')
+                    .then(function(r) { return r.json(); })
+                    .then(function(s) {
+                        if (s.state === 'running') {
+                            var label = s.phase_label || 'Applying configuration';
+                            if (s.phase === 'settling' && s.settle_remaining) {
+                                label += ' (' + s.settle_remaining + 's)';
+                            }
+                            statusEl.innerHTML = '<span class="text-muted">' + label + '…</span>';
+                            setTimeout(pollApply, 1000);
+                        } else if (s.state === 'failed') {
+                            statusEl.innerHTML = '<span class="text-warning">Configuration saved but services failed to restart: ' + (s.error || 'Unknown error') + '</span>';
+                            saveBtn.disabled = false;
+                            saveBtn.textContent = 'Retry';
+                            skipBtn.style.display = '';
+                            skipBtn.textContent = 'Continue anyway →';
+                        } else {
+                            statusEl.innerHTML = '<span class="text-success">Configuration saved and services restarted.</span>';
+                            setTimeout(advance, 1500);
+                        }
+                    })
+                    .catch(function() { setTimeout(pollApply, 2000); });  // transient: keep watching
+                }
+
                 postJSON('/towers/select', payload)
                 .then(function(r) { return r.json(); })
                 .then(function(data) {
@@ -1071,9 +1096,11 @@ function initSetupWizard(resumeStep, highestStepName, devMode, isRerun, demoMode
                         skipBtn.style.display = '';
                         return;
                     }
-                    if (data.applied) {
-                        statusEl.innerHTML = '<span class="text-success">Configuration saved and services restarted.</span>';
-                        setTimeout(advance, 1500);
+                    if (data.status) {
+                        // The restart runs on the server's shared queue now.
+                        // Still wait for it to finish before advancing —
+                        // later wizard steps expect the radar to be back up.
+                        pollApply();
                     } else if (data.error) {
                         statusEl.innerHTML = '<span class="text-warning">Configuration saved but services failed to restart: ' + data.error + '</span>';
                         saveBtn.disabled = false;

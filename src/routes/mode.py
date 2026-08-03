@@ -211,6 +211,14 @@ def set_mode():
         return jsonify({'success': False,
                         'error': 'Auto-calibration is running. Cancel it before switching modes'}), 409
 
+    # Same reasoning as /config/apply: a Mender install is replacing the very
+    # containers and manifests every branch below manipulates, and
+    # mender-update's own docker commands are outside the restart lock.
+    in_progress, reason = device_state.is_any_update_in_progress()
+    if in_progress:
+        return jsonify({'success': False,
+                        'error': f'{reason}. Switch modes once it finishes.'}), 409
+
     node_installed = config_mgr.is_retina_node_installed()
     current_mode = get_current_mode()
 

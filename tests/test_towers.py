@@ -282,11 +282,14 @@ class TestTowerSelect:
             data=json.dumps(payload),
             content_type='application/json',
         )
-        assert resp.status_code == 200
+        # Queued, not applied inline: the config write is synchronous but the
+        # merge+restart goes to the shared queue (see apply_service.py).
+        assert resp.status_code == 202
         data = json.loads(resp.data)
         assert data['success'] is True
 
-        # Verify user.yml was updated
+        # The write must have happened before the response, not been deferred
+        # to the queue — anything reading user.yml next has to see it.
         with open(user_path) as f:
             saved = yaml.safe_load(f)
         assert saved['location']['rx']['latitude'] == -33.8688
@@ -338,7 +341,7 @@ class TestTowerSelect:
             data=json.dumps(payload),
             content_type='application/json',
         )
-        assert resp.status_code == 200
+        assert resp.status_code == 202
 
         with open(user_path) as f:
             saved = yaml.safe_load(f)
