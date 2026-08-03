@@ -15,6 +15,16 @@ _mode_cache = 'radar'  # default mode if file read fails (e.g. dev environment w
 # claims it again.
 SDRPLAY_RESTART_SETTLE_SECONDS = 30
 
+# Budget for the stack recreate. Measured at 13.5s on a node under load
+# (4-core Pi at load 4.3), so this is ~20x headroom rather than a guess:
+# the old 120s was generous too, and what actually blew it was two compose
+# runs contending, not the work itself. Now that the restart lock makes that
+# contention impossible, the remaining reasons to exceed even this are a
+# genuinely stuck device or daemon — cases where killing the CLI mid-recreate
+# does real damage (see stack_reconcile), so it is worth waiting longer
+# before resorting to that.
+RECREATE_TIMEOUT_SECONDS = 300
+
 
 def get_current_mode():
     """Read persisted mode. Returns 'radar', 'spectrum', or 'sdrconnect'."""
@@ -129,15 +139,52 @@ def _run_config_merger_and_restart_locked(retina_node_path, on_phase):
     _settle(SDRPLAY_RESTART_SETTLE_SECONDS, on_phase)
 
     on_phase('recreating', None)
-    result = subprocess.run(
-        ['docker', 'compose', '-p', 'retina-node', 'up', '-d', '--force-recreate'],
-        cwd=retina_node_path,
-        capture_output=True, text=True, timeout=120
-    )
+    try:
+        result = subprocess.run(
+            ['docker', 'compose', '-p', 'retina-node', 'up', '-d', '--force-recreate'],
+            cwd=retina_node_path,
+            capture_output=True, text=True, timeout=RECREATE_TIMEOUT_SECONDS
+        )
+    except subprocess.TimeoutExpired:
+        # The CLI has just been SIGKILLed, quite possibly between renaming a
+        # container and removing the old one. Repair before returning, or
+        # every later apply fails on the name conflict it leaves behind.
+        return _repair(retina_node_path, on_phase,
+                       'Restarting the radar services timed out.')
+
     if result.returncode != 0:
-        return f'restart failed: {result.stderr or result.stdout}'
+        output = result.stderr or result.stdout
+        if _is_name_conflict(output):
+            return _repair(retina_node_path, on_phase,
+                           'Restarting the radar services hit a container name conflict.')
+        return f'restart failed: {output}'
 
     return None
+
+
+def _is_name_conflict(output):
+    """Compose failing because a half-recreated container still holds a name."""
+    lowered = (output or '').lower()
+    return 'already in use' in lowered or 'error when allocating new name' in lowered
+
+
+def _repair(retina_node_path, on_phase, reason):
+    """Clear half-recreated containers and restore the stack.
+
+    Runs with the restart lock still held (every caller of this is inside
+    _run_config_merger_and_restart_locked), which is what makes it safe to
+    remove containers here.
+    """
+    from stack_reconcile import reconcile
+
+    on_phase('repairing', None)
+    removed, error = reconcile(retina_node_path)
+    if error:
+        return f'{reason} Automatic repair also failed: {error}'
+    if removed:
+        return (f'{reason} Cleaned up {len(removed)} half-created '
+                f'container(s) and restarted — check the radar is running.')
+    return f'{reason} No half-created containers were left behind.'
 
 
 @bp.route('/api/mode', methods=['GET'])
