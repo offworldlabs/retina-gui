@@ -1,4 +1,4 @@
-from flask import Flask
+from flask import Flask, redirect, request
 from flask_wtf.csrf import CSRFProtect
 import os
 import subprocess
@@ -140,6 +140,51 @@ app.register_blueprint(mode_bp)
 app.register_blueprint(network_bp)
 app.register_blueprint(calibrate_bp)
 app.register_blueprint(tracker_preview_bp)
+
+
+# Paths that must keep working while a run holds the GUI: the config page
+# itself, its assets, and the endpoints its modal polls to show progress and
+# to cancel. Everything else is a navigation away from a run the user cannot
+# see from anywhere else.
+_CALIBRATION_ALLOWED_PREFIXES = (
+    '/config',        # the page, plus /config/apply/status and /config/rf-status
+    '/calibrate',     # status, cancel, apply
+    '/static',
+    '/favicon',
+)
+
+
+@app.before_request
+def _keep_the_user_with_the_running_calibration():
+    """While Auto-Calibrate is running, hold the browser on the config page.
+
+    A run owns the SDR for up to 15 minutes and blocks every config change
+    for its duration, but it is only visible in one place — the modal on
+    /config. Navigating away used to leave it running invisibly, with no way
+    to cancel it short of waiting out the budget or restarting the GUI.
+    Rather than let someone strand a run they cannot see, send them back to
+    the one page that can show and stop it.
+
+    Deliberately keyed on is_running() alone, never the lock file. The lock
+    survives a GUI crash by design, and a stale one here would lock the user
+    out of the entire interface with no way to reach the button that clears
+    it. is_running() is in-memory, so a restart always frees the GUI.
+
+    Only GETs are redirected. POSTs to other routes already refuse with a
+    409 and an explanation, which is more useful to a caller than a redirect
+    to an HTML page.
+    """
+    if request.method != 'GET':
+        return None
+    if request.path.startswith(_CALIBRATION_ALLOWED_PREFIXES):
+        return None
+    # The setup wizard redirects /config back to itself, so locking during
+    # the wizard would bounce the browser between the two forever.
+    if device_state.is_setup_wizard_in_progress():
+        return None
+    if calibrator.is_running():
+        return redirect('/config')
+    return None
 
 
 if __name__ == "__main__":

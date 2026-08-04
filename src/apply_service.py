@@ -37,6 +37,31 @@ path never queues work against itself.
 import threading
 from datetime import datetime, timezone
 
+
+class ConfigChangeRefused(Exception):
+    """Raised by request() when something is using the SDR that an apply
+    would pull out from under it.
+
+    The check lives here, not in the routes, because routes are exactly what
+    gets forgotten. /api/mode and /mender/install each grew their own
+    calibration guard, but /config/apply and /towers/select — added later —
+    did not, and nothing caught it. Demonstrated on a live node: clicking
+    Apply Changes during an Auto-Calibrate run recreated all seven
+    containers underneath it, after which every retune failed and the run
+    carried on to report an ordinary-looking "no confirmed track". Both of
+    those buttons sit on the same page as the Auto-Calibrate one.
+
+    Every path that restarts the stack for a config change funnels through
+    request(), so guarding it covers the routes that exist and the ones that
+    do not yet. Raising rather than returning a refusal is deliberate: a
+    caller that forgets to handle this gets a 500, not a silent 202 that
+    claims work was queued when it was not.
+    """
+
+    def __init__(self, reason):
+        super().__init__(reason)
+        self.reason = reason
+
 PHASE_LABELS = {
     'waiting_for_lock': 'Waiting for another restart to finish',
     'merging': 'Merging configuration',
@@ -55,9 +80,14 @@ def _utcnow():
 class ApplyService:
     """One-at-a-time config apply with progress and request coalescing."""
 
-    def __init__(self, retina_node_path, dev_mode=False, restart_fn=None):
+    def __init__(self, retina_node_path, dev_mode=False, restart_fn=None,
+                 guard=None):
         self._retina_node_path = retina_node_path
         self._dev_mode = dev_mode
+        # Optional callable returning (ok, reason). Checked by request()
+        # before any work starts — see ConfigChangeRefused for why the check
+        # belongs here rather than in each route.
+        self._guard = guard
         # Injected collaborator, same idiom as Calibrator's clients: tests
         # pass a fake instead of monkeypatching routes.mode, which conftest's
         # importlib.reload(app) would swap out from under them anyway.
@@ -94,9 +124,15 @@ class ApplyService:
     def request(self):
         """Start an apply, or coalesce into the one already running.
 
-        Returns the current status dict. Never raises, never blocks on the
-        actual work.
+        Returns the current status dict. Never blocks on the actual work.
+        Raises ConfigChangeRefused if the configured guard says something
+        else is using the SDR right now.
         """
+        if self._guard is not None:
+            ok, reason = self._guard()
+            if not ok:
+                raise ConfigChangeRefused(reason)
+
         if self._dev_mode:
             with self._lock:
                 self._status = self._idle_status()

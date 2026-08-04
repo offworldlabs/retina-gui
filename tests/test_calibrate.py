@@ -1457,6 +1457,44 @@ class TestRoutes:
         names = [t["name"] for t in towers]
         assert "Cached Tower" in names
 
+    def test_start_refuses_while_a_config_apply_is_still_running(self, app_client):
+        """The refusal has to run both ways.
+
+        ApplyService blocks an apply starting during a run. Nothing blocked a
+        run starting during an apply — can_start_calibration() knows about
+        Mender installs but not about the ~45s stack restart an apply
+        performs. Hit by accident on a live node: Apply Changes, then
+        Auto-Calibrate a few seconds later, and every retune failed against
+        restarting containers. All three towers came back
+        tuning_not_applied — honest, but a whole run wasted on something
+        that could just have been refused.
+        """
+        import app as app_module
+        with patch.object(app_module.apply_service, 'is_running', return_value=True):
+            resp = app_client.post('/calibrate/start', json={"mode": "track"})
+
+        assert resp.status_code == 409
+        assert 'configuration change' in resp.get_json()['error']
+
+    def test_status_reports_a_system_update_in_progress(self, app_client):
+        """A server-pushed Mender deployment installs autonomously — nothing
+        here can refuse it, unlike /mender/install. It restarts the radar
+        underneath a run, after which every retune fails and the run reports
+        tuning_not_applied for no reason the user can see. The modal already
+        polls this endpoint, so it carries the explanation."""
+        import app as app_module
+        with patch.object(app_module.device_state, 'is_any_update_in_progress',
+                          return_value=(True, 'Installing retina-node-v0.5.0')):
+            body = app_client.get('/calibrate/status').get_json()
+        assert body['system_update'] == 'Installing retina-node-v0.5.0'
+
+    def test_status_reports_no_update_when_none_is_running(self, app_client):
+        import app as app_module
+        with patch.object(app_module.device_state, 'is_any_update_in_progress',
+                          return_value=(False, None)):
+            body = app_client.get('/calibrate/status').get_json()
+        assert body['system_update'] is None
+
     def test_status_returns_idle_initially(self, app_client):
         resp = app_client.get('/calibrate/status')
         assert resp.status_code == 200
@@ -1468,6 +1506,34 @@ class TestRoutes:
                           return_value={"state": "idle", "result": None}):
             resp = app_client.post('/calibrate/apply')
         assert resp.status_code == 409
+
+    def test_apply_is_not_blocked_by_the_config_change_guard(self, app_client):
+        """The guard that refuses config changes mid-run must not refuse the
+        calibration's *own* apply.
+
+        Both go through ApplyService.request(), and persisting a result is
+        the entire payoff of a successful run — so a guard that cannot tell
+        the two apart would block the feature's happy path while looking
+        like it was protecting it. It can: by the time /calibrate/apply is
+        reachable the run has reached a terminal state, so is_running() is
+        false and the lock has been released.
+
+        Exercises the real guard, unlike the route test below which mocks
+        request() and would pass either way.
+        """
+        import app as app_module
+        import services
+
+        with patch.object(app_module.calibrator, 'is_running', return_value=False), \
+             patch.object(app_module.device_state, 'is_calibration_locked',
+                          return_value=(False, None)):
+            ok, reason = services.config_change_guard()
+        assert ok, f"the calibration's own apply would be refused: {reason}"
+
+        # ...and it does refuse while the run is still going.
+        with patch.object(app_module.calibrator, 'is_running', return_value=True):
+            ok, _ = services.config_change_guard()
+        assert not ok
 
     def test_apply_writes_user_config(self, app_client, config_files):
         import app as app_module

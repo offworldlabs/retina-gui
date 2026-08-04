@@ -4,6 +4,7 @@ import requests as http_requests
 from pydantic import ValidationError
 from config_schema import LocationFormConfig
 from config_manager import ConfigManager
+from apply_service import ConfigChangeRefused
 
 bp = Blueprint('towers', __name__, url_prefix='/towers')
 
@@ -236,4 +237,10 @@ def select():
     # for minutes when it lands behind another restart. Poll
     # /config/apply/status for progress; the queue always merges whatever is
     # in user.yml when it runs, so it necessarily picks up the write above.
-    return jsonify({"success": True, "status": apply_service.request()}), 202
+    # A calibration in flight is refused inside request() — see
+    # ApplyService.ConfigChangeRefused for why that check is not repeated
+    # here.
+    try:
+        return jsonify({"success": True, "status": apply_service.request()}), 202
+    except ConfigChangeRefused as refused:
+        return jsonify({"success": False, "error": refused.reason}), 409

@@ -740,6 +740,11 @@ class Calibrator:
 
         Returns (gain_a, applied_at_ms, still_overloaded).
         """
+        # Reset the phase on entry: the surveillance stage below sets it to
+        # "refining", and the LNA loop re-enters both stages many times per
+        # tower, so without this the UI reports "Refining gain" for most of a
+        # descent that is in fact walking the whole ladder again.
+        self._update(phase="descending")
         gain_a = GAIN_REDUCTION_MAX
         clean_gain_a = None
         applied_at, overload_a, _, device_error = self._probe(
@@ -790,6 +795,7 @@ class Calibrator:
 
         Returns (gain_b, applied_at_ms, still_overloaded).
         """
+        self._update(phase="descending")
         gain_b = GAIN_REDUCTION_MAX
         clean_gain_b = None
         reverted = False
