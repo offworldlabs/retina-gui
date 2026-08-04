@@ -4,79 +4,25 @@ import os
 import subprocess
 import sys
 
-from config_manager import ConfigManager
-from device_state import DeviceState
-from mender import MenderClient
-from network_manager import NetworkManager
-from ssh_keys import SSHKeyManager
-
-PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+# Configuration and shared services live in their own module because this one
+# is executed twice — once as __main__ (systemd runs `python3 src/app.py`) and
+# again as `app` the first time a route does `from app import ...`. Anything
+# constructed here would therefore exist twice in one process. See services.py
+# for what that broke. Re-exported below so `from app import ...` is unchanged.
+from services import (  # noqa: F401  (re-exported for routes)
+    PROJECT_ROOT, DEV_MODE, DATA_DIR, USER_CONFIG_PATH, MERGED_CONFIG_PATH,
+    RETINA_NODE_PATH, RETINA_SPECTRUM_URL, NODE_ID_FILE, TOWER_FINDER_URL,
+    BLAH2_API_URL, RETINA_TRACKER_HOST, RETINA_TRACKER_PORT,
+    RETINA_TRACKER_EVENTS_PATH, MENDER_SERVICES,
+    ssh_keys, network_mgr, config_mgr, mender, device_state,
+    apply_service, blah2_client, retina_tracker_client, calibrator,
+    tracker_capture,
+)
 app = Flask(__name__,
             template_folder=os.path.join(PROJECT_ROOT, 'templates'),
             static_folder=os.path.join(PROJECT_ROOT, 'static'))
 app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', os.urandom(32).hex())
 csrf = CSRFProtect(app)
-
-DEV_MODE = os.environ.get('DEV_MODE', '').lower() in ('1', 'true', 'yes')
-
-# Configurable paths - override via environment for local dev.
-# In dev mode, default to a writable local directory instead of the on-device paths.
-DATA_DIR = os.environ.get('DATA_DIR',
-    os.path.join(PROJECT_ROOT, 'dev_data') if DEV_MODE else '/data/retina-gui'
-)
-USER_CONFIG_PATH = os.environ.get('USER_CONFIG_PATH',
-    os.path.join(PROJECT_ROOT, 'dev_data', 'user.yml') if DEV_MODE else '/data/retina-node/config/user.yml'
-)
-MERGED_CONFIG_PATH = os.environ.get('MERGED_CONFIG_PATH',
-    os.path.join(PROJECT_ROOT, 'dev_data', 'config.yml') if DEV_MODE else '/data/retina-node/config/config.yml'
-)
-RETINA_NODE_PATH = os.environ.get('RETINA_NODE_PATH', '/data/mender-docker-compose/current/manifests')
-RETINA_SPECTRUM_URL = os.environ.get('RETINA_SPECTRUM_URL', 'http://localhost:3020')
-NODE_ID_FILE = os.environ.get('NODE_ID_FILE', '/data/mender/node_id')
-TOWER_FINDER_URL = os.environ.get('TOWER_FINDER_URL', 'https://tower-finder.retina.fm')
-# blah2_api runs with network_mode: host and listens directly on this port —
-# NOT the :8080 blah2_host nginx proxy, which doesn't forward /capture/* at all.
-BLAH2_API_URL = os.environ.get('BLAH2_API_URL', 'http://localhost:3000')
-# retina-tracker sidecar (network_mode: host, see retina-node's docker-compose.yml)
-RETINA_TRACKER_HOST = os.environ.get('RETINA_TRACKER_HOST', 'localhost')
-RETINA_TRACKER_PORT = int(os.environ.get('RETINA_TRACKER_PORT', '30100'))
-# Path the sidecar streams JSONL track events to (-s flag, see its compose
-# command) — tailed rather than read over the TCP socket, since retina-tracker's
-# --tcp mode is input-only (see retina_tracker_client.py's module docstring).
-RETINA_TRACKER_EVENTS_PATH = os.environ.get('RETINA_TRACKER_EVENTS_PATH',
-    os.path.join(PROJECT_ROOT, 'dev_data', 'retina-tracker-events.jsonl') if DEV_MODE
-    else '/data/retina-node/retina-tracker/output/events.jsonl'
-)
-DEV_MODE = os.environ.get('DEV_MODE', '').lower() in ('1', 'true', 'yes')
-
-# Shared services
-ssh_keys = SSHKeyManager(os.path.join(DATA_DIR, "authorized_keys"))
-network_mgr = NetworkManager(dev_mode=DEV_MODE)
-
-config_mgr = ConfigManager(
-    user_config_path=USER_CONFIG_PATH,
-    merged_config_path=MERGED_CONFIG_PATH,
-    retina_node_path=RETINA_NODE_PATH,
-)
-
-mender = MenderClient(
-    server_url=os.environ.get('MENDER_SERVER_URL', 'https://hosted.mender.io'),
-    release_name=os.environ.get('MENDER_RELEASE_NAME', 'retina-node'),
-    device_type=os.environ.get('MENDER_DEVICE_TYPE', 'pi5-v3-arm64'),
-    dev_mode=DEV_MODE,
-    dev_data_dir=DATA_DIR,
-)
-
-MENDER_SERVICES = ["mender-authd", "mender-updated", "mender-connect"]
-
-device_state = DeviceState(
-    data_dir=DATA_DIR,
-    mender_services=MENDER_SERVICES,
-    mender_conf_path="/data/mender/mender.conf",
-    mender_conf_backup_dir="/data/mender-cloud-disabled",
-    mender_conf_backup_path="/data/mender-cloud-disabled/mender.conf",
-    dev_mode=DEV_MODE,
-)
 
 if not DEV_MODE:
     device_state.apply_startup_preferences()
@@ -135,26 +81,10 @@ except Exception:
     pass
 
 
-from apply_service import ApplyService
-from blah2_client import Blah2Client
-from calibrator import Calibrator
-from retina_tracker_client import RetinaTrackerClient
-from tracker_capture import TrackerCaptureService
-
-apply_service = ApplyService(RETINA_NODE_PATH, dev_mode=DEV_MODE)
-blah2_client = Blah2Client(BLAH2_API_URL)
-retina_tracker_client = RetinaTrackerClient(
-    RETINA_TRACKER_HOST, RETINA_TRACKER_PORT, RETINA_TRACKER_EVENTS_PATH)
-calibrator = Calibrator(blah2_client, retina_tracker_client)
-tracker_capture = TrackerCaptureService(blah2_client, retina_tracker_client)
-
-
-def _on_calibration_complete(status):
-    """Runs on the calibration thread when a run reaches a terminal state."""
-    device_state.release_calibration_lock()
-
-
-calibrator.on_complete = _on_calibration_complete
+# apply_service, blah2_client, retina_tracker_client, calibrator and
+# tracker_capture are constructed in services.py and imported at the top of
+# this file — they must exist once per process, and this module body runs
+# twice. See services.py.
 
 # Never auto-start under pytest: conftest.py's app_client fixture reloads this
 # module per-test, and start() spawns a permanent, never-stopped background
