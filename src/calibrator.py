@@ -92,10 +92,16 @@ callback (_on_track_event) registered once with that same client — the one
 tracker-preview already tails. Because a confirmed track from one candidate
 tower is physically meaningless at another (different fc/tx position means
 different delay/Doppler geometry), a {"type": "RESET"} message clears the
-sidecar's tracker in place before each tower's descent+dwell (see
-RetinaTrackerClient.reset()) — mirroring blah2's own fc-triggered tracker
-reset. Reset scope is per-tower only: since any confirmed track ends the
-search immediately, finer-grained reset scope has no effect on correctness.
+sidecar's tracker in place (see RetinaTrackerClient.reset()) — mirroring
+blah2's own fc-triggered tracker reset. That reset happens at the start of
+every *dwell*, and again after a mid-dwell backoff, so a confirmation can
+only be earned from frames observed at the tuning it is reported against
+(see _reset_tracker). It used to be per-tower, on the reasoning that any
+confirmed track ends the search immediately so finer scope could not matter.
+That assumed this calibration is the sidecar's only source, which it is not:
+tracker_capture's always-on capture shares the same client, so the tracker is
+fed throughout the descent too, and a per-tower reset left a confirmed track
+waiting before the dwell had observed anything at all.
 Evidence grading is coarser than an in-process tracker could offer
 (EVIDENCE_NONE/DETECTIONS/ACTIVE only, no tentative/associated distinction)
 — the sidecar's events stream only reports confirmed (ACTIVE) tracks, the
@@ -106,8 +112,15 @@ Two success modes, with genuinely different dwell strategies:
     sidecar only ever emits one once a track has been promoted to ACTIVE —
     see retina_tracker/tracker.py::process_frame). No independent way to
     tell "bad gain" from "no aircraft right now", so this mode is
-    time-boxed — each tower gets a fair share of the overall budget (see
-    _run) and gives up when that runs out.
+    time-boxed. The two phases are budgeted *separately* (see _run):
+    descent runs under its own fixed ceiling (DESCENT_BACKSTOP_SECONDS),
+    and only the dwell divides what is left of the run budget across the
+    towers still to go. They deliberately do not share one deadline — an
+    earlier design gave each tower a single descent+dwell allowance, which
+    meant a descent long enough to exhaust it left zero dwell and returned
+    "skipped_no_time". On any node whose descent walks more than a few LNA
+    states that happened on every tower, so a whole run could be spent
+    retuning without ever once watching for an aircraft.
   - MODE_ADSB: a confirmed-track event only counts if the sidecar's own
     tracker matched it to a real aircraft (retina-tracker's Track class does
     this matching natively, from the same per-detection "adsb" field
@@ -194,13 +207,37 @@ ACK_POLL_SECONDS = 0.2
 APPLY_RETRY_DELAY_SECONDS = 0.5
 RF_STATUS_TIMEOUT_SECONDS = 6.0
 RF_STATUS_POLL_SECONDS = 0.3
-OVERLOAD_SETTLE_SECONDS = 2.0
+# How long to let a new gain/LNA candidate settle before reading its overload
+# state. This does not have to cover the overload *reporting* latency: blah2
+# posts an overload-status change as soon as it sees one (its capture thread
+# polls the device every 250ms and posts on change), so a candidate that
+# actually clips is reported promptly regardless of this value. What this
+# covers is the physical settle after the retune. Note that _read_overload
+# waits for a report newer than the candidate's appliedAt, and blah2 only
+# emits an unchanged state on a 2s heartbeat — so on a *clean* probe that
+# heartbeat, not this constant, is usually what bounds the wait.
+OVERLOAD_SETTLE_SECONDS = 1.0
 
 # Dwell: how long to wait for a confirmed track at one tuning. No fixed
 # default — each tower's share of the overall budget is computed dynamically
 # in _run() as (time remaining / towers remaining), so a slow descent or an
 # early tower's full-length dwell can't silently starve the towers after it.
 DWELL_POLL_SECONDS = 1.0
+
+# How often the dwell re-reads overload state. A single probe reading cannot
+# tell a genuinely clean operating point from one that clips intermittently,
+# and the dwell is by far the longest phase — so a marginal point accepted by
+# descent gets sat on for minutes. Observed on a live node: descent settled at
+# lna_state 3, the device then cycled Overload_Detected/Corrected there for the
+# whole dwell, and by the end the SDRplay API had stopped answering control
+# calls altogether, so every later retune in that run failed. Watching during
+# the dwell catches what one probe cannot.
+DWELL_OVERLOAD_CHECK_SECONDS = 5.0
+
+# How many times a dwell retreats before giving up on the tower. Each backoff
+# costs part of the dwell window, and a point needing several is not one worth
+# dwelling on.
+MAX_DWELL_BACKOFFS = 2
 
 # MODE_TRACK's retina-tracker feed loop polls faster than blah2's own CPI
 # cadence (measured ~0.9-1s on the desk node) so a new detection frame is
@@ -209,8 +246,30 @@ DWELL_POLL_SECONDS = 1.0
 # timestamp, so polling faster than the CPI rate is free, not wasteful.
 TRACKER_FEED_POLL_SECONDS = 0.2
 
-# Overall run budget.
-TOTAL_BUDGET_SECONDS = 600
+# Overall run budget. Kept comfortably below the 20 minutes at which both
+# retina-gui's own CALIBRATE_LOCK_TIMEOUT (device_state.py) and blah2-arm's
+# watchdog (blah2_rspduo_restart.bash, CALIBRATE_LOCK_TIMEOUT_SECONDS=1200)
+# stop treating calibrate.lock as live — past that point the watchdog would
+# restart the stack underneath a still-running calibration. Raising this
+# above ~20 minutes means raising both of those, in both repos, together.
+TOTAL_BUDGET_SECONDS = 900
+
+# Hard per-tower ceiling on the descent phase, whatever the run budget is —
+# a backstop against a device that has wedged and is burning the full retune
+# timeout on every probe, not a normal operating limit. It sits above the
+# ~4.5 minute worst case for a healthy node (one that never overloads walks
+# all 9 LNA states, ~10-11 probes each).
+DESCENT_BACKSTOP_SECONDS = 300
+
+# The share of a tower's own time slice that descent may consume before it
+# is cut off. This is what actually guarantees every tower gets watched:
+# descent and dwell are budgeted separately (see _run), but "separately"
+# alone is not enough — three towers each taking the full backstop above
+# would still swallow a 900s run whole and leave nothing to dwell on,
+# which is the original bug wearing a different hat. Capping descent at a
+# fraction of the slice means the remainder is always there for the dwell,
+# so no tower can ever be tuned and then not looked at.
+MAX_DESCENT_FRACTION = 0.7
 
 # Success modes.
 MODE_TRACK = "track"
@@ -265,6 +324,10 @@ class Calibrator:
         # Latest confirmed-track event the sidecar has emitted (see
         # _on_track_event) — read via _take_confirmed_event().
         self._last_confirmed_event = None
+        # Frequency blah2 was last successfully tuned to, so _apply knows
+        # when it is about to change fc and must hand over via the safe
+        # corner first (see _apply). None until the first successful apply.
+        self._last_applied_fc = None
         # Deferred to start() rather than done here: __init__ runs at app
         # boot regardless of whether a run ever happens, and registering
         # eagerly would start retina_tracker_client's tail thread that early
@@ -316,9 +379,11 @@ class Calibrator:
         first (normally the currently-configured tower).
         original: {"fc": int, "gain_a": int, "gain_b": int} — restored on any
         non-success terminal state.
-        dwell_seconds: fixed per-tower budget override, mainly for tests.
-        Leave as None to divide the remaining time evenly across the
-        remaining towers each time a new tower starts (the production path).
+        dwell_seconds: fixed per-tower *dwell* window override, mainly for
+        tests. Leave as None (the production path) to divide whatever run
+        time remains after each tower's descent evenly across the towers
+        still to go. Descent is never taken out of this — it runs under its
+        own DESCENT_BACKSTOP_SECONDS ceiling.
         mode: MODE_TRACK (any confirmed track) or MODE_ADSB (confirmed track
         that also matches a real aircraft's expected position, per the
         node's own truth.adsb.delay_tolerance/doppler_tolerance config — the
@@ -351,6 +416,9 @@ class Calibrator:
             # isn't actually enforced (see module docstring).
             self._status["progress"]["budget_seconds"] = (
                 None if mode == MODE_ADSB else budget_seconds)
+        # Seeded from the device itself at the top of _run, NOT from config —
+        # see _seed_last_applied_fc for why the two are not interchangeable.
+        self._last_applied_fc = None
         self._cancel.clear()
         self._thread = threading.Thread(
             target=self._run, args=(list(towers), dict(original),
@@ -421,10 +489,85 @@ class Calibrator:
     def _apply(self, fc, gain_a, gain_b, lna_state, ignore_cancel=False):
         """Request a retune and wait for blah2's ack. Returns appliedAt (ms).
 
+        A frequency change is preceded by a separate retune to the safe
+        corner at the *current* frequency. blah2's driver applies fc before
+        gain within one retune (RspDuo::retune does Update_Tuner_Frf, then
+        Update_Tuner_Gr), so a single call that moves both would park the
+        front end on the new frequency while still at the old one's gain.
+        Reaching a new tower from a sensitive operating point therefore
+        saturates the device before the attenuation this call is asking for
+        ever lands — and the driver returns early on that failure, so the
+        gain update is not merely late, it never executes. Worse, once the
+        SDRplay API returns ServiceNotResponding (which is what a hard
+        overload looks like from out here) it stays that way, so the retry
+        cannot get the rescuing attenuation through either.
+
+        Measured directly: 213 MHz at (59, 59, lna 9) is clean when reached
+        from a safe state, and saturates when reached from (49, 20, lna 1)
+        at 201 MHz — same destination, same requested gain, different
+        starting point. Going via the safe corner costs one extra retune
+        per tower change and removes the exposure entirely.
+
         ignore_cancel: used only by the restore-on-failure path, which must
         run to completion even if the user cancels (again) while it's in
         flight — otherwise blah2 could be left tuned to a failed candidate.
         """
+        if self._last_applied_fc is not None and int(fc) != self._last_applied_fc:
+            self._safe_fc_handover(ignore_cancel=ignore_cancel)
+        applied_at = self._apply_tuning(fc, gain_a, gain_b, lna_state,
+                                        ignore_cancel=ignore_cancel)
+        self._last_applied_fc = int(fc)
+        return applied_at
+
+    def _seed_last_applied_fc(self, original_fc):
+        """Record the frequency blah2 is *actually* on, before the search
+        starts, so _apply can tell a real frequency change from a no-op.
+
+        This must come from the device, not from the merged config. The two
+        diverge routinely: a run that finds a track and is never persisted
+        leaves the radio on the winning frequency while config.yml still
+        holds the old one. Seeding from config there makes the calibrator
+        believe it is already on the first tower's frequency when it is not,
+        so _apply sees no change and skips the safe-corner handover —
+        switching that protection off in precisely the case where the device
+        has drifted furthest from what config claims.
+
+        Seen live, and it wedged the radio: config said 545MHz, blah2 was
+        actually on 213MHz at (59,44,lna5) from an unpersisted run, and the
+        first retune moved fc to a strong local tower at that sensitive gain
+        with no handover. Every subsequent retune failed and the whole run
+        came back tuning_not_applied in 42 seconds.
+
+        An empty retune status is not ambiguous: it means blah2 has acked no
+        retune since it booted, so it is still on the frequency from
+        config.yml — which is exactly what the caller passed as `original`.
+        """
+        status = self._client.get_retune_status()
+        if status and status.get("fc") is not None:
+            self._last_applied_fc = int(status["fc"])
+        else:
+            self._last_applied_fc = int(original_fc)
+
+    def _safe_fc_handover(self, ignore_cancel=False):
+        """Retune to the safe corner at the frequency currently in use,
+        immediately before a frequency change (see _apply).
+
+        Best-effort: a failure here is not raised. If the device won't take
+        even this, the caller's own retune is about to surface the problem
+        through the normal path, and _probe already treats that as an
+        overload at the candidate. Raising here instead would only turn a
+        contained per-candidate failure into an aborted run.
+        """
+        try:
+            self._apply_tuning(self._last_applied_fc, GAIN_REDUCTION_MAX,
+                               GAIN_REDUCTION_MAX, LNA_STATE_MAX,
+                               ignore_cancel=ignore_cancel)
+        except CalibrationError:
+            pass
+
+    def _apply_tuning(self, fc, gain_a, gain_b, lna_state, ignore_cancel=False):
+        """One retune request plus ack wait. Callers should normally use
+        _apply, which adds the safe-corner handover on a frequency change."""
         last_error = None
         for attempt in range(2):
             self._check_cancel(ignore_cancel=ignore_cancel)
@@ -443,8 +586,18 @@ class Calibrator:
                     return status.get("appliedAt", 0)
                 time.sleep(ACK_POLL_SECONDS)
             last_error = "blah2 did not acknowledge the retune"
+        # Deliberately does not guess which of the two it was. An
+        # unacknowledged retune means either the radar is down, or the
+        # front end is so overloaded that the SDRplay API has stopped
+        # responding to control calls — from here those look identical,
+        # and they need opposite responses from the user. The previous
+        # wording ("Is the radar running?") named only the first, which
+        # is actively misleading on a strong-signal node where the second
+        # is the common case.
         raise CalibrationError(
-            f"Retune failed: {last_error}. Is the radar running?")
+            f"Retune failed: {last_error}. Either the radar is not running, "
+            "or this tower is strong enough to overload the receiver even at "
+            "minimum gain")
 
     def _read_overload(self, applied_at_ms):
         """Overload flags from an overload-status report newer than
@@ -499,6 +652,52 @@ class Calibrator:
         except CalibrationError as e:
             return applied_at, True, True, str(e)
         return applied_at, overload_a, overload_b, None
+
+    def _verify_applied(self, fc, gain_a, gain_b, lna_state):
+        """Confirm blah2 is really tuned to this before dwelling on it.
+
+        Returns (applied_at_ms, None) if it is, or (None, reason) if not.
+
+        A retune that fails does not stop the run — _probe folds the failure
+        into an overload reading so the descent can retreat — but until now
+        nothing checked, before dwelling, whether the tuning the descent
+        settled on was ever actually accepted. It could not simply trust
+        _descend's applied_at either: when a candidate's own retune never
+        completes, _probe returns the *previous* candidate's timestamp, so
+        the dwell's `timestamp >= applied_at` guard still passes for
+        detections produced by the old tuning. The result was a dwell that
+        looked entirely healthy while measuring a different frequency, and
+        reported its outcome against the tower it thought it was on.
+        Observed live: a dwell ran for minutes labelled WWLP/201MHz while
+        blah2 was still on 545MHz.
+
+        Comparing against the last acknowledged retune closes that: it is
+        the device's own account of what it is tuned to, so it catches a
+        failed retune, a generation blah2 abandoned (see its
+        MAX_RETUNE_ATTEMPTS), and anything else that retuned the radio
+        behind this run's back.
+        """
+        status = self._client.get_retune_status()
+        if not status:
+            return None, "blah2 has not acknowledged any tuning"
+
+        actual = (status.get("fc"), status.get("gainReductionA"),
+                  status.get("gainReductionB"), status.get("lnaState"))
+        if actual != (fc, gain_a, gain_b, lna_state):
+            # blah2_api reports a generation it gave up on (newer blah2 only,
+            # absent on older builds) — a more specific reason when present.
+            rejected = status.get("rejected") or {}
+            if rejected:
+                return None, (
+                    f"blah2 abandoned the retune after {rejected.get('attempts')} "
+                    f"attempts; it is still tuned to fc={actual[0]} "
+                    f"gain=({actual[1]},{actual[2]}) lna={actual[3]}")
+            return None, (
+                f"blah2 is tuned to fc={actual[0]} gain=({actual[1]},{actual[2]}) "
+                f"lna={actual[3]}, not the resolved fc={fc} "
+                f"gain=({gain_a},{gain_b}) lna={lna_state}")
+
+        return status.get("appliedAt", 0), None
 
     def _safe_revert(self, fc, gain_a, gain_b, lna_state, fallback_applied_at):
         """Best-effort re-apply of a previously-proven-safe candidate, after
@@ -673,8 +872,11 @@ class Calibrator:
         right there rather than climbing a ladder toward states it
         already knows are worse.
 
-        deadline: this tower's shared descent+dwell budget (monotonic
-        clock). Never exceeded — see _descend_reference/_descend_surveillance.
+        deadline: this tower's descent-only ceiling (monotonic clock), a
+        backstop against a wedged device rather than a share of the run
+        budget — the dwell window is derived separately once this returns
+        (see _run). Never exceeded — see
+        _descend_reference/_descend_surveillance.
 
         Returns (gain_a, gain_b, lna_state, applied_at_ms).
         """
@@ -732,12 +934,44 @@ class Calibrator:
         _dwell_adsb instead — see the module docstring.)
         """
         self._update(phase="dwelling")
+        # Start from a genuinely empty tracker — see _reset_tracker.
+        self._reset_tracker()
         max_evidence = EVIDENCE_NONE
         max_detections = 0
         last_timestamp = None
+        backoffs = 0
+        next_overload_check = time.monotonic() + DWELL_OVERLOAD_CHECK_SECONDS
+        overload_baseline = self._overload_reading()
 
         while time.monotonic() < dwell_deadline:
             self._check_cancel()
+
+            # A single probe reading cannot distinguish a clean operating
+            # point from one that clips intermittently, so keep watching the
+            # one we settled on — see DWELL_OVERLOAD_CHECK_SECONDS.
+            if time.monotonic() >= next_overload_check:
+                next_overload_check = time.monotonic() + DWELL_OVERLOAD_CHECK_SECONDS
+                reading = self._overload_reading()
+                clipped_a, clipped_b = self._overload_since(overload_baseline, reading)
+                if clipped_a or clipped_b:
+                    overload_baseline = reading
+                    self._update_rf(clipped_a, clipped_b)
+                    if backoffs >= MAX_DWELL_BACKOFFS:
+                        tower_entry["outcome"] = "unstable_overload"
+                        tower_entry["max_evidence"] = max_evidence
+                        tower_entry["max_detections"] = max_detections
+                        return None
+                    backoffs += 1
+                    gain_a, gain_b, lna_state, applied_at = self._dwell_backoff(
+                        fc, gain_a, gain_b, lna_state, applied_at,
+                        clipped_a, clipped_b, backoffs, tower_entry)
+                    # Everything before the retreat was measured at a tuning
+                    # we have now abandoned — restart the tracker and the
+                    # freshness guard so nothing from it is credited to the
+                    # tuning we end up reporting.
+                    self._reset_tracker()
+                    last_timestamp = None
+                    overload_baseline = self._overload_reading()
 
             detection = self._client.get_detection()
             timestamp = detection.get("timestamp") if detection else None
@@ -755,9 +989,17 @@ class Calibrator:
             if confirmed is not None:
                 tower_entry["outcome"] = "confirmed_track"
                 tower_entry["max_evidence"] = EVIDENCE_ACTIVE
+                # Report the tuning actually in effect — a mid-dwell backoff
+                # may have moved it since descent resolved (see
+                # _dwell_backoff), and history's final_* must agree with the
+                # result the user is offered to persist.
+                tower_entry["final_gain_a"] = gain_a
+                tower_entry["final_gain_b"] = gain_b
+                tower_entry["final_lna_state"] = lna_state
                 return {
                     "tower_name": tower.get("name"), "fc": fc,
                     "gain_a": gain_a, "gain_b": gain_b,
+                    "lna_state": lna_state,
                     "track_id": confirmed.get("track_id"),
                 }
 
@@ -768,7 +1010,119 @@ class Calibrator:
         tower_entry["outcome"] = "no_confirmed_track"
         tower_entry["max_evidence"] = max_evidence
         tower_entry["max_detections"] = max_detections
+        # As on the success path: a mid-dwell backoff may have moved these
+        # since descent resolved them, and the no-track fallback reads the
+        # top tower's final values to decide where to leave the device.
+        tower_entry["final_gain_a"] = gain_a
+        tower_entry["final_gain_b"] = gain_b
+        tower_entry["final_lna_state"] = lna_state
         return None
+
+    def _reset_tracker(self):
+        """Clear the sidecar's tracker and any confirmed event already held.
+
+        Called at the start of every dwell, and again after a mid-dwell
+        backoff, so a confirmation can only ever be earned from frames
+        observed at the tuning it will be reported against.
+
+        Per-tower reset is not sufficient, and the reasoning that said it was
+        assumed this calibration is the sidecar's only source. It isn't:
+        tracker_capture's always-on capture shares this same client, because
+        the sidecar accepts one connection at a time. So the tracker is fed
+        continuously whether or not a dwell is running, and a tower-start
+        reset leaves the whole descent — 150s on a live node — for a track to
+        accumulate and confirm before the dwell starts. The dwell's first
+        check then finds it already waiting and credits it to the resolved
+        tuning, having observed none of it. Seen live as a confirmed track
+        with dwell_seconds 0.0.
+
+        The applied_at guard does not close this: it only requires the
+        event's *latest* detection to post-date the retune, which a track
+        built across the descent still satisfies.
+        """
+        self._tracker_client.reset()
+        with self._lock:
+            self._last_confirmed_event = None
+
+    def _overload_reading(self):
+        """Current overload level plus blah2's monotonic onset counts (the
+        counts are None on an older blah2 that doesn't report them)."""
+        rf = self._client.get_overload_status()
+        if not rf:
+            return None
+        return {
+            "level_a": bool(rf.get("overloadA")),
+            "level_b": bool(rf.get("overloadB")),
+            "count_a": rf.get("overloadCountA"),
+            "count_b": rf.get("overloadCountB"),
+        }
+
+    @staticmethod
+    def _overload_since(baseline, current):
+        """Did either tuner clip at or since the baseline reading?
+
+        Both signals are needed, because they cover different shapes of the
+        same problem and each is blind to the other's:
+
+        - The *level* catches overload that is still happening now. That is
+          the persistent case, where a count taken after the onset never
+          rises again and so reveals nothing.
+        - The *counts* catch episodes that began and ended between two polls.
+          This hardware clips and recovers fast enough for that to be the
+          normal case — measured on a live node, 9 detect/correct cycles
+          inside 90s with every level sample reading false throughout.
+
+        Watching only the level misses oscillation; watching only the counts
+        misses a steady overload already in progress when the dwell began.
+        """
+        if not current:
+            return False, False
+        clipped_a, clipped_b = current["level_a"], current["level_b"]
+        if baseline and current["count_a"] is not None and baseline["count_a"] is not None:
+            clipped_a = clipped_a or current["count_a"] > baseline["count_a"]
+            clipped_b = clipped_b or current["count_b"] > baseline["count_b"]
+        return clipped_a, clipped_b
+
+    def _dwell_backoff(self, fc, gain_a, gain_b, lna_state, applied_at,
+                       overload_a, overload_b, attempt, tower_entry):
+        """Retreat one step toward safety after overload appeared mid-dwell.
+
+        Same direction of travel as the descent's own reverts: more
+        attenuation on whichever channel is clipping, and if a channel is
+        already at the gain ceiling, one step up the shared LNA axis with
+        both gains reset to the ceiling too — moving LNA is not per-channel,
+        so its neighbours have to be reproved from the safe end (see
+        _descend). Best-effort: if the device will not take the retreat,
+        report the values we asked for and let the dwell carry on; the
+        caller gives up after MAX_DWELL_BACKOFFS either way.
+
+        Returns the (gain_a, gain_b, lna_state, applied_at) now in effect.
+        """
+        new_a, new_b, new_lna = gain_a, gain_b, lna_state
+        if overload_a:
+            new_a = min(gain_a + DESCENT_STEP_DB, GAIN_REDUCTION_MAX)
+        if overload_b:
+            new_b = min(gain_b + DESCENT_STEP_DB, GAIN_REDUCTION_MAX)
+        # Gain alone cannot help a channel already at the ceiling — the
+        # clipping is upstream of it, so back the LNA off instead.
+        if ((overload_a and new_a == gain_a) or (overload_b and new_b == gain_b)) \
+                and lna_state < LNA_STATE_MAX:
+            new_lna = lna_state + 1
+            new_a = new_b = GAIN_REDUCTION_MAX
+
+        entry = {"phase": "dwell_overload_backoff", "attempt": attempt,
+                 "overload_a": overload_a, "overload_b": overload_b,
+                 "from": {"gain_a": gain_a, "gain_b": gain_b, "lna_state": lna_state},
+                 "to": {"gain_a": new_a, "gain_b": new_b, "lna_state": new_lna}}
+        tower_entry.setdefault("dwell_backoffs", []).append(entry)
+
+        new_applied_at, revert_error = self._safe_revert(
+            fc, new_a, new_b, new_lna, applied_at)
+        if revert_error:
+            entry["device_error"] = True
+            entry["device_error_detail"] = revert_error
+        self._set_current(gain_a=new_a, gain_b=new_b, lna_state=new_lna)
+        return new_a, new_b, new_lna, new_applied_at
 
     def _dwell_adsb(self, tower, fc, gain_a, initial_gain_b, lna_state, tower_entry):
         """MODE_ADSB's dwell: no time budget. Starting from descent's clean
@@ -822,6 +1176,11 @@ class Calibrator:
                     self._set_current(gain_b=previous_gain_b)
                 break
 
+            # Each gain candidate is its own watch, so each starts from an
+            # empty tracker — otherwise a match earned at the previous, more
+            # attenuating candidate would be credited to this one. See
+            # _reset_tracker.
+            self._reset_tracker()
             aircraft_seen = False
             last_timestamp = None
             while True:
@@ -929,6 +1288,10 @@ class Calibrator:
     # ── Run loop ───────────────────────────────────────────────
 
     def _run(self, towers, original, budget_seconds, dwell_seconds, mode):
+        # Must happen before the first retune: the safe-corner handover can
+        # only tell a frequency change from a no-op if it knows where the
+        # radio actually is. See _seed_last_applied_fc.
+        self._seed_last_applied_fc(original["fc"])
         result = None
         error = None
         state = "failed"
@@ -953,11 +1316,13 @@ class Calibrator:
                 self._set_current(tower_index=index, tower_name=tower.get("name"),
                                   fc=fc, gain_a=GAIN_REDUCTION_MAX,
                                   gain_b=GAIN_REDUCTION_MAX, lna_state=LNA_STATE_MAX)
-                # New geometry — a track confirmed at the previous tower (or
-                # an earlier gain candidate at this one) means nothing here.
-                self._tracker_client.reset()
-                with self._lock:
-                    self._last_confirmed_event = None
+                # The sidecar is reset at the start of each *dwell*, not here
+                # — see _reset_tracker. Resetting per tower is not enough:
+                # this client is shared with tracker_capture's always-on feed
+                # (the sidecar accepts one connection), so between a
+                # tower-start reset and the dwell the tracker keeps being fed
+                # for the whole descent and can confirm a track before the
+                # dwell begins.
                 # tower_entry stays thread-local until the tower is finished —
                 # it is only shared (appended to status history) once the run
                 # thread stops mutating it
@@ -968,24 +1333,28 @@ class Calibrator:
                     "outcome": "not_reached",
                 }
 
+                tower_started = time.monotonic()
                 if mode == MODE_ADSB:
                     # Descent is still time-bounded (it's a fast,
                     # traffic-independent overload-avoidance loop) — just not
                     # via a shrinking per-tower share of the overall budget.
-                    descent_deadline = time.monotonic() + ADSB_DESCENT_DEADLINE_SECONDS
+                    descent_deadline = tower_started + ADSB_DESCENT_DEADLINE_SECONDS
+                    tower_share = None
                 else:
-                    # This tower's total budget (descent + dwell together), so
-                    # a slow descent shrinks its own dwell rather than
-                    # overrunning into towers after it. Fixed dwell_seconds
-                    # (tests) keeps the old fixed-window behaviour; None
-                    # (production) divides whatever's left evenly across the
-                    # remaining towers.
-                    if dwell_seconds is not None:
-                        descent_deadline = min(time.monotonic() + dwell_seconds, run_deadline)
-                    else:
-                        towers_remaining = len(towers) - index
-                        time_left = max(run_deadline - time.monotonic(), 0)
-                        descent_deadline = time.monotonic() + (time_left / towers_remaining)
+                    # This tower's slice of what's left. Computed fresh per
+                    # tower so unused time from a quick tower rolls forward
+                    # rather than being lost, and so no tower can overrun
+                    # into the ones after it.
+                    towers_remaining = len(towers) - index
+                    time_left = max(run_deadline - tower_started, 0)
+                    tower_share = time_left / towers_remaining
+                    # Descent may only take part of the slice; the rest is
+                    # reserved for the dwell so this tower is always
+                    # actually watched. See MAX_DESCENT_FRACTION.
+                    descent_deadline = min(
+                        tower_started + tower_share * MAX_DESCENT_FRACTION,
+                        tower_started + DESCENT_BACKSTOP_SECONDS,
+                        run_deadline)
 
                 try:
                     gain_a, gain_b, lna_state, applied_at = self._descend(
@@ -997,30 +1366,73 @@ class Calibrator:
                         top_tower_resolved = (gain_a, gain_b, lna_state)
                     self._set_current(gain_a=gain_a, gain_b=gain_b, lna_state=lna_state)
 
-                    if mode == MODE_ADSB:
+                    # Never dwell on tuning the device did not actually take:
+                    # the dwell would measure whatever it is really on and
+                    # report the answer against this tower. See
+                    # _verify_applied.
+                    verified_at, tuning_error = self._verify_applied(
+                        fc, gain_a, gain_b, lna_state)
+                    if tuning_error:
+                        tower_entry["outcome"] = "tuning_not_applied"
+                        tower_entry["tuning_error"] = tuning_error
+                        tower_entry["device_error"] = True
+                        result = None
+                    elif mode == MODE_ADSB:
+                        applied_at = verified_at
                         result = self._dwell_adsb(tower, fc, gain_a, gain_b, lna_state,
                                                   tower_entry)
-                    elif time.monotonic() >= descent_deadline:
-                        # Descent alone used this tower's whole budget —
-                        # be honest that it was never actually watched,
-                        # rather than recording a misleading "checked,
-                        # nothing there".
-                        tower_entry["outcome"] = "skipped_no_time"
-                        result = None
                     else:
-                        dwell_started = time.monotonic()
-                        result = self._dwell(tower, fc, gain_a, gain_b, lna_state, applied_at,
-                                             descent_deadline, tower_entry)
-                        tower_entry["dwell_seconds"] = round(time.monotonic() - dwell_started, 1)
+                        # Use the device's own applied-at, not descent's —
+                        # descent's can be a previous candidate's timestamp
+                        # when a retune failed, which would let stale
+                        # detections through the dwell's freshness guard.
+                        applied_at = verified_at
+                        # Dwell gets the rest of this tower's slice — the
+                        # part descent was capped out of. A slow descent
+                        # therefore shortens its own dwell but can never
+                        # delete it. Fixed dwell_seconds (tests) pins the
+                        # window to a known length instead.
+                        now = time.monotonic()
+                        if dwell_seconds is not None:
+                            dwell_deadline = min(now + dwell_seconds, run_deadline)
+                        else:
+                            dwell_deadline = min(tower_started + tower_share, run_deadline)
+
+                        if dwell_deadline <= now:
+                            # The run budget is genuinely exhausted — this
+                            # tower was tuned but never actually watched. Say
+                            # so, rather than recording a misleading
+                            # "checked, nothing there".
+                            tower_entry["outcome"] = "skipped_no_time"
+                            result = None
+                        else:
+                            dwell_started = now
+                            result = self._dwell(tower, fc, gain_a, gain_b, lna_state,
+                                                 applied_at, dwell_deadline, tower_entry)
+                            tower_entry["dwell_seconds"] = round(
+                                time.monotonic() - dwell_started, 1)
                 finally:
                     if (any(e.get("device_error") for e in tower_entry.get("descent", ())) or
                             any(e.get("device_error") for e in tower_entry.get("gains_tried", ()))):
                         tower_entry["device_error"] = True
+                    # A mid-dwell backoff moves the operating point after
+                    # descent resolved it, so re-read the tower's own final
+                    # values here — the no-track fallback leaves the device
+                    # on these, and must not restore one already abandoned
+                    # for overloading.
+                    if index == 0 and tower_entry.get("final_lna_state") is not None:
+                        top_tower_resolved = (tower_entry["final_gain_a"],
+                                              tower_entry["final_gain_b"],
+                                              tower_entry["final_lna_state"])
                     self._append_history(tower_entry)
                     self._update_progress(towers_tried=index + 1)
 
                 if result is not None:
-                    result["lna_state"] = lna_state
+                    # MODE_TRACK's dwell reports its own lna_state, which may
+                    # have moved since descent resolved it (see
+                    # _dwell_backoff). Only fill it in for a dwell that
+                    # didn't — never overwrite it with a stale value.
+                    result.setdefault("lna_state", lna_state)
                     state = "done"
                     break
 

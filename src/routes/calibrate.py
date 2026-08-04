@@ -11,7 +11,12 @@ bp = Blueprint('calibrate', __name__, url_prefix='/calibrate')
 
 # Total towers tried per run, including the currently-configured one — the
 # tower-finder already ranks by expected signal, so this is the best N.
-MAX_TOWERS = 5
+# Deliberately small: every tower costs a full descent (up to ~4.5 minutes on
+# a node that never overloads) plus its own dwell, and dwell is where success
+# actually comes from. Towers past the top-ranked one are speculative, so
+# trading tower count for dwell time is the right way round — a run that
+# searches five towers but dwells on none of them searches nothing at all.
+MAX_TOWERS = 3
 
 # AGC bandwidths that enable hardware AGC on the reference channel — the AGC
 # would fight the gain search, so calibration refuses to run with these set.

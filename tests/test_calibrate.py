@@ -43,13 +43,25 @@ class FakeBlah2Client:
     """
 
     def __init__(self, overload_rule=None, detection=None, adsb_tracks=None,
-                 retune_fail_rule=None, overload_status_fail_rule=None):
+                 retune_fail_rule=None, overload_status_fail_rule=None,
+                 transient_overload=False):
         self.clock_ms = 1000
         self.generation = 0
         self.applied = []
         self.retune_error = None
         self.ack_enabled = True
         self.rf_enabled = True
+        # Monotonic onset counts, mirroring blah2's own. Real overload is an
+        # event stream, not a stable property of the tuning: the device clips
+        # and recovers faster than anything polls it.
+        self.overload_counts = [0, 0]
+        self._last_overload = (False, False)
+        # When set, an overload episode is over before anyone can observe it:
+        # the reported *level* stays False while the counts still rise. This
+        # is what real hardware does (measured: 9 detect/correct cycles in 90s
+        # with every level sample reading false), and modelling it is what
+        # makes a level-watching consumer fail these tests as it should.
+        self.transient_overload = transient_overload
         self.overload_rule = overload_rule or (lambda fc, ga, gb, lna: (False, False))
         self.detection = detection or (lambda client: None)
         self.adsb_tracks = adsb_tracks or (lambda client: None)
@@ -99,8 +111,22 @@ class FakeBlah2Client:
             return None
         overload_a, overload_b = self.overload_rule(
             cur["fc"], cur["gain_a"], cur["gain_b"], cur["lna_state"])
+        # Count onsets, exactly as blah2's driver callback does.
+        if overload_a and not self._last_overload[0]:
+            self.overload_counts[0] += 1
+        if overload_b and not self._last_overload[1]:
+            self.overload_counts[1] += 1
+        self._last_overload = (overload_a, overload_b)
+        if self.transient_overload:
+            # Episode already over by the time anyone looks — counts rose,
+            # level reads clean. A consumer that only samples the level sees
+            # nothing at all here.
+            self._last_overload = (False, False)
+            overload_a = overload_b = False
         return {"overloadA": overload_a, "overloadB": overload_b,
-                "timestamp": self._now()}
+                "timestamp": self._now(),
+                "overloadCountA": self.overload_counts[0],
+                "overloadCountB": self.overload_counts[1]}
 
     def get_detection(self):
         return self.detection(self)
@@ -162,6 +188,7 @@ class FakeRetinaTrackerClient:
 ORIGINAL = {"fc": 98_000_000, "gain_a": 40, "gain_b": 41, "lna_state": 4}
 TOWER = {"name": "Tower One", "fc": 98_000_000}
 TOWER_TWO = {"name": "Tower Two", "fc": 105_100_000}
+TOWER_THREE = {"name": "Tower Three", "fc": 213_000_000}
 
 
 def moving_track_detections(delay=10.0, doppler=50.0, snr=15.0, step_ms=500):
@@ -709,6 +736,83 @@ class TestMultiTower:
             assert entry["outcome"] == "no_confirmed_track"
             assert entry.get("dwell_seconds", 0) > 0
 
+    def test_long_descent_no_longer_starves_its_own_dwell(self, fast, monkeypatch):
+        """Descent and dwell are budgeted separately, so a descent long
+        enough to have exhausted a shared per-tower allowance still leaves
+        the tower an actual dwell.
+
+        Regression: descent and dwell used to share one per-tower deadline
+        (remaining budget / remaining towers). On any node whose descent
+        walks more than a few LNA states that deadline expired mid-descent,
+        so every tower came back 'skipped_no_time' and a whole run could be
+        spent retuning without ever watching for an aircraft once. Measured
+        on real hardware: ~148s of descent against a 120s per-tower share.
+        """
+        # A clean node is the expensive case: nothing ever overloads, so the
+        # descent walks the entire LNA ladder (9 states, both tuners each).
+        monkeypatch.setattr(calmod, "OVERLOAD_SETTLE_SECONDS", 0.02)
+        client = FakeBlah2Client()
+        cal = Calibrator(client, FakeRetinaTrackerClient())
+        started, error = cal.start([TOWER, TOWER_TWO], ORIGINAL, budget_seconds=6.0)
+        assert started, error
+        cal._thread.join(timeout=20)
+        status = cal.get_status()
+
+        first = status["history"][0]
+        # Descent ran to its natural end rather than being cut off...
+        assert first["final_lna_state"] == LNA_STATE_MIN
+        assert any(e.get("lna_state") == LNA_STATE_MIN for e in first["descent"])
+        # ...and the dwell it used to starve actually happened.
+        assert first["outcome"] == "no_confirmed_track"
+        assert first.get("dwell_seconds", 0) > 0
+
+    def test_every_tower_is_watched_even_when_every_descent_is_slow(self, fast, monkeypatch):
+        """The guarantee MAX_DESCENT_FRACTION buys: no tower is ever tuned
+        and then not looked at.
+
+        Budgeting descent and dwell separately is not sufficient on its own
+        — descents long enough to each hit their own ceiling would still
+        consume the whole run between them. Capping descent at a fraction
+        of each tower's slice is what makes a dwell unconditional.
+        """
+        monkeypatch.setattr(calmod, "OVERLOAD_SETTLE_SECONDS", 0.02)
+        client = FakeBlah2Client()
+        cal = Calibrator(client, FakeRetinaTrackerClient())
+        # Deliberately tight: a full clean descent wants more than any one
+        # tower's slice here, so every tower's descent gets cut short.
+        started, error = cal.start([TOWER, TOWER_TWO, TOWER_THREE], ORIGINAL,
+                                   budget_seconds=3.0)
+        assert started, error
+        cal._thread.join(timeout=20)
+        status = cal.get_status()
+
+        assert len(status["history"]) == 3
+        for entry in status["history"]:
+            assert entry["outcome"] == "no_confirmed_track", (
+                f"{entry['tower_name']} was tuned but never watched")
+            assert entry.get("dwell_seconds", 0) > 0
+
+    def test_descent_backstop_bounds_descent_without_killing_dwell(self, fast, monkeypatch):
+        """The descent ceiling exists to contain a wedged device, not to
+        ration dwell: hitting it truncates the search but the tower is
+        still watched, because the dwell window is derived afterwards from
+        the run budget that remains."""
+        monkeypatch.setattr(calmod, "OVERLOAD_SETTLE_SECONDS", 0.02)
+        monkeypatch.setattr(calmod, "DESCENT_BACKSTOP_SECONDS", 0.05)
+        client = FakeBlah2Client()
+        cal = Calibrator(client, FakeRetinaTrackerClient())
+        started, error = cal.start([TOWER], ORIGINAL, budget_seconds=5.0)
+        assert started, error
+        cal._thread.join(timeout=20)
+        status = cal.get_status()
+
+        entry = status["history"][0]
+        # Truncated well before the ladder's end...
+        assert entry["final_lna_state"] > LNA_STATE_MIN
+        # ...yet still dwelt, on budget the descent never got to consume.
+        assert entry["outcome"] == "no_confirmed_track"
+        assert entry.get("dwell_seconds", 0) > 0
+
     def test_slow_descent_yields_honest_skipped_outcome(self, fast):
         """If a tower's own descent consumes its whole share of the budget,
         it must be marked as never actually watched — not as a false
@@ -723,6 +827,228 @@ class TestMultiTower:
         status = cal.get_status()
         assert status["state"] == "failed"
         assert any(e["outcome"] == "skipped_no_time" for e in status["history"])
+
+
+class TestTuningVerifiedBeforeDwell:
+    """A dwell must never run against tuning the device did not take.
+
+    Regression: when a candidate's retune failed, _probe returned the
+    *previous* candidate's applied_at, so the dwell's freshness guard still
+    passed for detections produced by the old tuning. The dwell looked
+    healthy while measuring a different frequency and reported the answer
+    against the tower it thought it was on. Observed live: minutes of dwell
+    labelled WWLP/201MHz while blah2 was still tuned to 545MHz.
+    """
+
+    def test_tower_whose_retune_never_applied_is_not_dwelt_on(self, fast):
+        # blah2 refuses this tower's frequency outright, so nothing the
+        # descent asks for is ever actually applied there.
+        client = FakeBlah2Client(
+            retune_fail_rule=lambda fc, ga, gb, lna: fc == TOWER_TWO["fc"])
+        tracker_client = FakeRetinaTrackerClient(confirm_after=1)
+        cal = Calibrator(client, tracker_client)
+        status = run_to_completion(cal, [TOWER, TOWER_TWO], dwell=0.3)
+
+        second = status["history"][1]
+        assert second["outcome"] == "tuning_not_applied", (
+            f"dwelt on tuning that was never applied: {second}")
+        assert "tuning_error" in second
+        assert second.get("dwell_seconds") is None, "should not have dwelt at all"
+
+    def test_verified_tuning_still_dwells_normally(self, fast):
+        client = FakeBlah2Client(detection=moving_track_detections())
+        cal = Calibrator(client, FakeRetinaTrackerClient(confirm_after=1))
+        status = run_to_completion(cal, [TOWER], dwell=1.0)
+        assert status["state"] == "done"
+        assert status["history"][0]["outcome"] == "confirmed_track"
+
+
+class TestDwellOverloadBackoff:
+    """Descent takes one overload sample per candidate, which cannot tell a
+    clean operating point from one that clips intermittently. The dwell is
+    the long phase, so an unstable point accepted by descent is sat on for
+    minutes — observed live degrading the SDRplay API until every later
+    retune in the run failed. The dwell therefore keeps watching."""
+
+    def test_overload_during_dwell_retreats_toward_safety(self, fast, monkeypatch):
+        monkeypatch.setattr(calmod, "DWELL_OVERLOAD_CHECK_SECONDS", 0.02)
+        # Clean while descending, but the resolved point clips once dwelling.
+        state = {"dwelling": False}
+
+        def overload_rule(fc, ga, gb, lna):
+            return (state["dwelling"] and gb < GAIN_REDUCTION_MAX, False)
+
+        client = FakeBlah2Client(overload_rule=overload_rule)
+        cal = Calibrator(client, FakeRetinaTrackerClient())
+        original_dwell = cal._dwell
+
+        def dwell(*a, **kw):
+            state["dwelling"] = True
+            return original_dwell(*a, **kw)
+
+        cal._dwell = dwell
+        status = run_to_completion(cal, [TOWER], dwell=2.0)
+
+        entry = status["history"][0]
+        backoffs = entry.get("dwell_backoffs") or []
+        assert backoffs, "overload during dwell was not acted on"
+        first = backoffs[0]
+        # Retreat must move toward *more* attenuation, never less.
+        assert (first["to"]["gain_a"] >= first["from"]["gain_a"]
+                or first["to"]["lna_state"] > first["from"]["lna_state"])
+
+    def test_persistent_dwell_overload_gives_up_on_the_tower(self, fast, monkeypatch):
+        monkeypatch.setattr(calmod, "DWELL_OVERLOAD_CHECK_SECONDS", 0.02)
+        state = {"dwelling": False}
+        # Overloads at every setting once dwelling — no retreat can help.
+        client = FakeBlah2Client(
+            overload_rule=lambda fc, ga, gb, lna: (state["dwelling"], False))
+        cal = Calibrator(client, FakeRetinaTrackerClient())
+        original_dwell = cal._dwell
+
+        def dwell(*a, **kw):
+            state["dwelling"] = True
+            return original_dwell(*a, **kw)
+
+        cal._dwell = dwell
+        status = run_to_completion(cal, [TOWER], dwell=3.0)
+
+        entry = status["history"][0]
+        assert entry["outcome"] == "unstable_overload"
+        assert len(entry.get("dwell_backoffs") or []) == calmod.MAX_DWELL_BACKOFFS
+
+    def test_transient_overload_is_caught_even_though_the_level_reads_clean(
+            self, fast, monkeypatch):
+        """The case that matters, and the one a level-watching dwell misses.
+
+        Real overload episodes end faster than anyone polls: measured on a
+        live node, 9 detect/correct cycles inside 90s with every sample of
+        the level reading false throughout. A dwell that samples the flags
+        therefore sat on a visibly unstable operating point and never once
+        noticed. Comparing blah2's monotonic onset counts cannot miss an
+        episode regardless of poll rate.
+        """
+        monkeypatch.setattr(calmod, "DWELL_OVERLOAD_CHECK_SECONDS", 0.02)
+        state = {"dwelling": False}
+        client = FakeBlah2Client(
+            overload_rule=lambda fc, ga, gb, lna: (state["dwelling"], False),
+            transient_overload=True)
+        cal = Calibrator(client, FakeRetinaTrackerClient())
+        original_dwell = cal._dwell
+
+        def dwell(*a, **kw):
+            state["dwelling"] = True
+            return original_dwell(*a, **kw)
+
+        cal._dwell = dwell
+        status = run_to_completion(cal, [TOWER], dwell=2.0)
+
+        entry = status["history"][0]
+        # The level never reads True, so this only passes by counting.
+        assert entry.get("dwell_backoffs"), (
+            "transient overload went unnoticed - the dwell is watching the "
+            "level instead of the onset counts")
+
+    def test_stable_dwell_never_backs_off(self, fast, monkeypatch):
+        monkeypatch.setattr(calmod, "DWELL_OVERLOAD_CHECK_SECONDS", 0.02)
+        client = FakeBlah2Client()  # never overloads
+        cal = Calibrator(client, FakeRetinaTrackerClient())
+        status = run_to_completion(cal, [TOWER], dwell=1.0)
+        entry = status["history"][0]
+        assert entry["outcome"] == "no_confirmed_track"
+        assert not entry.get("dwell_backoffs")
+
+
+class TestSafeFrequencyHandover:
+    """blah2's driver applies fc before gain within one retune, so moving to
+    a new tower directly from a sensitive operating point parks the front end
+    on the new frequency at the old tower's gain. Verified on real hardware:
+    213 MHz at (59,59,lna 9) is clean from a safe state and saturates from
+    (49,20,lna 1) at 201 MHz — same destination, different origin. Every fc
+    change must therefore hand over via the safe corner first.
+    """
+
+    def test_frequency_change_is_preceded_by_the_safe_corner(self, fast):
+        client = FakeBlah2Client()
+        cal = Calibrator(client, FakeRetinaTrackerClient())
+        run_to_completion(cal, [TOWER, TOWER_TWO], dwell=0.05)
+
+        # Every retune that changed fc must be immediately preceded by one
+        # at the previous fc sitting at the safe corner.
+        applied = client.applied
+        changes = [i for i in range(1, len(applied))
+                   if applied[i]["fc"] != applied[i - 1]["fc"]]
+        assert changes, "expected at least one frequency change"
+        for i in changes:
+            previous = applied[i - 1]
+            assert (previous["gain_a"], previous["gain_b"], previous["lna_state"]) == (
+                GAIN_REDUCTION_MAX, GAIN_REDUCTION_MAX, LNA_STATE_MAX), (
+                f"fc changed to {applied[i]['fc']} from an unsafe tuning: {previous}")
+
+    def test_handover_happens_when_the_device_has_drifted_from_config(self, fast):
+        """The handover must key off where the radio actually is, not where
+        config says it is.
+
+        Regression, seen live and it wedged the radio: a previous run had
+        found a track at 213MHz and was never persisted, so config.yml still
+        said 545MHz while blah2 sat on 213MHz at a sensitive gain. Seeding
+        from config made the calibrator believe it was already on the first
+        tower's frequency, so it saw no change, skipped the handover, and
+        moved fc into a strong local tower at that gain. Every retune after
+        that failed and the run died in 42s.
+        """
+        client = FakeBlah2Client()
+        # The radio is genuinely somewhere else — as after an unpersisted run.
+        client.retune(TOWER_TWO["fc"], 59, 44, 5)
+        cal = Calibrator(client, FakeRetinaTrackerClient())
+        drifted = len(client.applied)
+
+        # `original` reports the *config* frequency, which equals the first
+        # tower's — so a config-seeded handover would think nothing changed.
+        run_to_completion(cal, [TOWER], original=ORIGINAL, dwell=0.1)
+
+        first = client.applied[drifted]
+        assert first["fc"] == TOWER_TWO["fc"], (
+            "first retune should be the safe-corner handover at the "
+            f"device's real fc, got {first}")
+        assert (first["gain_a"], first["gain_b"], first["lna_state"]) == (
+            GAIN_REDUCTION_MAX, GAIN_REDUCTION_MAX, LNA_STATE_MAX), (
+            f"handover must be at the safe corner, got {first}")
+
+    def test_gain_only_steps_do_not_add_a_handover(self, fast):
+        """The handover is for frequency changes only — a descent's own
+        gain steps share one fc and must not pay for an extra retune each."""
+        client = FakeBlah2Client()
+        cal = Calibrator(client, FakeRetinaTrackerClient())
+        run_to_completion(cal, [TOWER], dwell=0.05)
+
+        applied = client.applied
+        safe_corner = (GAIN_REDUCTION_MAX, GAIN_REDUCTION_MAX, LNA_STATE_MAX)
+        # Only the descent's own legitimate visits to the safe corner should
+        # appear — no consecutive duplicate pair from a spurious handover.
+        for i in range(1, len(applied)):
+            a, b = applied[i - 1], applied[i]
+            if a["fc"] == b["fc"]:
+                assert not (
+                    (a["gain_a"], a["gain_b"], a["lna_state"]) == safe_corner
+                    and (b["gain_a"], b["gain_b"], b["lna_state"]) == safe_corner), (
+                    f"redundant safe-corner retune at unchanged fc: {a} -> {b}")
+
+    def test_handover_failure_does_not_abort_the_run(self, fast):
+        """A device that won't even take the handover is not a fatal
+        condition — the caller's own retune surfaces it through the normal
+        per-candidate path instead."""
+        # Fail only the safe-corner retune at the first tower's frequency.
+        def fail_handover(fc, ga, gb, lna):
+            return (fc == TOWER["fc"] and (ga, gb, lna)
+                    == (GAIN_REDUCTION_MAX, GAIN_REDUCTION_MAX, LNA_STATE_MAX))
+
+        client = FakeBlah2Client(retune_fail_rule=fail_handover)
+        cal = Calibrator(client, FakeRetinaTrackerClient())
+        status = run_to_completion(cal, [TOWER, TOWER_TWO], dwell=0.05)
+        # The run still reached a terminal state rather than erroring out.
+        assert status["state"] in ("failed", "done")
+        assert len(status["history"]) == 2
 
 
 class TestNoTrackFallback:
@@ -756,17 +1082,51 @@ class TestNoTrackFallback:
 
 class TestTrackerSidecarIntegration:
     """Directly exercises the shared-sidecar-specific mechanics that don't
-    have another natural home: per-tower reset and the staleness guard on
+    have another natural home: per-dwell reset and the staleness guard on
     confirmed events (see calibrator.py's _take_confirmed_event)."""
 
-    def test_resets_tracker_before_each_towers_search(self, fast):
+    def test_resets_tracker_at_the_start_of_every_dwell(self, fast):
         client = FakeBlah2Client()
         tracker_client = FakeRetinaTrackerClient()
         cal = Calibrator(client, tracker_client)
-        started, error = cal.start([TOWER, TOWER_TWO], ORIGINAL, budget_seconds=0.05)
-        assert started, error
-        cal._thread.join(timeout=10)
+        run_to_completion(cal, [TOWER, TOWER_TWO], dwell=0.2)
+        # One per dwell — the scope that matters, since the sidecar is fed by
+        # tracker_capture throughout the descent too (see _reset_tracker).
         assert tracker_client.reset_calls == 2
+
+    def test_confirmation_waiting_before_the_dwell_is_not_credited(self, fast):
+        """The regression: a track confirmed from tracker_capture's always-on
+        feed *during the descent* must not be handed to the dwell as though
+        the dwell had observed it.
+
+        Reset used to be per-tower, so anything the sidecar accumulated over
+        the whole descent — 150s on a live node — was still there when the
+        dwell started. Seen live as a confirmed track with dwell_seconds 0.0,
+        credited to a tuning it had observed nothing at. The applied_at guard
+        does not catch it: the event's timestamp legitimately post-dates the
+        retune.
+        """
+        client = FakeBlah2Client()
+        # Never confirms from this dwell's own frames, so a success here
+        # could only have come from the pre-planted event below.
+        tracker_client = FakeRetinaTrackerClient()
+        cal = Calibrator(client, tracker_client)
+        original_dwell = cal._dwell
+
+        def dwell(*args, **kwargs):
+            # Stand in for the descent-time confirmation: recent enough to
+            # clear applied_at, but earned before this dwell watched anything.
+            cal._on_track_event({"track_id": "earned-during-descent",
+                                 "timestamp": 10 ** 13})
+            return original_dwell(*args, **kwargs)
+
+        cal._dwell = dwell
+        status = run_to_completion(cal, [TOWER], dwell=0.3)
+
+        assert status["state"] != "done", (
+            "credited a track the dwell never observed - the tracker is not "
+            "being reset at dwell start")
+        assert status["history"][0]["outcome"] == "no_confirmed_track"
 
     def test_stale_confirmed_event_before_applied_at_is_ignored(self):
         # A confirmed event generated before this candidate's applied_at —
