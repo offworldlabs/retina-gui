@@ -103,7 +103,25 @@ device_state = DeviceState(
     dev_mode=DEV_MODE,
 )
 
-apply_service = ApplyService(RETINA_NODE_PATH, dev_mode=DEV_MODE)
+def config_change_guard():
+    """Refuse a config apply while Auto-Calibrate is using the SDR.
+
+    Both signals are needed, as elsewhere: is_running() is authoritative for
+    this process and never expires, while the lock file also covers a run
+    left behind by a crashed or restarted GUI. See ApplyService's
+    ConfigChangeRefused for why this is enforced there rather than per-route.
+
+    `calibrator` is defined below this point, which is fine: the name is
+    resolved when the guard runs, not when it is defined.
+    """
+    if calibrator.is_running() or device_state.is_calibration_locked()[0]:
+        return False, ("Auto-calibration is running. Cancel it before "
+                       "changing configuration")
+    return True, None
+
+
+apply_service = ApplyService(RETINA_NODE_PATH, dev_mode=DEV_MODE,
+                             guard=config_change_guard)
 blah2_client = Blah2Client(BLAH2_API_URL)
 # One client per sidecar, shared by every feature that talks to it — its TCP
 # server accepts a single connection at a time, so a second instance does not

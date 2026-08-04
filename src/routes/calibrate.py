@@ -84,7 +84,7 @@ def _fetch_alternate_towers(merged, current_fc, limit):
 @bp.route("/start", methods=["POST"])
 def start():
     """Start an auto-calibration run against the live radar."""
-    from app import calibrator, config_mgr, device_state
+    from app import apply_service, calibrator, config_mgr, device_state
     from routes.mode import get_current_mode
 
     if not config_mgr.is_retina_node_installed():
@@ -96,6 +96,19 @@ def start():
     ok, reason = device_state.can_start_calibration()
     if not ok:
         return jsonify({"success": False, "error": reason}), 409
+
+    # The refusal has to run both ways. ApplyService stops a config apply
+    # starting during a run; this stops a run starting during an apply, which
+    # nothing covered — can_start_calibration() knows about Mender installs
+    # but not about the ~45s stack restart an apply performs. Hit by accident
+    # while testing: Apply Changes, then Auto-Calibrate a few seconds later,
+    # and every retune failed against restarting containers. All three towers
+    # came back tuning_not_applied, which is honest but is a whole run wasted
+    # on something that could simply have been refused.
+    if apply_service.is_running():
+        return jsonify({"success": False,
+                        "error": "A configuration change is still being applied. "
+                                 "Wait for it to finish before calibrating"}), 409
 
     merged = config_mgr.load_merged_config()
     capture = merged.get('capture', {}) or {}
@@ -160,8 +173,28 @@ def start():
 
 @bp.route("/status", methods=["GET"])
 def status():
-    from app import calibrator
-    return jsonify(calibrator.get_status())
+    from app import calibrator, device_state
+
+    payload = calibrator.get_status()
+
+    # A Mender deployment pushed from the server installs autonomously —
+    # mender-updated polls on its own and retina-gui is never consulted, so
+    # unlike /mender/install there is no guard that can refuse it. It
+    # replaces the containers underneath a run, after which every retune
+    # fails; the run then reports tuning_not_applied and gets abandoned for
+    # no reason the user can see. Annotating the status the modal already
+    # polls turns that from a mystery into an explanation. Cheap enough to
+    # do on every poll: it is a file-exists check plus a small JSON read.
+    #
+    # Deliberately reported rather than prevented. Blocking deployments
+    # would mean publishing Mender Update Control maps, and a map left
+    # behind by a crashed GUI would stall the fleet's updates - a worse
+    # failure than the one being avoided. Judged an accepted risk: the
+    # overlap window is narrow and the run already fails safely.
+    in_progress, reason = device_state.is_any_update_in_progress()
+    payload["system_update"] = reason if in_progress else None
+
+    return jsonify(payload)
 
 
 @bp.route("/cancel", methods=["POST"])

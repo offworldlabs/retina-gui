@@ -120,7 +120,10 @@
 
         {% if config_errors %}
         <div style="background:oklch(0.96 0.04 25);border:1px solid var(--danger);border-radius:var(--r-md);padding:12px 16px;margin-bottom:18px;font-size:13px;color:var(--danger);">
-            Please fix the highlighted fields below.
+            {# A form-level refusal (e.g. a calibration holding the SDR) has no
+               field to highlight, so say what actually happened instead. #}
+            {{ config_errors['_form'] if config_errors.get('_form')
+               else 'Please fix the highlighted fields below.' }}
         </div>
         {% endif %}
 
@@ -1377,14 +1380,84 @@ if (discardBtn) discardBtn.addEventListener('click', () => location.reload());
         return m + ':' + (r < 10 ? '0' : '') + r;
     }
 
+    function escapeHtml(s) {
+        var d = document.createElement('div');
+        d.textContent = s;
+        return d.innerHTML;
+    }
+
+    // Per-tower outcomes the engine records but the run's summary message
+    // cannot express. Without these every failure reads as "probably no
+    // aircraft", including the ones that never looked for one.
+    var OUTCOME_TEXT = {
+        no_confirmed_track: 'watched, but nothing confirmed',
+        confirmed_track: 'confirmed a track',
+        skipped_no_time: 'never watched — the search ran out of time here',
+        tuning_not_applied: 'never watched — the radio did not accept this tuning',
+        unstable_overload: 'stopped — the signal kept overloading the receiver',
+        not_reached: 'not reached'
+    };
+
+    function diagnose(history) {
+        if (!history.length) return '';
+        var watched = history.filter(function(h) {
+            return h.outcome === 'no_confirmed_track' || h.outcome === 'confirmed_track';
+        }).length;
+        var lines = history.map(function(h) {
+            var txt = OUTCOME_TEXT[h.outcome] || h.outcome || 'unknown';
+            var extra = '';
+            if (h.dwell_seconds) extra = ' (' + Math.round(h.dwell_seconds) + 's)';
+            if (h.tuning_error) extra += ' — ' + escapeHtml(h.tuning_error);
+            return '<div>' + escapeHtml(h.tower_name || 'Tower') + ': ' + txt + extra + '</div>';
+        });
+        var lead = watched === 0
+            ? '<strong>No tower was actually watched, so this is not evidence '
+              + 'about aircraft.</strong><br>'
+            : '';
+        return lead + lines.join('');
+    }
+
     function setTerminalButtons() {
         spinner.style.display = 'none';
         cancelBtn.style.display = 'none';
         closeBtn.style.display = '';
     }
 
+    // The server refuses config changes during a run (see ApplyService's
+    // ConfigChangeRefused), but being refused after filling in a form is a
+    // poor way to find out. Reflect it in the page too.
+    function setConfigLockedOut(locked) {
+        var apply = document.getElementById('applyBtn');
+        if (apply) {
+            apply.disabled = locked;
+            apply.title = locked
+                ? 'Auto-calibration is running. Cancel it before changing configuration.'
+                : '';
+        }
+        // Tower controls apply immediately (they POST /towers/select, which
+        // restarts the stack), so they need locking out too.
+        document.querySelectorAll('#towerPresetSelect, .tower-remove-btn')
+            .forEach(function(el) { el.disabled = locked; });
+    }
+
+    // A server-pushed Mender deployment installs on its own schedule and
+    // cannot be refused from here, so it can replace the containers under a
+    // run. Say so rather than let the run die unexplained.
+    function updateWarning(status) {
+        if (!status.system_update) return '';
+        return '<div style="margin-top:10px;padding:8px 10px;border-radius:6px;'
+            + 'background:oklch(0.96 0.04 85);border:1px solid var(--warn,#b7791f);'
+            + 'color:var(--warn,#b7791f);font-size:12.5px;">'
+            + '<strong>A system update is installing.</strong> '
+            + escapeHtml(status.system_update)
+            + '. It restarts the radar, so this calibration will not complete '
+            + 'and its results should be ignored. Run it again once the update '
+            + 'has finished.</div>';
+    }
+
     function render(status) {
         lastStatus = status;
+        setConfigLockedOut(status.state === 'running');
         if (status.state === 'running') {
             phaseText.textContent = PHASE_LABELS[status.phase] || 'Starting…';
             if (status.current) {
@@ -1416,6 +1489,11 @@ if (discardBtn) discardBtn.addEventListener('click', () => location.reload());
                     + ', LNA state ' + status.best_attempt.lna_state
                     + ': ' + status.best_attempt.reason;
             }
+            // Warn the moment a deployment starts, not once the run has
+            // already died of it.
+            var warnNow = updateWarning(status);
+            errorEl.style.display = warnNow ? '' : 'none';
+            errorEl.innerHTML = warnNow;
             return;
         }
 
@@ -1438,7 +1516,23 @@ if (discardBtn) discardBtn.addEventListener('click', () => location.reload());
         } else {
             phaseText.textContent = status.state === 'cancelled' ? 'Cancelled' : 'No calibration found';
             errorEl.style.display = '';
-            errorEl.textContent = status.error || '';
+            errorEl.innerHTML = escapeHtml(status.error || '');
+            // The run's own message assumes the towers were actually watched.
+            // When they weren't — the tuning never reached the device, the
+            // operating point kept clipping, or time ran out mid-search —
+            // saying "no aircraft was overhead" is simply wrong, and it is
+            // the failure the user most needs to distinguish. Report what the
+            // engine actually determined, per tower.
+            // A deployment restarting the radar is the explanation, so lead
+            // with it rather than leaving the per-tower failures to imply
+            // something about the tuning or the sky.
+            errorEl.innerHTML += updateWarning(status);
+            var diagnosis = diagnose(status.history || []);
+            if (diagnosis) {
+                errorEl.innerHTML += '<div style="margin-top:8px;padding:8px 10px;'
+                    + 'background:var(--surface-2,rgba(128,128,128,.08));border-radius:6px;'
+                    + 'color:var(--ink-2);font-size:12.5px;">' + diagnosis + '</div>';
+            }
             if (status.best_attempt) {
                 best.style.display = '';
                 best.innerHTML = 'Closest attempt: ' + mhz(status.best_attempt.fc)
@@ -1480,18 +1574,54 @@ if (discardBtn) discardBtn.addEventListener('click', () => location.reload());
         applyBtn.textContent = 'Persist to config';
     }
 
+    // Show the in-progress view rather than the "start a run" prompt — used
+    // both when starting one and when reattaching to one already going.
+    function showRunning() {
+        setupEl.style.display = 'none';
+        startBtn.style.display = 'none';
+        setupCancelBtn.style.display = 'none';
+        phase.style.display = 'flex';
+        spinner.style.display = '';
+        cancelBtn.style.display = '';
+    }
+
     btn.addEventListener('click', function() {
         resetModal();
         modal.show();
     });
 
+    // A run outlives the page: it is a background thread on the node, not
+    // something this tab owns. Without reattaching, navigating away or
+    // refreshing left it going with no way to see or cancel it — the Cancel
+    // button only ever appeared for the tab that started the run, so the only
+    // recourse was to wait out the full budget. Reattach on load so any tab
+    // can watch and stop it.
+    (function reattachIfRunning() {
+        fetch('/calibrate/status')
+            .then(function(r) { return r.json(); })
+            .then(function(status) {
+                if (status.state !== 'running') return;
+                resetModal();
+                showRunning();
+                render(status);
+                modal.show();
+                poll();
+            })
+            .catch(function() { /* nothing running, or GUI busy — ignore */ });
+    })();
+
+    // Leaving does not stop the run, but people assume it does, and a run
+    // holds the SDR and blocks config changes for its whole budget.
+    window.addEventListener('beforeunload', function(e) {
+        if (lastStatus && lastStatus.state === 'running') {
+            e.preventDefault();
+            e.returnValue = '';
+        }
+    });
+
     startBtn.addEventListener('click', function() {
         var mode = document.querySelector('input[name="calMode"]:checked').value;
-        setupEl.style.display = 'none';
-        startBtn.style.display = 'none';
-        setupCancelBtn.style.display = 'none';
-        phase.style.display = 'flex';
-        cancelBtn.style.display = '';
+        showRunning();
         fetch('/calibrate/start', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrf },

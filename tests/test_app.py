@@ -617,6 +617,168 @@ class TestApplyConfigRoute:
         assert data['settle_remaining'] == 12
 
 
+class TestNavigationLockedToConfigDuringCalibration:
+    """A run is only visible in one place — the modal on /config — while it
+    owns the SDR for up to 15 minutes and blocks every config change.
+    Navigating away stranded it: nothing else in the GUI showed it was
+    happening, and the Cancel button existed only on that page. So while one
+    is running, GET navigation is held on /config."""
+
+    def _calibrating(self, app_module, running=True):
+        return patch.object(app_module.calibrator, 'is_running', return_value=running)
+
+    def test_home_redirects_to_config(self, app_client):
+        import app as app_module
+        with self._calibrating(app_module):
+            response = app_client.get('/')
+        assert response.status_code == 302
+        assert response.headers['Location'].endswith('/config')
+
+    def test_config_page_itself_is_reachable(self, app_client):
+        import app as app_module
+        with self._calibrating(app_module):
+            response = app_client.get('/config')
+        assert response.status_code == 200
+
+    def test_the_modals_own_endpoints_keep_working(self, app_client):
+        """Redirecting these would break the very window doing the watching
+        and cancelling."""
+        import app as app_module
+        with self._calibrating(app_module):
+            for path in ('/calibrate/status', '/config/apply/status'):
+                assert app_client.get(path).status_code == 200, path
+
+    def test_static_assets_are_not_redirected(self, app_client):
+        import app as app_module
+        with self._calibrating(app_module):
+            response = app_client.get('/static/common.css')
+        assert response.status_code != 302
+
+    def test_nothing_is_locked_when_no_run_is_going(self, app_client):
+        import app as app_module
+        with self._calibrating(app_module, running=False):
+            assert app_client.get('/').status_code == 200
+
+    def test_posts_are_left_to_their_own_guards(self, app_client):
+        """A 409 with a reason is more use to a caller than a redirect to
+        HTML, and those guards already exist."""
+        import app as app_module
+        with self._calibrating(app_module):
+            response = app_client.post('/api/mode', data=json.dumps({'mode': 'spectrum'}),
+                                       content_type='application/json')
+        assert response.status_code == 409
+
+    def test_the_wizard_is_not_locked_and_cannot_loop(self, app_client):
+        """/config redirects into the wizard while it is in progress, so
+        locking navigation to /config during the wizard would bounce the
+        browser between the two forever."""
+        import app as app_module
+        with self._calibrating(app_module), \
+             patch.object(app_module.device_state, 'is_setup_wizard_in_progress',
+                          return_value=True):
+            response = app_client.get('/set-up')
+        assert response.status_code != 302
+
+    def test_a_stale_lock_file_does_not_lock_the_whole_gui(self, app_client):
+        """The lock outlives a crashed GUI by design. Keying navigation off
+        it would strand the user with no reachable way to clear it, so only
+        the in-memory signal is used here."""
+        import app as app_module
+        with patch.object(app_module.calibrator, 'is_running', return_value=False), \
+             patch.object(app_module.device_state, 'is_calibration_locked',
+                          return_value=(True, {})):
+            assert app_client.get('/').status_code == 200
+
+
+class TestConfigChangesDuringCalibration:
+    """A config apply restarts the whole stack, which pulls the SDR out from
+    under an Auto-Calibrate run.
+
+    Demonstrated on a live node before this guard existed: clicking Apply
+    Changes mid-run recreated all seven containers, after which every retune
+    failed and the run carried on to report an ordinary-looking "no confirmed
+    track" — a plausible negative result from a search that had stopped
+    happening. /api/mode and /mender/install each grew their own calibration
+    check; /config/apply and /towers/select, added later, did not.
+
+    The check now lives in ApplyService.request(), the one place every
+    config-driven restart funnels through, so a future route cannot reopen
+    the same hole by forgetting it.
+    """
+
+    def _calibrating(self, app_module):
+        return patch.object(app_module.calibrator, 'is_running', return_value=True)
+
+    def test_config_apply_refused(self, app_client):
+        import app as app_module
+        with self._calibrating(app_module):
+            response = app_client.post('/config/apply')
+
+        assert response.status_code == 409
+        body = json.loads(response.data)
+        assert body['success'] is False
+        assert 'Auto-calibration is running' in body['error']
+
+    def test_tower_select_refused(self, app_client):
+        import app as app_module
+        payload = {"rx_latitude": -33.8688, "rx_longitude": 151.2093,
+                   "rx_altitude": 45.0, "tx_latitude": -33.82,
+                   "tx_longitude": 151.185, "tx_altitude": 100.0,
+                   "tx_callsign": "ATN6"}
+        with self._calibrating(app_module):
+            response = app_client.post('/towers/select', data=json.dumps(payload),
+                                       content_type='application/json')
+
+        assert response.status_code == 409
+        assert 'Auto-calibration is running' in json.loads(response.data)['error']
+
+    def test_config_save_refused(self, app_client):
+        """Refused at the save, not just the apply that follows it —
+        otherwise the change lands in user.yml unapplied and is swept into
+        the next merge, including /calibrate/apply's own."""
+        import app as app_module
+        with self._calibrating(app_module):
+            response = app_client.post('/config/save', data={'capture.fc': '99000000'})
+
+        assert response.status_code == 200  # re-rendered form, not a redirect
+        assert b'Auto-calibration is running' in response.data
+
+    def test_a_stale_lock_file_also_refuses(self, app_client):
+        """is_running() is blind to a run left behind by a crashed GUI, so
+        the on-disk lock is checked too."""
+        import app as app_module
+        with patch.object(app_module.calibrator, 'is_running', return_value=False), \
+             patch.object(app_module.device_state, 'is_calibration_locked',
+                          return_value=(True, {})):
+            response = app_client.post('/config/apply')
+
+        assert response.status_code == 409
+        assert 'Auto-calibration is running' in json.loads(response.data)['error']
+
+    def test_allowed_again_once_the_run_finishes(self, app_client):
+        import app as app_module
+        with patch.object(app_module.calibrator, 'is_running', return_value=False), \
+             patch.object(app_module.device_state, 'is_calibration_locked',
+                          return_value=(False, None)), \
+             patch.object(app_module, 'apply_service') as svc:
+            svc.request.return_value = {'state': 'running'}
+            response = app_client.post('/config/apply')
+
+        assert response.status_code == 202
+        svc.request.assert_called_once()
+
+    def test_guard_lives_in_apply_service_not_only_the_routes(self):
+        """The point of the fix: a new caller of request() inherits the
+        refusal without having to remember it."""
+        from apply_service import ApplyService, ConfigChangeRefused
+
+        service = ApplyService('/tmp/nowhere',
+                               guard=lambda: (False, 'Auto-calibration is running'))
+        with pytest.raises(ConfigChangeRefused) as excinfo:
+            service.request()
+        assert 'Auto-calibration is running' in excinfo.value.reason
+
+
 class TestApplyDuringMenderInstall:
     """A Mender install replaces the compose manifests an apply's
     config-merger runs against, and mender-update's own docker commands sit

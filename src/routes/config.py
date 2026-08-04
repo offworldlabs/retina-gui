@@ -6,6 +6,7 @@ from config_schema import (
     CaptureFormConfig, LocationFormConfig, RetinaTrackerConfig,
 )
 from form_utils import schema_to_form_fields
+from apply_service import ConfigChangeRefused
 
 bp = Blueprint('config', __name__)
 
@@ -89,6 +90,16 @@ def save_config():
     capture_flat, location_flat, truth_data, tar1090_data, retina_tracker_data = ConfigManager.parse_flat_form_data(request.form.to_dict())
 
     all_errors = {}
+
+    # Refuse the save itself, not just the apply that follows it. The form
+    # posts here and the page then auto-POSTs /config/apply, so guarding only
+    # the apply would leave the user with changes written to user.yml that
+    # were never applied — and silently swept into the next merge, including
+    # the one /calibrate/apply performs on a successful run.
+    from app import calibrator, device_state as _device_state
+    if calibrator.is_running() or _device_state.is_calibration_locked()[0]:
+        all_errors['_form'] = ("Auto-calibration is running. Cancel it before "
+                               "changing configuration.")
 
     if capture_flat:
         try:
@@ -215,7 +226,13 @@ def apply_config():
         return jsonify({"success": False,
                         "error": f"{reason}. Apply your changes once it finishes."}), 409
 
-    return jsonify({"success": True, "status": apply_service.request()}), 202
+    # An in-flight calibration is refused inside request() rather than here,
+    # so no future route can reintroduce the gap this one had — see
+    # ApplyService.ConfigChangeRefused.
+    try:
+        return jsonify({"success": True, "status": apply_service.request()}), 202
+    except ConfigChangeRefused as refused:
+        return jsonify({"success": False, "error": refused.reason}), 409
 
 
 @bp.route("/config/apply/status", methods=["GET"])
