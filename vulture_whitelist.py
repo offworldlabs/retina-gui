@@ -52,7 +52,7 @@ device_rfNotch
 # TODO: config field: parsed but no reader found — wire it up or drop it
 #   src/config_schema.py:163  (unused variable)
 doppler_tolerance
-# TODO: config field: parsed but no reader found — wire it up or drop it
+# TODO: helper function with no callers found
 #   src/config_schema.py:64  (unused function)
 get_nested_value
 # TODO: no reference found anywhere in the estate
@@ -64,7 +64,7 @@ rx_altitude
 # TODO: config field: parsed but no reader found — wire it up or drop it
 #   src/config_schema.py:144  (unused variable)
 rx_longitude
-# TODO: config field: parsed but no reader found — wire it up or drop it
+# TODO: helper function with no callers found
 #   src/config_schema.py:75  (unused function)
 set_nested_value
 # TODO: no reference found anywhere in the estate
