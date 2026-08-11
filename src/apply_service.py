@@ -167,6 +167,7 @@ class ApplyService:
 
     def _run(self):
         import subprocess
+
         from restart_lock import BACKGROUND_TIMEOUT_SECONDS
 
         restart = self._resolve_restart_fn()

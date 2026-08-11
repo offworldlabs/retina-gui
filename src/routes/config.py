@@ -1,12 +1,15 @@
-from flask import Blueprint, render_template, request, redirect, url_for, jsonify
-
+from flask import Blueprint, jsonify, redirect, render_template, request, url_for
 from pydantic import ValidationError
+
+from apply_service import ConfigChangeRefused
 from config_schema import (
-    AdsbTruthConfig, Tar1090Config,
-    CaptureFormConfig, LocationFormConfig, RetinaTrackerConfig,
+    AdsbTruthConfig,
+    CaptureFormConfig,
+    LocationFormConfig,
+    RetinaTrackerConfig,
+    Tar1090Config,
 )
 from form_utils import schema_to_form_fields
-from apply_service import ConfigChangeRefused
 
 bp = Blueprint('config', __name__)
 
@@ -22,7 +25,7 @@ def _check_wizard_not_active():
 @bp.route("/config")
 def config_page():
     """Configuration page with all settings."""
-    from app import config_mgr, ssh_keys, DEV_MODE, device_state
+    from app import DEV_MODE, config_mgr, device_state, ssh_keys
 
     config = config_mgr.load_merged_config()
     retina_installed = config_mgr.is_retina_node_installed() or DEV_MODE or request.args.get('demo') == '1'
@@ -96,7 +99,8 @@ def save_config():
     # the apply would leave the user with changes written to user.yml that
     # were never applied — and silently swept into the next merge, including
     # the one /calibrate/apply performs on a successful run.
-    from app import calibrator, device_state as _device_state
+    from app import calibrator
+    from app import device_state as _device_state
     if calibrator.is_running() or _device_state.is_calibration_locked()[0]:
         all_errors['_form'] = ("Auto-calibration is running. Cancel it before "
                                "changing configuration.")
@@ -132,7 +136,7 @@ def save_config():
             all_errors.update(ConfigManager.format_validation_errors(e, 'retina_tracker'))
 
     if all_errors:
-        from app import ssh_keys, DEV_MODE, device_state
+        from app import DEV_MODE, device_state, ssh_keys
         return render_template("config.html",
                                retina_installed=config_mgr.is_retina_node_installed() or DEV_MODE or request.args.get('demo') == '1',
                                capture_fields=schema_to_form_fields(CaptureFormConfig, capture_flat),
@@ -205,7 +209,7 @@ def apply_config():
     In spectrum mode only config-merger runs — blah2 is intentionally stopped
     and must not be restarted until the user switches back to radar mode.
     """
-    from app import apply_service, config_mgr, device_state, DEV_MODE
+    from app import DEV_MODE, apply_service, config_mgr, device_state
 
     if DEV_MODE:
         return jsonify({"success": True, "status": apply_service.request()})

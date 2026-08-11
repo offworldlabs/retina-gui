@@ -103,7 +103,7 @@ def restart_lock(data_dir, timeout=None):
                 if time.monotonic() >= deadline:
                     raise RestartBusy(
                         "Another restart is already in progress. "
-                        "Wait for it to finish, then try again.")
+                        "Wait for it to finish, then try again.") from e
                 time.sleep(POLL_SECONDS)
 
         # Recorded for humans reading the file during an incident; the lock

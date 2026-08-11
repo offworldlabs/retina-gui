@@ -10,13 +10,19 @@ Also tests the layered config utility functions.
 """
 import os
 import tempfile
+
 import pytest
 from pydantic import ValidationError
 
 from config_schema import (
-    CaptureFormConfig, LocationFormConfig, AdsbTruthConfig, Tar1090Config,
+    AdsbTruthConfig,
+    CaptureFormConfig,
+    LocationFormConfig,
     RetinaTrackerConfig,
-    load_yaml_file, save_yaml_file, values_differ
+    Tar1090Config,
+    load_yaml_file,
+    save_yaml_file,
+    values_differ,
 )
 
 

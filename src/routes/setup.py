@@ -1,4 +1,4 @@
-from flask import Blueprint, render_template, request, jsonify
+from flask import Blueprint, jsonify, render_template, request
 
 bp = Blueprint('setup', __name__)
 
@@ -6,7 +6,7 @@ bp = Blueprint('setup', __name__)
 @bp.route("/set-up")
 def wizard():
     """Setup wizard — full-page multi-step first-boot flow."""
-    from app import mender, device_state, get_node_id, DEV_MODE
+    from app import DEV_MODE, device_state, get_node_id, mender
 
     resume_step = device_state.get_setup_wizard_step()
     owl_os_version, retina_node_version = mender.get_versions()
@@ -51,8 +51,8 @@ def save_step():
 @bp.route("/set-up/complete", methods=["POST"])
 def complete():
     """Mark setup wizard as complete."""
-    from app import config_mgr, RETINA_NODE_PATH
-    from routes.mode import enforce_radar_mode, _write_mode
+    from app import RETINA_NODE_PATH, config_mgr
+    from routes.mode import _write_mode, enforce_radar_mode
 
     # Write radar to mode.txt before docker ops so the home page cannot race
     # and see spectrum mode while enforce_radar_mode is still running.

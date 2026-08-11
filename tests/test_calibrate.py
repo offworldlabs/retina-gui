@@ -23,12 +23,12 @@ import yaml
 
 import calibrator as calmod
 from calibrator import (
-    Calibrator,
     EVIDENCE_DETECTIONS,
-    GAIN_REDUCTION_MIN,
     GAIN_REDUCTION_MAX,
-    LNA_STATE_MIN,
+    GAIN_REDUCTION_MIN,
     LNA_STATE_MAX,
+    LNA_STATE_MIN,
+    Calibrator,
 )
 from device_state import DeviceState
 

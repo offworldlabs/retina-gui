@@ -2,10 +2,9 @@
 
 Tests the form field generation from flat Pydantic schemas.
 """
-import pytest
 
-from config_schema import CaptureFormConfig, LocationFormConfig, AdsbTruthConfig
-from form_utils import schema_to_form_fields, get_field_input_type, get_field_constraints
+from config_schema import AdsbTruthConfig, CaptureFormConfig, LocationFormConfig
+from form_utils import get_field_constraints, get_field_input_type, schema_to_form_fields
 
 
 class TestGetFieldInputType:

@@ -12,10 +12,11 @@ Layered Config System:
 - Form shows values from config.yml, but only saves changed values to user.yml
 """
 import os
-import yaml
 from copy import deepcopy
 from typing import Literal
-from pydantic import BaseModel, Field, VERSION
+
+import yaml
+from pydantic import VERSION, BaseModel, Field
 
 # Detect Pydantic version for Field() syntax
 PYDANTIC_V2 = VERSION.startswith("2.")

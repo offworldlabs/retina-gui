@@ -14,7 +14,6 @@ import subprocess
 import threading
 import time
 
-
 DEV_NETWORKS = [
     {"ssid": "Dev Office WiFi", "signal": 88, "secured": True},
     {"ssid": "Dev Guest", "signal": 54, "secured": False},

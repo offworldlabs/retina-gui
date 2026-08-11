@@ -4,8 +4,9 @@ import os
 import subprocess
 import threading
 import time
+from unittest.mock import MagicMock, patch
+
 import pytest
-from unittest.mock import patch, MagicMock, call
 
 from restart_lock import is_locked, restart_lock
 
@@ -384,8 +385,8 @@ class TestRestartLockCoverage:
     leaves the daemon rejecting the real name as already in use."""
 
     def test_enforce_radar_mode_takes_the_lock(self, app_client, temp_dir, monkeypatch):
-        import routes.mode as mode_module
         import app as app_module
+        import routes.mode as mode_module
         monkeypatch.setattr(app_module, 'DATA_DIR', temp_dir)
 
         held = []
@@ -401,9 +402,9 @@ class TestRestartLockCoverage:
     def test_enforce_radar_mode_skips_when_lock_is_busy(self, app_client, temp_dir, monkeypatch):
         """Non-fatal by contract: whoever holds the lock is already
         restarting, so this must not raise or hang."""
-        import routes.mode as mode_module
         import app as app_module
         import restart_lock as rl
+        import routes.mode as mode_module
         monkeypatch.setattr(app_module, 'DATA_DIR', temp_dir)
         monkeypatch.setattr(rl, 'DEFAULT_TIMEOUT_SECONDS', 0.1)
 
@@ -454,8 +455,8 @@ class TestNoSelfDeadlock:
 
     def test_enforce_radar_mode_does_not_nest_inside_its_own_lock(
             self, app_client, temp_dir, monkeypatch):
-        import routes.mode as mode_module
         import app as app_module
+        import routes.mode as mode_module
         monkeypatch.setattr(app_module, 'DATA_DIR', temp_dir)
 
         with patch('subprocess.run') as mock_run:
@@ -471,8 +472,8 @@ class TestNoSelfDeadlock:
             assert done.wait(timeout=20), "enforce_radar_mode deadlocked on its own lock"
 
     def test_shared_restart_fn_does_not_nest(self, app_client, temp_dir, monkeypatch):
-        import routes.mode as mode_module
         import app as app_module
+        import routes.mode as mode_module
         monkeypatch.setattr(app_module, 'DATA_DIR', temp_dir)
 
         with patch('subprocess.run') as mock_run:

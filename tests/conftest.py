@@ -9,6 +9,7 @@ but only writes changed values to user.yml.
 """
 import os
 import tempfile
+
 import pytest
 import yaml
 
@@ -236,6 +237,7 @@ def app_client(temp_dir, config_files, test_manifests_dir):
 
     # Import app after setting env vars (reload to pick up new paths)
     import importlib
+
     # services.py holds the env-derived config and the shared singletons (it
     # exists because app.py's module body runs twice in production — see its
     # docstring). It must be reloaded first: reloading app alone would leave
@@ -274,6 +276,7 @@ def app_client_no_retina(temp_dir, config_files):
     os.environ['NODE_ID_FILE'] = node_id_file
 
     import importlib
+
     # services.py holds the env-derived config and the shared singletons (it
     # exists because app.py's module body runs twice in production — see its
     # docstring). It must be reloaded first: reloading app alone would leave
@@ -305,6 +308,7 @@ def app_client_no_node_id(temp_dir, config_files_no_node_id, test_manifests_dir)
     os.environ['NODE_ID_FILE'] = node_id_file
 
     import importlib
+
     # services.py holds the env-derived config and the shared singletons (it
     # exists because app.py's module body runs twice in production — see its
     # docstring). It must be reloaded first: reloading app alone would leave

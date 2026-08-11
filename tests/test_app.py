@@ -1,9 +1,10 @@
 """Tests for Flask app routes."""
-import os
 import json
+import os
+from unittest.mock import MagicMock, patch
+
 import pytest
 import yaml
-from unittest.mock import patch, MagicMock
 
 
 class TestSharedServiceSingletons:

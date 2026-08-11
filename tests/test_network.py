@@ -1,7 +1,7 @@
 """Tests for network_manager.py and the /network routes."""
 import json
 import subprocess
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, patch
 
 from network_manager import NetworkManager, _split_terse_line
 
