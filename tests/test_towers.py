@@ -2,10 +2,9 @@
 import json
 import os
 import sys
-import yaml
+from unittest.mock import MagicMock, patch
 
-import pytest
-from unittest.mock import patch, MagicMock
+import yaml
 
 # Add src to path for imports
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))

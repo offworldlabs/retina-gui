@@ -1,7 +1,8 @@
-from flask import Blueprint, jsonify, request
 import subprocess
 import threading
 import time
+
+from flask import Blueprint, jsonify, request
 
 bp = Blueprint('mender', __name__, url_prefix='/mender')
 
@@ -9,8 +10,8 @@ bp = Blueprint('mender', __name__, url_prefix='/mender')
 @bp.route("/check")
 def check():
     """Check for available retina-node updates and install status."""
-    from app import mender, device_state, DEV_MODE
-    from mender import get_all_stable_versions_from_github, DEV_VERSIONS
+    from app import DEV_MODE, device_state, mender
+    from mender import DEV_VERSIONS, get_all_stable_versions_from_github
 
     if DEV_MODE:
         in_progress, reason = device_state.is_any_update_in_progress()
@@ -86,9 +87,8 @@ def install():
     Accepts an optional 'version' in the JSON body (e.g. {"version": "v0.3.11"}).
     Defaults to the latest stable release if omitted.
     """
-    from app import mender, device_state, app, DEV_MODE, calibrator
-    from mender import get_latest_stable_from_github, DEV_VERSIONS
-    import time
+    from app import DEV_MODE, app, calibrator, device_state, mender
+    from mender import DEV_VERSIONS, get_latest_stable_from_github
 
     body = request.get_json() or {}
     requested_version = body.get("version")
@@ -157,9 +157,9 @@ def install():
         return jsonify({"success": False, "error": error})
 
     def _run_install(download_url):
+        from app import RETINA_NODE_PATH
         from mender import get_retina_node_version_from_docker
         from routes.mode import _write_mode, enforce_radar_mode
-        from app import RETINA_NODE_PATH
 
         def _recover():
             # The new artifact failed to apply. If something was already
@@ -195,7 +195,7 @@ def install():
                 # Long timeout because abandoning the down and installing on
                 # top of running containers is worse than waiting.
                 from app import DATA_DIR
-                from restart_lock import restart_lock, BACKGROUND_TIMEOUT_SECONDS
+                from restart_lock import BACKGROUND_TIMEOUT_SECONDS, restart_lock
                 try:
                     with restart_lock(DATA_DIR, timeout=BACKGROUND_TIMEOUT_SECONDS):
                         subprocess.run(
@@ -255,7 +255,7 @@ def cloud_services_toggle():
 @bp.route("/check-os")
 def check_os():
     """Check for owl-os updates and install status."""
-    from app import mender, device_state, DEV_MODE
+    from app import DEV_MODE, device_state, mender
     from mender import get_latest_owl_os_from_github, parse_os_version
 
     if DEV_MODE:

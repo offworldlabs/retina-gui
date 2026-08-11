@@ -1,13 +1,12 @@
 """Tests for DeviceState — state machine, guards, and transitions."""
 import json
 import os
-import tempfile
 from datetime import datetime, timedelta
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 
-from device_state import DeviceState, INSTALL_LOCK_TIMEOUT, MENDER_STATUS_TIMEOUT, SETUP_WIZARD_TIMEOUT
+from device_state import INSTALL_LOCK_TIMEOUT, MENDER_STATUS_TIMEOUT, SETUP_WIZARD_TIMEOUT, DeviceState
 
 
 @pytest.fixture

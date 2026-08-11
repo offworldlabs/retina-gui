@@ -10,14 +10,12 @@ Covers:
 """
 import json
 import os
-import time
-import threading
 from datetime import datetime, timedelta
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 
-from device_state import DeviceState, INSTALL_LOCK_TIMEOUT, MENDER_STATUS_TIMEOUT
+from device_state import INSTALL_LOCK_TIMEOUT, MENDER_STATUS_TIMEOUT, DeviceState
 
 
 @pytest.fixture

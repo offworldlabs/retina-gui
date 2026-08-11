@@ -12,7 +12,10 @@ import time
 import pytest
 
 from restart_lock import (
-    RestartBusy, is_locked, lock_path, restart_lock,
+    RestartBusy,
+    is_locked,
+    lock_path,
+    restart_lock,
 )
 
 

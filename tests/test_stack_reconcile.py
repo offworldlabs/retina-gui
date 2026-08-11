@@ -9,7 +9,9 @@ same way, across reboots.
 from unittest.mock import MagicMock, patch
 
 from stack_reconcile import (
-    PROJECT, find_stale_containers, reconcile,
+    PROJECT,
+    find_stale_containers,
+    reconcile,
 )
 
 # Real shape of the failure, from a node that hit it.

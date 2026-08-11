@@ -1,8 +1,9 @@
-from flask import Flask, redirect, request
-from flask_wtf.csrf import CSRFProtect
 import os
 import subprocess
 import sys
+
+from flask import Flask, redirect, request
+from flask_wtf.csrf import CSRFProtect
 
 # Configuration and shared services live in their own module because this one
 # is executed twice — once as __main__ (systemd runs `python3 src/app.py`) and
@@ -10,14 +11,32 @@ import sys
 # constructed here would therefore exist twice in one process. See services.py
 # for what that broke. Re-exported below so `from app import ...` is unchanged.
 from services import (  # noqa: F401  (re-exported for routes)
-    PROJECT_ROOT, DEV_MODE, DATA_DIR, USER_CONFIG_PATH, MERGED_CONFIG_PATH,
-    RETINA_NODE_PATH, RETINA_SPECTRUM_URL, NODE_ID_FILE, TOWER_FINDER_URL,
-    BLAH2_API_URL, RETINA_TRACKER_HOST, RETINA_TRACKER_PORT,
-    RETINA_TRACKER_EVENTS_PATH, MENDER_SERVICES,
-    ssh_keys, network_mgr, config_mgr, mender, device_state,
-    apply_service, blah2_client, retina_tracker_client, calibrator,
+    BLAH2_API_URL,
+    DATA_DIR,
+    DEV_MODE,
+    MENDER_SERVICES,
+    MERGED_CONFIG_PATH,
+    NODE_ID_FILE,
+    PROJECT_ROOT,
+    RETINA_NODE_PATH,
+    RETINA_SPECTRUM_URL,
+    RETINA_TRACKER_EVENTS_PATH,
+    RETINA_TRACKER_HOST,
+    RETINA_TRACKER_PORT,
+    TOWER_FINDER_URL,
+    USER_CONFIG_PATH,
+    apply_service,
+    blah2_client,
+    calibrator,
+    config_mgr,
+    device_state,
+    mender,
+    network_mgr,
+    retina_tracker_client,
+    ssh_keys,
     tracker_capture,
 )
+
 app = Flask(__name__,
             template_folder=os.path.join(PROJECT_ROOT, 'templates'),
             static_folder=os.path.join(PROJECT_ROOT, 'static'))
@@ -39,7 +58,7 @@ device_state.release_calibration_lock()
 # Enforce radar at the Docker level: stop and remove retina-spectrum if it is running.
 # retina-spectrum is only allowed while the wizard location step or config toggle is active.
 if config_mgr.is_retina_node_installed():
-    from restart_lock import restart_lock, OPPORTUNISTIC_TIMEOUT_SECONDS
+    from restart_lock import OPPORTUNISTIC_TIMEOUT_SECONDS, restart_lock
     from stack_reconcile import find_stale_containers, reconcile
     try:
         # Opportunistic, and deliberately so: this runs before Flask serves
@@ -98,7 +117,7 @@ if "pytest" not in sys.modules:
 def get_node_id():
     """Get node_id from Mender device identity file."""
     try:
-        with open(NODE_ID_FILE, 'r') as f:
+        with open(NODE_ID_FILE) as f:
             node_id = f.read().strip()
             if node_id:
                 return node_id
@@ -121,14 +140,14 @@ def inject_globals():
 
 
 # Register blueprints
-from routes.home import bp as home_bp
+from routes.calibrate import bp as calibrate_bp
 from routes.config import bp as config_bp
+from routes.home import bp as home_bp
 from routes.mender_routes import bp as mender_bp
-from routes.setup import bp as setup_bp
-from routes.towers import bp as towers_bp
 from routes.mode import bp as mode_bp
 from routes.network import bp as network_bp
-from routes.calibrate import bp as calibrate_bp
+from routes.setup import bp as setup_bp
+from routes.towers import bp as towers_bp
 from routes.tracker_preview import bp as tracker_preview_bp
 
 app.register_blueprint(home_bp)

@@ -1,10 +1,14 @@
+import requests as http_requests
 from flask import Blueprint, jsonify, request
 
-import requests as http_requests
-
 from calibrator import (
-    GAIN_REDUCTION_MIN, GAIN_REDUCTION_MAX, LNA_STATE_MIN, LNA_STATE_MAX,
-    MODE_TRACK, MODE_ADSB, VALID_MODES,
+    GAIN_REDUCTION_MAX,
+    GAIN_REDUCTION_MIN,
+    LNA_STATE_MAX,
+    LNA_STATE_MIN,
+    MODE_ADSB,
+    MODE_TRACK,
+    VALID_MODES,
 )
 
 bp = Blueprint('calibrate', __name__, url_prefix='/calibrate')
@@ -54,7 +58,7 @@ def _fetch_alternate_towers(merged, current_fc, limit):
     exists, and the service is unreachable — the run then just searches the
     current tower.
     """
-    from app import app, TOWER_FINDER_URL, device_state
+    from app import TOWER_FINDER_URL, app, device_state
 
     cached = device_state.get_towers_cache()
     if cached and cached.get("towers"):

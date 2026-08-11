@@ -1,10 +1,10 @@
-from flask import Blueprint, jsonify, request, Response, stream_with_context
-
 import requests as http_requests
+from flask import Blueprint, Response, jsonify, request, stream_with_context
 from pydantic import ValidationError
-from config_schema import LocationFormConfig
-from config_manager import ConfigManager
+
 from apply_service import ConfigChangeRefused
+from config_manager import ConfigManager
+from config_schema import LocationFormConfig
 
 bp = Blueprint('towers', __name__, url_prefix='/towers')
 
@@ -18,7 +18,7 @@ MAX_CACHED_TOWERS = 5
 @bp.route("/search", methods=["POST"])
 def search():
     """Proxy RF-profile tower search to Tower-Finder API."""
-    from app import app, TOWER_FINDER_URL, device_state
+    from app import TOWER_FINDER_URL, app, device_state
 
     body = request.get_json()
     if not body:

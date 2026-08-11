@@ -1,5 +1,4 @@
 """Tests for SSH key validation."""
-import pytest
 
 from ssh_keys import SSHKeyManager
 

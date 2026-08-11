@@ -1,6 +1,7 @@
 import os
 import subprocess
 import time
+
 from flask import Blueprint, jsonify, request
 
 bp = Blueprint('mode', __name__)
@@ -86,7 +87,7 @@ def run_config_merger_and_restart(retina_node_path: str, on_phase=None,
     Lets TimeoutExpired and FileNotFoundError propagate — callers handle them.
     """
     from app import DATA_DIR
-    from restart_lock import restart_lock, RestartBusy, DEFAULT_TIMEOUT_SECONDS
+    from restart_lock import DEFAULT_TIMEOUT_SECONDS, RestartBusy, restart_lock
 
     on_phase = on_phase or (lambda phase, detail=None: None)
     if lock_timeout is None:
@@ -194,7 +195,7 @@ def get_mode():
 
 @bp.route('/api/mode', methods=['POST'])
 def set_mode():
-    from app import RETINA_NODE_PATH, config_mgr, calibrator, device_state
+    from app import RETINA_NODE_PATH, calibrator, config_mgr, device_state
 
     data = request.get_json(silent=True) or {}
     mode = data.get('mode')
@@ -229,7 +230,7 @@ def set_mode():
             return jsonify({'success': True, 'mode': mode})
 
         from app import DATA_DIR
-        from restart_lock import restart_lock, RestartBusy
+        from restart_lock import RestartBusy, restart_lock
         try:
             with restart_lock(DATA_DIR):
                 return _set_mode_locked(mode, current_mode, RETINA_NODE_PATH)
@@ -358,9 +359,10 @@ def spectrum_ready():
     Returns {ready: true} as soon as the container responds on its port,
     regardless of HTTP status code.
     """
-    from app import RETINA_SPECTRUM_URL
-    import urllib.request
     import urllib.error
+    import urllib.request
+
+    from app import RETINA_SPECTRUM_URL
     try:
         urllib.request.urlopen(RETINA_SPECTRUM_URL, timeout=2)
         return jsonify({'ready': True})
@@ -438,7 +440,7 @@ def release_spectrum():
     response body.
     """
     from app import DATA_DIR, RETINA_NODE_PATH, config_mgr
-    from restart_lock import restart_lock, OPPORTUNISTIC_TIMEOUT_SECONDS
+    from restart_lock import OPPORTUNISTIC_TIMEOUT_SECONDS, restart_lock
 
     if not config_mgr.is_retina_node_installed():
         return '', 204

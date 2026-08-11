@@ -10,9 +10,7 @@ This class:
 
 import os
 
-from config_schema import (
-    load_yaml_file, save_yaml_file, values_differ
-)
+from config_schema import load_yaml_file, save_yaml_file, values_differ
 
 
 class ConfigManager:
@@ -227,9 +225,7 @@ class ConfigManager:
                     if nested_changes:
                         changes[key] = nested_changes
                 else:
-                    if values_differ(submitted_val, merged_val):
-                        changes[key] = submitted_val
-                    elif existing_val is not None and not values_differ(existing_val, submitted_val):
+                    if values_differ(submitted_val, merged_val) or existing_val is not None and not values_differ(existing_val, submitted_val):
                         changes[key] = submitted_val
 
             return changes

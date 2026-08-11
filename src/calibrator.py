@@ -569,7 +569,7 @@ class Calibrator:
         """One retune request plus ack wait. Callers should normally use
         _apply, which adds the safe-corner handover on a frequency change."""
         last_error = None
-        for attempt in range(2):
+        for _attempt in range(2):
             self._check_cancel(ignore_cancel=ignore_cancel)
             generation, error = self._client.retune(fc, gain_a, gain_b, lna_state)
             if generation is None:

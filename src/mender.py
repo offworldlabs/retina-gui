@@ -6,7 +6,6 @@ import time
 
 import requests
 
-
 # Fake version history used by all dev-mode routes — newest first.
 # Set DEV_NODE_VERSION env var to control the simulated installed version:
 #   DEV_NODE_VERSION=v1.0.0  (default) → re-run, package already installed
@@ -78,7 +77,8 @@ class MenderClient:
         if self.dev_data_dir:
             path = os.path.join(self.dev_data_dir, 'dev_node_version.txt')
             if os.path.exists(path):
-                v = open(path).read().strip()
+                with open(path) as fh:
+                    v = fh.read().strip()
                 return v or None
         v = os.environ.get('DEV_NODE_VERSION', 'v1.0.0')
         return v or None

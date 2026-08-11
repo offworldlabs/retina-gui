@@ -3,7 +3,7 @@ Utilities for converting Pydantic schemas to form field dicts for Jinja renderin
 
 Compatible with both Pydantic v1 (Debian Bookworm apt) and v2.
 """
-from typing import get_origin, get_args, Union, Literal
+from typing import Literal, Union, get_args, get_origin
 
 # Detect Pydantic version
 try:
@@ -77,7 +77,7 @@ def get_field_input_type(field_info):
 
     if get_origin(annotation) is Literal:
         return "select"
-    elif annotation == bool:
+    elif annotation is bool:
         return "checkbox"
     elif annotation in (int, float):
         return "number"
@@ -110,7 +110,7 @@ def get_field_constraints(field_info):
 
     # Add step for float fields
     annotation = _unwrap_optional(get_field_type(field_info))
-    if annotation == float:
+    if annotation is float:
         constraints['step'] = 'any'  # Allow any decimal
 
     return constraints

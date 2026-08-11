@@ -1,9 +1,11 @@
 """Tests for mender.py - version parsing and artifact selection."""
-from unittest.mock import patch, Mock
-import pytest
+from unittest.mock import Mock, patch
+
 from mender import (
-    parse_version, get_latest_stable_from_github,
-    parse_os_version, get_latest_owl_os_from_github,
+    get_latest_owl_os_from_github,
+    get_latest_stable_from_github,
+    parse_os_version,
+    parse_version,
 )
 
 

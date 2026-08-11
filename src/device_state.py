@@ -20,7 +20,6 @@ import subprocess
 import time
 from datetime import datetime, timedelta
 
-
 INSTALL_LOCK_TIMEOUT = timedelta(minutes=40)
 MENDER_STATUS_TIMEOUT = timedelta(hours=2)
 SETUP_WIZARD_TIMEOUT = timedelta(hours=24)
