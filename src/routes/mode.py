@@ -50,6 +50,71 @@ def _write_mode(mode):
         pass  # dev: no /data — in-memory cache is the fallback
 
 
+def restart_sdrplay_service(on_phase=None):
+    """Restart sdrplay_apiService, forcing it if the unit will not stop.
+
+    `systemctl restart sdrplay.service` is not reliable on the failure that
+    matters most. When the SDRplay device has wedged — the state auto-calibrate
+    exists to recover from — the unit hangs in `deactivating (stop-sigterm)`
+    because sdrplay_apiService ignores SIGTERM, and the restart never returns.
+
+    This was a bare `subprocess.run(..., timeout=30)`. Confirmed live on
+    jonathan-node-2 against a genuinely wedged RSPduo (blah2 crash-looping on
+    `MaxDevs=1023 NumDevs=0 / Error: No devices found`): the timeout fired,
+    TimeoutExpired propagated out of run_config_merger_and_restart, reached
+    ApplyService as 'Command timed out', and **the container recreate never
+    ran** — so the one path that can recover the device aborted half-way, and
+    Auto-Calibrate's preflight reported it could not restart the radio.
+
+    The fallback is the sequence that did work by hand on that node: SIGKILL
+    the service process, which releases the stuck systemd job, then clear the
+    failed state and start it again. The device stayed enumerated on USB
+    throughout, so no unbind/rebind is needed — only the API service is stuck.
+
+    Never raises: every caller here treats the restart as best-effort, and a
+    node without sdrplay.service at all (dev machines) must stay a no-op.
+    Returns None normally, or a short description of what it had to do.
+    """
+    if on_phase is not None:
+        on_phase('restarting_sdr', None)
+    try:
+        result = subprocess.run(['systemctl', 'restart', 'sdrplay.service'],
+                                capture_output=True, timeout=30)
+        if result.returncode == 0:
+            return None
+        detail = 'systemctl restart returned non-zero'
+    except subprocess.TimeoutExpired:
+        detail = 'systemctl restart hung (service stuck stopping)'
+    except (FileNotFoundError, OSError):
+        return None  # no systemd/sdrplay here — dev machine
+
+    if on_phase is not None:
+        on_phase('resetting_sdr', None)
+    try:
+        # -f (full command line), not -x: the kernel truncates comm to 15
+        # chars, so the 18-char name never matches an -x pattern. That bug is
+        # why blah2-arm's own sdrplay-restart.sh is a silent no-op, while
+        # script/blah2_rspduo_restart.bash works.
+        #
+        # The pattern is bracketed so it cannot match a shell command line
+        # that merely *carries* it — running the unbracketed form over ssh
+        # matches the invoking shell and kills the session.
+        subprocess.run(['pkill', '-9', '-f', '[s]drplay_apiService'],
+                       capture_output=True, timeout=15)
+        # Killing the process is what releases the stuck job, but systemd
+        # needs a moment to reap it before the unit is actionable again.
+        time.sleep(3)
+        subprocess.run(['systemctl', 'reset-failed', 'sdrplay.service'],
+                       capture_output=True, timeout=15)
+        # Often a no-op: the restart queued above usually completes on its own
+        # once the process dies. Harmless when it already has.
+        subprocess.run(['systemctl', 'start', 'sdrplay.service'],
+                       capture_output=True, timeout=30)
+    except (subprocess.TimeoutExpired, FileNotFoundError, OSError) as e:
+        return f'{detail}; forced reset also failed ({type(e).__name__})'
+    return f'{detail}; forced a reset of sdrplay_apiService'
+
+
 def _settle(seconds, on_phase):
     """Sleep out the SDRplay settle window, reporting the remaining time.
 
@@ -129,10 +194,10 @@ def _run_config_merger_and_restart_locked(retina_node_path, on_phase):
 
     # Force a clean sdrplay_apiService restart so the USB device is properly
     # re-initialised before blah2 claims it.  Mirrors what the watchdog does.
-    # Non-fatal: no-op on dev machines without sdrplay.service.
-    on_phase('restarting_sdr', None)
-    subprocess.run(['systemctl', 'restart', 'sdrplay.service'],
-                   capture_output=True, timeout=30)
+    # Non-fatal: no-op on dev machines without sdrplay.service, and it forces
+    # the service down rather than timing out when the device has wedged —
+    # see restart_sdrplay_service, which reports its own phases.
+    restart_sdrplay_service(on_phase)
 
     # See SDRPLAY_RESTART_SETTLE_SECONDS — without this, recreating the
     # containers immediately after the restart request returns has
@@ -301,8 +366,7 @@ def _set_mode_locked(mode, current_mode, retina_node_path):
 
         # Force a clean sdrplay_apiService restart so the USB device is
         # properly re-initialised before SDRconnect claims it.  Non-fatal.
-        subprocess.run(['systemctl', 'restart', 'sdrplay.service'],
-                       capture_output=True, timeout=30)
+        restart_sdrplay_service()
 
         result = subprocess.run(['systemctl', 'start', 'sdrconnect.service'],
                                 capture_output=True, text=True, timeout=30)
@@ -334,8 +398,7 @@ def _set_mode_locked(mode, current_mode, retina_node_path):
 
         # Force a clean sdrplay_apiService restart so the USB device is
         # properly re-initialised before blah2 claims it.  Non-fatal.
-        subprocess.run(['systemctl', 'restart', 'sdrplay.service'],
-                       capture_output=True, timeout=30)
+        restart_sdrplay_service()
 
         result = subprocess.run(
             ['docker', 'compose', '-p', 'retina-node', 'up', '-d', '--force-recreate',
@@ -420,8 +483,7 @@ def _enforce_radar_mode_locked(retina_node_path: str) -> None:
         )
         subprocess.run(['systemctl', 'stop', 'sdrconnect.service'],
                        capture_output=True, timeout=30)
-        subprocess.run(['systemctl', 'restart', 'sdrplay.service'],
-                       capture_output=True, timeout=30)
+        restart_sdrplay_service()
         subprocess.run(
             ['docker', 'compose', '-p', 'retina-node', 'up', '-d', '--force-recreate',
              'blah2', 'blah2_api', 'blah2_web', 'blah2_host', 'retina-tracker'],
