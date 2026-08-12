@@ -67,6 +67,7 @@ PHASE_LABELS = {
     'merging': 'Merging configuration',
     'stopping_spectrum': 'Releasing the SDR',
     'restarting_sdr': 'Restarting the SDR service',
+    'resetting_sdr': 'SDR service stuck — forcing it down',
     'settling': 'Waiting for the SDR to settle',
     'recreating': 'Restarting radar services',
     'repairing': 'Cleaning up after an interrupted restart',
@@ -121,14 +122,23 @@ class ApplyService:
         with self._lock:
             return self._status['state'] == 'running'
 
-    def request(self):
+    def request(self, bypass_guard=False):
         """Start an apply, or coalesce into the one already running.
 
         Returns the current status dict. Never blocks on the actual work.
         Raises ConfigChangeRefused if the configured guard says something
         else is using the SDR right now.
+
+        bypass_guard exists for exactly one caller: Auto-Calibrate's own
+        preflight recovery (see calibrator._run_recovery_apply). The guard's
+        job is to stop a config apply pulling the SDR out from under a
+        running calibration — but there the calibration *is* the caller, it
+        holds the calibration lock itself, and restarting the stack is the
+        only way to unwedge the device it is about to search with. Refusing
+        it there would mean the guard blocking the one apply that exists to
+        make the run possible. No route should ever pass this.
         """
-        if self._guard is not None:
+        if self._guard is not None and not bypass_guard:
             ok, reason = self._guard()
             if not ok:
                 raise ConfigChangeRefused(reason)

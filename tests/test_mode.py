@@ -491,6 +491,125 @@ class TestNoSelfDeadlock:
             assert result['error'] is None
 
 
+class TestRestartSdrplayService:
+    """A wedged SDRplay device leaves sdrplay.service hanging in
+    `deactivating (stop-sigterm)`, so `systemctl restart` never returns.
+    Confirmed live on jonathan-node-2 against a genuinely wedged RSPduo: the
+    bare subprocess call this replaces timed out, TimeoutExpired escaped
+    run_config_merger_and_restart into ApplyService as 'Command timed out',
+    and the container recreate never ran — aborting the one path that can
+    recover the device. See restart_sdrplay_service."""
+
+    @patch('subprocess.run')
+    def test_clean_restart_needs_no_force(self, mock_run):
+        import routes.mode as mode_module
+        mock_run.return_value = MagicMock(returncode=0, stdout='', stderr='')
+
+        assert mode_module.restart_sdrplay_service() is None
+        assert mock_run.call_count == 1
+        assert mock_run.call_args_list[0][0][0] == [
+            'systemctl', 'restart', 'sdrplay.service']
+
+    @patch('subprocess.run')
+    def test_hung_restart_is_forced_down_rather_than_raising(
+            self, mock_run, monkeypatch):
+        import routes.mode as mode_module
+        monkeypatch.setattr(mode_module.time, 'sleep', lambda s: None)
+
+        def fake_run(argv, **kwargs):
+            if argv[:2] == ['systemctl', 'restart']:
+                raise subprocess.TimeoutExpired(argv, 30)
+            return MagicMock(returncode=0, stdout='', stderr='')
+        mock_run.side_effect = fake_run
+
+        # The whole point: it reports rather than raising, so the caller's
+        # container recreate still runs.
+        detail = mode_module.restart_sdrplay_service()
+        assert detail is not None
+        assert 'hung' in detail
+
+        argvs = [c[0][0] for c in mock_run.call_args_list]
+        assert ['systemctl', 'restart', 'sdrplay.service'] in argvs
+        assert ['pkill', '-9', '-f', '[s]drplay_apiService'] in argvs
+        assert ['systemctl', 'reset-failed', 'sdrplay.service'] in argvs
+        assert ['systemctl', 'start', 'sdrplay.service'] in argvs
+
+    @patch('subprocess.run')
+    def test_kill_pattern_uses_f_and_cannot_self_match(self, mock_run,
+                                                       monkeypatch):
+        """-x matches the kernel's comm field, truncated to 15 chars, so the
+        18-char name never matches — that is why blah2-arm's own
+        sdrplay-restart.sh is a silent no-op. And the pattern is bracketed so
+        it cannot match a shell command line merely carrying it: the
+        unbracketed form run over ssh kills the invoking session."""
+        import routes.mode as mode_module
+        monkeypatch.setattr(mode_module.time, 'sleep', lambda s: None)
+
+        def fake_run(argv, **kwargs):
+            if argv[:2] == ['systemctl', 'restart']:
+                raise subprocess.TimeoutExpired(argv, 30)
+            return MagicMock(returncode=0, stdout='', stderr='')
+        mock_run.side_effect = fake_run
+        mode_module.restart_sdrplay_service()
+
+        kill = next(c[0][0] for c in mock_run.call_args_list
+                    if c[0][0][0] == 'pkill')
+        assert '-f' in kill and '-x' not in kill
+        pattern = kill[-1]
+        assert pattern.startswith('[s]')
+        # A command line carrying the bracketed pattern must not match it.
+        import re
+        assert not re.search(pattern, f'bash -c pkill -9 -f {pattern}')
+        # ...while the real service process still does.
+        assert re.search(pattern, '/opt/sdrplay_api/sdrplay_apiService')
+
+    @patch('subprocess.run')
+    def test_missing_systemd_is_a_silent_no_op(self, mock_run):
+        """Dev machines have no sdrplay.service and must not be forced."""
+        import routes.mode as mode_module
+        mock_run.side_effect = FileNotFoundError()
+
+        assert mode_module.restart_sdrplay_service() is None
+        assert mock_run.call_count == 1
+
+    @patch('subprocess.run')
+    def test_forced_reset_failing_still_does_not_raise(self, mock_run,
+                                                      monkeypatch):
+        import routes.mode as mode_module
+        monkeypatch.setattr(mode_module.time, 'sleep', lambda s: None)
+
+        def fake_run(argv, **kwargs):
+            raise subprocess.TimeoutExpired(argv, 30)
+        mock_run.side_effect = fake_run
+
+        detail = mode_module.restart_sdrplay_service()
+        assert 'forced reset also failed' in detail
+
+    @patch('subprocess.run')
+    def test_apply_completes_the_recreate_despite_a_hung_restart(
+            self, mock_run, app_client, temp_dir, monkeypatch):
+        """The regression this exists for, at the level that actually
+        mattered: the recreate must still happen."""
+        import routes.mode as mode_module
+        monkeypatch.setattr(mode_module, 'SDRPLAY_RESTART_SETTLE_SECONDS', 0)
+        monkeypatch.setattr(mode_module.time, 'sleep', lambda s: None)
+
+        def fake_run(argv, **kwargs):
+            if argv[:2] == ['systemctl', 'restart']:
+                raise subprocess.TimeoutExpired(argv, 30)
+            return MagicMock(returncode=0, stdout='', stderr='')
+        mock_run.side_effect = fake_run
+
+        phases = []
+        error = mode_module.run_config_merger_and_restart(
+            temp_dir, on_phase=lambda phase, detail=None: phases.append(phase))
+
+        assert error is None
+        assert 'resetting_sdr' in phases
+        assert any('--force-recreate' in c[0][0]
+                   for c in mock_run.call_args_list), "never recreated"
+
+
 class TestRestartSettleTime:
     """run_config_merger_and_restart() is the shared choke point every
     config-applying/mode-switching route funnels through (/api/mode,

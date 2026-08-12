@@ -13,6 +13,7 @@ auto-emit a confirmed-track event after `confirm_after` frames (None =
 never confirms), and reset() clears that count, mirroring the real
 sidecar's RESET wiping accumulated state between candidate towers.
 """
+import copy
 import json
 import os
 from datetime import datetime, timedelta
@@ -186,6 +187,12 @@ class FakeRetinaTrackerClient:
 
 
 ORIGINAL = {"fc": 98_000_000, "gain_a": 40, "gain_b": 41, "lna_state": 4}
+# Same tuning at a frequency no tower in these tests uses — for the cases
+# that script a retune failure at TOWER's own fc. The preflight probes at
+# whatever frequency the device is already on (see calibrator._preflight),
+# so starting there keeps such a script aimed at the tower it is about,
+# rather than at the preflight.
+ORIGINAL_ELSEWHERE = dict(ORIGINAL, fc=90_100_000)
 TOWER = {"name": "Tower One", "fc": 98_000_000}
 TOWER_TWO = {"name": "Tower Two", "fc": 105_100_000}
 TOWER_THREE = {"name": "Tower Three", "fc": 213_000_000}
@@ -573,8 +580,13 @@ class TestDeviceCrashHandling:
             retune_fail_rule=lambda fc, ga, gb, lna: fc == TOWER["fc"],
             detection=detection)
         tracker_client = FakeRetinaTrackerClient(confirm_after=1)
+        # Started from a frequency that still works, so the preflight's own
+        # safe-corner probe passes and the run actually reaches the towers.
+        # A device that cannot be tuned even where it already sits is a
+        # different fault, and _preflight ends the run on it deliberately —
+        # see TestPreflight.
         status = run_to_completion(Calibrator(client, tracker_client),
-                                   [TOWER, TOWER_TWO])
+                                   [TOWER, TOWER_TWO], original=ORIGINAL_ELSEWHERE)
         assert status["state"] == "done"
         assert status["result"]["tower_name"] == "Tower Two"
         assert len(status["history"]) == 2
@@ -1022,7 +1034,11 @@ class TestSafeFrequencyHandover:
         cal = Calibrator(client, FakeRetinaTrackerClient())
         run_to_completion(cal, [TOWER], dwell=0.05)
 
-        applied = client.applied
+        # applied[0] is the preflight's own safe-corner probe, which lands on
+        # the same tuning the first descent candidate then asks for. That
+        # duplicate is the liveness check, not a handover, so the search's
+        # own retunes are what this assertion is about.
+        applied = client.applied[1:]
         safe_corner = (GAIN_REDUCTION_MAX, GAIN_REDUCTION_MAX, LNA_STATE_MAX)
         # Only the descent's own legitimate visits to the safe corner should
         # appear — no consecutive duplicate pair from a spurious handover.
@@ -1045,7 +1061,11 @@ class TestSafeFrequencyHandover:
 
         client = FakeBlah2Client(retune_fail_rule=fail_handover)
         cal = Calibrator(client, FakeRetinaTrackerClient())
-        status = run_to_completion(cal, [TOWER, TOWER_TWO], dwell=0.05)
+        # Elsewhere to start with, so the failure scripted above is the
+        # handover into TOWER and not the preflight probe — see
+        # ORIGINAL_ELSEWHERE.
+        status = run_to_completion(cal, [TOWER, TOWER_TWO], dwell=0.05,
+                                   original=ORIGINAL_ELSEWHERE)
         # The run still reached a terminal state rather than erroring out.
         assert status["state"] in ("failed", "done")
         assert len(status["history"]) == 2
@@ -1271,27 +1291,283 @@ class TestAdsbMode:
         assert "Invalid mode" in error
 
 
+class FakeConfigManager:
+    """Stand-in for ConfigManager — only the two user.yml accessors the
+    preflight's recovery branch touches."""
+
+    def __init__(self, user_config=None):
+        self.user_config = copy.deepcopy(user_config) if user_config else {}
+        self.saves = 0
+
+    def load_user_config(self):
+        return copy.deepcopy(self.user_config)
+
+    def save_user_config(self, config):
+        self.user_config = copy.deepcopy(config)
+        self.saves += 1
+
+
+class FakeApplyService:
+    """Stand-in for ApplyService. request() returns immediately and
+    get_status() reports the scripted outcome, as the real one does.
+    on_request is how a test makes the radio start answering again — it
+    stands in for the restart actually reinitialising the device."""
+
+    def __init__(self, outcome="done", error=None, on_request=None):
+        self.requests = []
+        self._outcome = outcome
+        self._error = error
+        self._on_request = on_request
+        self._status = {"state": "idle", "error": None}
+
+    def request(self, bypass_guard=False):
+        self.requests.append({"bypass_guard": bypass_guard})
+        if self._on_request is not None:
+            self._on_request()
+        self._status = {"state": self._outcome, "error": self._error}
+        return dict(self._status)
+
+    def get_status(self):
+        return dict(self._status)
+
+
+def wedged_until_restart():
+    """A device that refuses every retune until an apply happens — the
+    live failure this preflight exists for. Returns (rule, clear) for
+    FakeBlah2Client's retune_fail_rule and FakeApplyService's on_request."""
+    wedged = {"still": True}
+    def rule(fc, gain_a, gain_b, lna_state):
+        return wedged["still"]
+    def clear():
+        wedged["still"] = False
+    return rule, clear
+
+
+@pytest.fixture
+def fast_preflight(fast, monkeypatch):
+    """`fast`, plus the preflight's own recovery timings."""
+    monkeypatch.setattr(calmod, "PREFLIGHT_RECOVERY_PROBE_SECONDS", 0.2)
+    monkeypatch.setattr(calmod, "PREFLIGHT_RECOVERY_APPLY_TIMEOUT_SECONDS", 1.0)
+    monkeypatch.setattr(calmod, "PREFLIGHT_APPLY_POLL_SECONDS", 0.01)
+
+
+class TestPreflight:
+    """Before any tower is tried, the radio is parked at the safe corner and
+    proved to still accept tuning commands — and recovered by restart if it
+    doesn't. See calibrator._preflight."""
+
+    def test_healthy_device_is_parked_at_the_safe_corner_first(self, fast_preflight):
+        client = FakeBlah2Client()
+        config_mgr = FakeConfigManager()
+        apply_service = FakeApplyService()
+        cal = Calibrator(client, FakeRetinaTrackerClient(),
+                         config_mgr=config_mgr, apply_service=apply_service)
+        status = run_to_completion(cal, [TOWER], dwell=0.05)
+
+        first = client.applied[0]
+        assert (first["fc"], first["gain_a"], first["gain_b"], first["lna_state"]) == (
+            ORIGINAL["fc"], GAIN_REDUCTION_MAX, GAIN_REDUCTION_MAX, LNA_STATE_MAX)
+        # A healthy node pays for the probe and nothing else: no restart, no
+        # user.yml write, and nothing to report about it.
+        assert apply_service.requests == []
+        assert config_mgr.saves == 0
+        assert status["preflight"] is None
+
+    def test_probe_stays_on_the_frequency_the_device_is_actually_on(self, fast_preflight):
+        # blah2 left on another tower by an unpersisted earlier run while
+        # config still says ORIGINAL. Moving fc from an unknown gain is the
+        # hazard the safe corner exists to avoid, and the probe has nothing
+        # proven-safe to hand over from — so it must not move fc at all.
+        client = FakeBlah2Client()
+        client.generation = 7
+        client.applied.append({
+            "fc": TOWER_THREE["fc"], "gain_a": 30, "gain_b": 30, "lna_state": 2,
+            "generation": 7, "applied_at": 500})
+        cal = Calibrator(client, FakeRetinaTrackerClient(),
+                         config_mgr=FakeConfigManager(),
+                         apply_service=FakeApplyService())
+        run_to_completion(cal, [TOWER], dwell=0.05)
+
+        probe = client.applied[1]
+        assert probe["fc"] == TOWER_THREE["fc"]
+        assert (probe["gain_a"], probe["gain_b"], probe["lna_state"]) == (
+            GAIN_REDUCTION_MAX, GAIN_REDUCTION_MAX, LNA_STATE_MAX)
+
+    def test_wedged_device_is_recovered_and_the_run_proceeds(self, fast_preflight):
+        rule, clear = wedged_until_restart()
+        client = FakeBlah2Client(retune_fail_rule=rule,
+                                 detection=moving_track_detections())
+        config_mgr = FakeConfigManager(
+            {"capture": {"device": {"gainReduction": [30, 30], "lnaState": 2},
+                         "fc": ORIGINAL["fc"]}})
+        apply_service = FakeApplyService(on_request=clear)
+        cal = Calibrator(client, FakeRetinaTrackerClient(confirm_after=1),
+                         config_mgr=config_mgr, apply_service=apply_service)
+        status = run_to_completion(cal, [TOWER], dwell=3.0)
+
+        # The one apply this engine ever makes, and the one caller allowed
+        # past the config-change guard.
+        assert apply_service.requests == [{"bypass_guard": True}]
+        # The safe corner is written into user.yml so the restart brings
+        # blah2 up on it, without disturbing the rest of the section.
+        assert config_mgr.user_config["capture"]["device"] == {
+            "gainReduction": [GAIN_REDUCTION_MAX, GAIN_REDUCTION_MAX],
+            "lnaState": LNA_STATE_MAX}
+        assert config_mgr.user_config["capture"]["fc"] == ORIGINAL["fc"]
+        assert status["preflight"]["recovered"] is True
+        assert status["preflight"]["previous"] == ORIGINAL
+        # And having recovered it, the run did its actual job.
+        assert status["state"] == "done"
+
+    def test_unrecoverable_device_ends_the_run_before_any_tower(self, fast_preflight):
+        client = FakeBlah2Client(retune_fail_rule=lambda fc, ga, gb, lna: True)
+        config_mgr = FakeConfigManager()
+        apply_service = FakeApplyService()
+        cal = Calibrator(client, FakeRetinaTrackerClient(),
+                         config_mgr=config_mgr, apply_service=apply_service)
+        status = run_to_completion(cal, [TOWER, TOWER_TWO], dwell=0.05)
+
+        assert status["state"] == "failed"
+        # No tower was tried, so there is nothing to say about aircraft —
+        # which is the whole point. Before the preflight this ran all the
+        # way through, reported tuning_not_applied per tower, and led with
+        # "no aircraft was overhead".
+        assert status["history"] == []
+        assert "still not accepting tuning commands after a restart" in status["error"]
+        assert "maximum attenuation" in status["error"]
+        # It still tried, and it still left the device safe.
+        assert apply_service.requests == [{"bypass_guard": True}]
+        assert config_mgr.saves == 1
+        assert status["preflight"]["recovered"] is False
+
+    def test_failed_restart_is_reported_rather_than_swallowed(self, fast_preflight):
+        client = FakeBlah2Client(retune_fail_rule=lambda fc, ga, gb, lna: True)
+        apply_service = FakeApplyService(outcome="failed",
+                                         error="Command timed out")
+        cal = Calibrator(client, FakeRetinaTrackerClient(),
+                         config_mgr=FakeConfigManager(),
+                         apply_service=apply_service)
+        status = run_to_completion(cal, [TOWER], dwell=0.05)
+
+        assert status["state"] == "failed"
+        assert "restarting it failed" in status["error"]
+        assert "Command timed out" in status["error"]
+
+    def test_restart_that_never_finishes_gives_up(self, fast_preflight):
+        client = FakeBlah2Client(retune_fail_rule=lambda fc, ga, gb, lna: True)
+        # Never leaves 'running' — a restart that hung rather than failed.
+        apply_service = FakeApplyService(outcome="running")
+        cal = Calibrator(client, FakeRetinaTrackerClient(),
+                         config_mgr=FakeConfigManager(),
+                         apply_service=apply_service)
+        status = run_to_completion(cal, [TOWER], dwell=0.05)
+
+        assert status["state"] == "failed"
+        assert "did not finish in time" in status["error"]
+
+    def test_without_recovery_machinery_it_fails_fast(self, fast_preflight):
+        # No config_mgr/apply_service (dev mode, and every engine-level test
+        # above): the probe still runs and still ends the run honestly,
+        # there is just no restart to attempt.
+        client = FakeBlah2Client()
+        client.ack_enabled = False
+        status = run_to_completion(Calibrator(client, FakeRetinaTrackerClient()),
+                                   [TOWER], dwell=0.05)
+
+        assert status["state"] == "failed"
+        assert status["history"] == []
+        assert "Restart the radar services and try again" in status["error"]
+
+    def test_cancel_after_a_recovery_does_not_restore_the_wedging_tuning(
+            self, fast_preflight):
+        # The original tuning is what the radio was stuck on. Putting a
+        # just-recovered device back on it is the one move guaranteed to
+        # undo the recovery, so a recovered run skips the restore entirely.
+        import time as _time
+        rule, clear = wedged_until_restart()
+        client = FakeBlah2Client(retune_fail_rule=rule)
+        cal = Calibrator(client, FakeRetinaTrackerClient(),
+                         config_mgr=FakeConfigManager(),
+                         apply_service=FakeApplyService(on_request=clear))
+        started, error = cal.start([TOWER], ORIGINAL, budget_seconds=30,
+                                   dwell_seconds=30)
+        assert started, error
+        deadline = _time.monotonic() + 5
+        while _time.monotonic() < deadline:
+            if cal.get_status()["phase"] == "dwelling":
+                break
+            _time.sleep(0.01)
+        cal.cancel()
+        cal._thread.join(timeout=10)
+        status = cal.get_status()
+
+        assert status["state"] == "cancelled"
+        assert status["preflight"]["recovered"] is True
+        assert (client.current["gain_a"], client.current["gain_b"],
+                client.current["lna_state"]) != (
+            ORIGINAL["gain_a"], ORIGINAL["gain_b"], ORIGINAL["lna_state"])
+
+    def test_recovery_time_is_not_charged_to_the_search_budget(
+            self, fast, monkeypatch):
+        # A recovery restart can take ~90s. Starting the budget clock before
+        # it would silently shorten every tower's dwell on a node that was
+        # already having a bad day.
+        monkeypatch.setattr(calmod, "PREFLIGHT_RECOVERY_PROBE_SECONDS", 0.2)
+        monkeypatch.setattr(calmod, "PREFLIGHT_RECOVERY_APPLY_TIMEOUT_SECONDS", 5.0)
+        monkeypatch.setattr(calmod, "PREFLIGHT_APPLY_POLL_SECONDS", 0.05)
+        rule, clear = wedged_until_restart()
+        client = FakeBlah2Client(retune_fail_rule=rule)
+
+        polls = {"n": 0}
+        apply_service = FakeApplyService(on_request=clear)
+        real_get_status = apply_service.get_status
+        def slow_get_status():
+            polls["n"] += 1
+            # 'running' for the first few polls, i.e. a restart that took
+            # a meaningful slice of the budget below.
+            if polls["n"] <= 10:
+                return {"state": "running", "error": None}
+            return real_get_status()
+        apply_service.get_status = slow_get_status
+
+        cal = Calibrator(client, FakeRetinaTrackerClient(),
+                         config_mgr=FakeConfigManager(),
+                         apply_service=apply_service)
+        status = run_to_completion(cal, [TOWER, TOWER_TWO], budget=1.5,
+                                   dwell=None)
+
+        assert status["preflight"]["recovered"] is True
+        # Both towers still got looked at, rather than the second being
+        # eaten by time spent restarting before the search began.
+        assert status["progress"]["towers_tried"] == 2
+        assert [h["outcome"] for h in status["history"]] == [
+            "no_confirmed_track", "no_confirmed_track"]
+
+
 class TestFailureModes:
     def test_unreachable_blah2_fails_the_run(self, fast):
-        # A permanently broken retune is now folded into the same
-        # overload-handling path as a device wedge (see _probe/_safe_revert)
-        # rather than aborting the run outright — this tower can never
-        # confirm anything, so the run still correctly ends "failed", just
-        # via the ordinary no-track path rather than surfacing "Retune
-        # failed" directly. history[0]["device_error"] is what now proves
-        # blah2 was genuinely unreachable, not just "no aircraft."
+        # A radio that takes no retune at all is caught by the preflight
+        # before any tower is tried (see calibrator._preflight). It used to
+        # be folded into the per-candidate overload path, so the run walked
+        # all three towers, recorded tuning_not_applied on each, and
+        # finished behind a summary message about no aircraft being
+        # overhead — the exact confusion the preflight exists to remove.
+        # No history at all is the point: nothing was watched, so there is
+        # nothing to report about it.
         client = FakeBlah2Client()
         client.retune_error = "connection refused"
         status = run_to_completion(Calibrator(client, FakeRetinaTrackerClient()), [TOWER])
         assert status["state"] == "failed"
-        assert status["history"][0]["device_error"] is True
+        assert status["history"] == []
+        assert "not accepting tuning commands" in status["error"]
 
     def test_missing_ack_fails_the_run(self, fast):
         client = FakeBlah2Client()
         client.ack_enabled = False
         status = run_to_completion(Calibrator(client, FakeRetinaTrackerClient()), [TOWER])
         assert status["state"] == "failed"
-        assert status["history"][0]["device_error"] is True
+        assert status["history"] == []
+        assert "not accepting tuning commands" in status["error"]
 
     def test_missing_rf_status_fails_the_run(self, fast):
         client = FakeBlah2Client(detection=moving_track_detections())

@@ -128,7 +128,13 @@ blah2_client = Blah2Client(BLAH2_API_URL)
 # get a second conversation, it gets a socket nobody ever reads from.
 retina_tracker_client = RetinaTrackerClient(
     RETINA_TRACKER_HOST, RETINA_TRACKER_PORT, RETINA_TRACKER_EVENTS_PATH)
-calibrator = Calibrator(blah2_client, retina_tracker_client)
+# config_mgr/apply_service are only reached by the preflight's recovery
+# branch — writing the safe corner to user.yml and restarting the stack when
+# the radio has stopped accepting retunes (see calibrator._preflight). The
+# apply_service reference resolves here because ApplyService is constructed
+# above; its own guard resolves `calibrator` lazily, so the cycle is fine.
+calibrator = Calibrator(blah2_client, retina_tracker_client,
+                        config_mgr=config_mgr, apply_service=apply_service)
 tracker_capture = TrackerCaptureService(blah2_client, retina_tracker_client)
 
 

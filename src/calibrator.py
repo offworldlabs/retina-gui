@@ -139,12 +139,47 @@ Two success modes, with genuinely different dwell strategies:
     rejects mode=adsb at the /start endpoint — exposing it to users is a
     separate decision not yet made.
 
-Nothing is written to user.yml during a run, and nothing here touches
-config-merger or Docker: every setting this engine applies goes through
-blah2's live retune protocol (see blah2_client.retune) and is in-memory
-only. That keeps the whole run on sub-second HTTP calls and keeps this
-module free of any Flask/subprocess/Docker import. Persisting a
-successful result is a separate, explicit step (POST /calibrate/apply).
+Before the search starts, a preflight (see _preflight) parks the device at
+the safe corner — max gain reduction on both tuners, max LNA state — at
+whatever frequency blah2 is *actually* on, and requires an ack for it. That
+one retune does two jobs: it proves the SDRplay API is still answering
+control calls, and it leaves the radio at its least sensitive setting before
+any candidate is tried. On a healthy node it costs a couple of seconds and
+nothing else happens.
+
+If the ack never comes, the device is wedged, and a live retune provably
+cannot rescue it: once the SDRplay API starts returning ServiceNotResponding
+it keeps doing so (see _apply), so every later retune in the run fails too.
+The only lever that works is a restart from a safe config. The preflight
+therefore writes the safe corner to user.yml and runs the ordinary
+config-apply path — sdrplay_apiService restart, settle, container recreate —
+then re-probes until the device answers or PREFLIGHT_RECOVERY_PROBE_SECONDS
+expires. If it never answers, the run is abandoned before any tower is
+tried, with a message naming the real fault.
+
+Without this, the wedged case was near-invisible: every retune failed, every
+tower came back tuning_not_applied, and the whole run finished in 30-60
+seconds behind a summary message about there being no aircraft overhead.
+
+That user.yml write is a deliberate exception to the rule below, and it is
+**not** reverted. It only ever happens on a device that was already
+unresponsive, where max attenuation is a working state rather than a
+degraded one; a run that reaches /calibrate/apply overwrites it anyway; and
+reverting it would cost a second container restart that could leave the node
+deaf if it failed in between. The run reports that it did this and what the
+previous values were, so the user can restore them deliberately. For the
+same reason, a run whose preflight had to recover the device does not
+restore the original tuning on a non-success outcome (see _run) — putting a
+just-recovered radio back on the sensitive settings that wedged it is the
+one thing not to do.
+
+Apart from that preflight, nothing is written to user.yml during a run, and
+nothing here touches config-merger or Docker: every setting this engine
+applies goes through blah2's live retune protocol (see blah2_client.retune)
+and is in-memory only. That keeps the whole search on sub-second HTTP calls,
+and this module still imports no Flask, subprocess or Docker — the recovery
+restart goes through an injected ApplyService. Persisting a successful
+result is a separate, explicit step (POST /calibrate/apply).
 
 On a genuine user cancellation or an unexpected/CalibrationError
 exception, the original tuning is restored, unchanged from before. On
@@ -201,6 +236,26 @@ ADSB_GAIN_STEP_DB = 5
 # traffic), just not one derived from a shrinking per-tower time division.
 ADSB_DESCENT_DEADLINE_SECONDS = 120
 
+# Preflight recovery (see _preflight). The apply timeout has to cover the
+# whole config-apply path — config-merger, the sdrplay_apiService restart,
+# routes.mode's own 30s settle, and a container recreate measured at ~47s —
+# with enough headroom that a slow node isn't declared dead for being slow.
+# The probe window then covers blah2 coming up and claiming the device
+# afterwards; SDRplay hardware needs a real 20-60s settle before it answers
+# again, so anything shorter reports a false failure on a device that was
+# about to recover.
+#
+# These two are bounded from above, not just chosen: the preflight runs
+# *before* TOTAL_BUDGET_SECONDS starts (see _run), so their sum is added to
+# a run's total wall time, and the whole thing still has to finish inside
+# the 1200s after which retina-gui's own CALIBRATE_LOCK_TIMEOUT and
+# blah2-arm's watchdog stop treating calibrate.lock as live and restart the
+# stack underneath the run. 180 + 60 + 900 = 1140 leaves a minute of
+# margin; raising either without lowering TOTAL_BUDGET_SECONDS spends it.
+PREFLIGHT_RECOVERY_APPLY_TIMEOUT_SECONDS = 180
+PREFLIGHT_RECOVERY_PROBE_SECONDS = 60
+PREFLIGHT_APPLY_POLL_SECONDS = 1.0
+
 # Retune protocol timing.
 ACK_TIMEOUT_SECONDS = 2.0
 ACK_POLL_SECONDS = 0.2
@@ -252,6 +307,9 @@ TRACKER_FEED_POLL_SECONDS = 0.2
 # stop treating calibrate.lock as live — past that point the watchdog would
 # restart the stack underneath a still-running calibration. Raising this
 # above ~20 minutes means raising both of those, in both repos, together.
+# Note this is no longer a run's whole wall time: the preflight's recovery
+# branch runs ahead of this clock, and its own two constants are sized
+# against the same 1200s ceiling — see PREFLIGHT_RECOVERY_APPLY_TIMEOUT_SECONDS.
 TOTAL_BUDGET_SECONDS = 900
 
 # Hard per-tower ceiling on the descent phase, whatever the run budget is —
@@ -314,9 +372,18 @@ class Calibrator:
     DeviceState and is managed by the caller (routes/calibrate.py).
     """
 
-    def __init__(self, blah2_client, retina_tracker_client):
+    def __init__(self, blah2_client, retina_tracker_client,
+                 config_mgr=None, apply_service=None):
         self._client = blah2_client
         self._tracker_client = retina_tracker_client
+        # Both are only used by _preflight's recovery branch, and only when
+        # the safe-corner probe has already failed. Left as None (every
+        # engine-level test, and dev mode) the probe still runs and still
+        # aborts the run with an accurate message — there is simply no
+        # restart to attempt. Injected rather than imported so this module
+        # keeps its no-Flask/no-subprocess property (see module docstring).
+        self._config_mgr = config_mgr
+        self._apply_service = apply_service
         self._lock = threading.Lock()
         self._cancel = threading.Event()
         self._thread = None
@@ -353,6 +420,10 @@ class Calibrator:
             "result": None,
             "error": None,
             "original": None,
+            # None until the preflight has something to report. Only set when
+            # the device had to be recovered — a clean probe is unremarkable
+            # and says nothing the UI needs to show. See _preflight.
+            "preflight": None,
             "history": [],
         }
 
@@ -547,6 +618,126 @@ class Calibrator:
             self._last_applied_fc = int(status["fc"])
         else:
             self._last_applied_fc = int(original_fc)
+
+    # ── Preflight ──────────────────────────────────────────────
+
+    def _preflight(self, original):
+        """Park the device at the safe corner and prove it still responds,
+        recovering it by restart if it doesn't. See the module docstring for
+        the full rationale.
+
+        Runs after _seed_last_applied_fc, and deliberately probes at the
+        frequency blah2 is *actually* on rather than at original["fc"]:
+        moving fc from an unknown, possibly sensitive gain is the exact
+        hazard _apply's handover exists to avoid, and this call has no
+        proven-safe state to hand over from. Gain reduction and LNA state
+        only ever increase here, so the probe is safe from any starting
+        point.
+
+        Returns None if the device is usable. Raises CalibrationError with a
+        message naming the real fault if it is not — there is no point
+        starting a search against a radio that cannot be tuned.
+        """
+        self._update(phase="preflight")
+        fc = self._last_applied_fc
+        try:
+            self._apply_tuning(fc, GAIN_REDUCTION_MAX, GAIN_REDUCTION_MAX,
+                               LNA_STATE_MAX)
+            return
+        except CalibrationError as e:
+            # Rebound: `as e` is unbound at the end of the except block, and
+            # this message is still needed several branches below.
+            probe_error = e
+
+        if self._apply_service is None or self._config_mgr is None:
+            raise CalibrationError(
+                f"The radio is not accepting tuning commands ({probe_error}). "
+                "Restart the radar services and try again.")
+
+        self._update(phase="recovering")
+        # Recorded before the write, so a run that dies anywhere below still
+        # reports that it intervened — and _run still knows not to restore.
+        self._set_preflight(recovered=False, restarted=True, previous=dict(original))
+        try:
+            self._persist_safe_corner()
+        except Exception as e:
+            # Without this write the restart brings blah2 straight back up on
+            # the tuning that wedged it, so there is no point doing it.
+            raise CalibrationError(
+                "The radio stopped accepting tuning commands, and its safe "
+                f"settings could not be saved: {e}") from e
+
+        error = self._run_recovery_apply()
+        if error:
+            raise CalibrationError(
+                f"The radio stopped accepting tuning commands, and restarting "
+                f"it failed: {error}")
+
+        # blah2 has to come up and claim the device before it can ack
+        # anything, so this retries rather than asking once.
+        deadline = time.monotonic() + PREFLIGHT_RECOVERY_PROBE_SECONDS
+        last_error = probe_error
+        while True:
+            try:
+                self._apply_tuning(fc, GAIN_REDUCTION_MAX, GAIN_REDUCTION_MAX,
+                                   LNA_STATE_MAX)
+                self._set_preflight(recovered=True, restarted=True,
+                                    previous=dict(original))
+                return
+            except CalibrationError as e:
+                last_error = e
+            if time.monotonic() >= deadline:
+                raise CalibrationError(
+                    f"The radio is still not accepting tuning commands after a "
+                    f"restart ({last_error}). It has been set to maximum "
+                    f"attenuation; the SDRplay service may need attention on "
+                    f"the node itself.")
+            self._sleep(PREFLIGHT_APPLY_POLL_SECONDS)
+
+    def _persist_safe_corner(self):
+        """Write the safe corner to user.yml so the stack restart below
+        brings blah2 up on it. The one user.yml write this engine makes, and
+        the reason it is not reverted, are covered in the module docstring."""
+        user_config = self._config_mgr.load_user_config() or {}
+        device = user_config.setdefault("capture", {}).setdefault("device", {})
+        device["gainReduction"] = [GAIN_REDUCTION_MAX, GAIN_REDUCTION_MAX]
+        device["lnaState"] = LNA_STATE_MAX
+        self._config_mgr.save_user_config(user_config)
+
+    def _run_recovery_apply(self):
+        """Run the ordinary config-apply path and wait for it to finish.
+
+        ApplyService.request() returns immediately (it exists precisely so a
+        closed tab can't interrupt a restart), so this polls to completion.
+        bypass_guard is required: that guard refuses config applies while a
+        calibration is running, which is normally exactly right — this is the
+        one caller that owns the run doing the restarting.
+
+        Returns None on success, or a message on failure.
+        """
+        try:
+            self._apply_service.request(bypass_guard=True)
+        except Exception as e:
+            return str(e)
+
+        deadline = time.monotonic() + PREFLIGHT_RECOVERY_APPLY_TIMEOUT_SECONDS
+        while True:
+            status = self._apply_service.get_status()
+            state = status.get("state")
+            if state == "done":
+                return None
+            if state == "failed":
+                return status.get("error") or "the restart failed"
+            if time.monotonic() >= deadline:
+                return "the restart did not finish in time"
+            # ignore_cancel: a cancel arriving mid-restart must not leave
+            # containers half-recreated with nobody waiting on them. The run
+            # aborts at the next _check_cancel, once the stack is settled.
+            self._sleep(PREFLIGHT_APPLY_POLL_SECONDS, ignore_cancel=True)
+
+    def _set_preflight(self, **kwargs):
+        with self._lock:
+            self._status["preflight"] = dict(kwargs)
 
     def _safe_fc_handover(self, ignore_cancel=False):
         """Retune to the safe corner at the frequency currently in use,
@@ -1308,9 +1499,21 @@ class Calibrator:
         # module docstring). None until/unless tower index 0 is actually
         # reached.
         top_tower_resolved = None
-        run_deadline = time.monotonic() + budget_seconds
 
         try:
+            # Ahead of the budget clock deliberately: a recovery restart can
+            # take ~90s, and charging that to the search would silently
+            # shorten every tower's dwell for a node that was already having
+            # a bad day. Raises if the radio can't be tuned at all, which
+            # ends the run here rather than after three towers of
+            # tuning_not_applied.
+            self._preflight(original)
+            run_deadline = time.monotonic() + budget_seconds
+            # Rebase the elapsed counter onto the same instant, or the UI
+            # shows a recovery's ~90s counting against a budget that has not
+            # started yet. started_at keeps the true wall-clock start.
+            self._update(_started_monotonic=time.monotonic())
+
             for index, tower in enumerate(towers):
                 self._check_cancel()
                 # MODE_ADSB has no time division (see module docstring) — the
@@ -1489,7 +1692,18 @@ class Calibrator:
         # second cancel click while this is in flight must not be able
         # to abort it, or blah2 could be left tuned to the last (failed)
         # candidate.
-        if state != "done" and not no_track_fallback_applied:
+        # A run whose preflight had to restart a wedged device never restores
+        # the original tuning: those are the settings the radio was stuck on,
+        # and putting a just-recovered device back on them is the one move
+        # guaranteed to undo the recovery. user.yml already holds the safe
+        # corner in that case (see _persist_safe_corner), so skipping this
+        # keeps the live tuning agreeing with the persisted one rather than
+        # fighting it. Keyed on `restarted`, not `recovered`: a cancel
+        # arriving between the restart and the first successful probe still
+        # leaves a device that must not be handed those values back.
+        with self._lock:
+            restarted = bool((self._status.get("preflight") or {}).get("restarted"))
+        if state != "done" and not no_track_fallback_applied and not restarted:
             self._update(phase="restoring")
             try:
                 self._apply(original["fc"], original["gain_a"], original["gain_b"],
