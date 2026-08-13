@@ -354,12 +354,11 @@ def get_latest_stable_from_github(
 def parse_os_version(tag: str) -> tuple[int, ...] | None:
     """Extract semver tuple from owl-os version strings.
 
-    Handles formats: 'os-v0.1.0', 'v0.1.0', '0.1.0',
-    and pre-release variants like 'os-v0.1.0-dev', 'v0.1.0-rc1'.
-    Returns the numeric version tuple (0, 1, 0) — suffix is ignored for comparison.
-    Returns None for non-matching strings.
+    Handles formats: 'os-v0.1.0', 'v0.1.0', '0.1.0'.
+    Returns version tuple (0, 1, 0) for stable releases.
+    Returns None for RCs, dev, or non-matching strings.
     """
-    match = re.match(r"^(?:os-)?v?(\d+)\.(\d+)\.(\d+)(?:[-.].+)?$", tag)
+    match = re.match(r"^(?:os-)?v?(\d+)\.(\d+)\.(\d+)$", tag)
     if match:
         return tuple(int(x) for x in match.groups())
     return None
@@ -374,14 +373,15 @@ _owl_os_release_cache: dict[str, tuple[float, tuple[str | None, str | None]]] = 
 def get_latest_owl_os_from_github(
     repo: str = "offworldlabs/owl-os",
 ) -> tuple[str | None, str | None]:
-    """Get latest owl-os version tag from GitHub releases.
+    """Get latest stable owl-os version tag from GitHub releases.
 
-    Queries GitHub releases API, includes both stable and pre-release builds
-    (tags matching os-v*.*.*[-suffix]), and returns the highest semver version.
+    Queries GitHub releases API, filters to stable versions
+    (tags matching os-v*.*.*), and returns the highest semver version.
+    Pre-releases are excluded: a device offered an -rc or -dev image as its
+    "latest" would be updated onto an untested build.
     Result (including errors) is cached for _OWL_OS_RELEASE_CACHE_TTL seconds.
 
-    Returns (version_tag, error) tuple. version_tag is like 'os-v0.2.0' or
-    'os-v0.2.1-dev'.
+    Returns (version_tag, error) tuple. version_tag is like 'os-v0.2.0'.
     """
     cached = _owl_os_release_cache.get(repo)
     if cached and time.monotonic() - cached[0] < _OWL_OS_RELEASE_CACHE_TTL:
@@ -396,20 +396,20 @@ def get_latest_owl_os_from_github(
         if resp.status_code != 200:
             result = None, f"GitHub API error: {resp.status_code}"
         else:
-            found = []
+            stable = []
             for release in resp.json():
                 tag = release.get("tag_name", "")
                 if not tag.startswith("os-v"):
                     continue
                 version = parse_os_version(tag)
                 if version:
-                    found.append((tag, version))
+                    stable.append((tag, version))
 
-            if not found:
-                result = None, "No owl-os releases found"
+            if not stable:
+                result = None, "No stable owl-os releases found"
             else:
-                found.sort(key=lambda x: x[1], reverse=True)
-                result = found[0][0], None
+                stable.sort(key=lambda x: x[1], reverse=True)
+                result = stable[0][0], None
     except requests.RequestException as e:
         result = None, str(e)
 
