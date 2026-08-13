@@ -45,14 +45,14 @@ SAMPLE_TOWER_RESPONSE = {
 class TestTowerSearch:
     """Tests for POST /towers/search proxy route."""
 
-    @patch('routes.towers.http_requests.post')
-    def test_search_returns_towers(self, mock_post, app_client):
+    @patch('routes.towers.http_requests.get')
+    def test_search_returns_towers(self, mock_get, app_client):
         """Proxy returns tower data from Tower-Finder API."""
         mock_resp = MagicMock()
         mock_resp.status_code = 200
         mock_resp.json.return_value = SAMPLE_TOWER_RESPONSE
         mock_resp.raise_for_status.return_value = None
-        mock_post.return_value = mock_resp
+        mock_get.return_value = mock_resp
 
         resp = app_client.post('/towers/search', json={'lat': -33.8688, 'lon': 151.2093})
         assert resp.status_code == 200
@@ -60,8 +60,8 @@ class TestTowerSearch:
         assert data['count'] == 1
         assert data['towers'][0]['callsign'] == 'ATN6'
 
-        mock_post.assert_called_once()
-        assert '/api/towers' in mock_post.call_args[0][0]
+        mock_get.assert_called_once()
+        assert '/api/towers' in mock_get.call_args[0][0]
 
     def test_search_missing_body(self, app_client):
         """Returns 400 when request body is missing."""
@@ -73,38 +73,40 @@ class TestTowerSearch:
         resp = app_client.post('/towers/search', json={'lat': -33.8688})
         assert resp.status_code == 400
 
-    @patch('routes.towers.http_requests.post')
-    def test_search_timeout(self, mock_post, app_client):
+    @patch('routes.towers.http_requests.get')
+    def test_search_timeout(self, mock_get, app_client):
         """Returns 504 on timeout."""
         import requests
-        mock_post.side_effect = requests.Timeout()
+        mock_get.side_effect = requests.Timeout()
 
         resp = app_client.post('/towers/search', json={'lat': -33.8688, 'lon': 151.2093})
         assert resp.status_code == 504
         data = json.loads(resp.data)
         assert 'timed out' in data['error'].lower()
 
-    @patch('routes.towers.http_requests.post')
-    def test_search_upstream_error(self, mock_post, app_client):
+    @patch('routes.towers.http_requests.get')
+    def test_search_upstream_error(self, mock_get, app_client):
         """Returns 502 when Tower-Finder API is unreachable."""
         import requests
-        mock_post.side_effect = requests.ConnectionError()
+        mock_get.side_effect = requests.ConnectionError()
 
         resp = app_client.post('/towers/search', json={'lat': -33.8688, 'lon': 151.2093})
         assert resp.status_code == 502
 
-    @patch('routes.towers.http_requests.post')
-    def test_search_forwards_body(self, mock_post, app_client):
+    @patch('routes.towers.http_requests.get')
+    def test_search_forwards_body(self, mock_get, app_client):
         """Forwards entire JSON body to Tower-Finder API."""
         mock_resp = MagicMock()
         mock_resp.json.return_value = {"towers": [], "count": 0}
         mock_resp.raise_for_status.return_value = None
-        mock_post.return_value = mock_resp
+        mock_get.return_value = mock_resp
 
         body = {'lat': 38.9, 'lon': -77.0, 'altitude': 50, 'limit': 10, 'source': 'us', 'radius_km': 100}
         app_client.post('/towers/search', json=body)
 
-        forwarded = mock_post.call_args[1]['json']
+        # The plain (no-measurements) search forwards via query params on a GET;
+        # the JSON-body form is the measurement-enriched POST branch.
+        forwarded = mock_get.call_args[1]['params']
         assert forwarded['lat'] == 38.9
         assert forwarded['lon'] == -77.0
         assert forwarded['altitude'] == 50
