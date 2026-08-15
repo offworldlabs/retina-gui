@@ -8,10 +8,50 @@ The GUI reads from config.yml to show actual running values,
 but only writes changed values to user.yml.
 """
 import os
+import socket
 import tempfile
 
 import pytest
 import yaml
+
+_LOOPBACK = ("127.0.0.1", "::1", "localhost", "0.0.0.0")
+
+
+@pytest.fixture(autouse=True)
+def block_network(monkeypatch):
+    """Fail loudly if a test opens a connection to anything but loopback.
+
+    Without this, a test whose mock patches the wrong target does not fail —
+    the real request escapes to a live service and the assertion is decided by
+    whatever production answers. That is not hypothetical: the tower-search
+    tests patched `http_requests.post` while the code took its GET branch, and
+    for two months every run of this suite called the production tower-finder.
+    Three of them failed confusingly; `test_search_upstream_error` PASSED,
+    because it expects a 502 and the genuine outage produced one.
+
+    A missed mock now raises here instead, naming the address it tried.
+    """
+    real_connect = socket.socket.connect
+    real_connect_ex = socket.socket.connect_ex
+
+    def check(addr):
+        host = addr[0] if isinstance(addr, tuple) else addr
+        if isinstance(host, str) and host not in _LOOPBACK:
+            raise RuntimeError(
+                f"Test tried to reach {addr!r}. Nothing here may touch the "
+                f"network — a mock is missing or patched at the wrong target."
+            )
+
+    def guarded_connect(self, addr):
+        check(addr)
+        return real_connect(self, addr)
+
+    def guarded_connect_ex(self, addr):
+        check(addr)
+        return real_connect_ex(self, addr)
+
+    monkeypatch.setattr(socket.socket, "connect", guarded_connect)
+    monkeypatch.setattr(socket.socket, "connect_ex", guarded_connect_ex)
 
 
 @pytest.fixture(autouse=True)
