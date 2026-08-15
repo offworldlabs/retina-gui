@@ -1,0 +1,46 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # Pinned deliberately: an unpinned ruff picks up new rules on release and
+      # turns a green branch red without anything in this repo changing.
+      - run: pip install ruff==0.16.2 vulture==2.14 pre-commit==4.6.2
+
+      - run: ruff check .
+
+      - name: Dead code
+        run: pre-commit run --all-files --show-diff-on-failure
+
+  tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements.txt
+
+      - run: pip install -r requirements.txt pytest==8.3.4
+
+      # Roughly two and a half minutes, nearly all of it test_calibrate.py
+      # waiting out real dwell budgets. The timeout is a runaway guard, not a
+      # target — raise it rather than trimming coverage if the suite grows.
+      - name: Tests
+        timeout-minutes: 10
+        run: pytest
