@@ -24,3 +24,13 @@ jobs:
 
       - name: Dead code
         run: pre-commit run --all-files --show-diff-on-failure
+
+      # pytest is not in requirements.txt — that file is the runtime dependency
+      # set for the device image, and pytest has no business shipping there.
+      - run: pip install -r requirements.txt 'pytest>=8.0'
+
+      # pytest.ini supplies testpaths=tests and pythonpath=src, so no arguments
+      # are needed here. This suite had never run in CI until 86cb4jfk7; the
+      # four mender tests it now protects had been failing for two months.
+      - name: Tests
+        run: pytest
