@@ -23,6 +23,7 @@ from services import (  # noqa: F401  (re-exported for routes)
     RETINA_TRACKER_EVENTS_PATH,
     RETINA_TRACKER_HOST,
     RETINA_TRACKER_PORT,
+    TELEMETRY_STATUS_PATH,
     TOWER_FINDER_URL,
     USER_CONFIG_PATH,
     apply_service,
@@ -34,6 +35,7 @@ from services import (  # noqa: F401  (re-exported for routes)
     network_mgr,
     retina_tracker_client,
     ssh_keys,
+    telemetry_status,
     tracker_capture,
 )
 

@@ -210,6 +210,22 @@ class TestTowerCacheAdd:
         assert resp.status_code == 400
         assert resp.get_json()['success'] is False
 
+    def test_add_rejects_overlong_callsign(self, app_client):
+        """32 is retina-telemetry's tx_callsign cap; a longer one would be
+        accepted into the cache here and only fail later, when the tower is
+        selected and the whole location block stops validating."""
+        resp = app_client.post('/towers/cache/add', json={
+            'callsign': 'x' * 33, 'frequency_mhz': 95.5, 'latitude': -33.9, 'longitude': 151.2,
+        })
+        assert resp.status_code == 400
+        assert '32 characters' in resp.get_json()['error']
+
+    def test_add_accepts_callsign_at_the_cap(self, app_client):
+        resp = app_client.post('/towers/cache/add', json={
+            'callsign': 'x' * 32, 'frequency_mhz': 95.5, 'latitude': -33.9, 'longitude': 151.2,
+        })
+        assert resp.status_code == 200
+
     def test_add_rejects_out_of_range_latitude(self, app_client):
         resp = app_client.post('/towers/cache/add', json={
             'callsign': 'Bad', 'frequency_mhz': 95.5, 'latitude': 999, 'longitude': 151.2,

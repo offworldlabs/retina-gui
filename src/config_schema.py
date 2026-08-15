@@ -21,6 +21,12 @@ from pydantic import VERSION, BaseModel, Field
 # Detect Pydantic version for Field() syntax
 PYDANTIC_V2 = VERSION.startswith("2.")
 
+# Transmitter names travel to the server as retina-telemetry's `tx_callsign`,
+# which the node-ingest spec caps at 32. Tower-Finder never returns anything
+# near it — the only way to exceed it is a hand-typed name, either in the
+# config form or the manual Add Tower dialog, so both are checked against this.
+TX_NAME_MAX_LENGTH = 32
+
 
 # ============================================================================
 # Config File Loading
@@ -147,7 +153,10 @@ class LocationFormConfig(BaseModel):
     tx_latitude: float = Field(ge=-90, le=90, title="Transmitter Latitude", description="decimal degrees")
     tx_longitude: float = Field(ge=-180, le=180, title="Transmitter Longitude", description="decimal degrees")
     tx_altitude: float = Field(title="Transmitter Altitude", description="meters")
-    tx_name: str = Field(title="Transmitter Name", description="location name")
+    # 32 chars is retina-telemetry's tx_callsign limit, not a display concern:
+    # a longer name means it cannot build a NodeConfig, so registration and
+    # every config resend fail and the node never reaches the server.
+    tx_name: str = Field(max_length=TX_NAME_MAX_LENGTH, title="Transmitter Name", description="location name")
 
 
 # ============================================================================

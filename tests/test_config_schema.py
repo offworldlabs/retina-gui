@@ -161,6 +161,24 @@ class TestLocationFormConfig:
         assert config.rx_latitude == 37.7644
         assert config.tx_name == 'KSCZ-LD'
 
+    def test_tx_name_length_cap(self):
+        """tx_name is capped at 32 — retina-telemetry's tx_callsign limit.
+
+        A longer name means it cannot build a NodeConfig at all, so the node
+        never registers. Rejecting it here covers both writers: the config form
+        and the wizard's /towers/set-location.
+        """
+        def location(tx_name):
+            return LocationFormConfig(
+                rx_latitude=0, rx_longitude=0, rx_altitude=0, rx_name='Test',
+                tx_latitude=0, tx_longitude=0, tx_altitude=0, tx_name=tx_name
+            )
+
+        assert location('x' * 32).tx_name == 'x' * 32
+
+        with pytest.raises(ValidationError):
+            location('x' * 33)
+
     def test_latitude_bounds(self):
         """Latitude must be -90 to 90."""
         # Invalid: > 90
