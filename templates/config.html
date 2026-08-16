@@ -247,7 +247,7 @@
                 <div class="cfg-grid">
                     <div style="grid-column:1/-1;" class="cfg-row" style="padding:0;border:0;">
                         <div class="label-col"><label>Name</label><span class="help">{{ loc.tx_name.description if loc.tx_name else '' }}</span></div>
-                        <div><input type="text" name="location.tx_name" class="ds-input" value="{{ loc.tx_name.value or '' if loc.tx_name else '' }}"></div>
+                        <div><input type="text" name="location.tx_name" class="ds-input" maxlength="32" value="{{ loc.tx_name.value or '' if loc.tx_name else '' }}"></div>
                     </div>
                     {% if loc.tx_latitude %}
                     <div class="cfg-row" style="padding:0;border:0;">
@@ -550,7 +550,7 @@
                 <div class="modal-body">
                     <div class="cfg-row" style="padding:0;border:0;">
                         <div class="label-col"><label for="towerAddCallsign">Name / Callsign</label></div>
-                        <div><input type="text" id="towerAddCallsign" name="callsign" class="ds-input" required></div>
+                        <div><input type="text" id="towerAddCallsign" name="callsign" class="ds-input" maxlength="32" required></div>
                     </div>
                     <div class="cfg-row" style="padding:0;border:0;">
                         <div class="label-col"><label for="towerAddFrequency">Frequency</label><span class="help">MHz</span></div>

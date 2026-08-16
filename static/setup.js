@@ -245,7 +245,18 @@ function initSetupWizard(resumeStep, highestStepName, devMode, isRerun, demoMode
         btn.addEventListener('click', function() {
             btn.disabled = true;
             btn.textContent = 'Connecting...';
-            postJSON('/mender/cloud-services', {enabled: true})
+            // Demo mode pre-ticks both boxes, so a consent write here would
+            // record an acceptance nobody gave — the one thing the whole
+            // versioned-record design exists to prevent. Demoing the wizard on
+            // a live node must leave the record untouched.
+            var recordConsent = demoMode
+                ? Promise.resolve()
+                : postJSON('/set-up/consent', {}).then(function(r) { return r.json(); });
+            // Consent is recorded before the Mender toggle because it is the
+            // half that unblocks telemetry: if cloud services fail, the owner
+            // has still accepted and retina-telemetry can register.
+            recordConsent
+            .then(function() { return postJSON('/mender/cloud-services', {enabled: true}); })
             .then(function(r) { return r.json(); })
             .then(function() { advance(); })
             .catch(function() {

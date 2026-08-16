@@ -4,7 +4,7 @@ from pydantic import ValidationError
 
 from apply_service import ConfigChangeRefused
 from config_manager import ConfigManager
-from config_schema import LocationFormConfig
+from config_schema import TX_NAME_MAX_LENGTH, LocationFormConfig
 
 bp = Blueprint('towers', __name__, url_prefix='/towers')
 
@@ -105,6 +105,14 @@ def cache_add():
 
     if not callsign:
         return jsonify({"success": False, "error": "Name/callsign is required"}), 400
+    # Caught here as well as in LocationFormConfig so the rejection lands on the
+    # field the operator is typing into, rather than later when the tower is
+    # selected and the whole location block fails to validate.
+    if len(callsign) > TX_NAME_MAX_LENGTH:
+        return jsonify({
+            "success": False,
+            "error": f"Name/callsign must be {TX_NAME_MAX_LENGTH} characters or fewer",
+        }), 400
     if not (-90 <= latitude <= 90):
         return jsonify({"success": False, "error": "Latitude must be between -90 and 90"}), 400
     if not (-180 <= longitude <= 180):

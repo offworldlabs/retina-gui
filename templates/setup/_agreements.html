@@ -12,11 +12,15 @@
             </div>
         </label>
 
+        {# The publication disclosure lives here rather than in the EULA, so
+           this wording is part of what TELEMETRY_CONSENT_VERSION identifies —
+           changing it must bump that constant (see device_state.py). Recording
+           publication as "public" is only honest while this text says so. #}
         <label class="step-check">
             <input type="checkbox" id="cloudCheck">
             <div>
-                <div class="step-check-text">Enable cloud services</div>
-                <div class="step-check-help">Required for automatic updates. Can be disabled later in Settings.</div>
+                <div class="step-check-text">Enable cloud services and data publication</div>
+                <div class="step-check-help">Required for automatic updates, and can be disabled later in Settings. Your radar detections are sent to Offworld Labs and published in a public archive, including the location of this receiver. Published data cannot be recalled once it has been copied.</div>
             </div>
         </label>
     </div>

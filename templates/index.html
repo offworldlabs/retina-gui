@@ -52,6 +52,56 @@
     </div>
     {% endif %}
 
+    {# Absent when the telemetry package isn't installed — not a fault, so no
+       card rather than an empty one. See telemetry_status.py. #}
+    {% if telemetry %}
+    <section class="telemetry-section">
+        <div class="section-head"><h2>Telemetry</h2></div>
+        <div class="svc-card">
+            <div class="svc-head">
+                <div class="svc-icon">
+                    <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M12 20v-8"/>
+                        <path d="M8.5 9.5a5 5 0 0 1 7 0" opacity=".6"/>
+                        <path d="M5.5 6.5a9 9 0 0 1 13 0" opacity=".35"/>
+                        <circle cx="12" cy="12" r="1.8" fill="currentColor" stroke="none"/>
+                    </svg>
+                </div>
+                <div class="svc-name">Node identifier</div>
+                {% if telemetry.stale %}
+                <span class="ds-pill">
+                    <span class="ds-pill-dot" style="background:var(--danger);"></span>
+                    Not running
+                </span>
+                {% elif telemetry.state %}
+                <span class="ds-pill">
+                    <span class="ds-pill-dot" style="background:{{ 'var(--accent)' if telemetry.state == 'streaming' else 'var(--ink-3)' }};"></span>
+                    {{ telemetry.state|replace('_', ' ')|capitalize }}
+                </span>
+                {% endif %}
+            </div>
+
+            {% if telemetry.node_ref %}
+            <div class="svc-desc" style="font-weight:600;color:var(--ink);font-family:var(--font-mono);">{{ telemetry.node_ref }}</div>
+            <div class="svc-desc">Use this to find your node's data.</div>
+            {% else %}
+            <div class="svc-desc">This node has no identifier yet — it is assigned once it registers.</div>
+            {% endif %}
+
+            {# Pre-written prose from retina-telemetry, shown verbatim: mapping
+               its states to our own wording would be a second vocabulary to
+               keep in step with a file we don't own. #}
+            {% if telemetry.stale %}
+            <div class="svc-desc">
+                The telemetry service last reported {{ telemetry.last_report or 'at an unknown time' }} and is no longer running, so nothing is reaching the server.
+            </div>
+            {% elif telemetry.detail %}
+            <div class="svc-desc">{{ telemetry.detail }}</div>
+            {% endif %}
+        </div>
+    </section>
+    {% endif %}
+
     {% if mode == 'spectrum' %}
     <section class="spectrum-section">
         <div class="section-head"><h2>Spectrum</h2></div>
@@ -211,6 +261,7 @@
         </div>
     </section>
     {% endif %}
+
 
 </main>
 {% endblock %}

@@ -18,12 +18,30 @@ import os
 import shutil
 import subprocess
 import time
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 INSTALL_LOCK_TIMEOUT = timedelta(minutes=40)
 MENDER_STATUS_TIMEOUT = timedelta(hours=2)
 SETUP_WIZARD_TIMEOUT = timedelta(hours=24)
 CALIBRATE_LOCK_TIMEOUT = timedelta(minutes=20)
+
+# Identifies the terms the owner was actually shown, so it is possible later to
+# say what a given owner agreed to. It must change whenever that text changes,
+# and "that text" is the whole agreements screen — the two checkbox labels in
+# templates/setup/_agreements.html as much as templates/eula.html, because the
+# publication disclosure lives in the checkbox wording rather than in the EULA.
+# A version that does not move when the wording does makes the record a lie.
+#
+# Deferred deliberately: nothing re-prompts an owner whose stored version is
+# older than this one. Changing the text today leaves existing nodes holding
+# their original record, which is correct but silent.
+TELEMETRY_CONSENT_VERSION = "2026-08-15"
+
+# What publication means here. Publishing is a condition of participation
+# rather than a choice, so there is no UI for it — see the disclosure in the
+# agreements step, which is what makes recording this honest. The wire supports
+# "private", so making it optional later is a UI change and nothing more.
+TELEMETRY_PUBLICATION_CHOICE = "public"
 
 
 class DeviceState:
@@ -49,6 +67,10 @@ class DeviceState:
         self.setup_wizard_completed_flag = os.path.join(data_dir, "setup-wizard-completed")
         self.calibrate_lock_file = os.path.join(data_dir, "calibrate.lock")
         self.towers_cache_file = os.path.join(data_dir, "towers-cache.json")
+        # Read by the retina-telemetry container, which refuses to register
+        # without it. The path is a cross-repo contract, not an internal
+        # detail — see save_telemetry_consent.
+        self.telemetry_consent_file = os.path.join(data_dir, "telemetry-consent.json")
         self.dev_mode = dev_mode
 
     # ── State Queries ──────────────────────────────────────────
@@ -387,6 +409,72 @@ class DeviceState:
         os.makedirs(os.path.dirname(self.setup_wizard_file), exist_ok=True)
         with open(self.setup_wizard_file, "w") as f:
             json.dump(data, f)
+
+    # ── Telemetry consent ──────────────────────────────────────
+
+    def get_telemetry_consent(self) -> dict | None:
+        """Read the recorded consent, or None if nothing was ever recorded."""
+        if not os.path.exists(self.telemetry_consent_file):
+            return None
+        try:
+            with open(self.telemetry_consent_file) as f:
+                consent = json.load(f)
+        except (OSError, ValueError):
+            return None
+        return consent if isinstance(consent, dict) else None
+
+    def save_telemetry_consent(self, version=TELEMETRY_CONSENT_VERSION):
+        """Record that the owner accepted the terms.
+
+        Writes the three records retina-telemetry requires — it refuses to
+        register without all three and will never write a default of its own,
+        because a record it invented would claim an owner agreed to something
+        they were never shown. That discipline only holds if this end never
+        writes one speculatively either: call this from the agreements step and
+        nowhere else.
+
+        Shape mirrors the wire's `Agreements` object one-for-one, so there is
+        no translation to get wrong between what the owner saw and what the
+        server is told.
+
+        `accepted_at` is timezone-aware on purpose. The wire types it
+        `AwareDatetime`, so a naive timestamp is rejected at the boundary and
+        the node silently never registers — and every other timestamp in this
+        class uses a naive `datetime.now()`, which makes copying the
+        surrounding idiom the natural way to break it.
+
+        Re-accepting the same version preserves the original `accepted_at`: the
+        record answers "when did they agree to this text", and a wizard re-run
+        that shows unchanged wording has not produced a new agreement. A
+        changed version is a genuine re-acceptance and re-dates all three.
+        """
+        existing = self.get_telemetry_consent() or {}
+        accepted_at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+        if existing.get("licence", {}).get("version") == version:
+            accepted_at = existing["licence"].get("accepted_at", accepted_at)
+
+        record = {"version": version, "accepted_at": accepted_at}
+        self._write_json_atomically(self.telemetry_consent_file, {
+            "licence": dict(record),
+            "remote_management": dict(record),
+            "publication": {**record, "choice": TELEMETRY_PUBLICATION_CHOICE},
+        })
+
+    def _write_json_atomically(self, path, payload):
+        """Write JSON via a temp file and a rename.
+
+        A half-written consent file reads as "not accepted" to
+        retina-telemetry, so the node goes quiet and looks like a telemetry
+        bug rather than an interrupted write.
+        """
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        temporary = path + ".tmp"
+        with open(temporary, "w") as f:
+            json.dump(payload, f, indent=2, sort_keys=True)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(temporary, path)
 
     def clear_setup_wizard(self):
         """Clear wizard state (called on completion)."""

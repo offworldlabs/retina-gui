@@ -38,6 +38,7 @@ from mender import MenderClient
 from network_manager import NetworkManager
 from retina_tracker_client import RetinaTrackerClient
 from ssh_keys import SSHKeyManager
+from telemetry_status import TelemetryStatus
 from tracker_capture import TrackerCaptureService
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -72,6 +73,13 @@ RETINA_TRACKER_EVENTS_PATH = os.environ.get('RETINA_TRACKER_EVENTS_PATH',
     os.path.join(PROJECT_ROOT, 'dev_data', 'retina-tracker-events.jsonl') if DEV_MODE
     else '/data/retina-node/retina-tracker/output/events.jsonl'
 )
+# Written by the retina-telemetry container, read-only to us. That service
+# binds no ports, so this file is the only way anything it knows reaches an
+# operator — see telemetry_status.py.
+TELEMETRY_STATUS_PATH = os.environ.get('TELEMETRY_STATUS_PATH',
+    os.path.join(PROJECT_ROOT, 'dev_data', 'telemetry-status.json') if DEV_MODE
+    else '/data/retina-telemetry/status.json'
+)
 
 MENDER_SERVICES = ["mender-authd", "mender-updated", "mender-connect"]
 
@@ -102,6 +110,12 @@ device_state = DeviceState(
     mender_conf_backup_path="/data/mender-cloud-disabled/mender.conf",
     dev_mode=DEV_MODE,
 )
+
+telemetry_status = TelemetryStatus(
+    status_path=TELEMETRY_STATUS_PATH,
+    node_ref_cache_path=os.path.join(DATA_DIR, "telemetry-node-ref"),
+)
+
 
 def config_change_guard():
     """Refuse a config apply while Auto-Calibrate is using the SDR.

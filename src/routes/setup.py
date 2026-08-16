@@ -48,6 +48,26 @@ def save_step():
     return jsonify({"success": True})
 
 
+@bp.route("/set-up/consent", methods=["POST"])
+def consent():
+    """Record acceptance of the terms shown on the agreements step.
+
+    Deliberately posted from that step rather than at wizard completion. Every
+    node already in the field has completed the wizard and will never see it
+    again, so re-running /set-up is the re-consent path — and writing here
+    means an owner can tick, continue, and close the tab without going through
+    the location and tower steps or the docker work /set-up/complete triggers.
+
+    retina-telemetry re-reads the file on every state derivation rather than
+    caching it at startup, so this takes effect within seconds and needs no
+    restart or ordering with that container.
+    """
+    from app import device_state
+
+    device_state.save_telemetry_consent()
+    return jsonify({"success": True})
+
+
 @bp.route("/set-up/complete", methods=["POST"])
 def complete():
     """Mark setup wizard as complete."""

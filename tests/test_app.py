@@ -1154,3 +1154,37 @@ class TestSetupWizardStepRoutes:
         response = app_client.post('/set-up/complete')
         data = json.loads(response.data)
         assert data['success'] is True
+
+
+class TestTelemetryConsentRoute:
+    """Test POST /set-up/consent.
+
+    Until this writes, no node in the fleet can register with
+    retina-telemetry — it refuses without all three records and will never
+    synthesise one.
+    """
+
+    def test_consent_writes_the_records(self, app_client):
+        import app as app_module
+        assert app_module.device_state.get_telemetry_consent() is None
+
+        response = app_client.post('/set-up/consent',
+                                   data=json.dumps({}),
+                                   content_type='application/json')
+
+        assert json.loads(response.data)['success'] is True
+        consent = app_module.device_state.get_telemetry_consent()
+        assert set(consent) == {"licence", "remote_management", "publication"}
+        assert consent['publication']['choice'] == 'public'
+
+    def test_consent_is_independent_of_wizard_completion(self, app_client):
+        """The re-consent path for the deployed fleet: a node that has already
+        finished setup re-runs /set-up, ticks, continues, and abandons. Nothing
+        about completing the wizard may be required for the record to land."""
+        import app as app_module
+        app_module.device_state.mark_setup_wizard_completed()
+
+        app_client.post('/set-up/consent', data=json.dumps({}),
+                        content_type='application/json')
+
+        assert app_module.device_state.get_telemetry_consent() is not None
