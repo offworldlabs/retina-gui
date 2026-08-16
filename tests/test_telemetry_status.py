@@ -134,6 +134,43 @@ class TestStaleness:
         assert reader.read()["stale"] is False
 
 
+class TestLastReportInWords:
+    """`2026-08-16T09:49:52Z` makes the operator do arithmetic to answer the
+    only question it is there for — how long the service has been quiet."""
+
+    @pytest.mark.parametrize("age,expected", [
+        (timedelta(seconds=5), "less than a minute ago"),
+        (timedelta(seconds=89), "less than a minute ago"),
+        (timedelta(seconds=90), "1 minute ago"),
+        (timedelta(minutes=5), "5 minutes ago"),
+        (timedelta(hours=1), "1 hour ago"),
+        (timedelta(hours=6), "6 hours ago"),
+        (timedelta(days=1), "1 day ago"),
+        (timedelta(days=9), "9 days ago"),
+    ])
+    def test_ages_read_as_prose(self, reader, age, expected):
+        with open(reader.status_path, "w") as f:
+            json.dump({"state": "streaming", "written_at": written_at(age)}, f)
+        assert reader.read()["last_report"] == expected
+
+    def test_no_timestamp_has_no_words(self, reader):
+        with open(reader.status_path, "w") as f:
+            json.dump({"state": "streaming"}, f)
+        assert reader.read()["last_report"] is None
+
+    def test_unparseable_timestamp_has_no_words(self, reader):
+        with open(reader.status_path, "w") as f:
+            json.dump({"state": "streaming", "written_at": "not a timestamp"}, f)
+        assert reader.read()["last_report"] is None
+
+    def test_a_clock_skewed_future_stamp_does_not_go_negative(self, reader):
+        """Node and container clocks need not agree to the second."""
+        future = (datetime.now(timezone.utc) + timedelta(seconds=30)).strftime("%Y-%m-%dT%H:%M:%SZ")
+        with open(reader.status_path, "w") as f:
+            json.dump({"state": "streaming", "written_at": future}, f)
+        assert reader.read()["last_report"] == "less than a minute ago"
+
+
 class TestNodeRefCache:
     """node_ref is null for up to a heartbeat interval after a restart.
 
@@ -222,3 +259,6 @@ class TestHomePageCard:
         # The identifier still shows: it stays valid, and someone contacting
         # support about a dead service is exactly who needs to quote it.
         assert b"nde4f2k9xq7m3b8" in body
+        # Prose, not an RFC 3339 stamp the reader has to decode.
+        assert b"last reported 1 hour ago" in body
+        assert b"T09:" not in body

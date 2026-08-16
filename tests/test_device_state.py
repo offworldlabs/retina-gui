@@ -6,7 +6,13 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from device_state import INSTALL_LOCK_TIMEOUT, MENDER_STATUS_TIMEOUT, SETUP_WIZARD_TIMEOUT, DeviceState
+from device_state import (
+    INSTALL_LOCK_TIMEOUT,
+    MENDER_STATUS_TIMEOUT,
+    SETUP_WIZARD_TIMEOUT,
+    TELEMETRY_CONSENT_VERSION,
+    DeviceState,
+)
 
 
 @pytest.fixture
@@ -424,3 +430,84 @@ class TestTowersCache:
         with open(ds.towers_cache_file, "w") as f:
             f.write("not json")
         assert ds.get_towers_cache() is None
+
+
+class TestTelemetryConsent:
+    """Test the consent records retina-telemetry refuses to register without.
+
+    The shape is a cross-repo contract with retina-telemetry's
+    `collect/consent.py`, which fails closed on anything it does not recognise
+    — so these assert the exact keys rather than round-tripping our own writer.
+    """
+
+    def test_no_consent_by_default(self, ds):
+        """The state of every node that has not been through the wizard."""
+        assert ds.get_telemetry_consent() is None
+
+    def test_writes_all_three_records(self, ds):
+        ds.save_telemetry_consent()
+        consent = ds.get_telemetry_consent()
+
+        assert set(consent) == {"licence", "remote_management", "publication"}
+        for name in ("licence", "remote_management", "publication"):
+            assert consent[name]["version"] == TELEMETRY_CONSENT_VERSION
+            assert consent[name]["accepted_at"]
+
+    def test_publication_records_a_choice(self, ds):
+        """retina-telemetry discards the record unless choice is exactly
+        "public" or "private"; anything else is treated as no consent at all."""
+        ds.save_telemetry_consent()
+        assert ds.get_telemetry_consent()["publication"]["choice"] == "public"
+
+    def test_accepted_at_is_timezone_aware(self, ds):
+        """The wire types this AwareDatetime, so a naive timestamp is rejected
+        at the boundary and the node silently never registers."""
+        ds.save_telemetry_consent()
+        stamp = ds.get_telemetry_consent()["licence"]["accepted_at"]
+
+        assert datetime.fromisoformat(stamp).tzinfo is not None
+
+    def test_all_three_share_one_timestamp(self, ds):
+        """One checkbox, one moment of agreement."""
+        ds.save_telemetry_consent()
+        consent = ds.get_telemetry_consent()
+
+        stamps = {consent[n]["accepted_at"] for n in consent}
+        assert len(stamps) == 1
+
+    def test_reaccepting_same_version_preserves_the_original_date(self, ds):
+        """A wizard re-run showing unchanged wording is not a new agreement,
+        and overwriting would destroy when they first agreed."""
+        ds.save_telemetry_consent()
+        first = ds.get_telemetry_consent()["licence"]["accepted_at"]
+
+        ds.save_telemetry_consent()
+        assert ds.get_telemetry_consent()["licence"]["accepted_at"] == first
+
+    def test_new_version_redates_every_record(self, ds):
+        """Changed wording is a genuine re-acceptance."""
+        ds.save_telemetry_consent(version="2020-01-01")
+        with open(ds.telemetry_consent_file) as f:
+            stale = json.load(f)
+        stale["licence"]["accepted_at"] = "2020-01-01T00:00:00Z"
+        stale["publication"]["accepted_at"] = "2020-01-01T00:00:00Z"
+        with open(ds.telemetry_consent_file, "w") as f:
+            json.dump(stale, f)
+
+        ds.save_telemetry_consent(version="2026-12-25")
+        consent = ds.get_telemetry_consent()
+
+        assert consent["licence"]["version"] == "2026-12-25"
+        assert consent["licence"]["accepted_at"] != "2020-01-01T00:00:00Z"
+        assert consent["publication"]["accepted_at"] != "2020-01-01T00:00:00Z"
+
+    def test_malformed_file_reads_as_no_consent(self, ds):
+        """Fail closed, matching retina-telemetry's own posture: a record we
+        cannot read is not a record."""
+        with open(ds.telemetry_consent_file, "w") as f:
+            f.write("{not json")
+        assert ds.get_telemetry_consent() is None
+
+    def test_write_leaves_no_temp_file_behind(self, ds):
+        ds.save_telemetry_consent()
+        assert not os.path.exists(ds.telemetry_consent_file + ".tmp")

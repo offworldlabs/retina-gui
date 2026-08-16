@@ -263,6 +263,10 @@ h1, h2, h3, h4, h5, h6 {
 .tower-info .name { font-size: 15px; font-weight: 600; letter-spacing: -0.01em; }
 .tower-info .freq { font-family: var(--font-mono); color: var(--ink-3); font-size: 12.5px; margin-top: 1px; }
 
+/* Telemetry sits between the tower row and the service grid, so it carries the
+   same 20px gap those two use to separate themselves from what follows. */
+.telemetry-section { margin-bottom: 20px; }
+
 /* Section head */
 .section-head h2 {
     font-size: 11.5px;
