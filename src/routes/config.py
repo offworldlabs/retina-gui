@@ -14,10 +14,24 @@ from form_utils import schema_to_form_fields
 bp = Blueprint('config', __name__)
 
 
+# The wizard's tower step polls /config/apply/status to know when the restart
+# it queued has finished. Redirecting that hands fetch() an HTML page rather
+# than an error: the request succeeds, .json() rejects, and the step re-polls
+# a redirect forever with its spinner still up and its skip button hidden.
+# Same rule as _CALIBRATION_ALLOWED_PREFIXES in app.py — never redirect the
+# status endpoint the watching window depends on.
+#
+# Matched exactly, not by prefix: this route only reads status, while
+# /config/apply and /config/save mutate and must stay blocked mid-wizard.
+_WIZARD_ALLOWED_PATHS = ('/config/apply/status',)
+
+
 @bp.before_request
 def _check_wizard_not_active():
     """Block config access while the setup wizard is in progress."""
     from app import device_state
+    if request.path in _WIZARD_ALLOWED_PATHS:
+        return None
     if device_state.is_setup_wizard_in_progress():
         return redirect('/set-up')
 

@@ -691,6 +691,74 @@ class TestNavigationLockedToConfigDuringCalibration:
             assert app_client.get('/').status_code == 200
 
 
+class TestWizardRedirectDoesNotStrandTheWizard:
+    """The wizard guard on the config blueprint is a page guard, but
+    @bp.before_request applies it to every route in that blueprint —
+    including /config/apply/status, which the wizard's own tower step polls.
+
+    Observed on jonathan-node-1: the tower step saved WGBY-TV correctly and
+    the queued apply finished in 0.74s, but every poll was answered with a
+    302 to /set-up. fetch() follows redirects, so the browser got the setup
+    page as a 200 of text/html, .json() rejected, and the step's catch-all
+    re-polled forever — leaving "Saving configuration..." on screen for 53
+    minutes with the skip button hidden.
+
+    Same rule the calibration guard already follows above: never redirect the
+    status endpoint the watching window depends on.
+    """
+
+    @staticmethod
+    def _in_wizard(client):
+        client.post('/set-up/save-step', json={'step': 'towers'})
+
+    def test_the_wizards_own_poll_endpoint_keeps_working(self, app_client):
+        self._in_wizard(app_client)
+        response = app_client.get('/config/apply/status')
+        assert response.status_code == 200
+        assert response.headers['Content-Type'].startswith('application/json')
+        json.loads(response.data)  # must parse — this is what fetch().json() does
+
+    def test_the_config_page_is_still_blocked(self, app_client):
+        """The exemption is one exact path, not a /config prefix. Widening it
+        would quietly disable the guard this class is built around."""
+        self._in_wizard(app_client)
+        response = app_client.get('/config')
+        assert response.status_code == 302
+        assert response.headers['Location'].endswith('/set-up')
+
+    def test_mutating_config_routes_are_still_blocked(self, app_client):
+        self._in_wizard(app_client)
+        for path in ('/config/save', '/config/apply'):
+            response = app_client.post(path, data={})
+            assert response.status_code == 302, path
+
+    def test_the_tower_step_can_read_its_own_progress(self, app_client):
+        """End to end: save a tower mid-wizard, then poll as setup.js does.
+
+        Deliberately asserts the poll stays readable rather than that the
+        apply reaches a terminal state — the work is a real docker restart
+        that a unit test cannot drive to completion. Readability is the whole
+        bug: before the fix every one of these polls raised JSONDecodeError
+        on the setup page's HTML, and the step had no state to act on.
+        """
+        self._in_wizard(app_client)
+        saved = app_client.post('/towers/select', json={
+            'rx_latitude': 42.2371916, 'rx_longitude': -72.6835149,
+            'rx_altitude': 16, 'tx_latitude': 42.241528,
+            'tx_longitude': -72.648361, 'tx_altitude': 619.2,
+            'tx_callsign': 'WGBY-TV', 'frequency_mhz': 213.0,
+        })
+        assert saved.status_code == 202
+
+        for _ in range(5):
+            response = app_client.get('/config/apply/status')
+            assert response.status_code == 200
+            status = json.loads(response.data)  # raised JSONDecodeError before
+            assert status['state'] in ('queued', 'running', 'done', 'failed'), status
+            if status['state'] != 'running':
+                break
+
+
 class TestConfigChangesDuringCalibration:
     """A config apply restarts the whole stack, which pulls the SDR out from
     under an Auto-Calibrate run.

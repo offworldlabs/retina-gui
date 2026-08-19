@@ -1072,10 +1072,13 @@ function initSetupWizard(resumeStep, highestStepName, devMode, isRerun, demoMode
                     frequency_mhz: selectedTower.frequency_mhz
                 };
 
+                var pollFailures = 0;
+
                 function pollApply() {
                     fetch('/config/apply/status')
                     .then(function(r) { return r.json(); })
                     .then(function(s) {
+                        pollFailures = 0;
                         if (s.state === 'running') {
                             var label = s.phase_label || 'Applying configuration';
                             if (s.phase === 'settling' && s.settle_remaining) {
@@ -1094,7 +1097,23 @@ function initSetupWizard(resumeStep, highestStepName, devMode, isRerun, demoMode
                             setTimeout(advance, 1500);
                         }
                     })
-                    .catch(function() { setTimeout(pollApply, 2000); });  // transient: keep watching
+                    .catch(function() {
+                        // A miss or two is transient — the GUI can blink out
+                        // while the stack restarts under us. A run of them is
+                        // not, and re-polling forever without saying so leaves
+                        // this step frozen on its spinner with the skip button
+                        // hidden and nothing to click. Surface it instead, and
+                        // give back the way past.
+                        if (++pollFailures >= 5) {
+                            statusEl.innerHTML = '<span class="text-warning">Configuration saved, but progress could not be read.</span>';
+                            saveBtn.disabled = false;
+                            saveBtn.textContent = 'Retry';
+                            skipBtn.style.display = '';
+                            skipBtn.textContent = 'Continue anyway \u2192';
+                            return;
+                        }
+                        setTimeout(pollApply, 2000);
+                    });
                 }
 
                 postJSON('/towers/select', payload)
