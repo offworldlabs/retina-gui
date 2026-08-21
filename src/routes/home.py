@@ -35,7 +35,7 @@ def index():
         retina_node_version = retina_node_version or '0.9.0-demo'
         setup_needed = False
         setup_in_progress = False
-        tx_name = tx_name or 'KPIX — 706 MHz UHF'
+        tx_name = tx_name or 'KPIX - 706 MHz UHF'
         rx_name = rx_name or 'San Francisco, CA'
         telemetry = telemetry or {
             'state': 'streaming', 'detail': None, 'node_ref': 'nde4f2k9xq7m3b8',

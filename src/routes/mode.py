@@ -249,7 +249,7 @@ def _repair(retina_node_path, on_phase, reason):
         return f'{reason} Automatic repair also failed: {error}'
     if removed:
         return (f'{reason} Cleaned up {len(removed)} half-created '
-                f'container(s) and restarted — check the radar is running.')
+                f'container(s) and restarted. Check the radar is running.')
     return f'{reason} No half-created containers were left behind.'
 
 

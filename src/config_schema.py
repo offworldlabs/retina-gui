@@ -136,7 +136,7 @@ class CaptureFormConfig(BaseModel):
     device_rfNotch: bool = Field(title="RF Notch Filter", description="Not recommended to enable unless you are sure.")
     device_bandwidthNumber: Literal[0, 5, 50, 100] = Field(
         title="Bandwidth Number",
-        description="AGC loop bandwidth (Hz). 0 disables AGC — gain is fixed by Gain Reduction/LNA State. "
+        description="AGC loop bandwidth (Hz). 0 disables AGC: gain is fixed by Gain Reduction/LNA State. "
                      "5/50/100 enable AGC: lower is slower and more stable, higher reacts faster but chases noise more."
     )
 

@@ -76,13 +76,13 @@ def search():
                 app.logger.warning(f"Failed to cache tower search results: {e}")
         return jsonify(result)
     except http_requests.Timeout:
-        return jsonify({"error": "Tower search timed out — try again"}), 504
+        return jsonify({"error": "Tower search timed out, try again"}), 504
     except http_requests.RequestException as e:
         app.logger.warning(f"Tower search failed: {e}")
         return jsonify({"error": "Unable to reach tower finder service"}), 502
     except Exception as e:
         app.logger.error(f"Tower search unexpected error: {e}")
-        return jsonify({"error": "Tower search failed — check server logs"}), 500
+        return jsonify({"error": "Tower search failed, check server logs"}), 500
 
 
 @bp.route("/cache/add", methods=["POST"])

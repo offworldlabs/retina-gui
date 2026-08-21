@@ -25,7 +25,7 @@
             </div>
             <div class="ds-brand-text">
                 <div class="ds-brand-name">OWL-OS</div>
-                <div class="ds-brand-node">Node <span class="mono">{{ node_id or '—' }}</span></div>
+                <div class="ds-brand-node">Node <span class="mono">{{ node_id or '-' }}</span></div>
             </div>
         </div>
         </a>
@@ -45,8 +45,8 @@
 
     {% block footer %}
     <footer class="foot">
-        <span>Node <span class="mono">{{ node_id or '—' }}</span></span>
-        <span>owl-os <span class="mono">{{ owl_os_version or '—' }}</span></span>
+        <span>Node <span class="mono">{{ node_id or '-' }}</span></span>
+        <span>owl-os <span class="mono">{{ owl_os_version or '-' }}</span></span>
         <span>retina-node <span class="mono">{{ retina_node_version or 'Not installed' }}</span></span>
         <div class="foot-spacer"></div>
     </footer>

@@ -14,7 +14,7 @@
             <div id="plotStatus" class="text-muted">Waiting for first data&hellip;</div>
             <div class="flex-grow-1"></div>
             <button type="button" id="clearBufferBtn" class="ds-btn danger-ghost sm"
-                    title="Clears only what's displayed here — tracking keeps running, so an active aircraft will reappear on its own.">
+                    title="Clears only what's displayed here. Tracking keeps running, so an active aircraft will reappear on its own.">
                 Clear buffer
             </button>
         </div>
@@ -148,7 +148,7 @@
     var source = new EventSource('/tracker-preview/events');
     source.onmessage = refresh;
     source.onerror = function() {
-        status.textContent = 'Connection lost — reload the page to restart the capture.';
+        status.textContent = 'Connection lost. Reload the page to restart the capture.';
     };
     window.addEventListener('beforeunload', function() {
         source.close();
