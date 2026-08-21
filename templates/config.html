@@ -654,6 +654,12 @@
 
 {% block scripts %}
 <script>
+// This node's own permanent address. Deliberately not owl.local: that name is
+// answered by every node on the network at once, so telling someone to check
+// it proves only that *a* node is reachable, not this one — and on a network
+// with more than one node it would send them to the fleet list instead.
+var NODE_URL = 'http://{{ node_id }}.local';
+
 // Mode segmented control — change is staged; applied when user clicks Apply changes
 (function() {
     var segmented    = document.getElementById('modeSegmented');
@@ -1079,9 +1085,9 @@
                 if (currentMode() === 'same_network') {
                     connectStatus.textContent = 'Connected to ' + d.ssid + ', verified active. You can safely disconnect Ethernet now.';
                 } else if (lastStatus.ethernet_connected) {
-                    connectStatus.textContent = 'Connected to ' + d.ssid + ', verified active. This device may now only be reachable from ' + d.ssid + '. Keep Ethernet connected for now, join ' + d.ssid + ' with your own computer, and confirm http://retina.local loads there. Once confirmed, it\'s safe to disconnect Ethernet.';
+                    connectStatus.textContent = 'Connected to ' + d.ssid + ', verified active. This device may now only be reachable from ' + d.ssid + '. Keep Ethernet connected for now, join ' + d.ssid + ' with your own computer, and confirm ' + NODE_URL + ' loads there. Once confirmed, it\'s safe to disconnect Ethernet.';
                 } else {
-                    connectStatus.textContent = 'Connected to ' + d.ssid + ', verified active. Join ' + d.ssid + ' with your own computer now and confirm http://retina.local loads there.';
+                    connectStatus.textContent = 'Connected to ' + d.ssid + ', verified active. Join ' + d.ssid + ' with your own computer now and confirm ' + NODE_URL + ' loads there.';
                 }
                 loadStatus();
             } else if (d.state === 'failed') {

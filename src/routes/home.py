@@ -1,5 +1,7 @@
-from flask import Blueprint, redirect, render_template, request
+from flask import Blueprint, jsonify, redirect, render_template, request
 
+from node_name import MAX_LENGTH as NAME_MAX_LENGTH
+from routes.fleet import entry_point_response, is_entry_point
 from routes.mode import get_current_mode
 
 bp = Blueprint('home', __name__)
@@ -8,7 +10,17 @@ bp = Blueprint('home', __name__)
 @bp.route("/")
 def index():
     """Home page with node ID, services, and SSH keys."""
-    from app import config_mgr, device_state, get_node_id, mender, ssh_keys, telemetry_status
+    from app import config_mgr, device_state, get_node_id, mender, node_name, ssh_keys, telemetry_status
+
+    # Someone who typed owl.local is asking for "a node", and on a network with
+    # several of them the honest answer is the list, not whichever one happened
+    # to win the race to answer. Checked before the setup wizard: a visitor
+    # looking for the fleet should not be dropped into one node's first-run
+    # wizard just because that node is the one that replied.
+    if is_entry_point(request.host):
+        response = entry_point_response()
+        if response is not None:
+            return response
 
     if device_state.is_setup_wizard_in_progress():
         return redirect('/set-up')
@@ -52,7 +64,26 @@ def index():
                            tx_name=tx_name,
                            rx_name=rx_name,
                            telemetry=telemetry,
+                           node_name=node_name.get(),
+                           node_name_max_length=NAME_MAX_LENGTH,
                            mode=get_current_mode())
+
+
+@bp.route("/node-name", methods=["POST"])
+def set_node_name():
+    """Rename this node.
+
+    The name is only a label — it is what the fleet page shows on this node's
+    card instead of ret4c844c20, and it reaches the other nodes through the
+    DNS-SD TXT record. Nothing addresses the node by it, so a rename cannot
+    break a bookmark or an SSH config.
+    """
+    from app import node_name
+
+    ok, error = node_name.set(request.form.get("name", ""))
+    if not ok:
+        return jsonify({"ok": False, "error": error}), 400
+    return jsonify({"ok": True, "name": node_name.get()})
 
 
 @bp.route("/eula")

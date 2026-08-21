@@ -34,8 +34,10 @@ from blah2_client import Blah2Client
 from calibrator import Calibrator
 from config_manager import ConfigManager
 from device_state import DeviceState
+from mdns_peers import peer_directory_from_env
 from mender import MenderClient
 from network_manager import NetworkManager
+from node_name import NodeName
 from retina_tracker_client import RetinaTrackerClient
 from ssh_keys import SSHKeyManager
 from telemetry_status import TelemetryStatus
@@ -115,6 +117,30 @@ telemetry_status = TelemetryStatus(
     status_path=TELEMETRY_STATUS_PATH,
     node_ref_cache_path=os.path.join(DATA_DIR, "telemetry-node-ref"),
 )
+
+node_name = NodeName(os.path.join(DATA_DIR, "node-name"), dev_mode=DEV_MODE)
+
+
+def read_node_id():
+    """The Mender node_id, or 'Unknown' if it cannot be read.
+
+    Also this node's mDNS host name: owl-mdns-identity derives ret*.local from
+    exactly this value, so `f"{read_node_id()}.local"` is the address other
+    machines reach us on. app.get_node_id() wraps this to add logging; nothing
+    that runs off the request path should use that one, since it needs the
+    Flask app object.
+    """
+    try:
+        with open(NODE_ID_FILE) as f:
+            return f.read().strip() or "Unknown"
+    except OSError:
+        return "Unknown"
+
+
+# Owns a browse thread and a probe thread, so like the clients above it must
+# exist once per process. start() is called from app.py, not here, so that
+# importing this module under pytest does not spawn anything.
+peers = peer_directory_from_env(read_node_id, DEV_MODE)
 
 
 def config_change_guard():

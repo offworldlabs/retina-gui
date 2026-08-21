@@ -32,6 +32,12 @@
         <div class="nav-tabs">
             <a class="nav-tab{% if active_page == 'home' %} active{% endif %}" href="/">Home</a>
             <a class="nav-tab{% if active_page == 'config' %} active{% endif %}" href="/config">Config</a>
+            {# Only once there is somewhere to switch to. On the overwhelmingly
+               common single-node setup this tab would lead to a page listing
+               the node you are already looking at. #}
+            {% if fleet_count and fleet_count > 1 %}
+            <a class="nav-tab{% if active_page == 'fleet' %} active{% endif %}" href="/fleet">Nodes</a>
+            {% endif %}
         </div>
         <div class="nav-spacer"></div>
         <a class="ds-btn ghost sm" href="https://dash.retina.fm" target="_blank" rel="noopener">
