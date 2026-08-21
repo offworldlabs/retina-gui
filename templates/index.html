@@ -262,30 +262,6 @@
     </section>
     {% endif %}
 
-    {# The name this node is called on the fleet page. Purely a label: nothing
-       addresses the node by it, so renaming cannot break a bookmark or an SSH
-       config. The id below it is the part that never changes. #}
-    <section>
-        <div class="section-head"><h2>This node</h2></div>
-        <div class="svc-card" style="max-width:480px;">
-            <div class="svc-head">
-                <div class="svc-name">Name</div>
-            </div>
-            <div class="svc-desc">
-                Shown on the Nodes page. Leave it empty to be listed by
-                identifier.
-            </div>
-            <div style="display:flex;gap:8px;align-items:center;margin-top:4px;">
-                <input class="ds-input" id="nodeNameInput" type="text"
-                       value="{{ node_name }}" maxlength="{{ node_name_max_length }}"
-                       placeholder="{{ node_id }}" style="flex:1;">
-                <button type="button" class="ds-btn ghost" id="nodeNameSave">Save</button>
-            </div>
-            <div class="svc-desc" id="nodeNameStatus"></div>
-            <div class="svc-desc mono">{{ node_id }}.local</div>
-        </div>
-    </section>
-
 </main>
 {% endblock %}
 
@@ -296,45 +272,6 @@
 document.querySelectorAll('.svc-card[data-port]').forEach(function(el) {
     el.href = 'http://' + window.location.hostname + ':' + el.dataset.port + (el.dataset.path || '');
 });
-</script>
-<script>
-(function () {
-    var input  = document.getElementById('nodeNameInput');
-    var save   = document.getElementById('nodeNameSave');
-    var status = document.getElementById('nodeNameStatus');
-    if (!input || !save) { return; }
-
-    function show(message, ok) {
-        status.textContent = message;
-        status.style.color = ok ? 'var(--ok)' : 'var(--danger)';
-    }
-
-    save.addEventListener('click', function () {
-        save.disabled = true;
-        show('Saving…', true);
-        var body = new URLSearchParams();
-        body.append('name', input.value);
-        fetch('/node-name', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/x-www-form-urlencoded',
-                'X-CSRFToken': document.querySelector('meta[name="csrf-token"]').content
-            },
-            body: body.toString()
-        })
-            .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, d: d }; }); })
-            .then(function (result) {
-                if (result.ok && result.d.ok) {
-                    input.value = result.d.name;
-                    show(result.d.name ? 'Saved.' : 'Saved. This node will be listed by identifier.', true);
-                } else {
-                    show(result.d.error || 'Could not save the name.', false);
-                }
-            })
-            .catch(function () { show('Could not reach the node.', false); })
-            .finally(function () { save.disabled = false; });
-    });
-})();
 </script>
 {% if mode == 'spectrum' %}
 <script>

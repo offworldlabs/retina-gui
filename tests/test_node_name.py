@@ -63,8 +63,8 @@ def test_characters_that_would_break_the_advertisement_are_refused(names, bad):
 
 
 def test_unicode_is_fine(names):
-    assert names.set("Rooftop — Boston 🦉")[0] is True
-    assert names.get() == "Rooftop — Boston 🦉"
+    assert names.set("Rooftop Café Boston 🦉")[0] is True
+    assert names.get() == "Rooftop Café Boston 🦉"
 
 
 def test_the_file_is_world_readable(names):
@@ -152,7 +152,20 @@ def test_a_rejected_name_comes_back_as_a_400_with_a_reason(app_client):
     assert payload["error"]
 
 
-def test_the_name_appears_on_the_home_page(app_client):
+def test_the_name_appears_on_the_config_page(app_client):
     app_client.post("/node-name", data={"name": "Boston Rooftop"})
-    body = app_client.get("/", headers={"Host": "ret7dd2cb0d.local"}).data.decode()
+    body = app_client.get("/config").data.decode()
     assert "Boston Rooftop" in body
+
+
+def test_the_config_page_shows_this_node_s_own_address(app_client):
+    """owl.local is shared, so the address worth bookmarking is the node's."""
+    body = app_client.get("/config").data.decode()
+    assert "http://ret7dd2cb0d.local" in body
+
+
+def test_renaming_is_not_offered_on_the_home_page(app_client):
+    """It lives under Administration on the config page, with the other
+    settings that save on their own rather than with the config form."""
+    body = app_client.get("/", headers={"Host": "ret7dd2cb0d.local"}).data.decode()
+    assert "nodeNameInput" not in body
