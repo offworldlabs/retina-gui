@@ -483,7 +483,7 @@ function initSetupWizard(resumeStep, highestStepName, devMode, isRerun, demoMode
                         return;
                     }
                     if (data.error) {
-                        status.textContent = 'Unable to check: ' + data.error + ' — retrying...';
+                        status.textContent = 'Unable to check: ' + data.error + '. Retrying...';
                         setTimeout(checkAvailability, 5000);
                         return;
                     }
@@ -510,7 +510,7 @@ function initSetupWizard(resumeStep, highestStepName, devMode, isRerun, demoMode
                     }
                 })
                 .catch(function() {
-                    status.textContent = 'Unable to check for available packages — retrying...';
+                    status.textContent = 'Unable to check for available packages. Retrying...';
                     setTimeout(checkAvailability, 5000);
                 });
         }
@@ -643,7 +643,7 @@ function initSetupWizard(resumeStep, highestStepName, devMode, isRerun, demoMode
             })
             .catch(function() {
                 if (!locationActive) return;
-                scanStatus.textContent = 'Spectrum analyser unavailable — will search by location only';
+                scanStatus.textContent = 'Spectrum analyser unavailable, will search by location only';
                 spectrumGating = false;
                 var lat = parseFloat(document.getElementById('rxLat').value);
                 var lon = parseFloat(document.getElementById('rxLon').value);
@@ -688,11 +688,11 @@ function initSetupWizard(resumeStep, highestStepName, devMode, isRerun, demoMode
         function updateRfUI() {
             var n = rfMeasurements.length;
             if (rfPhase === 'waiting') {
-                scanStatus.textContent = 'Waiting for sweep to start — this will take about 1 minute…';
+                scanStatus.textContent = 'Waiting for sweep to start. This will take about 1 minute…';
                 scanStatus.style.display = '';
                 scanResult.style.display = 'none';
             } else if (rfPhase === 'scanning') {
-                scanStatus.textContent = 'Scanning…' + (n > 0 ? ' — ' + n + ' signal' + (n !== 1 ? 's' : '') + ' found' : '');
+                scanStatus.textContent = 'Scanning…' + (n > 0 ? ', ' + n + ' signal' + (n !== 1 ? 's' : '') + ' found' : '');
                 scanStatus.style.display = '';
                 scanResult.style.display = 'none';
             } else if (rfPhase === 'done') {

@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 {% set active_page = 'config' %}
-{% block title %}Configuration — OWL-OS{% endblock %}
+{% block title %}Configuration - OWL-OS{% endblock %}
 
 {% block head %}
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
@@ -111,7 +111,7 @@
 
         {% if not retina_installed %}
         <div style="background:var(--surface-2);border:1px solid var(--line);border-radius:var(--r-md);padding:14px 18px;margin-bottom:18px;font-size:13px;color:var(--ink-2);">
-            Passive radar not yet deployed — configuration will be available after retina-node is installed.
+            Passive radar not yet deployed. Configuration will be available after retina-node is installed.
         </div>
         {% endif %}
 
@@ -155,7 +155,7 @@
         <section id="tower" class="cfg-section">
             <div class="cfg-section-head">
                 <h2>Tower</h2>
-                <span class="desc">Pick a broadcast tower from your setup wizard's search results — updates the transmitter location and center frequency below. Add or remove towers from this cached list manually.</span>
+                <span class="desc">Pick a broadcast tower from your setup wizard's search results to set the transmitter location and center frequency below. Add or remove towers from this cached list manually.</span>
             </div>
             <div class="cfg-body" {% if not retina_installed %}style="opacity:.5;pointer-events:none;"{% endif %}>
                 <div class="cfg-row" id="towerPresetRow" style="padding:0;border:0;{% if not towers %}display:none;{% endif %}">
@@ -173,7 +173,7 @@
                                     data-lat="{{ tower.get('latitude') if tower.get('latitude') is not none else '' }}"
                                     data-lon="{{ tower.get('longitude') if tower.get('longitude') is not none else '' }}"
                                     data-altitude="{{ tower.get('altitude_m') if tower.get('altitude_m') is not none else 0 }}"
-                                    data-frequency="{{ tower.get('frequency_mhz') if tower.get('frequency_mhz') is not none else '' }}">{{ tower.get('callsign') or tower.get('name') or 'Tower' }} — {{ tower.get('frequency_mhz') }} MHz{% if tower.get('distance_km') is not none %} ({{ tower.get('distance_km') }} km{% if tower.get('distance_class') %}, {{ tower.get('distance_class') }}{% endif %}){% endif %}</option>
+                                    data-frequency="{{ tower.get('frequency_mhz') if tower.get('frequency_mhz') is not none else '' }}">{{ tower.get('callsign') or tower.get('name') or 'Tower' }} - {{ tower.get('frequency_mhz') }} MHz{% if tower.get('distance_km') is not none %} ({{ tower.get('distance_km') }} km{% if tower.get('distance_class') %}, {{ tower.get('distance_class') }}{% endif %}){% endif %}</option>
                             {% endfor %}
                         </select>
                     </div>
@@ -190,7 +190,7 @@
                          data-lon="{{ tower.get('longitude') if tower.get('longitude') is not none else '' }}"
                          data-frequency="{{ tower.get('frequency_mhz') if tower.get('frequency_mhz') is not none else '' }}">
                         <div class="ssh-meta">
-                            <div class="ssh-key">{{ tower.get('callsign') or tower.get('name') or 'Tower' }} — {{ tower.get('frequency_mhz') }} MHz</div>
+                            <div class="ssh-key">{{ tower.get('callsign') or tower.get('name') or 'Tower' }} - {{ tower.get('frequency_mhz') }} MHz</div>
                         </div>
                         <button type="button" class="ds-btn danger-ghost sm tower-remove-btn" data-index="{{ loop.index0 }}">Remove</button>
                     </div>
@@ -275,7 +275,7 @@
         <section id="capture" class="cfg-section">
             <div class="cfg-section-head">
                 <h2>Capture</h2>
-                <span class="desc">SDR sampling and gain. Touch with care — affects data quality.</span>
+                <span class="desc">SDR sampling and gain. Touch with care, as it affects data quality.</span>
             </div>
             <div class="cfg-body" {% if not retina_installed %}style="opacity:.5;pointer-events:none;"{% endif %}>
                 <div style="display:flex;align-items:center;gap:10px;margin-bottom:4px;">
@@ -290,12 +290,12 @@
                     <div class="ladder-row">
                         <div class="ladder-name">Reference<span class="sub">Tuner A</span></div>
                         <div class="ladder-track" id="peakTrackA"></div>
-                        <div class="ladder-value" id="peakValA">—</div>
+                        <div class="ladder-value" id="peakValA">-</div>
                     </div>
                     <div class="ladder-row">
                         <div class="ladder-name">Surveillance<span class="sub">Tuner B</span></div>
                         <div class="ladder-track" id="peakTrackB"></div>
-                        <div class="ladder-value" id="peakValB">—</div>
+                        <div class="ladder-value" id="peakValB">-</div>
                     </div>
                     <div class="ladder-scale-row">
                         <div class="ladder-name-spacer"></div>
@@ -484,13 +484,13 @@
                     <label style="display:flex;align-items:flex-start;gap:8px;font-size:13.5px;cursor:pointer;">
                         <input type="radio" name="netMode" id="netModeSame" value="same_network" checked style="margin-top:3px;">
                         <span>
-                            <strong>Use this network's WiFi</strong> — I'm wired into a router and want this node on its WiFi too, then I'll unplug the cable.
+                            <strong>Use this network's WiFi</strong>: I'm wired into a router and want this node on its WiFi too, then I'll unplug the cable.
                             <span id="netModeSameDisabledHint" style="display:none;color:var(--ink-3);"> (connect an Ethernet cable to use this)</span>
                         </span>
                     </label>
                     <label style="display:flex;align-items:flex-start;gap:8px;font-size:13.5px;cursor:pointer;">
                         <input type="radio" name="netMode" id="netModeDifferent" value="different_network" style="margin-top:3px;">
-                        <span><strong>Switch to a different network</strong> — I'm moving this node to a new router entirely.</span>
+                        <span><strong>Switch to a different network</strong>: I'm moving this node to a new router entirely.</span>
                     </label>
                 </div>
 
@@ -714,12 +714,12 @@
                 } else {
                     // Leave selectedMode at the failed target so clicking Apply again retries.
                     // The toggle stays on the target mode to invite the retry.
-                    errorMsg.textContent = (d.error || 'Mode switch failed') + ' — press Apply to retry.';
+                    errorMsg.textContent = (d.error || 'Mode switch failed').replace(/\s*\.?\s*$/, '') + '. Press Apply to retry.';
                     errorMsg.style.display = '';
                 }
             })
             .catch(function() {
-                errorMsg.textContent = 'Failed to reach the node — check your connection and press Apply to retry.';
+                errorMsg.textContent = 'Failed to reach the node. Check your connection and press Apply to retry.';
                 errorMsg.style.display = '';
             })
             .finally(function() {
@@ -755,7 +755,7 @@
     }
 
     function towerLabel(t) {
-        var label = esc(t.callsign || t.name || 'Tower') + ' — ' + esc(t.frequency_mhz) + ' MHz';
+        var label = esc(t.callsign || t.name || 'Tower') + ' - ' + esc(t.frequency_mhz) + ' MHz';
         if (t.distance_km !== undefined && t.distance_km !== null) {
             label += ' (' + esc(t.distance_km) + ' km' + (t.distance_class ? ', ' + esc(t.distance_class) : '') + ')';
         }
@@ -784,7 +784,7 @@
         }).join('');
 
         manageList.innerHTML = towers.map(function(t, i) {
-            var label = esc(t.callsign || t.name || 'Tower') + ' — ' + esc(t.frequency_mhz) + ' MHz';
+            var label = esc(t.callsign || t.name || 'Tower') + ' - ' + esc(t.frequency_mhz) + ' MHz';
             return '<div class="ssh-item" data-index="' + i + '"' +
                 ' data-lat="' + esc(t.latitude != null ? t.latitude : '') + '"' +
                 ' data-lon="' + esc(t.longitude != null ? t.longitude : '') + '"' +
@@ -865,7 +865,7 @@
             }
         })
         .catch(function() {
-            manageError.textContent = 'Failed to reach the server — check your connection.';
+            manageError.textContent = 'Failed to reach the server. Check your connection.';
             manageError.style.display = '';
             btn.disabled = false;
         });
@@ -908,7 +908,7 @@
             })
             .catch(function() {
                 submitBtn.disabled = false;
-                addError.textContent = 'Failed to reach the server — check your connection.';
+                addError.textContent = 'Failed to reach the server. Check your connection.';
                 addError.style.display = '';
             });
         });
@@ -975,7 +975,7 @@
                 lines.push("No Ethernet connection detected. Switching networks will disconnect this device from its current WiFi, so if the new network doesn't work out, you'll need to join it yourself to regain access. We recommend connecting Ethernet first as a fallback.");
             }
             if (lastStatus.client_on_wifi) {
-                lines.push("You also appear to be viewing this page over the WiFi network you're about to change — this page itself may stop responding the moment the switch happens.");
+                lines.push("You also appear to be viewing this page over the WiFi network you're about to change. This page itself may stop responding the moment the switch happens.");
             }
             mode2Warning.innerHTML = lines.map(function(l) { return '<div>' + l + '</div>'; }).join('');
             mode2Warning.style.display = '';
@@ -1037,7 +1037,7 @@
         scanned.forEach(function(net) {
             var o = document.createElement('option');
             o.value = net.ssid;
-            o.textContent = net.ssid + (net.secured ? ' (secured)' : ' (open)') + ' — ' + net.signal + '%';
+            o.textContent = net.ssid + (net.secured ? ' (secured)' : ' (open)') + ' - ' + net.signal + '%';
             o.dataset.secured = net.secured ? '1' : '0';
             select.appendChild(o);
         });
@@ -1077,22 +1077,22 @@
             if (d.state === 'connected') {
                 connectStatus.style.color = 'var(--ok)';
                 if (currentMode() === 'same_network') {
-                    connectStatus.textContent = 'Connected to ' + d.ssid + ' — verified active. You can safely disconnect Ethernet now.';
+                    connectStatus.textContent = 'Connected to ' + d.ssid + ', verified active. You can safely disconnect Ethernet now.';
                 } else if (lastStatus.ethernet_connected) {
-                    connectStatus.textContent = 'Connected to ' + d.ssid + ' — verified active. This device may now only be reachable from ' + d.ssid + '. Keep Ethernet connected for now, join ' + d.ssid + ' with your own computer, and confirm http://retina.local loads there. Once confirmed, it\'s safe to disconnect Ethernet.';
+                    connectStatus.textContent = 'Connected to ' + d.ssid + ', verified active. This device may now only be reachable from ' + d.ssid + '. Keep Ethernet connected for now, join ' + d.ssid + ' with your own computer, and confirm http://retina.local loads there. Once confirmed, it\'s safe to disconnect Ethernet.';
                 } else {
-                    connectStatus.textContent = 'Connected to ' + d.ssid + ' — verified active. Join ' + d.ssid + ' with your own computer now and confirm http://retina.local loads there.';
+                    connectStatus.textContent = 'Connected to ' + d.ssid + ', verified active. Join ' + d.ssid + ' with your own computer now and confirm http://retina.local loads there.';
                 }
                 loadStatus();
             } else if (d.state === 'failed') {
                 connectStatus.style.color = 'var(--danger)';
-                connectStatus.textContent = (d.error || 'Connection failed') + ' — nothing was removed from your existing network.';
+                connectStatus.textContent = (d.error || 'Connection failed').replace(/\s*\.?\s*$/, '') + '. Nothing was removed from your existing network.';
             }
         }).catch(function() {
             spinner.style.display = 'none';
             connectBtn.disabled = false;
             connectStatus.style.color = 'var(--danger)';
-            connectStatus.textContent = "Lost connection to the node — if you just changed WiFi networks, rejoin the new network and reload this page to confirm.";
+            connectStatus.textContent = "Lost connection to the node. If you just changed WiFi networks, rejoin the new network and reload this page to confirm.";
         });
     }
 
@@ -1162,7 +1162,7 @@ if (window.location.search.includes('saved=1')) {
                         if (s.phase === 'settling' && s.settle_remaining) {
                             label += ' (' + s.settle_remaining + 's)';
                         }
-                        if (s.queued) label += ' — your latest changes are queued';
+                        if (s.queued) label += ', your latest changes are queued';
                         btn.innerHTML = spinner + label;
                         status.style.color = '';
                         status.textContent = '';
@@ -1246,7 +1246,7 @@ if (discardBtn) discardBtn.addEventListener('click', () => location.reload());
                 toggle.checked = data.enabled;
                 if (data.update_in_progress) {
                     toggle.disabled = true;
-                    status.textContent = data.update_reason + ' — toggle locked';
+                    status.textContent = data.update_reason + ', toggle locked';
                     setTimeout(loadCloudStatus, 10000);
                 } else {
                     toggle.disabled = false;
@@ -1366,7 +1366,7 @@ if (discardBtn) discardBtn.addEventListener('click', () => location.reload());
 
     var PHASE_LABELS = {
         preflight: 'Checking the radio responds…',
-        recovering: 'Radio unresponsive — restarting it…',
+        recovering: 'Radio unresponsive, restarting it…',
         descending: 'Maximizing gain, backing off overload…',
         refining: 'Refining gain…',
         dwelling: 'Watching for aircraft…',
@@ -1394,9 +1394,9 @@ if (discardBtn) discardBtn.addEventListener('click', () => location.reload());
     var OUTCOME_TEXT = {
         no_confirmed_track: 'watched, but nothing confirmed',
         confirmed_track: 'confirmed a track',
-        skipped_no_time: 'never watched — the search ran out of time here',
-        tuning_not_applied: 'never watched — the radio did not accept this tuning',
-        unstable_overload: 'stopped — the signal kept overloading the receiver',
+        skipped_no_time: 'never watched (the search ran out of time here)',
+        tuning_not_applied: 'never watched (the radio did not accept this tuning)',
+        unstable_overload: 'stopped (the signal kept overloading the receiver)',
         not_reached: 'not reached'
     };
 
@@ -1409,7 +1409,7 @@ if (discardBtn) discardBtn.addEventListener('click', () => location.reload());
             var txt = OUTCOME_TEXT[h.outcome] || h.outcome || 'unknown';
             var extra = '';
             if (h.dwell_seconds) extra = ' (' + Math.round(h.dwell_seconds) + 's)';
-            if (h.tuning_error) extra += ' — ' + escapeHtml(h.tuning_error);
+            if (h.tuning_error) extra += ' - ' + escapeHtml(h.tuning_error);
             return '<div>' + escapeHtml(h.tower_name || 'Tower') + ': ' + txt + extra + '</div>';
         });
         var lead = watched === 0
@@ -1841,14 +1841,14 @@ if (discardBtn) discardBtn.addEventListener('click', () => location.reload());
                 valA.innerHTML = a.current.toFixed(1) + '<span class="unit">dBFS</span>';
             } else {
                 paintLadder(trackA, FLOOR - 1);
-                valA.textContent = '—';
+                valA.textContent = '-';
             }
             if (b.hasData) {
                 paintLadder(trackB, b.current);
                 valB.innerHTML = b.current.toFixed(1) + '<span class="unit">dBFS</span>';
             } else {
                 paintLadder(trackB, FLOOR - 1);
-                valB.textContent = '—';
+                valB.textContent = '-';
             }
         }
         requestAnimationFrame(frame);

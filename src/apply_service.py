@@ -67,7 +67,7 @@ PHASE_LABELS = {
     'merging': 'Merging configuration',
     'stopping_spectrum': 'Releasing the SDR',
     'restarting_sdr': 'Restarting the SDR service',
-    'resetting_sdr': 'SDR service stuck — forcing it down',
+    'resetting_sdr': 'SDR service stuck, forcing it down',
     'settling': 'Waiting for the SDR to settle',
     'recreating': 'Restarting radar services',
     'repairing': 'Cleaning up after an interrupted restart',
