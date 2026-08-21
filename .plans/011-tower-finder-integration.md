@@ -1,10 +1,10 @@
 # 011 — Tower Finder Integration
 
 ## Goal
-Add a "Location" step to the setup wizard that lets operators set their RX location, search for nearby broadcast tower illuminators via the Tower-Finder API, and select one as the TX — writing both to user.yml.
+Add a "Location" step to the setup wizard that lets operators set their RX location, search for nearby broadcast tower illuminators via the retina-server API, and select one as the TX — writing both to user.yml.
 
 ## Context
-- Tower-Finder is a FastAPI service hosted at **`https://api.retina.fm`**
+- retina-server is a FastAPI service hosted at **`https://api.retina.fm`**
   - `GET /api/towers` — ranked tower search by location
   - `GET /api/elevation` — ground elevation lookup
 - retina-gui setup wizard currently: Agreements → System → Packages → Done
@@ -12,10 +12,10 @@ Add a "Location" step to the setup wizard that lets operators set their RX locat
 - Frontend is Flask + Jinja2 + Bootstrap 5 + vanilla JS (no React)
 
 ## Architecture Decisions
-- **Proxy via Flask backend** — retina-gui proxies Tower-Finder API calls (avoids CORS, keeps API URL server-side)
+- **Proxy via Flask backend** — retina-gui proxies retina-server API calls (avoids CORS, keeps API URL server-side)
 - **`TOWER_FINDER_URL` env var** — default `https://api.retina.fm`
 - **Vanilla JS + Bootstrap + Leaflet** — matches existing setup wizard style, no React
-- **Leaflet map** — loaded from CDN (same tile provider as Tower-Finder: CartoDB light)
+- **Leaflet map** — loaded from CDN (same tile provider as retina-server: CartoDB light)
 - **No frequency matching yet** — spectrum analyser will feed in later
 - **Data source auto-detected** — silently from lat/lon bounding boxes (AU/CA/US), no dropdown needed
 
@@ -28,7 +28,7 @@ Agreements → System → Packages → Location → Done
                                     │     ├─ OR manual lat/lon entry
                                     │     └─ Altitude auto-filled from elevation API
                                     │
-                                    ├─ 2. "Find Towers" → calls Tower-Finder API
+                                    ├─ 2. "Find Towers" → calls retina-server API
                                     │     ├─ Loading spinner while querying
                                     │     ├─ Leaflet map with color-coded tower markers
                                     │     ├─ Results table with ranked towers
@@ -40,7 +40,7 @@ Agreements → System → Packages → Location → Done
                                           └─ "Save & Continue" writes to user.yml
 ```
 
-## Tower-Finder API Details
+## retina-server API Details
 
 ### `GET /api/towers` — what we send
 | Parameter   | Type   | Required | Description                          |
@@ -84,7 +84,7 @@ Agreements → System → Packages → Location → Done
 - Send: `lat`, `lon`
 - Returns: `{ "elevation_m": 45.2 }`
 
-## Source Auto-Detection (from Tower-Finder)
+## Source Auto-Detection (from retina-server)
 ```
 Australia:  lat -45 to -10, lon 112 to 155  → "au"
 Canada:     lat 42 to 84,   lon -141 to -52 → "ca"
@@ -95,7 +95,7 @@ US:         lat 24 to 49,   lon -125 to -66 → "us"
 
 ## Implementation Plan
 
-### Phase 1: Backend — Tower-Finder API proxy routes
+### Phase 1: Backend — retina-server API proxy routes
 
 - [ ] **1.1** Add `TOWER_FINDER_URL` env var to app.py (default `https://api.retina.fm`)
 - [ ] **1.2** Add `GET /towers/search` route — proxies to `GET /api/towers`
@@ -158,7 +158,7 @@ US:         lat 24 to 49,   lon -125 to -66 → "us"
 
 ### Phase 3: Tests
 
-- [ ] **3.1** Test `GET /towers/search` — mock `requests.get` to Tower-Finder, verify proxy behavior + error handling
+- [ ] **3.1** Test `GET /towers/search` — mock `requests.get` to retina-server, verify proxy behavior + error handling
 - [ ] **3.2** Test `GET /towers/elevation` — mock elevation response
 - [ ] **3.3** Test `POST /towers/select` — validates fields, saves to user.yml correctly
 - [ ] **3.4** Test setup wizard renders Location step and step count is now 5
@@ -180,6 +180,6 @@ location:
 ```
 
 ## Dependencies
-- Tower-Finder API at `https://api.retina.fm` (internet required)
+- retina-server API at `https://api.retina.fm` (internet required)
 - `requests` library for backend HTTP proxy calls (check if already in requirements)
 - Leaflet JS/CSS from CDN (no npm install needed)

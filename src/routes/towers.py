@@ -17,7 +17,7 @@ MAX_CACHED_TOWERS = 5
 
 @bp.route("/search", methods=["POST"])
 def search():
-    """Proxy RF-profile tower search to Tower-Finder API."""
+    """Proxy RF-profile tower search to retina-server API."""
     from app import TOWER_FINDER_URL, app, device_state
 
     body = request.get_json()

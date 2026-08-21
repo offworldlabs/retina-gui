@@ -47,7 +47,7 @@ class TestTowerSearch:
 
     @patch('routes.towers.http_requests.get')
     def test_search_returns_towers(self, mock_get, app_client):
-        """Proxy returns tower data from Tower-Finder API."""
+        """Proxy returns tower data from retina-server API."""
         mock_resp = MagicMock()
         mock_resp.status_code = 200
         mock_resp.json.return_value = SAMPLE_TOWER_RESPONSE
@@ -86,7 +86,7 @@ class TestTowerSearch:
 
     @patch('routes.towers.http_requests.get')
     def test_search_upstream_error(self, mock_get, app_client):
-        """Returns 502 when Tower-Finder API is unreachable."""
+        """Returns 502 when retina-server API is unreachable."""
         import requests
         mock_get.side_effect = requests.ConnectionError()
 
@@ -95,7 +95,7 @@ class TestTowerSearch:
 
     @patch('routes.towers.http_requests.get')
     def test_search_forwards_body(self, mock_get, app_client):
-        """Forwards entire JSON body to Tower-Finder API."""
+        """Forwards entire JSON body to retina-server API."""
         mock_resp = MagicMock()
         mock_resp.json.return_value = {"towers": [], "count": 0}
         mock_resp.raise_for_status.return_value = None
