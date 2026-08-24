@@ -1,12 +1,15 @@
-<!-- Step 6: Auto-Calibrate (descent-only, current tower) -->
+<!-- Step 6: Auto-Calibrate (current tower, no track confirmation) -->
 <div data-step="calibrate" class="step-panel" style="display:none;">
     <div class="wiz-title-row">
         <h1>Tune the receiver</h1>
-        {# Deliberately not "looking for aircraft": this run is descent-only
-           (see calibrator.py's descent_only), so there is no dwell and no
-           track to wait for. Promising aircraft here would set the owner up
-           to read a normal result as a failure. #}
-        <p>Find the best gain settings for your location. Takes a few minutes, and you can skip it.</p>
+        {# Deliberately not "looking for aircraft": this run skips track
+           confirmation (see calibrator.py's skip_confirmation), so there is
+           nothing to wait for a plane for. It does still watch the settled
+           point for overload — that is the soak, and it is why the phase
+           reads "dwelling" for ~45s at the end. Promising aircraft here
+           would set the owner up to read a normal result as a failure. #}
+        <p>Find the best gain settings for your location.<br>
+            Takes a few minutes, and you can skip it.</p>
     </div>
 
     {# Pre-run explainer. Replaced by the progress view once a run starts. #}

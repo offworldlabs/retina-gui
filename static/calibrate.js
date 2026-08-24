@@ -24,6 +24,9 @@ window.RetinaCalibrate = (function() {
         descending: 'Maximizing gain, backing off overload…',
         refining: 'Refining gain…',
         dwelling: 'Watching for aircraft…',
+        // The skip-confirmation soak: watching the settled operating point
+        // for overload, not waiting for a track. See calibrator.SOAK_SECONDS.
+        soaking: 'Checking the settings hold…',
         restoring: 'Restoring original tuning…'
     };
 

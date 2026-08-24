@@ -1172,7 +1172,11 @@ class Calibrator:
         dict on success, None if the dwell budget expires. (MODE_ADSB uses
         _dwell_adsb instead — see the module docstring.)
         """
-        self._update(phase="dwelling")
+        # A soak is not dwelling for aircraft and must not say it is: its own
+        # phase, so both UIs can label it honestly. Reusing "dwelling" showed
+        # "Watching for aircraft…" through the setup wizard's soak — on a step
+        # whose whole copy promises no aircraft (caught in live testing).
+        self._update(phase="soaking" if watch_only else "dwelling")
         # Start from a genuinely empty tracker — see _reset_tracker. Skipped
         # for a watch_only soak: it never reads the tracker, so resetting it
         # would only disturb tracker_capture's always-on feed for no gain.
@@ -1684,11 +1688,19 @@ class Calibrator:
                             # wrong. _dwell records final_* after any backoff,
                             # so the fallback persists what the soak settled
                             # on, not what descent first proposed.
+                            soak_started = time.monotonic()
                             self._dwell(tower, fc, gain_a, gain_b, lna_state,
                                         verified_at,
-                                        min(time.monotonic() + SOAK_SECONDS,
+                                        min(soak_started + SOAK_SECONDS,
                                             run_deadline),
                                         tower_entry, watch_only=True)
+                            # Its own key, not dwell_seconds: how long the
+                            # point was proven to hold is the soak's whole
+                            # output, and reporting it as a dwell would
+                            # invite reading it as time spent looking for
+                            # aircraft.
+                            tower_entry["soak_seconds"] = round(
+                                time.monotonic() - soak_started, 1)
                             result = None
                             continue
                         # Dwell gets the rest of this tower's slice — the

@@ -1213,7 +1213,7 @@ class TestSkipConfirmation:
         # this can only be caught by watching the resolved point.
         deadline = time.monotonic() + 10
         while time.monotonic() < deadline:
-            if cal.get_status().get("phase") == "dwelling":
+            if cal.get_status().get("phase") == "soaking":
                 break
             time.sleep(0.01)
         else:
@@ -1232,6 +1232,46 @@ class TestSkipConfirmation:
         assert status["fallback"]["gain_b"] == entry["final_gain_b"]
         assert status["fallback"]["lna_state"] == entry["final_lna_state"]
         assert status["fallback"]["gain_b"] == client.current["gain_b"]
+
+    def test_soak_does_not_claim_to_be_watching_for_aircraft(self, fast):
+        """Caught in live testing on owl: the soak reused the dwell's phase,
+        so the wizard step — whose copy deliberately promises no aircraft —
+        displayed "Watching for aircraft…" for its whole 45s."""
+        seen = []
+        client = FakeBlah2Client()
+        cal = Calibrator(client, FakeRetinaTrackerClient())
+        real_update = cal._update
+
+        def spy(**kwargs):
+            if "phase" in kwargs:
+                seen.append(kwargs["phase"])
+            return real_update(**kwargs)
+
+        cal._update = spy
+        started, _ = cal.start([TOWER], ORIGINAL, budget_seconds=30,
+                               skip_confirmation=True)
+        assert started
+        cal._thread.join(timeout=20)
+        assert "soaking" in seen
+        assert "dwelling" not in seen
+
+    def test_a_normal_run_still_reports_dwelling(self, fast):
+        """The Configuration page really is watching for aircraft, and must
+        keep saying so."""
+        seen = []
+        client = FakeBlah2Client()
+        cal = Calibrator(client, FakeRetinaTrackerClient())
+        real_update = cal._update
+
+        def spy(**kwargs):
+            if "phase" in kwargs:
+                seen.append(kwargs["phase"])
+            return real_update(**kwargs)
+
+        cal._update = spy
+        run_to_completion(cal, [TOWER], dwell=0.3)
+        assert "dwelling" in seen
+        assert "soaking" not in seen
 
     def test_a_clean_soak_reports_tuned(self, fast):
         """A point that holds for the whole soak is the success case, and
