@@ -1569,6 +1569,25 @@ if (discardBtn) discardBtn.addEventListener('click', () => location.reload());
                     + ': ' + status.best_attempt.reason
                     + '.<br>Try entering these in the Capture fields below as a starting point.';
             }
+            // A run that found no track still resolved an operating point the
+            // descent proved this device tolerates, and the radar is on it
+            // right now — but only live, until it is written to config. Offer
+            // the same persist the success path offers, or the next restart
+            // throws the whole run away. Distinct from "Closest attempt"
+            // above, which is informational and may name a different tower:
+            // this is what the radar is actually running.
+            if (status.fallback) {
+                resultEl.style.display = '';
+                resultEl.innerHTML = 'The radar is running on <strong>'
+                    + escapeHtml(status.fallback.tower_name || 'Tower') + '</strong> at '
+                    + mhz(status.fallback.fc) + ', gain reduction A ' + status.fallback.gain_a
+                    + ' dB / B ' + status.fallback.gain_b + ' dB, LNA state '
+                    + status.fallback.lna_state
+                    + ' - the best operating point this run proved the device tolerates.'
+                    + '<br>This is not saved yet: a restart would go back to the previous tuning. '
+                    + 'Persist it to keep it.';
+                applyBtn.style.display = '';
+            }
         }
     }
 

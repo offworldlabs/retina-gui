@@ -418,6 +418,14 @@ class Calibrator:
             "rf": {"overload_a": None, "overload_b": None},
             "best_attempt": None,
             "result": None,
+            # The operating point a no-track run settled on and left the
+            # device running (see _apply_top_tower_fallback). Persistable by
+            # /calibrate/apply exactly like "result": a run that never
+            # confirmed a track still resolved tuning this device's own
+            # descent proved it tolerates, which is worth keeping. Stays
+            # None for a cancelled run — cancel restores the original
+            # tuning, so there is deliberately nothing to offer.
+            "fallback": None,
             "error": None,
             "original": None,
             # None until the preflight has something to report. Only set when
@@ -1474,6 +1482,20 @@ class Calibrator:
         config.yml).
         """
         self._update(phase="restoring")
+        # Recorded ahead of the retune and kept whether or not it lands: this
+        # is the tuning /calibrate/apply persists for a no-track run, and it
+        # is the right thing to write to config either way. A blah2 that
+        # missed the retune re-reads config.yml on its next restart
+        # (restart: always), so persisting is what actually makes this stick
+        # — dropping the record because the live apply failed would discard
+        # the run's only durable output at the moment it matters most.
+        self._update(fallback={
+            "tower_name": top_tower.get("name"),
+            "fc": top_fc,
+            "gain_a": gain_a,
+            "gain_b": gain_b,
+            "lna_state": lna_state,
+        })
         try:
             self._apply(top_fc, gain_a, gain_b, lna_state, ignore_cancel=True)
             self._set_current(tower_index=0, tower_name=top_tower.get("name"),

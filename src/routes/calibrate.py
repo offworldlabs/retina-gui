@@ -210,8 +210,11 @@ def cancel():
 
 @bp.route("/apply", methods=["POST"])
 def apply():
-    """Persist a successful calibration result: write user.yml, then queue the
+    """Persist a calibration run's tuning: write user.yml, then queue the
     config-merger + service restart (mirrors /towers/select).
+
+    Takes a confirmed-track result when there is one, and otherwise the
+    operating point a no-track run settled on (see calibrator's "fallback").
 
     can_start_calibration() below already covers a Mender install in progress,
     which is why this route needs no separate update guard.
@@ -220,9 +223,21 @@ def apply():
 
     run_status = calibrator.get_status()
     result = run_status.get("result")
-    if run_status.get("state") != "done" or not result:
+    # A run that confirmed no track still resolved an operating point this
+    # device's own descent proved it tolerates, and _apply_top_tower_fallback
+    # has already left blah2 running on it. That tuning is live-only until
+    # something writes it to config: the next stack restart re-reads
+    # config.yml and silently discards it. In the setup wizard that restart
+    # is seconds away (/set-up/complete force-recreates the stack), so
+    # without this the run's only durable output is lost every single time.
+    # It is the same write as a success, from values proven the same way.
+    # Cancelled runs never arrive here with a fallback — cancel restores the
+    # original tuning, and _run's _check_cancel fires before the fallback is
+    # ever recorded — so cancelling still means "put it back".
+    tuning = result if run_status.get("state") == "done" and result else run_status.get("fallback")
+    if not tuning:
         return jsonify({"success": False,
-                        "error": "No successful calibration result to apply"}), 409
+                        "error": "No calibration tuning to apply"}), 409
 
     ok, reason = device_state.can_start_calibration()
     if not ok:
@@ -230,10 +245,10 @@ def apply():
 
     user_config = dict(config_mgr.load_user_config())
     capture = dict(user_config.get('capture', {}) or {})
-    capture['fc'] = int(result['fc'])
+    capture['fc'] = int(tuning['fc'])
     device = dict(capture.get('device', {}) or {})
-    device['gainReduction'] = [int(result['gain_a']), int(result['gain_b'])]
-    device['lnaState'] = int(result['lna_state'])
+    device['gainReduction'] = [int(tuning['gain_a']), int(tuning['gain_b'])]
+    device['lnaState'] = int(tuning['lna_state'])
     # Always assert AGC off: a calibration result is by definition a manual
     # gain/LNA operating point (the AGC guard above refuses to run against
     # hardware AGC), so persisting one must never inherit a stale AGC-on
