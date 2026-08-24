@@ -289,6 +289,18 @@ DWELL_POLL_SECONDS = 1.0
 # the dwell catches what one probe cannot.
 DWELL_OVERLOAD_CHECK_SECONDS = 5.0
 
+# How long a skip-confirmation run watches its resolved operating point before
+# accepting it. Descent proves a candidate only over OVERLOAD_SETTLE_SECONDS —
+# a single second — and the whole reason DWELL_OVERLOAD_CHECK_SECONDS exists is
+# that one probe cannot tell a clean point from one that clips intermittently.
+# Skipping the dwell entirely would therefore persist a one-second verdict, and
+# the documented failure above (device cycling Overload_Detected/Corrected until
+# the SDRplay API stopped answering) is exactly what that misses. So the track
+# wait goes, the overload watch stays: ~9 checks at 5s apart, enough to absorb
+# MAX_DWELL_BACKOFFS retreats and still leave several clean readings at the
+# point we finally keep.
+SOAK_SECONDS = 45.0
+
 # How many times a dwell retreats before giving up on the tower. Each backoff
 # costs part of the dwell window, and a point needing several is not one worth
 # dwelling on.
@@ -426,11 +438,11 @@ class Calibrator:
             # None for a cancelled run — cancel restores the original
             # tuning, so there is deliberately nothing to offer.
             "fallback": None,
-            # True when the caller asked for a descent-only run (setup wizard).
-            # Consumers need it to tell "we deliberately never looked for a
-            # track" from "we looked and found nothing" — the two have very
-            # different things to say to a user. See _run.
-            "descent_only": False,
+            # True when the caller asked to skip track confirmation (setup
+            # wizard). Consumers need it to tell "we deliberately never looked
+            # for a track" from "we looked and found nothing" — the two have
+            # very different things to say to a user. See _run.
+            "skip_confirmation": False,
             "error": None,
             "original": None,
             # None until the preflight has something to report. Only set when
@@ -456,7 +468,7 @@ class Calibrator:
         return status
 
     def start(self, towers, original, budget_seconds=TOTAL_BUDGET_SECONDS,
-              dwell_seconds=None, mode=MODE_TRACK, descent_only=False):
+              dwell_seconds=None, mode=MODE_TRACK, skip_confirmation=False):
         """Start a run. Returns (started, error).
 
         towers: list of {"name": str, "fc": int Hz} — first entry is dwelt on
@@ -468,15 +480,19 @@ class Calibrator:
         time remains after each tower's descent evenly across the towers
         still to go. Descent is never taken out of this — it runs under its
         own DESCENT_BACKSTOP_SECONDS ceiling.
-        descent_only: resolve each tower's operating point and stop, never
-        dwelling for a confirmed track. Built for the setup wizard, which
-        wants a non-overloading tuning rather than a confirmation: it turns a
-        ~15 minute run into roughly the descent's own ~200s, and since no
+        skip_confirmation: resolve each tower's operating point, soak it for
+        SOAK_SECONDS to prove it holds, and stop — never waiting for a
+        confirmed track. Built for the setup wizard, which wants a stable
+        non-overloading tuning rather than a confirmation: it turns a ~15
+        minute run into roughly the descent plus the soak, and since no
         confirmation is attempted, none can be spurious — which matters while
         _on_track_event still accepts tracks the sidecar itself flags as
         implausible. The run ends with no result, so the no-track fallback
         persists the resolved tuning exactly as it would otherwise.
-        Deliberately NOT expressed as dwell_seconds=0: that lands in the
+        It does NOT skip overload watching: descent proves a candidate over
+        one second, and a point that clips intermittently only shows up when
+        it is sat on (see SOAK_SECONDS and DWELL_OVERLOAD_CHECK_SECONDS).
+        Also deliberately NOT expressed as dwell_seconds=0: that lands in the
         "budget genuinely exhausted" branch and reports skipped_no_time,
         which would be a false explanation here.
         mode: MODE_TRACK (any confirmed track) or MODE_ADSB (confirmed track
@@ -502,7 +518,7 @@ class Calibrator:
             self._status.update({
                 "state": "running",
                 "mode": mode,
-                "descent_only": bool(descent_only),
+                "skip_confirmation": bool(skip_confirmation),
                 "started_at": _utcnow(),
                 "original": dict(original),
                 "_started_monotonic": time.monotonic(),
@@ -519,7 +535,7 @@ class Calibrator:
         self._thread = threading.Thread(
             target=self._run, args=(list(towers), dict(original),
                                     budget_seconds, dwell_seconds, mode,
-                                    bool(descent_only)),
+                                    bool(skip_confirmation)),
             daemon=True)
         self._thread.start()
         return True, None
@@ -1148,7 +1164,7 @@ class Calibrator:
         return gain_a, gain_b, lna_state, applied_at
 
     def _dwell(self, tower, fc, gain_a, gain_b, lna_state, applied_at, dwell_deadline,
-               tower_entry):
+               tower_entry, watch_only=False):
         """MODE_TRACK's dwell: push live detections to the shared
         retina-tracker sidecar (see module docstring for why — blah2's own
         tracker is not trusted here) and wait for it to emit a confirmed
@@ -1157,8 +1173,11 @@ class Calibrator:
         _dwell_adsb instead — see the module docstring.)
         """
         self._update(phase="dwelling")
-        # Start from a genuinely empty tracker — see _reset_tracker.
-        self._reset_tracker()
+        # Start from a genuinely empty tracker — see _reset_tracker. Skipped
+        # for a watch_only soak: it never reads the tracker, so resetting it
+        # would only disturb tracker_capture's always-on feed for no gain.
+        if not watch_only:
+            self._reset_tracker()
         max_evidence = EVIDENCE_NONE
         max_detections = 0
         last_timestamp = None
@@ -1183,6 +1202,15 @@ class Calibrator:
                         tower_entry["outcome"] = "unstable_overload"
                         tower_entry["max_evidence"] = max_evidence
                         tower_entry["max_detections"] = max_detections
+                        # As on the other two exits: record where the backoffs
+                        # actually left the device. Without this the entry
+                        # keeps descent's pre-retreat values, and the no-track
+                        # fallback then persists the very tuning this branch
+                        # just proved unstable — undoing the retreat
+                        # _dwell_backoff already applied to the hardware.
+                        tower_entry["final_gain_a"] = gain_a
+                        tower_entry["final_gain_b"] = gain_b
+                        tower_entry["final_lna_state"] = lna_state
                         return None
                     backoffs += 1
                     gain_a, gain_b, lna_state, applied_at = self._dwell_backoff(
@@ -1195,6 +1223,13 @@ class Calibrator:
                     self._reset_tracker()
                     last_timestamp = None
                     overload_baseline = self._overload_reading()
+
+            if watch_only:
+                # The soak's entire job is the overload check above. No
+                # detections are fed and no confirmation is looked for, so
+                # there is nothing here that could be falsely confirmed.
+                self._sleep(TRACKER_FEED_POLL_SECONDS)
+                continue
 
             detection = self._client.get_detection()
             timestamp = detection.get("timestamp") if detection else None
@@ -1230,7 +1265,10 @@ class Calibrator:
                                             max_evidence, max_detections)
             self._sleep(TRACKER_FEED_POLL_SECONDS)
 
-        tower_entry["outcome"] = "no_confirmed_track"
+        # A soak that reached its deadline without the overload watch giving
+        # up has done its job: the point held. "no_confirmed_track" would be
+        # a false report of a search that never ran.
+        tower_entry["outcome"] = "tuned" if watch_only else "no_confirmed_track"
         tower_entry["max_evidence"] = max_evidence
         tower_entry["max_detections"] = max_detections
         # As on the success path: a mid-dwell backoff may have moved these
@@ -1525,7 +1563,7 @@ class Calibrator:
     # ── Run loop ───────────────────────────────────────────────
 
     def _run(self, towers, original, budget_seconds, dwell_seconds, mode,
-             descent_only=False):
+             skip_confirmation=False):
         # Must happen before the first retune: the safe-corner handover can
         # only tell a frequency change from a no-op if it knows where the
         # radio actually is. See _seed_last_applied_fc.
@@ -1637,14 +1675,20 @@ class Calibrator:
                         # when a retune failed, which would let stale
                         # detections through the dwell's freshness guard.
                         applied_at = verified_at
-                        if descent_only:
-                            # The whole point: the operating point is
-                            # resolved, so stop. Its own outcome label, not
-                            # skipped_no_time — nothing was skipped and no
-                            # time ran out, and the UI must be able to say
-                            # "tuned" rather than inventing a shortage that
-                            # did not happen.
-                            tower_entry["outcome"] = "descent_only"
+                        if skip_confirmation:
+                            # Soak the resolved point rather than trusting
+                            # descent's one-second verdict on it: same
+                            # overload watch and same backoff the full dwell
+                            # uses, just no track to wait for. See
+                            # SOAK_SECONDS for why skipping this outright was
+                            # wrong. _dwell records final_* after any backoff,
+                            # so the fallback persists what the soak settled
+                            # on, not what descent first proposed.
+                            self._dwell(tower, fc, gain_a, gain_b, lna_state,
+                                        verified_at,
+                                        min(time.monotonic() + SOAK_SECONDS,
+                                            run_deadline),
+                                        tower_entry, watch_only=True)
                             result = None
                             continue
                         # Dwell gets the rest of this tower's slice — the
@@ -1697,18 +1741,18 @@ class Calibrator:
                     break
 
             if result is None and error is None:
-                if descent_only:
+                if skip_confirmation:
                     # Not a failure: this run did exactly what was asked. The
                     # state stays "failed" because there is no confirmed
                     # result — but the message must not borrow the dwell's
                     # "no aircraft was overhead" explanation for a dwell that
                     # never ran. Callers distinguish the two on the
-                    # descent_only flag in status, and the tuning itself is
+                    # skip_confirmation flag in status, and the tuning itself is
                     # persisted through the same fallback path below.
                     error = ("Tuning resolved. This run found the best "
-                             "non-overloading settings for this tower and "
-                             "stopped there, without waiting to confirm a "
-                             "track.")
+                             "settings for this tower and checked they held "
+                             "without overloading the receiver, but was not "
+                             "asked to wait for a confirmed track.")
                 elif mode == MODE_ADSB:
                     error = ("No ADS-B-verified track: every candidate tower "
                              "and gain setting was tried, but no confirmed "

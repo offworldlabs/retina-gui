@@ -2,8 +2,8 @@
 //
 // Two entry points run calibration and they must not drift: the Configuration
 // page modal (a full run — every candidate tower, dwelling on each until a
-// track confirms) and the setup wizard step (descent-only, current tower, see
-// calibrator.py's descent_only). What they share is everything except the DOM:
+// track confirms) and the setup wizard step (current tower, descend then soak
+// for overload, no track wait — see calibrator.py's skip_confirmation). What they share is everything except the DOM:
 // the status vocabulary, the formatting, the "what did this run actually mean"
 // interpretation, and the fetch calls. Rendering stays with each caller, since
 // one is a Bootstrap modal and the other is a full-page wizard step.
@@ -38,7 +38,7 @@ window.RetinaCalibrate = (function() {
         skipped_no_time: 'never watched (the search ran out of time here)',
         tuning_not_applied: 'never watched (the radio did not accept this tuning)',
         unstable_overload: 'stopped (the signal kept overloading the receiver)',
-        descent_only: 'tuned (this run was not asked to wait for a track)',
+        tuned: 'tuned and held without overloading (no track was waited for)',
         not_reached: 'not reached'
     };
 
@@ -99,8 +99,8 @@ window.RetinaCalibrate = (function() {
         var watched = history.filter(function(h) {
             return h.outcome === 'no_confirmed_track' || h.outcome === 'confirmed_track';
         }).length;
-        var descentOnly = history.every(function(h) {
-            return h.outcome === 'descent_only';
+        var soakOnly = history.every(function(h) {
+            return h.outcome === 'tuned';
         });
         var lines = history.map(function(h) {
             var txt = OUTCOME_TEXT[h.outcome] || h.outcome || 'unknown';
@@ -109,10 +109,11 @@ window.RetinaCalibrate = (function() {
             if (h.tuning_error) extra += ' - ' + escapeHtml(h.tuning_error);
             return '<div>' + escapeHtml(h.tower_name || 'Tower') + ': ' + txt + extra + '</div>';
         });
-        // "Nothing was watched" is a warning for a run that meant to watch,
-        // and simply a description for one that never intended to — saying it
-        // about a descent-only run would invent a problem.
-        var lead = (watched === 0 && !descentOnly)
+        // "Nothing was watched" is a warning for a run that meant to watch
+        // for aircraft, and simply a description for one that never intended
+        // to. A soak DID watch — for overload, which is the thing it cared
+        // about — so saying this about it would invent a problem.
+        var lead = (watched === 0 && !soakOnly)
             ? '<strong>No tower was actually watched, so this is not evidence '
               + 'about aircraft.</strong><br>'
             : '';

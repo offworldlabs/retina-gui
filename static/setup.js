@@ -1157,14 +1157,17 @@ function initSetupWizard(resumeStep, highestStepName, devMode, isRerun, demoMode
     };
     })();
 
-    // Step 6: Auto-Calibrate — descent-only against the tower just chosen.
+    // Step 6: Auto-Calibrate against the tower just chosen.
     //
     // Deliberately a different run shape from the Configuration page's
     // Auto-Calibrate: scope current_tower (the owner picked a tower one step
     // ago; re-searching alternates contradicts that and triples the time) and
-    // descent_only (resolve the operating point, never dwell for a
-    // confirmation). ~3.5 min instead of ~15, and nothing can be falsely
-    // confirmed because nothing is confirmed at all. See calibrator.py.
+    // skip_confirmation (descend, then soak the resolved point for overload,
+    // but never wait for a confirmed track). ~4 min instead of ~15, and
+    // nothing can be falsely confirmed because nothing is confirmed at all.
+    // The soak is not optional: descent proves a point over one second, and
+    // intermittent clipping only shows when the point is sat on — see
+    // calibrator.py's SOAK_SECONDS.
     enterHooks.calibrate = (function() {
         var stopPoll = null;
         var listenersAdded = false;
@@ -1326,7 +1329,7 @@ function initSetupWizard(resumeStep, highestStepName, devMode, isRerun, demoMode
                 el('calWizPhase').textContent = 'Starting…';
                 window.RetinaCalibrate.start({
                     scope: 'current_tower',
-                    descent_only: true
+                    skip_confirmation: true
                 }).then(function(d) {
                     if (!d.success) {
                         show(true, false);

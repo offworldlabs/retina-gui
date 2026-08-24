@@ -16,6 +16,7 @@ sidecar's RESET wiping accumulated state between candidate towers.
 import copy
 import json
 import os
+import time
 from datetime import datetime, timedelta
 from unittest.mock import patch
 
@@ -264,6 +265,7 @@ def fast(monkeypatch):
     monkeypatch.setattr(calmod, "RF_STATUS_POLL_SECONDS", 0.005)
     monkeypatch.setattr(calmod, "DWELL_POLL_SECONDS", 0.01)
     monkeypatch.setattr(calmod, "TRACKER_FEED_POLL_SECONDS", 0.01)
+    monkeypatch.setattr(calmod, "SOAK_SECONDS", 0.5)
 
 
 def run_to_completion(cal, towers, original=ORIGINAL, budget=10, dwell=3.0):
@@ -1167,31 +1169,84 @@ class TestNoTrackFallback:
             cal._thread.join(timeout=10)
 
 
-class TestDescentOnly:
-    """The setup wizard's run shape: resolve the operating point and stop,
-    never dwelling for a confirmation (see calibrator.start's descent_only)."""
+class TestSkipConfirmation:
+    """The setup wizard's run shape: resolve the operating point, soak it to
+    prove it holds, and stop without waiting for a track (see
+    calibrator.start's skip_confirmation)."""
 
-    def test_descent_only_skips_the_dwell_and_persists_the_tuning(self, fast):
+    def test_skip_confirmation_never_confirms_but_still_persists_tuning(self, fast):
         client = FakeBlah2Client()
         tracker_client = FakeRetinaTrackerClient(confirm_after=1)
         cal = Calibrator(client, tracker_client)
         started, error = cal.start([TOWER], ORIGINAL, budget_seconds=10,
-                                   descent_only=True)
+                                   skip_confirmation=True)
         assert started, error
-        cal._thread.join(timeout=10)
+        cal._thread.join(timeout=20)
         status = cal.get_status()
-        # Even with a tracker that would confirm instantly, no dwell runs, so
-        # there is no result — and therefore nothing that can be spurious.
+        # Even with a tracker that would confirm instantly, the soak feeds it
+        # nothing and never reads it — so there is no result, and therefore
+        # nothing that can be spurious.
         assert status["state"] == "failed"
         assert status["result"] is None
-        assert status["descent_only"] is True
-        assert status["history"][0]["outcome"] == "descent_only"
+        assert status["skip_confirmation"] is True
+        assert status["history"][0]["outcome"] == "tuned"
         # The tuning still lands, via the same fallback path a no-track run
         # uses — that is what makes this shape usable in the wizard.
         assert status["fallback"] is not None
         assert status["fallback"]["fc"] == TOWER["fc"]
 
-    def test_descent_only_never_reports_skipped_no_time(self, fast):
+    def test_soak_catches_overload_descent_could_not_see(self, fast, monkeypatch):
+        """The whole reason the soak exists. Descent proves a candidate over
+        OVERLOAD_SETTLE_SECONDS — one second in production. A point that only
+        starts clipping once it is sat on is invisible to that, and skipping
+        the dwell entirely would persist the one-second verdict."""
+        monkeypatch.setattr(calmod, "DWELL_OVERLOAD_CHECK_SECONDS", 0.02)
+        monkeypatch.setattr(calmod, "SOAK_SECONDS", 3.0)
+        clipping = {"on": False}
+        client = FakeBlah2Client(
+            overload_rule=lambda fc, ga, gb, lna: (False, clipping["on"]))
+        cal = Calibrator(client, FakeRetinaTrackerClient())
+        started, _ = cal.start([TOWER], ORIGINAL, budget_seconds=30,
+                               skip_confirmation=True)
+        assert started
+        # Clip only once the descent has settled and the soak has begun, so
+        # this can only be caught by watching the resolved point.
+        deadline = time.monotonic() + 10
+        while time.monotonic() < deadline:
+            if cal.get_status().get("phase") == "dwelling":
+                break
+            time.sleep(0.01)
+        else:
+            cal.cancel()
+            cal._thread.join(timeout=10)
+            pytest.fail("soak never started")
+        clipping["on"] = True
+        cal._thread.join(timeout=30)
+
+        status = cal.get_status()
+        entry = status["history"][0]
+        assert entry.get("dwell_backoffs"), "the soak never retreated from overload"
+        # And the retreat must reach what gets persisted — otherwise the run
+        # moves the hardware to safety and then writes the unsafe values back.
+        assert status["fallback"]["gain_a"] == entry["final_gain_a"]
+        assert status["fallback"]["gain_b"] == entry["final_gain_b"]
+        assert status["fallback"]["lna_state"] == entry["final_lna_state"]
+        assert status["fallback"]["gain_b"] == client.current["gain_b"]
+
+    def test_a_clean_soak_reports_tuned(self, fast):
+        """A point that holds for the whole soak is the success case, and
+        must not be reported as any kind of shortfall."""
+        client = FakeBlah2Client()
+        cal = Calibrator(client, FakeRetinaTrackerClient())
+        started, _ = cal.start([TOWER], ORIGINAL, budget_seconds=30,
+                               skip_confirmation=True)
+        assert started
+        cal._thread.join(timeout=20)
+        entry = cal.get_status()["history"][0]
+        assert entry["outcome"] == "tuned"
+        assert not entry.get("dwell_backoffs")
+
+    def test_skip_confirmation_never_reports_skipped_no_time(self, fast):
         """The regression this flag exists to avoid. dwell_seconds=0 would
         land in the "budget genuinely exhausted" branch and label the tower
         skipped_no_time, telling the user time ran out when nothing of the
@@ -1199,7 +1254,7 @@ class TestDescentOnly:
         client = FakeBlah2Client()
         cal = Calibrator(client, FakeRetinaTrackerClient())
         started, _ = cal.start([TOWER], ORIGINAL, budget_seconds=10,
-                               descent_only=True)
+                               skip_confirmation=True)
         assert started
         cal._thread.join(timeout=10)
         status = cal.get_status()
@@ -1207,14 +1262,14 @@ class TestDescentOnly:
         assert "no aircraft was overhead" not in (status["error"] or "")
         assert "Tuning resolved" in (status["error"] or "")
 
-    def test_descent_only_still_resolves_a_real_operating_point(self, fast):
+    def test_skip_confirmation_still_resolves_a_real_operating_point(self, fast):
         """Descent must do its actual job — the shorter run is only worth
         anything if the tuning it lands on is the one the descent proved."""
         client = FakeBlah2Client(
             overload_rule=lambda fc, ga, gb, lna: (False, gb < 37))
         cal = Calibrator(client, FakeRetinaTrackerClient())
         started, _ = cal.start([TOWER], ORIGINAL, budget_seconds=10,
-                               descent_only=True)
+                               skip_confirmation=True)
         assert started
         cal._thread.join(timeout=10)
         status = cal.get_status()
@@ -1224,13 +1279,13 @@ class TestDescentOnly:
 
     def test_a_normal_run_is_unaffected(self, fast):
         """The Configuration-page entry point must keep dwelling and keep
-        confirming — descent_only defaults off."""
+        confirming — skip_confirmation defaults off."""
         client = FakeBlah2Client(detection=moving_track_detections())
         tracker_client = FakeRetinaTrackerClient(confirm_after=1)
         status = run_to_completion(Calibrator(client, tracker_client), [TOWER])
         assert status["state"] == "done"
         assert status["result"] is not None
-        assert status["descent_only"] is False
+        assert status["skip_confirmation"] is False
 
 
 class TestTrackerSidecarIntegration:
@@ -1916,7 +1971,7 @@ class TestRoutes:
             resp = app_client.post('/calibrate/apply')
         assert resp.status_code == 409
 
-    def test_start_passes_descent_only_through(self, app_client):
+    def test_start_passes_skip_confirmation_through(self, app_client):
         """The wizard's run shape has to survive the route, and the
         Configuration page must not pick it up by accident."""
         import app as app_module
@@ -1924,10 +1979,10 @@ class TestRoutes:
                           return_value=(True, None)) as started:
             resp = app_client.post('/calibrate/start',
                                    json={"scope": "current_tower",
-                                         "descent_only": True})
+                                         "skip_confirmation": True})
         assert resp.status_code == 200
-        assert resp.get_json()["descent_only"] is True
-        assert started.call_args.kwargs["descent_only"] is True
+        assert resp.get_json()["skip_confirmation"] is True
+        assert started.call_args.kwargs["skip_confirmation"] is True
         # scope: current_tower means exactly one tower, not three.
         assert len(started.call_args.args[0]) == 1
 
@@ -1938,8 +1993,8 @@ class TestRoutes:
                           return_value=(True, None)) as started:
             resp = app_client.post('/calibrate/start', json={})
         assert resp.status_code == 200
-        assert resp.get_json()["descent_only"] is False
-        assert started.call_args.kwargs["descent_only"] is False
+        assert resp.get_json()["skip_confirmation"] is False
+        assert started.call_args.kwargs["skip_confirmation"] is False
 
     def test_apply_of_a_cancelled_run_is_rejected(self, app_client):
         """Cancel restores the original tuning and never records a fallback,
@@ -2078,7 +2133,8 @@ class TestSharedCalibrateDriver:
     @staticmethod
     def _module_surface():
         import re
-        src = open(os.path.join(REPO_ROOT, 'static', 'calibrate.js')).read()
+        with open(os.path.join(REPO_ROOT, 'static', 'calibrate.js')) as f:
+            src = f.read()
         # The `return { ... }` block at the end is the public surface.
         tail = src[src.rindex('return {'):]
         return set(re.findall(r'^\s{8}(\w+):', tail, re.M))
@@ -2088,7 +2144,8 @@ class TestSharedCalibrateDriver:
         import re
         names = set()
         for rel in (('templates', 'config.html'), ('static', 'setup.js')):
-            src = open(os.path.join(REPO_ROOT, *rel)).read()
+            with open(os.path.join(REPO_ROOT, *rel)) as f:
+                src = f.read()
             names |= set(re.findall(r'\bCAL\.(\w+)', src))
             names |= set(re.findall(r'\bwindow\.RetinaCalibrate\.(\w+)', src))
         return names
@@ -2101,8 +2158,10 @@ class TestSharedCalibrateDriver:
             f"and the wizard step would break at runtime")
 
     def test_both_consumers_actually_load_the_module(self):
-        cfg = open(os.path.join(REPO_ROOT, 'templates', 'config.html')).read()
-        setup = open(os.path.join(REPO_ROOT, 'templates', 'setup.html')).read()
+        with open(os.path.join(REPO_ROOT, 'templates', 'config.html')) as f:
+            cfg = f.read()
+        with open(os.path.join(REPO_ROOT, 'templates', 'setup.html')) as f:
+            setup = f.read()
         assert '/static/calibrate.js' in cfg
         assert '/static/calibrate.js' in setup
         # Order matters: the module must be parsed before the page script
@@ -2113,7 +2172,8 @@ class TestSharedCalibrateDriver:
     def test_config_page_no_longer_defines_its_own_copies(self):
         """The point of the extraction. If these come back, the two entry
         points can disagree about what a status means."""
-        cfg = open(os.path.join(REPO_ROOT, 'templates', 'config.html')).read()
+        with open(os.path.join(REPO_ROOT, 'templates', 'config.html')) as f:
+            cfg = f.read()
         for dupe in ('var OUTCOME_TEXT', 'function diagnose(', 'function mhz(',
                      'function preflightNotice(', 'function updateWarning('):
             assert dupe not in cfg, f"{dupe} is defined again in config.html"
