@@ -449,6 +449,70 @@ class TestTar1090Save:
         # adsblol_fallback=True is same as merged config, might not be saved
         # (only values that differ are saved)
 
+    def test_blank_adsb_source_saved_as_explicit_blank(self, app_client, user_config_file):
+        """Clearing all three boxes must save, and must stay cleared."""
+        response = app_client.post('/config/save', data={
+            'tar1090.adsb_source_host': '',
+            'tar1090.adsb_source_port': '',
+            'tar1090.adsb_source_protocol': '',
+            'tar1090.adsblol_fallback': 'on',
+            'tar1090.adsblol_radius': '50',
+        }, follow_redirects=False)
+
+        assert response.status_code == 302
+
+        with open(user_config_file) as f:
+            saved = yaml.safe_load(f)
+        # Written as "" rather than left out: default.yml ships a source of its
+        # own, so an omitted key would merge that default straight back in.
+        assert saved['tar1090']['adsb_source'] == ''
+
+    def test_complete_adsb_source_saves_with_fallback_off(self, app_client, user_config_file):
+        """adsb.lol only excuses an empty source; a full one never needed it."""
+        response = app_client.post('/config/save', data={
+            'tar1090.adsb_source_host': '10.0.0.1',
+            'tar1090.adsb_source_port': '30006',
+            'tar1090.adsb_source_protocol': 'raw_in',
+            # adsblol_fallback unchecked, so the browser does not post it
+            'tar1090.adsblol_radius': '50',
+        }, follow_redirects=False)
+
+        assert response.status_code == 302
+
+        with open(user_config_file) as f:
+            saved = yaml.safe_load(f)
+        assert saved['tar1090']['adsb_source'] == '10.0.0.1,30006,raw_in'
+        assert saved['tar1090']['adsblol_fallback'] is False
+
+    def test_blank_adsb_source_rejected_without_fallback(self, app_client):
+        """With adsb.lol off too, an empty source leaves the node no ADS-B at all."""
+        response = app_client.post('/config/save', data={
+            'tar1090.adsb_source_host': '',
+            'tar1090.adsb_source_port': '',
+            'tar1090.adsb_source_protocol': '',
+            # adsblol_fallback unchecked, so the browser does not post it
+            'tar1090.adsblol_radius': '50',
+        })
+
+        assert response.status_code == 200
+        assert b'an ADS-B source is required unless adsb.lol fallback' in response.data
+
+    def test_partial_adsb_source_rejected(self, app_client):
+        """A host with no port or protocol would join into a broken "host,,"."""
+        response = app_client.post('/config/save', data={
+            'tar1090.adsb_source_host': '10.0.0.1',
+            'tar1090.adsb_source_port': '',
+            'tar1090.adsb_source_protocol': '',
+            'tar1090.adsblol_fallback': 'on',
+            'tar1090.adsblol_radius': '50',
+        })
+
+        assert response.status_code == 200
+        assert b'Please fix the highlighted fields below' in response.data
+        # The complaint has to reach the empty boxes. A banner with nothing
+        # highlighted is what made the original bug so hard to place.
+        assert b'required when an ADS-B source is set' in response.data
+
     def test_invalid_port(self, app_client):
         """Port > 65535 should show error banner."""
         response = app_client.post('/config/save', data={

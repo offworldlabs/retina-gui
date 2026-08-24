@@ -336,9 +336,15 @@
                 <div class="cfg-grid three">
                     {% for fname in ['adsb_source_host', 'adsb_source_port', 'adsb_source_protocol'] %}
                     {% if fname in t %}
+                    {# This section is hand-built rather than rendered through
+                       render_field, so it has to look config_errors up itself.
+                       Without this the banner above claims fields are
+                       highlighted and none of them are. #}
+                    {% set t_err = config_errors.get('tar1090.' ~ fname) if config_errors else none %}
                     <div>
                         <div class="ds-label-micro" style="margin-bottom:6px;">{{ t[fname].title }}</div>
-                        <input type="{{ t[fname].type }}" name="tar1090.{{ fname }}" class="ds-input mono" value="{{ t[fname].value if t[fname].value is not none else '' }}">
+                        <input type="{{ t[fname].type }}" name="tar1090.{{ fname }}" class="ds-input mono{% if t_err %} is-invalid{% endif %}" value="{{ t[fname].value if t[fname].value is not none else '' }}">
+                        {% if t_err %}<div style="color:var(--danger);font-size:12px;margin-top:4px;">{{ t_err }}</div>{% endif %}
                     </div>
                     {% endif %}
                     {% endfor %}
@@ -355,10 +361,12 @@
                         <div class="desc">Use the public adsb.lol feed if no local ADS-B receiver is reachable.</div>
                     </div>
                     {% if 'adsblol_radius' in t %}
+                    {% set radius_err = config_errors.get('tar1090.adsblol_radius') if config_errors else none %}
                     <div class="cfg-input-row" style="width:180px;flex-shrink:0;">
-                        <input type="number" name="tar1090.adsblol_radius" class="ds-input mono" min="1" max="500" value="{{ t['adsblol_radius'].value if t['adsblol_radius'].value is not none else '' }}">
+                        <input type="number" name="tar1090.adsblol_radius" class="ds-input mono{% if radius_err %} is-invalid{% endif %}" min="1" max="500" value="{{ t['adsblol_radius'].value if t['adsblol_radius'].value is not none else '' }}">
                         <span class="unit">nm</span>
                     </div>
+                    {% if radius_err %}<div style="color:var(--danger);font-size:12px;margin-top:4px;">{{ radius_err }}</div>{% endif %}
                     {% endif %}
                 </div>
                 {% endif %}

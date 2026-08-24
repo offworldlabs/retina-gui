@@ -3,7 +3,7 @@
 Tests the form field generation from flat Pydantic schemas.
 """
 
-from config_schema import AdsbTruthConfig, CaptureFormConfig, LocationFormConfig
+from config_schema import AdsbTruthConfig, CaptureFormConfig, LocationFormConfig, Tar1090Config
 from form_utils import get_field_constraints, get_field_input_type, schema_to_form_fields
 
 
@@ -24,6 +24,17 @@ class TestGetFieldInputType:
         """String fields should map to text."""
         field_info = CaptureFormConfig.model_fields['device_type']
         assert get_field_input_type(field_info) == 'text'
+
+    def test_optional_int_to_number(self):
+        """`X | None` must map the same as `X`.
+
+        get_origin returns types.UnionType for a PEP 604 union but
+        typing.Union for Optional[X]. Recognising only the latter renders an
+        optional port as a plain text box with no spinner or browser-side
+        range check, which is easy to miss because nothing errors.
+        """
+        field_info = Tar1090Config.model_fields['adsb_source_port']
+        assert get_field_input_type(field_info) == 'number'
 
     def test_float_to_number(self):
         """Float fields should map to number."""
@@ -52,6 +63,12 @@ class TestGetFieldConstraints:
         constraints = get_field_constraints(field_info)
         assert constraints.get('max') == 0
         assert 'min' not in constraints
+
+    def test_optional_int_keeps_constraints(self):
+        """Bounds on a `X | None` field must survive the unwrap."""
+        constraints = get_field_constraints(Tar1090Config.model_fields['adsb_source_port'])
+        assert constraints['min'] == 1
+        assert constraints['max'] == 65535
 
     def test_no_constraints(self):
         """Field with no constraints."""
