@@ -426,6 +426,11 @@ class Calibrator:
             # None for a cancelled run — cancel restores the original
             # tuning, so there is deliberately nothing to offer.
             "fallback": None,
+            # True when the caller asked for a descent-only run (setup wizard).
+            # Consumers need it to tell "we deliberately never looked for a
+            # track" from "we looked and found nothing" — the two have very
+            # different things to say to a user. See _run.
+            "descent_only": False,
             "error": None,
             "original": None,
             # None until the preflight has something to report. Only set when
@@ -451,7 +456,7 @@ class Calibrator:
         return status
 
     def start(self, towers, original, budget_seconds=TOTAL_BUDGET_SECONDS,
-              dwell_seconds=None, mode=MODE_TRACK):
+              dwell_seconds=None, mode=MODE_TRACK, descent_only=False):
         """Start a run. Returns (started, error).
 
         towers: list of {"name": str, "fc": int Hz} — first entry is dwelt on
@@ -463,6 +468,17 @@ class Calibrator:
         time remains after each tower's descent evenly across the towers
         still to go. Descent is never taken out of this — it runs under its
         own DESCENT_BACKSTOP_SECONDS ceiling.
+        descent_only: resolve each tower's operating point and stop, never
+        dwelling for a confirmed track. Built for the setup wizard, which
+        wants a non-overloading tuning rather than a confirmation: it turns a
+        ~15 minute run into roughly the descent's own ~200s, and since no
+        confirmation is attempted, none can be spurious — which matters while
+        _on_track_event still accepts tracks the sidecar itself flags as
+        implausible. The run ends with no result, so the no-track fallback
+        persists the resolved tuning exactly as it would otherwise.
+        Deliberately NOT expressed as dwell_seconds=0: that lands in the
+        "budget genuinely exhausted" branch and reports skipped_no_time,
+        which would be a false explanation here.
         mode: MODE_TRACK (any confirmed track) or MODE_ADSB (confirmed track
         that also matches a real aircraft's expected position, per the
         node's own truth.adsb.delay_tolerance/doppler_tolerance config — the
@@ -486,6 +502,7 @@ class Calibrator:
             self._status.update({
                 "state": "running",
                 "mode": mode,
+                "descent_only": bool(descent_only),
                 "started_at": _utcnow(),
                 "original": dict(original),
                 "_started_monotonic": time.monotonic(),
@@ -501,7 +518,8 @@ class Calibrator:
         self._cancel.clear()
         self._thread = threading.Thread(
             target=self._run, args=(list(towers), dict(original),
-                                    budget_seconds, dwell_seconds, mode),
+                                    budget_seconds, dwell_seconds, mode,
+                                    bool(descent_only)),
             daemon=True)
         self._thread.start()
         return True, None
@@ -1506,7 +1524,8 @@ class Calibrator:
 
     # ── Run loop ───────────────────────────────────────────────
 
-    def _run(self, towers, original, budget_seconds, dwell_seconds, mode):
+    def _run(self, towers, original, budget_seconds, dwell_seconds, mode,
+             descent_only=False):
         # Must happen before the first retune: the safe-corner handover can
         # only tell a frequency change from a no-op if it knows where the
         # radio actually is. See _seed_last_applied_fc.
@@ -1618,6 +1637,16 @@ class Calibrator:
                         # when a retune failed, which would let stale
                         # detections through the dwell's freshness guard.
                         applied_at = verified_at
+                        if descent_only:
+                            # The whole point: the operating point is
+                            # resolved, so stop. Its own outcome label, not
+                            # skipped_no_time — nothing was skipped and no
+                            # time ran out, and the UI must be able to say
+                            # "tuned" rather than inventing a shortage that
+                            # did not happen.
+                            tower_entry["outcome"] = "descent_only"
+                            result = None
+                            continue
                         # Dwell gets the rest of this tower's slice — the
                         # part descent was capped out of. A slow descent
                         # therefore shortens its own dwell but can never
@@ -1668,7 +1697,19 @@ class Calibrator:
                     break
 
             if result is None and error is None:
-                if mode == MODE_ADSB:
+                if descent_only:
+                    # Not a failure: this run did exactly what was asked. The
+                    # state stays "failed" because there is no confirmed
+                    # result — but the message must not borrow the dwell's
+                    # "no aircraft was overhead" explanation for a dwell that
+                    # never ran. Callers distinguish the two on the
+                    # descent_only flag in status, and the tuning itself is
+                    # persisted through the same fallback path below.
+                    error = ("Tuning resolved. This run found the best "
+                             "non-overloading settings for this tower and "
+                             "stopped there, without waiting to confirm a "
+                             "track.")
+                elif mode == MODE_ADSB:
                     error = ("No ADS-B-verified track: every candidate tower "
                              "and gain setting was tried, but no confirmed "
                              "track ever matched a real aircraft while one "

@@ -1,0 +1,44 @@
+<!-- Step 6: Auto-Calibrate (descent-only, current tower) -->
+<div data-step="calibrate" class="step-panel" style="display:none;">
+    <div class="wiz-title-row">
+        <h1>Tune the receiver</h1>
+        {# Deliberately not "looking for aircraft": this run is descent-only
+           (see calibrator.py's descent_only), so there is no dwell and no
+           track to wait for. Promising aircraft here would set the owner up
+           to read a normal result as a failure. #}
+        <p>Find the best gain settings for your location. Takes a few minutes, and you can skip it.</p>
+    </div>
+
+    {# Pre-run explainer. Replaced by the progress view once a run starts. #}
+    <div id="calWizIntro" class="step-stack">
+        <p style="font-size:13px;color:var(--ink-2);margin:0 0 10px;">
+            Your radio starts on generic settings that are not chosen for your
+            site. This tries progressively more sensitive settings against your
+            chosen tower and keeps the strongest one that does not overload the
+            receiver.
+        </p>
+        <p style="font-size:13px;color:var(--ink-3);margin:0;">
+            The radar restarts at the end to pick up the new settings. You can
+            run this again at any time from Configuration.
+        </p>
+    </div>
+
+    {# Progress view #}
+    <div id="calWizRunning" style="display:none;">
+        <div style="display:flex;gap:10px;align-items:center;">
+            <span id="calWizSpinner" class="spinner-border spinner-border-sm text-primary"></span>
+            <span id="calWizPhase" style="font-weight:600;font-size:14px;"></span>
+        </div>
+        <div id="calWizDetail" style="display:none;margin-top:12px;font-size:13px;color:var(--ink-2);">
+            <div>Tower: <span id="calWizTower">-</span></div>
+            <div>Centre frequency: <span id="calWizFc">-</span></div>
+            <div>Gain reduction: <span id="calWizGains">-</span></div>
+            <div>LNA state: <span id="calWizLna">-</span></div>
+            <div>Receiver: <span id="calWizOverload">-</span></div>
+        </div>
+    </div>
+
+    {# Terminal view — outcome plus what was saved #}
+    <div id="calWizResult" style="display:none;margin-top:14px;"></div>
+    <div id="calWizError" style="display:none;margin-top:14px;font-size:13px;"></div>
+</div>

@@ -1167,6 +1167,72 @@ class TestNoTrackFallback:
             cal._thread.join(timeout=10)
 
 
+class TestDescentOnly:
+    """The setup wizard's run shape: resolve the operating point and stop,
+    never dwelling for a confirmation (see calibrator.start's descent_only)."""
+
+    def test_descent_only_skips_the_dwell_and_persists_the_tuning(self, fast):
+        client = FakeBlah2Client()
+        tracker_client = FakeRetinaTrackerClient(confirm_after=1)
+        cal = Calibrator(client, tracker_client)
+        started, error = cal.start([TOWER], ORIGINAL, budget_seconds=10,
+                                   descent_only=True)
+        assert started, error
+        cal._thread.join(timeout=10)
+        status = cal.get_status()
+        # Even with a tracker that would confirm instantly, no dwell runs, so
+        # there is no result — and therefore nothing that can be spurious.
+        assert status["state"] == "failed"
+        assert status["result"] is None
+        assert status["descent_only"] is True
+        assert status["history"][0]["outcome"] == "descent_only"
+        # The tuning still lands, via the same fallback path a no-track run
+        # uses — that is what makes this shape usable in the wizard.
+        assert status["fallback"] is not None
+        assert status["fallback"]["fc"] == TOWER["fc"]
+
+    def test_descent_only_never_reports_skipped_no_time(self, fast):
+        """The regression this flag exists to avoid. dwell_seconds=0 would
+        land in the "budget genuinely exhausted" branch and label the tower
+        skipped_no_time, telling the user time ran out when nothing of the
+        sort happened."""
+        client = FakeBlah2Client()
+        cal = Calibrator(client, FakeRetinaTrackerClient())
+        started, _ = cal.start([TOWER], ORIGINAL, budget_seconds=10,
+                               descent_only=True)
+        assert started
+        cal._thread.join(timeout=10)
+        status = cal.get_status()
+        assert status["history"][0]["outcome"] != "skipped_no_time"
+        assert "no aircraft was overhead" not in (status["error"] or "")
+        assert "Tuning resolved" in (status["error"] or "")
+
+    def test_descent_only_still_resolves_a_real_operating_point(self, fast):
+        """Descent must do its actual job — the shorter run is only worth
+        anything if the tuning it lands on is the one the descent proved."""
+        client = FakeBlah2Client(
+            overload_rule=lambda fc, ga, gb, lna: (False, gb < 37))
+        cal = Calibrator(client, FakeRetinaTrackerClient())
+        started, _ = cal.start([TOWER], ORIGINAL, budget_seconds=10,
+                               descent_only=True)
+        assert started
+        cal._thread.join(timeout=10)
+        status = cal.get_status()
+        assert status["fallback"]["gain_b"] == 39
+        assert status["fallback"]["gain_b"] == client.current["gain_b"]
+        assert status["fallback"]["lna_state"] == client.current["lna_state"]
+
+    def test_a_normal_run_is_unaffected(self, fast):
+        """The Configuration-page entry point must keep dwelling and keep
+        confirming — descent_only defaults off."""
+        client = FakeBlah2Client(detection=moving_track_detections())
+        tracker_client = FakeRetinaTrackerClient(confirm_after=1)
+        status = run_to_completion(Calibrator(client, tracker_client), [TOWER])
+        assert status["state"] == "done"
+        assert status["result"] is not None
+        assert status["descent_only"] is False
+
+
 class TestTrackerSidecarIntegration:
     """Directly exercises the shared-sidecar-specific mechanics that don't
     have another natural home: per-dwell reset and the staleness guard on
@@ -1850,6 +1916,31 @@ class TestRoutes:
             resp = app_client.post('/calibrate/apply')
         assert resp.status_code == 409
 
+    def test_start_passes_descent_only_through(self, app_client):
+        """The wizard's run shape has to survive the route, and the
+        Configuration page must not pick it up by accident."""
+        import app as app_module
+        with patch.object(app_module.calibrator, 'start',
+                          return_value=(True, None)) as started:
+            resp = app_client.post('/calibrate/start',
+                                   json={"scope": "current_tower",
+                                         "descent_only": True})
+        assert resp.status_code == 200
+        assert resp.get_json()["descent_only"] is True
+        assert started.call_args.kwargs["descent_only"] is True
+        # scope: current_tower means exactly one tower, not three.
+        assert len(started.call_args.args[0]) == 1
+
+    def test_start_defaults_to_a_full_run(self, app_client):
+        """No flag from the Configuration page — three towers, full dwell."""
+        import app as app_module
+        with patch.object(app_module.calibrator, 'start',
+                          return_value=(True, None)) as started:
+            resp = app_client.post('/calibrate/start', json={})
+        assert resp.status_code == 200
+        assert resp.get_json()["descent_only"] is False
+        assert started.call_args.kwargs["descent_only"] is False
+
     def test_apply_of_a_cancelled_run_is_rejected(self, app_client):
         """Cancel restores the original tuning and never records a fallback,
         so there is nothing to keep — the route must not invent one."""
@@ -1973,3 +2064,56 @@ class TestRoutes:
         assert user['capture']['fc'] == 105_100_000
         assert user['capture']['device']['gainReduction'] == [30, 45]
         assert user['capture']['device']['lnaState'] == 6
+
+
+REPO_ROOT = os.path.join(os.path.dirname(__file__), '..')
+
+
+class TestSharedCalibrateDriver:
+    """static/calibrate.js is consumed by two callers that cannot be
+    unit-tested here (browser JS). The one failure this guards is the one the
+    extraction introduced: a consumer referencing something the module does
+    not export, which silently breaks the Auto-Calibrate modal at runtime."""
+
+    @staticmethod
+    def _module_surface():
+        import re
+        src = open(os.path.join(REPO_ROOT, 'static', 'calibrate.js')).read()
+        # The `return { ... }` block at the end is the public surface.
+        tail = src[src.rindex('return {'):]
+        return set(re.findall(r'^\s{8}(\w+):', tail, re.M))
+
+    @staticmethod
+    def _referenced_names():
+        import re
+        names = set()
+        for rel in (('templates', 'config.html'), ('static', 'setup.js')):
+            src = open(os.path.join(REPO_ROOT, *rel)).read()
+            names |= set(re.findall(r'\bCAL\.(\w+)', src))
+            names |= set(re.findall(r'\bwindow\.RetinaCalibrate\.(\w+)', src))
+        return names
+
+    def test_every_referenced_helper_is_exported(self):
+        missing = self._referenced_names() - self._module_surface()
+        assert not missing, (
+            f"config.html/setup.js reference {sorted(missing)}, which "
+            f"static/calibrate.js does not export - the Auto-Calibrate modal "
+            f"and the wizard step would break at runtime")
+
+    def test_both_consumers_actually_load_the_module(self):
+        cfg = open(os.path.join(REPO_ROOT, 'templates', 'config.html')).read()
+        setup = open(os.path.join(REPO_ROOT, 'templates', 'setup.html')).read()
+        assert '/static/calibrate.js' in cfg
+        assert '/static/calibrate.js' in setup
+        # Order matters: the module must be parsed before the page script
+        # that dereferences window.RetinaCalibrate at IIFE-evaluation time.
+        assert cfg.index('/static/calibrate.js') < cfg.index('RetinaCalibrate;')
+        assert setup.index('/static/calibrate.js') < setup.index('/static/setup.js')
+
+    def test_config_page_no_longer_defines_its_own_copies(self):
+        """The point of the extraction. If these come back, the two entry
+        points can disagree about what a status means."""
+        cfg = open(os.path.join(REPO_ROOT, 'templates', 'config.html')).read()
+        for dupe in ('var OUTCOME_TEXT', 'function diagnose(', 'function mhz(',
+                     'function preflightNotice(', 'function updateWarning('):
+            assert dupe not in cfg, f"{dupe} is defined again in config.html"

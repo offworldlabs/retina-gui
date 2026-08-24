@@ -48,6 +48,7 @@
             {% include "setup/_packages.html" %}
             {% include "setup/_location.html" %}
             {% include "setup/_towers.html" %}
+            {% include "setup/_calibrate.html" %}
             {% include "setup/_complete.html" %}
 
         </div>
@@ -90,6 +91,15 @@
                 <button type="button" class="ds-btn primary" id="towerSaveBtn" disabled>Save &amp; continue</button>
             </div>
 
+            {# Auto-Calibrate — optional, never blocks completion #}
+            <div id="stepBtns-calibrate" class="step-foot-btns" style="display:none;">
+                <span id="calWizStatus" style="font-size:13px;color:var(--ink-3);"></span>
+                <button type="button" class="ds-btn ghost"   id="calWizSkipBtn">Skip →</button>
+                <button type="button" class="ds-btn ghost"   id="calWizCancelBtn" style="display:none;">Cancel</button>
+                <button type="button" class="ds-btn primary" id="calWizStartBtn">Optimise reception</button>
+                <button type="button" class="ds-btn primary" id="calWizNextBtn" style="display:none;">Continue →</button>
+            </div>
+
             {# Complete #}
             <div id="stepBtns-complete" class="step-foot-btns" style="display:none;">
                 <a href="/" class="ds-btn primary">Go to dashboard →</a>
@@ -102,6 +112,7 @@
 
 {% block scripts %}
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script src="/static/calibrate.js"></script>
     <script src="/static/setup.js"></script>
     <script>
         initSetupWizard({{ resume_step|tojson }}, {{ highest_step|default(none)|tojson }}, {{ dev_mode|default(false)|tojson }}, {{ is_rerun|default(false)|tojson }}, {{ demo_mode|default(false)|tojson }});

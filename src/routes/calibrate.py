@@ -162,16 +162,26 @@ def start():
         return jsonify({"success": False,
                         "error": "ADS-B verified mode is not currently available"}), 409
 
+    # Descent-only is the setup wizard's shape: resolve the operating point
+    # and stop, rather than dwelling ~700s for a confirmation the wizard does
+    # not need. Opt-in per request, so the Configuration page entry point is
+    # untouched and keeps all three towers plus the full dwell. Paired there
+    # with scope: "current_tower", but deliberately independent of it — the
+    # two answer different questions (how many towers vs whether to dwell).
+    descent_only = bool(body.get("descent_only"))
+
     if not device_state.acquire_calibration_lock():
         return jsonify({"success": False,
                         "error": "Auto-calibration already in progress"}), 409
 
-    started, error = calibrator.start(towers, original, mode=mode)
+    started, error = calibrator.start(towers, original, mode=mode,
+                                      descent_only=descent_only)
     if not started:
         device_state.release_calibration_lock()
         return jsonify({"success": False, "error": error}), 409
 
     return jsonify({"success": True, "mode": mode,
+                    "descent_only": descent_only,
                     "towers": [tower["name"] for tower in towers]})
 
 
