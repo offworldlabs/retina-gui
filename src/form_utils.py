@@ -3,6 +3,7 @@ Utilities for converting Pydantic schemas to form field dicts for Jinja renderin
 
 Compatible with both Pydantic v1 (Debian Bookworm apt) and v2.
 """
+import types
 from typing import Literal, Union, get_args, get_origin
 
 # Detect Pydantic version
@@ -52,10 +53,19 @@ def get_field_readonly(field_info):
     return False
 
 
+# Optional[X] and X | None describe the same type but are not the same object:
+# get_origin returns typing.Union for the first and types.UnionType for the
+# second. Matching only the first makes a PEP 604 field quietly lose its input
+# type and render a port as a text box instead of a number one, so both forms
+# are accepted here. The repo's ruff config enforces X | None (UP045), which
+# would otherwise be the failing style.
+_UNION_ORIGINS = (Union, types.UnionType)
+
+
 def _unwrap_optional(annotation):
-    """Strip Optional[X] down to X."""
+    """Strip Optional[X] / X | None down to X."""
     origin = get_origin(annotation)
-    if origin is Union:
+    if origin in _UNION_ORIGINS:
         args = get_args(annotation)
         non_none = [a for a in args if a is not type(None)]
         if non_none:

@@ -98,6 +98,39 @@ def delete_key():
     return redirect(url_for("config.config_page"))
 
 
+# The three ADS-B source boxes are one YAML value (host,port,protocol), so they
+# only mean anything as a set: complete, or empty because adsb.lol is feeding
+# tar1090 instead. Neither of those is what the form produces on its own, hence
+# both checks here.
+#
+# Checked here rather than in the schema so each complaint lands on the box it
+# belongs to. Pydantic can see adsblol_fallback perfectly well - it is a field
+# of the same model - but a model-level error carries no field name, so the
+# page would raise its banner with nothing highlighted, which is the failure
+# this whole change exists to remove.
+_ADSB_SOURCE_FIELDS = ("adsb_source_host", "adsb_source_port", "adsb_source_protocol")
+
+
+def _adsb_source_errors(tar1090_data):
+    """Per-field errors for a source that is neither complete nor legitimately empty."""
+    missing = [f for f in _ADSB_SOURCE_FIELDS if tar1090_data.get(f) in (None, "")]
+    if not missing:
+        return {}
+
+    if len(missing) == len(_ADSB_SOURCE_FIELDS):
+        # Nothing to point at is fine only when adsb.lol is covering for it.
+        if tar1090_data.get("adsblol_fallback"):
+            return {}
+        reason = "an ADS-B source is required unless adsb.lol fallback is turned on"
+    else:
+        # A partial set joins into a malformed "host,," that tar1090 accepts
+        # and then quietly never connects on.
+        reason = ("required when an ADS-B source is set "
+                  "(clear all three to feed tar1090 from adsb.lol instead)")
+
+    return {f"tar1090.{f}": reason for f in missing}
+
+
 @bp.route("/config/save", methods=["POST"])
 def save_config():
     """Save config form data to user.yml."""
@@ -142,6 +175,7 @@ def save_config():
             Tar1090Config(**tar1090_data)
         except ValidationError as e:
             all_errors.update(ConfigManager.format_validation_errors(e, 'tar1090'))
+        all_errors.update(_adsb_source_errors(tar1090_data))
 
     if retina_tracker_data:
         try:
@@ -170,8 +204,13 @@ def save_config():
         host = tar1090_data.pop('adsb_source_host', '')
         port = tar1090_data.pop('adsb_source_port', '')
         protocol = tar1090_data.pop('adsb_source_protocol', '')
-        if host or port or protocol:
-            tar1090_nested['adsb_source'] = f"{host},{port},{protocol}"
+        # An emptied source is written as "" rather than omitted. default.yml
+        # ships a source of its own, so dropping the key here would leave the
+        # merge free to put that default straight back and silently undo the
+        # clearing. compute_user_overrides still discards the "" when it
+        # matches what is already merged, so nothing is pinned needlessly.
+        tar1090_nested['adsb_source'] = (f"{host},{port},{protocol}"
+                                         if host or port or protocol else "")
         tar1090_nested.update(tar1090_data)
 
     merged_config = config_mgr.load_merged_config()
