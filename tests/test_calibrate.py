@@ -16,6 +16,7 @@ sidecar's RESET wiping accumulated state between candidate towers.
 import copy
 import json
 import os
+import time
 from datetime import datetime, timedelta
 from unittest.mock import patch
 
@@ -264,6 +265,7 @@ def fast(monkeypatch):
     monkeypatch.setattr(calmod, "RF_STATUS_POLL_SECONDS", 0.005)
     monkeypatch.setattr(calmod, "DWELL_POLL_SECONDS", 0.01)
     monkeypatch.setattr(calmod, "TRACKER_FEED_POLL_SECONDS", 0.01)
+    monkeypatch.setattr(calmod, "SOAK_SECONDS", 0.5)
 
 
 def run_to_completion(cal, towers, original=ORIGINAL, budget=10, dwell=3.0):
@@ -1099,6 +1101,232 @@ class TestNoTrackFallback:
         assert client.current["gain_b"] == 39
         assert client.current["lna_state"] == LNA_STATE_MIN
 
+    def test_fallback_tuning_is_recorded_for_persistence(self, fast):
+        """The fallback is applied live, but live-only tuning dies at the
+        next stack restart — which in the setup wizard is seconds later
+        (/set-up/complete force-recreates the stack). Recording it in status
+        is what lets /calibrate/apply write it to config, so the run's only
+        durable output survives."""
+        client = FakeBlah2Client(
+            overload_rule=lambda fc, ga, gb, lna: (False, gb < 37))
+        status = run_to_completion(Calibrator(client, FakeRetinaTrackerClient()), [TOWER])
+        assert status["state"] == "failed"
+        assert status["result"] is None
+        fallback = status["fallback"]
+        assert fallback is not None
+        # Exactly what the device was left running, so persisting it is a
+        # no-op against live state rather than a fresh, unproven tuning.
+        assert fallback["fc"] == TOWER["fc"] == client.current["fc"]
+        assert fallback["gain_a"] == client.current["gain_a"]
+        assert fallback["gain_b"] == client.current["gain_b"] == 39
+        assert fallback["lna_state"] == client.current["lna_state"]
+        assert fallback["tower_name"] == TOWER["name"]
+
+    def test_fallback_names_the_top_tower_not_the_last_tried(self, fast):
+        """fc must stay on the top-ranked tower — in the setup wizard that
+        is the tower the user just chose, and persisting a different one
+        would silently overrule that choice."""
+        client = FakeBlah2Client()
+        status = run_to_completion(Calibrator(client, FakeRetinaTrackerClient()),
+                                   [TOWER, TOWER_TWO])
+        assert status["fallback"]["fc"] == TOWER["fc"]
+        assert status["fallback"]["fc"] != TOWER_TWO["fc"]
+
+    def test_cancelled_run_records_no_fallback(self, fast):
+        """Cancel restores the original tuning, so there must be nothing for
+        /calibrate/apply to persist — cancelling has to keep meaning "put it
+        back", not "keep whatever it had reached"."""
+        import time
+        client = FakeBlah2Client()
+        cal = Calibrator(client, FakeRetinaTrackerClient())
+        started, _ = cal.start([TOWER], ORIGINAL, budget_seconds=30,
+                               dwell_seconds=30)
+        assert started
+        deadline = time.monotonic() + 5
+        while time.monotonic() < deadline:
+            if cal.get_status()["phase"] == "dwelling":
+                break
+            time.sleep(0.01)
+        cal.cancel()
+        cal._thread.join(timeout=10)
+        status = cal.get_status()
+        assert status["state"] == "cancelled"
+        assert status["fallback"] is None
+
+    def test_a_new_run_clears_the_previous_run_fallback(self, fast):
+        """Otherwise a stale fallback from an earlier run stays persistable
+        while a fresh run is still going."""
+        client = FakeBlah2Client()
+        cal = Calibrator(client, FakeRetinaTrackerClient())
+        assert run_to_completion(cal, [TOWER])["fallback"] is not None
+        started, _ = cal.start([TOWER], ORIGINAL, budget_seconds=30,
+                               dwell_seconds=30)
+        assert started
+        try:
+            assert cal.get_status()["fallback"] is None
+        finally:
+            cal.cancel()
+            cal._thread.join(timeout=10)
+
+
+class TestSkipConfirmation:
+    """The setup wizard's run shape: resolve the operating point, soak it to
+    prove it holds, and stop without waiting for a track (see
+    calibrator.start's skip_confirmation)."""
+
+    def test_skip_confirmation_never_confirms_but_still_persists_tuning(self, fast):
+        client = FakeBlah2Client()
+        tracker_client = FakeRetinaTrackerClient(confirm_after=1)
+        cal = Calibrator(client, tracker_client)
+        started, error = cal.start([TOWER], ORIGINAL, budget_seconds=10,
+                                   skip_confirmation=True)
+        assert started, error
+        cal._thread.join(timeout=20)
+        status = cal.get_status()
+        # Even with a tracker that would confirm instantly, the soak feeds it
+        # nothing and never reads it — so there is no result, and therefore
+        # nothing that can be spurious.
+        assert status["state"] == "failed"
+        assert status["result"] is None
+        assert status["skip_confirmation"] is True
+        assert status["history"][0]["outcome"] == "tuned"
+        # The tuning still lands, via the same fallback path a no-track run
+        # uses — that is what makes this shape usable in the wizard.
+        assert status["fallback"] is not None
+        assert status["fallback"]["fc"] == TOWER["fc"]
+
+    def test_soak_catches_overload_descent_could_not_see(self, fast, monkeypatch):
+        """The whole reason the soak exists. Descent proves a candidate over
+        OVERLOAD_SETTLE_SECONDS — one second in production. A point that only
+        starts clipping once it is sat on is invisible to that, and skipping
+        the dwell entirely would persist the one-second verdict."""
+        monkeypatch.setattr(calmod, "DWELL_OVERLOAD_CHECK_SECONDS", 0.02)
+        monkeypatch.setattr(calmod, "SOAK_SECONDS", 3.0)
+        clipping = {"on": False}
+        client = FakeBlah2Client(
+            overload_rule=lambda fc, ga, gb, lna: (False, clipping["on"]))
+        cal = Calibrator(client, FakeRetinaTrackerClient())
+        started, _ = cal.start([TOWER], ORIGINAL, budget_seconds=30,
+                               skip_confirmation=True)
+        assert started
+        # Clip only once the descent has settled and the soak has begun, so
+        # this can only be caught by watching the resolved point.
+        deadline = time.monotonic() + 10
+        while time.monotonic() < deadline:
+            if cal.get_status().get("phase") == "soaking":
+                break
+            time.sleep(0.01)
+        else:
+            cal.cancel()
+            cal._thread.join(timeout=10)
+            pytest.fail("soak never started")
+        clipping["on"] = True
+        cal._thread.join(timeout=30)
+
+        status = cal.get_status()
+        entry = status["history"][0]
+        assert entry.get("dwell_backoffs"), "the soak never retreated from overload"
+        # And the retreat must reach what gets persisted — otherwise the run
+        # moves the hardware to safety and then writes the unsafe values back.
+        assert status["fallback"]["gain_a"] == entry["final_gain_a"]
+        assert status["fallback"]["gain_b"] == entry["final_gain_b"]
+        assert status["fallback"]["lna_state"] == entry["final_lna_state"]
+        assert status["fallback"]["gain_b"] == client.current["gain_b"]
+
+    def test_soak_does_not_claim_to_be_watching_for_aircraft(self, fast):
+        """Caught in live testing on owl: the soak reused the dwell's phase,
+        so the wizard step — whose copy deliberately promises no aircraft —
+        displayed "Watching for aircraft…" for its whole 45s."""
+        seen = []
+        client = FakeBlah2Client()
+        cal = Calibrator(client, FakeRetinaTrackerClient())
+        real_update = cal._update
+
+        def spy(**kwargs):
+            if "phase" in kwargs:
+                seen.append(kwargs["phase"])
+            return real_update(**kwargs)
+
+        cal._update = spy
+        started, _ = cal.start([TOWER], ORIGINAL, budget_seconds=30,
+                               skip_confirmation=True)
+        assert started
+        cal._thread.join(timeout=20)
+        assert "soaking" in seen
+        assert "dwelling" not in seen
+
+    def test_a_normal_run_still_reports_dwelling(self, fast):
+        """The Configuration page really is watching for aircraft, and must
+        keep saying so."""
+        seen = []
+        client = FakeBlah2Client()
+        cal = Calibrator(client, FakeRetinaTrackerClient())
+        real_update = cal._update
+
+        def spy(**kwargs):
+            if "phase" in kwargs:
+                seen.append(kwargs["phase"])
+            return real_update(**kwargs)
+
+        cal._update = spy
+        run_to_completion(cal, [TOWER], dwell=0.3)
+        assert "dwelling" in seen
+        assert "soaking" not in seen
+
+    def test_a_clean_soak_reports_tuned(self, fast):
+        """A point that holds for the whole soak is the success case, and
+        must not be reported as any kind of shortfall."""
+        client = FakeBlah2Client()
+        cal = Calibrator(client, FakeRetinaTrackerClient())
+        started, _ = cal.start([TOWER], ORIGINAL, budget_seconds=30,
+                               skip_confirmation=True)
+        assert started
+        cal._thread.join(timeout=20)
+        entry = cal.get_status()["history"][0]
+        assert entry["outcome"] == "tuned"
+        assert not entry.get("dwell_backoffs")
+
+    def test_skip_confirmation_never_reports_skipped_no_time(self, fast):
+        """The regression this flag exists to avoid. dwell_seconds=0 would
+        land in the "budget genuinely exhausted" branch and label the tower
+        skipped_no_time, telling the user time ran out when nothing of the
+        sort happened."""
+        client = FakeBlah2Client()
+        cal = Calibrator(client, FakeRetinaTrackerClient())
+        started, _ = cal.start([TOWER], ORIGINAL, budget_seconds=10,
+                               skip_confirmation=True)
+        assert started
+        cal._thread.join(timeout=10)
+        status = cal.get_status()
+        assert status["history"][0]["outcome"] != "skipped_no_time"
+        assert "no aircraft was overhead" not in (status["error"] or "")
+        assert "Tuning resolved" in (status["error"] or "")
+
+    def test_skip_confirmation_still_resolves_a_real_operating_point(self, fast):
+        """Descent must do its actual job — the shorter run is only worth
+        anything if the tuning it lands on is the one the descent proved."""
+        client = FakeBlah2Client(
+            overload_rule=lambda fc, ga, gb, lna: (False, gb < 37))
+        cal = Calibrator(client, FakeRetinaTrackerClient())
+        started, _ = cal.start([TOWER], ORIGINAL, budget_seconds=10,
+                               skip_confirmation=True)
+        assert started
+        cal._thread.join(timeout=10)
+        status = cal.get_status()
+        assert status["fallback"]["gain_b"] == 39
+        assert status["fallback"]["gain_b"] == client.current["gain_b"]
+        assert status["fallback"]["lna_state"] == client.current["lna_state"]
+
+    def test_a_normal_run_is_unaffected(self, fast):
+        """The Configuration-page entry point must keep dwelling and keep
+        confirming — skip_confirmation defaults off."""
+        client = FakeBlah2Client(detection=moving_track_detections())
+        tracker_client = FakeRetinaTrackerClient(confirm_after=1)
+        status = run_to_completion(Calibrator(client, tracker_client), [TOWER])
+        assert status["state"] == "done"
+        assert status["result"] is not None
+        assert status["skip_confirmation"] is False
+
 
 class TestTrackerSidecarIntegration:
     """Directly exercises the shared-sidecar-specific mechanics that don't
@@ -1783,6 +2011,99 @@ class TestRoutes:
             resp = app_client.post('/calibrate/apply')
         assert resp.status_code == 409
 
+    def test_start_passes_skip_confirmation_through(self, app_client):
+        """The wizard's run shape has to survive the route, and the
+        Configuration page must not pick it up by accident."""
+        import app as app_module
+        with patch.object(app_module.calibrator, 'start',
+                          return_value=(True, None)) as started:
+            resp = app_client.post('/calibrate/start',
+                                   json={"scope": "current_tower",
+                                         "skip_confirmation": True})
+        assert resp.status_code == 200
+        assert resp.get_json()["skip_confirmation"] is True
+        assert started.call_args.kwargs["skip_confirmation"] is True
+        # scope: current_tower means exactly one tower, not three.
+        assert len(started.call_args.args[0]) == 1
+
+    def test_start_defaults_to_a_full_run(self, app_client):
+        """No flag from the Configuration page — three towers, full dwell."""
+        import app as app_module
+        with patch.object(app_module.calibrator, 'start',
+                          return_value=(True, None)) as started:
+            resp = app_client.post('/calibrate/start', json={})
+        assert resp.status_code == 200
+        assert resp.get_json()["skip_confirmation"] is False
+        assert started.call_args.kwargs["skip_confirmation"] is False
+
+    def test_apply_of_a_cancelled_run_is_rejected(self, app_client):
+        """Cancel restores the original tuning and never records a fallback,
+        so there is nothing to keep — the route must not invent one."""
+        import app as app_module
+        cancelled = {"state": "cancelled", "result": None, "fallback": None}
+        with patch.object(app_module.calibrator, 'get_status', return_value=cancelled):
+            resp = app_client.post('/calibrate/apply')
+        assert resp.status_code == 409
+
+    def test_apply_persists_a_no_track_fallback(self, app_client, config_files):
+        """The blocker this route change exists for: a run that confirmed no
+        track still resolved an operating point the descent proved the device
+        tolerates, and it is applied live only. The next stack restart
+        re-reads config.yml and discards it — seconds later, in the setup
+        wizard's case — so it has to be writable to config just like a
+        success."""
+        import app as app_module
+        no_track = {
+            "state": "failed",
+            "started_at": "2026-08-24T00:00:00+00:00",
+            "result": None,
+            "error": "No confirmed track found within the time budget.",
+            "fallback": {"tower_name": "Tower One", "fc": 213_000_000,
+                         "gain_a": 49, "gain_b": 39, "lna_state": 7},
+        }
+        with patch.object(app_module.calibrator, 'get_status', return_value=no_track), \
+             patch.object(app_module.apply_service, 'request',
+                          return_value={"state": "running"}) as queued:
+            resp = app_client.post('/calibrate/apply')
+        assert resp.status_code == 202
+        assert resp.get_json()["success"] is True
+        queued.assert_called_once_with()
+
+        user_path, _ = config_files
+        with open(user_path) as f:
+            user = yaml.safe_load(f)
+        assert user['capture']['fc'] == 213_000_000
+        assert user['capture']['device']['gainReduction'] == [49, 39]
+        assert user['capture']['device']['lnaState'] == 7
+        # AGC stays off on this path too: the fallback is a manual operating
+        # point exactly like a confirmed result.
+        assert user['capture']['device']['bandwidthNumber'] == 0
+
+    def test_apply_prefers_a_confirmed_result_over_a_fallback(self, app_client, config_files):
+        """Defensive: the two are mutually exclusive in the engine today
+        (the fallback only runs when result is None). If that ever changes,
+        a confirmed track must still win over a consolation tuning."""
+        import app as app_module
+        both = {
+            "state": "done",
+            "result": {"tower_name": "Real", "fc": 105_100_000,
+                       "gain_a": 30, "gain_b": 45, "lna_state": 6,
+                       "track_id": "0A3F"},
+            "fallback": {"tower_name": "Consolation", "fc": 213_000_000,
+                         "gain_a": 59, "gain_b": 59, "lna_state": 9},
+        }
+        with patch.object(app_module.calibrator, 'get_status', return_value=both), \
+             patch.object(app_module.apply_service, 'request',
+                          return_value={"state": "running"}):
+            resp = app_client.post('/calibrate/apply')
+        assert resp.status_code == 202
+
+        user_path, _ = config_files
+        with open(user_path) as f:
+            user = yaml.safe_load(f)
+        assert user['capture']['fc'] == 105_100_000
+        assert user['capture']['device']['gainReduction'] == [30, 45]
+
     def test_apply_is_not_blocked_by_the_config_change_guard(self, app_client):
         """The guard that refuses config changes mid-run must not refuse the
         calibration's *own* apply.
@@ -1838,3 +2159,61 @@ class TestRoutes:
         assert user['capture']['fc'] == 105_100_000
         assert user['capture']['device']['gainReduction'] == [30, 45]
         assert user['capture']['device']['lnaState'] == 6
+
+
+REPO_ROOT = os.path.join(os.path.dirname(__file__), '..')
+
+
+class TestSharedCalibrateDriver:
+    """static/calibrate.js is consumed by two callers that cannot be
+    unit-tested here (browser JS). The one failure this guards is the one the
+    extraction introduced: a consumer referencing something the module does
+    not export, which silently breaks the Auto-Calibrate modal at runtime."""
+
+    @staticmethod
+    def _module_surface():
+        import re
+        with open(os.path.join(REPO_ROOT, 'static', 'calibrate.js')) as f:
+            src = f.read()
+        # The `return { ... }` block at the end is the public surface.
+        tail = src[src.rindex('return {'):]
+        return set(re.findall(r'^\s{8}(\w+):', tail, re.M))
+
+    @staticmethod
+    def _referenced_names():
+        import re
+        names = set()
+        for rel in (('templates', 'config.html'), ('static', 'setup.js')):
+            with open(os.path.join(REPO_ROOT, *rel)) as f:
+                src = f.read()
+            names |= set(re.findall(r'\bCAL\.(\w+)', src))
+            names |= set(re.findall(r'\bwindow\.RetinaCalibrate\.(\w+)', src))
+        return names
+
+    def test_every_referenced_helper_is_exported(self):
+        missing = self._referenced_names() - self._module_surface()
+        assert not missing, (
+            f"config.html/setup.js reference {sorted(missing)}, which "
+            f"static/calibrate.js does not export - the Auto-Calibrate modal "
+            f"and the wizard step would break at runtime")
+
+    def test_both_consumers_actually_load_the_module(self):
+        with open(os.path.join(REPO_ROOT, 'templates', 'config.html')) as f:
+            cfg = f.read()
+        with open(os.path.join(REPO_ROOT, 'templates', 'setup.html')) as f:
+            setup = f.read()
+        assert '/static/calibrate.js' in cfg
+        assert '/static/calibrate.js' in setup
+        # Order matters: the module must be parsed before the page script
+        # that dereferences window.RetinaCalibrate at IIFE-evaluation time.
+        assert cfg.index('/static/calibrate.js') < cfg.index('RetinaCalibrate;')
+        assert setup.index('/static/calibrate.js') < setup.index('/static/setup.js')
+
+    def test_config_page_no_longer_defines_its_own_copies(self):
+        """The point of the extraction. If these come back, the two entry
+        points can disagree about what a status means."""
+        with open(os.path.join(REPO_ROOT, 'templates', 'config.html')) as f:
+            cfg = f.read()
+        for dupe in ('var OUTCOME_TEXT', 'function diagnose(', 'function mhz(',
+                     'function preflightNotice(', 'function updateWarning('):
+            assert dupe not in cfg, f"{dupe} is defined again in config.html"

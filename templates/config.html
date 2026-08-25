@@ -337,9 +337,15 @@
                 <div class="cfg-grid three">
                     {% for fname in ['adsb_source_host', 'adsb_source_port', 'adsb_source_protocol'] %}
                     {% if fname in t %}
+                    {# This section is hand-built rather than rendered through
+                       render_field, so it has to look config_errors up itself.
+                       Without this the banner above claims fields are
+                       highlighted and none of them are. #}
+                    {% set t_err = config_errors.get('tar1090.' ~ fname) if config_errors else none %}
                     <div>
                         <div class="ds-label-micro" style="margin-bottom:6px;">{{ t[fname].title }}</div>
-                        <input type="{{ t[fname].type }}" name="tar1090.{{ fname }}" class="ds-input mono" value="{{ t[fname].value if t[fname].value is not none else '' }}">
+                        <input type="{{ t[fname].type }}" name="tar1090.{{ fname }}" class="ds-input mono{% if t_err %} is-invalid{% endif %}" value="{{ t[fname].value if t[fname].value is not none else '' }}">
+                        {% if t_err %}<div style="color:var(--danger);font-size:12px;margin-top:4px;">{{ t_err }}</div>{% endif %}
                     </div>
                     {% endif %}
                     {% endfor %}
@@ -356,10 +362,12 @@
                         <div class="desc">Use the public adsb.lol feed if no local ADS-B receiver is reachable.</div>
                     </div>
                     {% if 'adsblol_radius' in t %}
+                    {% set radius_err = config_errors.get('tar1090.adsblol_radius') if config_errors else none %}
                     <div class="cfg-input-row" style="width:180px;flex-shrink:0;">
-                        <input type="number" name="tar1090.adsblol_radius" class="ds-input mono" min="1" max="500" value="{{ t['adsblol_radius'].value if t['adsblol_radius'].value is not none else '' }}">
+                        <input type="number" name="tar1090.adsblol_radius" class="ds-input mono{% if radius_err %} is-invalid{% endif %}" min="1" max="500" value="{{ t['adsblol_radius'].value if t['adsblol_radius'].value is not none else '' }}">
                         <span class="unit">nm</span>
                     </div>
+                    {% if radius_err %}<div style="color:var(--danger);font-size:12px;margin-top:4px;">{{ radius_err }}</div>{% endif %}
                     {% endif %}
                 </div>
                 {% endif %}
@@ -699,6 +707,7 @@
 {% endblock %}
 
 {% block scripts %}
+<script src="/static/calibrate.js"></script>
 <script>
 // This node's own permanent address. Deliberately not owl.local: that name is
 // answered by every node on the network at once, so telling someone to check
@@ -1456,60 +1465,15 @@ if (discardBtn) discardBtn.addEventListener('click', () => location.reload());
     var pollTimer = null;
     var lastStatus = null;
 
-    var PHASE_LABELS = {
-        preflight: 'Checking the radio responds…',
-        recovering: 'Radio unresponsive, restarting it…',
-        descending: 'Maximizing gain, backing off overload…',
-        refining: 'Refining gain…',
-        dwelling: 'Watching for aircraft…',
-        restoring: 'Restoring original tuning…'
-    };
-
-    var MODE_LABELS = { track: 'Standard', adsb: 'ADS-B verified' };
-
-    function mhz(fc) { return (fc / 1e6).toFixed(1) + ' MHz'; }
-
-    function fmtSeconds(s) {
-        var m = Math.floor(s / 60), r = s % 60;
-        return m + ':' + (r < 10 ? '0' : '') + r;
-    }
-
-    function escapeHtml(s) {
-        var d = document.createElement('div');
-        d.textContent = s;
-        return d.innerHTML;
-    }
-
-    // Per-tower outcomes the engine records but the run's summary message
-    // cannot express. Without these every failure reads as "probably no
-    // aircraft", including the ones that never looked for one.
-    var OUTCOME_TEXT = {
-        no_confirmed_track: 'watched, but nothing confirmed',
-        confirmed_track: 'confirmed a track',
-        skipped_no_time: 'never watched (the search ran out of time here)',
-        tuning_not_applied: 'never watched (the radio did not accept this tuning)',
-        unstable_overload: 'stopped (the signal kept overloading the receiver)',
-        not_reached: 'not reached'
-    };
-
-    function diagnose(history) {
-        if (!history.length) return '';
-        var watched = history.filter(function(h) {
-            return h.outcome === 'no_confirmed_track' || h.outcome === 'confirmed_track';
-        }).length;
-        var lines = history.map(function(h) {
-            var txt = OUTCOME_TEXT[h.outcome] || h.outcome || 'unknown';
-            var extra = '';
-            if (h.dwell_seconds) extra = ' (' + Math.round(h.dwell_seconds) + 's)';
-            if (h.tuning_error) extra += ' - ' + escapeHtml(h.tuning_error);
-            return '<div>' + escapeHtml(h.tower_name || 'Tower') + ': ' + txt + extra + '</div>';
-        });
-        var lead = watched === 0
-            ? '<strong>No tower was actually watched, so this is not evidence '
-              + 'about aircraft.</strong><br>'
-            : '';
-        return lead + lines.join('');
-    }
+    // Shared with the setup wizard's calibrate step — see static/calibrate.js
+    // for why the vocabulary and interpretation live there rather than here.
+    var CAL = window.RetinaCalibrate;
+    var PHASE_LABELS = CAL.PHASE_LABELS;
+    var MODE_LABELS = CAL.MODE_LABELS;
+    var mhz = CAL.mhz;
+    var fmtSeconds = CAL.fmtSeconds;
+    var escapeHtml = CAL.escapeHtml;
+    var diagnose = CAL.diagnose;
 
     function setTerminalButtons() {
         spinner.style.display = 'none';
@@ -1534,45 +1498,9 @@ if (discardBtn) discardBtn.addEventListener('click', () => location.reload());
             .forEach(function(el) { el.disabled = locked; });
     }
 
-    // A server-pushed Mender deployment installs on its own schedule and
-    // cannot be refused from here, so it can replace the containers under a
-    // run. Say so rather than let the run die unexplained.
-    function updateWarning(status) {
-        if (!status.system_update) return '';
-        return '<div style="margin-top:10px;padding:8px 10px;border-radius:6px;'
-            + 'background:oklch(0.96 0.04 85);border:1px solid var(--warn,#b7791f);'
-            + 'color:var(--warn,#b7791f);font-size:12.5px;">'
-            + '<strong>A system update is installing.</strong> '
-            + escapeHtml(status.system_update)
-            + '. It restarts the radar, so this calibration will not complete '
-            + 'and its results should be ignored. Run it again once the update '
-            + 'has finished.</div>';
-    }
+    var updateWarning = CAL.updateWarning;
 
-    // The preflight only reports when it had to intervene. A clean probe is
-    // unremarkable; a restart is not — it persisted maximum attenuation to
-    // the config, deliberately and without reverting it (see calibrator.py's
-    // module docstring), so the user has to be told what was replaced or
-    // their gain settings appear to have changed by themselves.
-    function preflightNotice(status) {
-        var pf = status.preflight;
-        if (!pf || !pf.restarted) return '';
-        var was = pf.previous
-            ? ' Its previous setting was gain reduction A ' + pf.previous.gain_a
-              + ' dB / B ' + pf.previous.gain_b + ' dB, LNA state '
-              + pf.previous.lna_state + ', which you can restore in the '
-              + 'Capture fields below.'
-            : '';
-        var lead = pf.recovered
-            ? 'The radio had stopped accepting tuning commands and was restarted.'
-            : 'The radio had stopped accepting tuning commands.';
-        return '<div style="margin-top:10px;padding:8px 10px;border-radius:6px;'
-            + 'background:oklch(0.96 0.04 85);border:1px solid var(--warn,#b7791f);'
-            + 'color:var(--warn,#b7791f);font-size:12.5px;">'
-            + '<strong>' + lead + '</strong> It has been set to maximum '
-            + 'attenuation (gain reduction 59/59, LNA state 9) and that has '
-            + 'been saved to the configuration.' + was + '</div>';
-    }
+    var preflightNotice = CAL.preflightNotice;
 
     function render(status) {
         lastStatus = status;
@@ -1660,6 +1588,25 @@ if (discardBtn) discardBtn.addEventListener('click', () => location.reload());
                     + ', LNA state ' + status.best_attempt.lna_state
                     + ': ' + status.best_attempt.reason
                     + '.<br>Try entering these in the Capture fields below as a starting point.';
+            }
+            // A run that found no track still resolved an operating point the
+            // descent proved this device tolerates, and the radar is on it
+            // right now — but only live, until it is written to config. Offer
+            // the same persist the success path offers, or the next restart
+            // throws the whole run away. Distinct from "Closest attempt"
+            // above, which is informational and may name a different tower:
+            // this is what the radar is actually running.
+            if (status.fallback) {
+                resultEl.style.display = '';
+                resultEl.innerHTML = 'The radar is running on <strong>'
+                    + escapeHtml(status.fallback.tower_name || 'Tower') + '</strong> at '
+                    + mhz(status.fallback.fc) + ', gain reduction A ' + status.fallback.gain_a
+                    + ' dB / B ' + status.fallback.gain_b + ' dB, LNA state '
+                    + status.fallback.lna_state
+                    + ' - the best operating point this run proved the device tolerates.'
+                    + '<br>This is not saved yet: a restart would go back to the previous tuning. '
+                    + 'Persist it to keep it.';
+                applyBtn.style.display = '';
             }
         }
     }

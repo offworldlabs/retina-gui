@@ -275,6 +275,23 @@ class TestTar1090Config:
         )
         assert config.adsb_source_port == 30005
 
+    def test_blank_adsb_source(self):
+        """No local beast feed must be describable at all.
+
+        A node fed from adsb.lol through the tar1090 proxy has nothing to
+        point these at, and a blank adsb_source is how that is expressed.
+        While all three were required, blanking it made the whole config
+        page unsaveable - every field on it, not just this section.
+
+        Whether a blank source is allowed on a given save depends on
+        adsblol_fallback; that rule lives in routes/config.py, so the model
+        on its own accepts the absence.
+        """
+        config = Tar1090Config(adsblol_fallback=True, adsblol_radius=120)
+        assert config.adsb_source_host is None
+        assert config.adsb_source_port is None
+        assert config.adsb_source_protocol is None
+
     def test_port_bounds(self):
         """Port must be 1-65535."""
         with pytest.raises(ValidationError):

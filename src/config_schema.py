@@ -194,10 +194,18 @@ class Tar1090Config(BaseModel):
 
     Note: adsb_source is stored as comma-separated string in YAML
     but split into 3 fields for the form.
+
+    The three source fields are optional here so that a node with no local
+    beast feed can be described at all: one fed from adsb.lol via the tar1090
+    proxy has nothing to point them at, and blanking adsb_source is how that
+    is expressed. Optional does not mean free-standing, though. When they may
+    actually be left empty depends on adsblol_fallback, and a partial set is
+    never valid, so both rules are enforced on save in routes/config.py, where
+    each complaint can be attached to the box it concerns.
     """
-    adsb_source_host: str = Field(title="ADS-B Host", description="IP or hostname")
-    adsb_source_port: int = Field(ge=1, le=65535, title="ADS-B Port")
-    adsb_source_protocol: str = Field(title="Protocol", description="e.g. beast_in")
+    adsb_source_host: str | None = Field(None, title="ADS-B Host", description="IP or hostname")
+    adsb_source_port: int | None = Field(None, ge=1, le=65535, title="ADS-B Port")
+    adsb_source_protocol: str | None = Field(None, title="Protocol", description="e.g. beast_in")
     adsblol_fallback: bool = Field(title="adsb.lol Fallback")
     adsblol_radius: int = Field(ge=1, le=500, title="adsb.lol Radius", description="nautical miles")
 

@@ -26,6 +26,7 @@ function initSetupWizard(resumeStep, highestStepName, devMode, isRerun, demoMode
         radar: 'Packages',
         location: 'Where is your receiver?',
         towers: 'Choose a tower',
+        calibrate: 'Tune the receiver',
         complete: 'You\'re all set'
     };
 
@@ -1156,7 +1157,257 @@ function initSetupWizard(resumeStep, highestStepName, devMode, isRerun, demoMode
     };
     })();
 
-    // Step 6: Complete
+    // Step 6: Auto-Calibrate against the tower just chosen.
+    //
+    // Deliberately a different run shape from the Configuration page's
+    // Auto-Calibrate: scope current_tower (the owner picked a tower one step
+    // ago; re-searching alternates contradicts that and triples the time) and
+    // skip_confirmation (descend, then soak the resolved point for overload,
+    // but never wait for a confirmed track). ~4 min instead of ~15, and
+    // nothing can be falsely confirmed because nothing is confirmed at all.
+    // The soak is not optional: descent proves a point over one second, and
+    // intermittent clipping only shows when the point is sat on — see
+    // calibrator.py's SOAK_SECONDS.
+    enterHooks.calibrate = (function() {
+        var stopPoll = null;
+        var listenersAdded = false;
+        var advancing = false;
+
+        function el(id) { return document.getElementById(id); }
+
+        function show(intro, running) {
+            el('calWizIntro').style.display = intro ? '' : 'none';
+            el('calWizRunning').style.display = running ? '' : 'none';
+        }
+
+        function setButtons(state) {
+            el('calWizStartBtn').style.display  = state === 'idle' ? '' : 'none';
+            el('calWizSkipBtn').style.display   = state === 'running' ? 'none' : '';
+            el('calWizCancelBtn').style.display = state === 'running' ? '' : 'none';
+            el('calWizNextBtn').style.display   = state === 'terminal' ? '' : 'none';
+            el('calWizCancelBtn').disabled = false;
+        }
+
+        // A confirmed result or the no-track fallback both carry tuning worth
+        // keeping, and the wizard persists either without asking — the
+        // Configuration page's "Persist to config" button is not reachable
+        // from here, and the stack restart at /set-up/complete would discard
+        // anything left unsaved seconds later.
+        function persistThenAllowNext(status) {
+            var CAL = window.RetinaCalibrate;
+            var tuning = CAL.tuningOf(status);
+            if (!tuning) { setButtons('terminal'); return; }
+            var statusEl = el('calWizStatus');
+            statusEl.textContent = 'Saving settings…';
+            CAL.apply().then(function(d) {
+                if (!d.success) throw new Error(d.error || 'Apply failed');
+                // Wait for the merge+restart to finish before letting the user
+                // advance: /set-up/complete force-recreates the stack, and two
+                // overlapping restarts race the 90s restart lock, whose
+                // failure enforce_radar_mode swallows silently.
+                return CAL.pollApply(function(s) {
+                    var label = s.phase_label || 'Applying';
+                    if (s.phase === 'settling' && s.settle_remaining) {
+                        label += ' (' + s.settle_remaining + 's)';
+                    }
+                    statusEl.textContent = label + '…';
+                });
+            }).then(function() {
+                statusEl.textContent = 'Settings saved.';
+                setButtons('terminal');
+            }).catch(function(err) {
+                // Never blocks completion — the tuning is live either way, and
+                // the owner must be able to finish setup.
+                statusEl.textContent = 'Could not save settings: ' + err.message;
+                setButtons('terminal');
+            });
+        }
+
+        function renderTerminal(status) {
+            var CAL = window.RetinaCalibrate;
+            var resultEl = el('calWizResult');
+            var errorEl = el('calWizError');
+            show(false, false);
+            el('calWizSpinner').style.display = 'none';
+
+            var tuning = CAL.tuningOf(status);
+            if (tuning) {
+                var entry = (status.history || [])[0] || {};
+                var before = status.original;
+                // What the run changed, not just what it ended on: the owner
+                // has no other way to see that these settings are not the
+                // generic ones the radio shipped with.
+                var wasRow = before
+                    ? '<div style="font-size:12.5px;color:var(--ink-3);margin-top:6px;">'
+                      + 'Previously gain reduction A ' + before.gain_a + ' dB / B '
+                      + before.gain_b + ' dB, LNA state ' + before.lna_state + '.</div>'
+                    : '';
+                // An empty dwell_backoffs means the point never clipped across
+                // the whole soak. That is the reassurance the soak earns and
+                // the step otherwise never states.
+                var held = entry.soak_seconds
+                    ? '<div style="font-size:12.5px;color:var(--ink-3);margin-top:6px;">'
+                      + (((entry.dwell_backoffs || []).length === 0)
+                          ? 'Held cleanly for ' + Math.round(entry.soak_seconds)
+                            + 's with no sign of overload.'
+                          : 'Backed off ' + entry.dwell_backoffs.length
+                            + ' time(s) during a ' + Math.round(entry.soak_seconds)
+                            + 's check, and settled here.')
+                      + '</div>'
+                    : '';
+                resultEl.style.display = '';
+                resultEl.innerHTML =
+                    '<div style="padding:14px 16px;border:1px solid var(--ok-edge);'
+                    + 'background:var(--ok-soft);border-radius:var(--r-md);">'
+                    + '<div style="font-weight:600;font-size:14px;color:var(--ok);">Receiver tuned</div>'
+                    + '<div style="font-size:13px;color:var(--ink-2);margin-top:4px;">'
+                    + 'Using <strong>' + CAL.escapeHtml(tuning.tower_name || 'Tower')
+                    + '</strong> at ' + CAL.mhz(tuning.fc) + '.</div>'
+                    + '<div style="font-size:13px;color:var(--ink-2);margin-top:8px;">'
+                    + 'Gain reduction A <strong>' + tuning.gain_a + ' dB</strong>'
+                    + ' / B <strong>' + tuning.gain_b + ' dB</strong>'
+                    + ', LNA state <strong>' + tuning.lna_state + '</strong>.</div>'
+                    + wasRow + held + '</div>';
+                // Static copy lives in the template — see #calWizNext there.
+                el('calWizNext').style.display = '';
+            } else {
+                errorEl.style.display = '';
+                errorEl.innerHTML = '<span style="color:var(--ink-2);">'
+                    + CAL.escapeHtml(status.error || 'Tuning did not complete.')
+                    + ' You can run this again later from Configuration.</span>';
+            }
+            errorEl.innerHTML += CAL.updateWarning(status) + CAL.preflightNotice(status);
+            if (errorEl.innerHTML) errorEl.style.display = '';
+            persistThenAllowNext(status);
+        }
+
+        function renderRunning(status) {
+            var CAL = window.RetinaCalibrate;
+            show(false, true);
+            el('calWizSpinner').style.display = '';
+            el('calWizPhase').textContent = CAL.PHASE_LABELS[status.phase] || 'Starting…';
+            if (status.current) {
+                el('calWizDetail').style.display = '';
+                el('calWizTower').textContent = status.current.tower_name || '-';
+                el('calWizFc').textContent = CAL.mhz(status.current.fc);
+                el('calWizGains').textContent =
+                    'A ' + status.current.gain_a + ' dB / B ' + status.current.gain_b + ' dB';
+                el('calWizLna').textContent =
+                    status.current.lna_state == null ? '-' : status.current.lna_state;
+                var rf = status.rf || {};
+                el('calWizOverload').textContent = rf.overload_a == null ? '-'
+                    : ('A ' + (rf.overload_a ? 'OVERLOAD' : 'ok')
+                       + ' / B ' + (rf.overload_b ? 'OVERLOAD' : 'ok'));
+            }
+        }
+
+        function watch() {
+            if (stopPoll) stopPoll();
+            setButtons('running');
+            stopPoll = window.RetinaCalibrate.pollStatus(function(status) {
+                if (status.state === 'running') { renderRunning(status); return; }
+                stopPoll = null;
+                window._calWizStopPoll = null;
+                renderTerminal(status);
+            });
+            // Published so leaveHooks.calibrate, which lives outside this
+            // closure, can stop the timer when the step goes off screen.
+            window._calWizStopPoll = stopPoll;
+        }
+
+        return function() {
+            var CAL = window.RetinaCalibrate;
+            el('calWizResult').style.display = 'none';
+            el('calWizResult').innerHTML = '';
+            el('calWizError').style.display = 'none';
+            el('calWizError').innerHTML = '';
+            el('calWizNext').style.display = 'none';
+            el('calWizStatus').textContent = '';
+            advancing = false;
+
+            // Never auto-start: this hook fires on every entry, including
+            // when the owner clicks back to a step they already finished.
+            // Reattach to whatever the node is actually doing instead — the
+            // run is a background thread there, not something this tab owns.
+            CAL.getStatus().then(function(status) {
+                if (status.state === 'running') { watch(); return; }
+                if (CAL.isTerminal(status) && CAL.tuningOf(status)) {
+                    // A finished run from this session (or before a reload):
+                    // show what it found rather than offering to redo it.
+                    renderTerminal(status);
+                    return;
+                }
+                // Includes "step says calibrate, calibrator says idle", which
+                // is the normal state after a reboot mid-run — the start
+                // prompt is the honest thing to show, not an error.
+                show(true, false);
+                setButtons('idle');
+            }).catch(function() {
+                show(true, false);
+                setButtons('idle');
+            });
+
+            if (listenersAdded) return;
+            listenersAdded = true;
+
+            el('calWizStartBtn').addEventListener('click', function() {
+                el('calWizStatus').textContent = '';
+                el('calWizResult').style.display = 'none';
+                el('calWizError').style.display = 'none';
+                el('calWizNext').style.display = 'none';
+                show(false, true);
+                setButtons('running');
+                el('calWizPhase').textContent = 'Starting…';
+                window.RetinaCalibrate.start({
+                    scope: 'current_tower',
+                    skip_confirmation: true
+                }).then(function(d) {
+                    if (!d.success) {
+                        show(true, false);
+                        setButtons('idle');
+                        el('calWizError').style.display = '';
+                        el('calWizError').innerHTML =
+                            '<span style="color:var(--danger,#b91c1c);">'
+                            + window.RetinaCalibrate.escapeHtml(d.error || 'Could not start') + '</span>';
+                        return;
+                    }
+                    watch();
+                }).catch(function() {
+                    show(true, false);
+                    setButtons('idle');
+                    el('calWizError').style.display = '';
+                    el('calWizError').textContent = 'Could not start tuning.';
+                });
+            });
+
+            el('calWizCancelBtn').addEventListener('click', function() {
+                el('calWizCancelBtn').disabled = true;
+                el('calWizStatus').textContent = 'Cancelling…';
+                window.RetinaCalibrate.cancel().catch(function() {});
+            });
+
+            el('calWizSkipBtn').addEventListener('click', function() {
+                if (advancing) return;
+                advancing = true;
+                advance();
+            });
+
+            el('calWizNextBtn').addEventListener('click', function() {
+                if (advancing) return;
+                advancing = true;
+                advance();
+            });
+        };
+    })();
+
+    // Leaving the step must not leave a timer running against a view that is
+    // no longer on screen. The run itself continues on the node, and
+    // re-entering reattaches to it.
+    leaveHooks.calibrate = function() {
+        if (window._calWizStopPoll) { window._calWizStopPoll(); window._calWizStopPoll = null; }
+    };
+
+    // Step 7: Complete
     enterHooks.complete = function() {
         window.removeEventListener('beforeunload', handleBeforeUnload);
         if (backBtn) backBtn.style.display = 'none';
