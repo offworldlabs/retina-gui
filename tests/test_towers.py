@@ -394,15 +394,37 @@ class TestSetupWizardLocationStep:
                 < html.index('data-step="calibrate"')
                 < html.index('data-step="complete"'))
 
-    def test_calibrate_step_does_not_promise_aircraft(self, app_client):
-        """The wizard run is descent-only, so there is no dwell and no track
-        to wait for. Promising aircraft would make a normal result read as a
-        failure — see the Copy note on this step."""
+    def test_calibrate_step_does_not_promise_aircraft_before_the_run(self, app_client):
+        """The wizard run never waits for a track, so copy shown *before* and
+        *during* it must not lead the owner to expect aircraft — a normal
+        result would then read as a failure. Scoped to the pre-result half on
+        purpose: the post-run explainer does discuss aircraft, to say why none
+        were waited for, which is the opposite problem."""
         html = app_client.get('/set-up').data.decode()
         start = html.index('data-step="calibrate"')
         panel = html[start:html.index('data-step="complete"')]
-        assert 'aircraft' not in panel.lower()
-        assert 'gain settings' in panel.lower()
+        before_result = panel[:panel.index('id="calWizResult"')]
+        assert 'aircraft' not in before_result.lower()
+        assert 'gain settings' in before_result.lower()
+
+    def test_calibrate_step_has_a_slot_for_the_post_run_explanation(self, app_client):
+        """The copy itself is the author's to write; this only guards the
+        wiring. setup.js reveals #calWizNext on a terminal run and hides it
+        again on re-entry, so losing the id would silently drop whatever is
+        written there."""
+        html = app_client.get('/set-up').data.decode()
+        start = html.index('data-step="calibrate"')
+        panel = html[start:html.index('data-step="complete"')]
+        assert 'id="calWizNext"' in panel
+
+        with open(os.path.join(os.path.dirname(__file__), '..',
+                               'static', 'setup.js')) as f:
+            setup_js = f.read()
+        assert "el('calWizNext').style.display = ''" in setup_js
+        # Both reset paths must hide it again: re-entering the step, and
+        # starting a fresh run. Not an exact count, so adding a legitimate
+        # third reset later does not fail this.
+        assert setup_js.count("el('calWizNext').style.display = 'none'") >= 2
 
     def test_setup_page_loads_shared_calibrate_driver(self, app_client):
         """The wizard step and the Configuration modal must not drift — both

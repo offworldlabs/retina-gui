@@ -6,8 +6,9 @@
            confirmation (see calibrator.py's skip_confirmation), so there is
            nothing to wait for a plane for. It does still watch the settled
            point for overload — that is the soak, and it is why the phase
-           reads "dwelling" for ~45s at the end. Promising aircraft here
-           would set the owner up to read a normal result as a failure. #}
+           reads "Checking the settings hold…" for ~45s at the end. Promising
+           aircraft here would set the owner up to read a normal result as a
+           failure. #}
         <p>Find the best gain settings for your location.<br>
             Takes a few minutes, and you can skip it.</p>
     </div>
@@ -41,7 +42,42 @@
         </div>
     </div>
 
-    {# Terminal view — outcome plus what was saved #}
+    {# Terminal view — outcome plus what was saved. Filled from the run's
+       status by renderTerminal in setup.js, since the values are dynamic. #}
     <div id="calWizResult" style="display:none;margin-top:14px;"></div>
     <div id="calWizError" style="display:none;margin-top:14px;font-size:13px;"></div>
+
+    {# Post-run explanation, shown under the "Receiver tuned" box once a run
+       finishes and produced tuning. Deliberately static markup rather than a
+       string in setup.js: none of it depends on the run, and copy this long
+       should be editable without touching JavaScript.
+
+       Keep the outer div and its id. setup.js reveals it in renderTerminal
+       and hides it again both on re-entry and on starting a new run, so
+       losing the id silently drops all of this. #}
+    <div id="calWizNext" style="display:none;margin-top:16px;">
+        <div style="padding:14px 16px;border:1px solid var(--edge,#d8dee6);border-radius:var(--r-md);">
+
+            <p style="font-size:13px;color:var(--ink-2);margin:0 0 10px;">
+                This process has resulted in a gain configuration that operates
+                both your reference and surveillance tuners in an optimal state
+                with regard to clipping. This does not necessarily mean it is
+                the optimal configuration for detecting aircraft.
+            </p>
+
+            <p style="font-size:13px;color:var(--ink-2);margin:0 0 10px;">
+                After you continue, you can explore the device's configuration
+                options and you can run Auto-Calibrate again during a period
+                of significant air traffic to tune your system further.
+            </p>
+
+            <p style="font-size:13px;color:var(--ink-2);margin:0;">
+                You may also find that tuning your <strong>Minimum SNR</strong>
+                (default 7.0 dB) to your node's observed noise floor improves
+                Auto-Calibrate's performance. Manual tuning is available as
+                well.
+            </p>
+
+        </div>
+    </div>
 </div>

@@ -1232,15 +1232,44 @@ function initSetupWizard(resumeStep, highestStepName, devMode, isRerun, demoMode
 
             var tuning = CAL.tuningOf(status);
             if (tuning) {
+                var entry = (status.history || [])[0] || {};
+                var before = status.original;
+                // What the run changed, not just what it ended on: the owner
+                // has no other way to see that these settings are not the
+                // generic ones the radio shipped with.
+                var wasRow = before
+                    ? '<div style="font-size:12.5px;color:var(--ink-3);margin-top:6px;">'
+                      + 'Previously gain reduction A ' + before.gain_a + ' dB / B '
+                      + before.gain_b + ' dB, LNA state ' + before.lna_state + '.</div>'
+                    : '';
+                // An empty dwell_backoffs means the point never clipped across
+                // the whole soak. That is the reassurance the soak earns and
+                // the step otherwise never states.
+                var held = entry.soak_seconds
+                    ? '<div style="font-size:12.5px;color:var(--ink-3);margin-top:6px;">'
+                      + (((entry.dwell_backoffs || []).length === 0)
+                          ? 'Held cleanly for ' + Math.round(entry.soak_seconds)
+                            + 's with no sign of overload.'
+                          : 'Backed off ' + entry.dwell_backoffs.length
+                            + ' time(s) during a ' + Math.round(entry.soak_seconds)
+                            + 's check, and settled here.')
+                      + '</div>'
+                    : '';
                 resultEl.style.display = '';
                 resultEl.innerHTML =
                     '<div style="padding:14px 16px;border:1px solid var(--ok-edge);'
                     + 'background:var(--ok-soft);border-radius:var(--r-md);">'
                     + '<div style="font-weight:600;font-size:14px;color:var(--ok);">Receiver tuned</div>'
                     + '<div style="font-size:13px;color:var(--ink-2);margin-top:4px;">'
-                    + CAL.escapeHtml(tuning.tower_name || 'Tower') + ' at ' + CAL.mhz(tuning.fc)
-                    + ', gain reduction A ' + tuning.gain_a + ' dB / B ' + tuning.gain_b
-                    + ' dB, LNA state ' + tuning.lna_state + '.</div></div>';
+                    + 'Using <strong>' + CAL.escapeHtml(tuning.tower_name || 'Tower')
+                    + '</strong> at ' + CAL.mhz(tuning.fc) + '.</div>'
+                    + '<div style="font-size:13px;color:var(--ink-2);margin-top:8px;">'
+                    + 'Gain reduction A <strong>' + tuning.gain_a + ' dB</strong>'
+                    + ' / B <strong>' + tuning.gain_b + ' dB</strong>'
+                    + ', LNA state <strong>' + tuning.lna_state + '</strong>.</div>'
+                    + wasRow + held + '</div>';
+                // Static copy lives in the template — see #calWizNext there.
+                el('calWizNext').style.display = '';
             } else {
                 errorEl.style.display = '';
                 errorEl.innerHTML = '<span style="color:var(--ink-2);">'
@@ -1292,6 +1321,7 @@ function initSetupWizard(resumeStep, highestStepName, devMode, isRerun, demoMode
             el('calWizResult').innerHTML = '';
             el('calWizError').style.display = 'none';
             el('calWizError').innerHTML = '';
+            el('calWizNext').style.display = 'none';
             el('calWizStatus').textContent = '';
             advancing = false;
 
@@ -1324,6 +1354,7 @@ function initSetupWizard(resumeStep, highestStepName, devMode, isRerun, demoMode
                 el('calWizStatus').textContent = '';
                 el('calWizResult').style.display = 'none';
                 el('calWizError').style.display = 'none';
+                el('calWizNext').style.display = 'none';
                 show(false, true);
                 setButtons('running');
                 el('calWizPhase').textContent = 'Starting…';
