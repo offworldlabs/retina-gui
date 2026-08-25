@@ -661,6 +661,7 @@
 {% endblock %}
 
 {% block scripts %}
+<script src="/static/calibrate.js"></script>
 <script>
 // Mode segmented control — change is staged; applied when user clicks Apply changes
 (function() {
@@ -1372,60 +1373,15 @@ if (discardBtn) discardBtn.addEventListener('click', () => location.reload());
     var pollTimer = null;
     var lastStatus = null;
 
-    var PHASE_LABELS = {
-        preflight: 'Checking the radio responds…',
-        recovering: 'Radio unresponsive, restarting it…',
-        descending: 'Maximizing gain, backing off overload…',
-        refining: 'Refining gain…',
-        dwelling: 'Watching for aircraft…',
-        restoring: 'Restoring original tuning…'
-    };
-
-    var MODE_LABELS = { track: 'Standard', adsb: 'ADS-B verified' };
-
-    function mhz(fc) { return (fc / 1e6).toFixed(1) + ' MHz'; }
-
-    function fmtSeconds(s) {
-        var m = Math.floor(s / 60), r = s % 60;
-        return m + ':' + (r < 10 ? '0' : '') + r;
-    }
-
-    function escapeHtml(s) {
-        var d = document.createElement('div');
-        d.textContent = s;
-        return d.innerHTML;
-    }
-
-    // Per-tower outcomes the engine records but the run's summary message
-    // cannot express. Without these every failure reads as "probably no
-    // aircraft", including the ones that never looked for one.
-    var OUTCOME_TEXT = {
-        no_confirmed_track: 'watched, but nothing confirmed',
-        confirmed_track: 'confirmed a track',
-        skipped_no_time: 'never watched (the search ran out of time here)',
-        tuning_not_applied: 'never watched (the radio did not accept this tuning)',
-        unstable_overload: 'stopped (the signal kept overloading the receiver)',
-        not_reached: 'not reached'
-    };
-
-    function diagnose(history) {
-        if (!history.length) return '';
-        var watched = history.filter(function(h) {
-            return h.outcome === 'no_confirmed_track' || h.outcome === 'confirmed_track';
-        }).length;
-        var lines = history.map(function(h) {
-            var txt = OUTCOME_TEXT[h.outcome] || h.outcome || 'unknown';
-            var extra = '';
-            if (h.dwell_seconds) extra = ' (' + Math.round(h.dwell_seconds) + 's)';
-            if (h.tuning_error) extra += ' - ' + escapeHtml(h.tuning_error);
-            return '<div>' + escapeHtml(h.tower_name || 'Tower') + ': ' + txt + extra + '</div>';
-        });
-        var lead = watched === 0
-            ? '<strong>No tower was actually watched, so this is not evidence '
-              + 'about aircraft.</strong><br>'
-            : '';
-        return lead + lines.join('');
-    }
+    // Shared with the setup wizard's calibrate step — see static/calibrate.js
+    // for why the vocabulary and interpretation live there rather than here.
+    var CAL = window.RetinaCalibrate;
+    var PHASE_LABELS = CAL.PHASE_LABELS;
+    var MODE_LABELS = CAL.MODE_LABELS;
+    var mhz = CAL.mhz;
+    var fmtSeconds = CAL.fmtSeconds;
+    var escapeHtml = CAL.escapeHtml;
+    var diagnose = CAL.diagnose;
 
     function setTerminalButtons() {
         spinner.style.display = 'none';
@@ -1450,45 +1406,9 @@ if (discardBtn) discardBtn.addEventListener('click', () => location.reload());
             .forEach(function(el) { el.disabled = locked; });
     }
 
-    // A server-pushed Mender deployment installs on its own schedule and
-    // cannot be refused from here, so it can replace the containers under a
-    // run. Say so rather than let the run die unexplained.
-    function updateWarning(status) {
-        if (!status.system_update) return '';
-        return '<div style="margin-top:10px;padding:8px 10px;border-radius:6px;'
-            + 'background:oklch(0.96 0.04 85);border:1px solid var(--warn,#b7791f);'
-            + 'color:var(--warn,#b7791f);font-size:12.5px;">'
-            + '<strong>A system update is installing.</strong> '
-            + escapeHtml(status.system_update)
-            + '. It restarts the radar, so this calibration will not complete '
-            + 'and its results should be ignored. Run it again once the update '
-            + 'has finished.</div>';
-    }
+    var updateWarning = CAL.updateWarning;
 
-    // The preflight only reports when it had to intervene. A clean probe is
-    // unremarkable; a restart is not — it persisted maximum attenuation to
-    // the config, deliberately and without reverting it (see calibrator.py's
-    // module docstring), so the user has to be told what was replaced or
-    // their gain settings appear to have changed by themselves.
-    function preflightNotice(status) {
-        var pf = status.preflight;
-        if (!pf || !pf.restarted) return '';
-        var was = pf.previous
-            ? ' Its previous setting was gain reduction A ' + pf.previous.gain_a
-              + ' dB / B ' + pf.previous.gain_b + ' dB, LNA state '
-              + pf.previous.lna_state + ', which you can restore in the '
-              + 'Capture fields below.'
-            : '';
-        var lead = pf.recovered
-            ? 'The radio had stopped accepting tuning commands and was restarted.'
-            : 'The radio had stopped accepting tuning commands.';
-        return '<div style="margin-top:10px;padding:8px 10px;border-radius:6px;'
-            + 'background:oklch(0.96 0.04 85);border:1px solid var(--warn,#b7791f);'
-            + 'color:var(--warn,#b7791f);font-size:12.5px;">'
-            + '<strong>' + lead + '</strong> It has been set to maximum '
-            + 'attenuation (gain reduction 59/59, LNA state 9) and that has '
-            + 'been saved to the configuration.' + was + '</div>';
-    }
+    var preflightNotice = CAL.preflightNotice;
 
     function render(status) {
         lastStatus = status;

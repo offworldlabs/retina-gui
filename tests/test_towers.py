@@ -377,12 +377,60 @@ class TestSetupWizardLocationStep:
         assert 'Find towers' in html
 
     def test_setup_page_has_all_steps(self, app_client):
-        """Setup wizard has all 6 step panels."""
+        """Setup wizard has all 7 step panels."""
         resp = app_client.get('/set-up')
         html = resp.data.decode()
         assert 'data-step="location"' in html
         assert 'data-step="towers"' in html
+        assert 'data-step="calibrate"' in html
         assert 'data-step="complete"' in html
+
+    def test_calibrate_step_sits_between_towers_and_complete(self, app_client):
+        """Steps are discovered from DOM order, so the include order in
+        setup.html *is* the wizard order — tuning has to come after a tower
+        is chosen and before the completion restart."""
+        html = app_client.get('/set-up').data.decode()
+        assert (html.index('data-step="towers"')
+                < html.index('data-step="calibrate"')
+                < html.index('data-step="complete"'))
+
+    def test_calibrate_step_does_not_promise_aircraft_before_the_run(self, app_client):
+        """The wizard run never waits for a track, so copy shown *before* and
+        *during* it must not lead the owner to expect aircraft — a normal
+        result would then read as a failure. Scoped to the pre-result half on
+        purpose: the post-run explainer does discuss aircraft, to say why none
+        were waited for, which is the opposite problem."""
+        html = app_client.get('/set-up').data.decode()
+        start = html.index('data-step="calibrate"')
+        panel = html[start:html.index('data-step="complete"')]
+        before_result = panel[:panel.index('id="calWizResult"')]
+        assert 'aircraft' not in before_result.lower()
+        assert 'gain settings' in before_result.lower()
+
+    def test_calibrate_step_has_a_slot_for_the_post_run_explanation(self, app_client):
+        """The copy itself is the author's to write; this only guards the
+        wiring. setup.js reveals #calWizNext on a terminal run and hides it
+        again on re-entry, so losing the id would silently drop whatever is
+        written there."""
+        html = app_client.get('/set-up').data.decode()
+        start = html.index('data-step="calibrate"')
+        panel = html[start:html.index('data-step="complete"')]
+        assert 'id="calWizNext"' in panel
+
+        with open(os.path.join(os.path.dirname(__file__), '..',
+                               'static', 'setup.js')) as f:
+            setup_js = f.read()
+        assert "el('calWizNext').style.display = ''" in setup_js
+        # Both reset paths must hide it again: re-entering the step, and
+        # starting a fresh run. Not an exact count, so adding a legitimate
+        # third reset later does not fail this.
+        assert setup_js.count("el('calWizNext').style.display = 'none'") >= 2
+
+    def test_setup_page_loads_shared_calibrate_driver(self, app_client):
+        """The wizard step and the Configuration modal must not drift — both
+        consume static/calibrate.js."""
+        html = app_client.get('/set-up').data.decode()
+        assert '/static/calibrate.js' in html
 
     def test_setup_page_includes_leaflet(self, app_client):
         """Setup wizard loads Leaflet JS and CSS."""
