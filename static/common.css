@@ -145,6 +145,18 @@ h1, h2, h3, h4, h5, h6 {
 .nav-tab:hover  { color: var(--ink); background: var(--surface-2); }
 .nav-tab.active { color: var(--ink); background: var(--surface-2); }
 .nav-spacer { flex: 1; }
+
+/* Child row of the banner: which page of the node named in the row above.
+   Set apart from .nav by a lighter ground and no border of its own, so the two
+   rows read as one banner with a hierarchy rather than as two navbars. */
+.subnav {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    padding: 8px 28px;
+    border-bottom: 1px solid var(--line);
+    background: var(--surface-2);
+}
 /* ── Spectrum mode overrides ──────────────────── */
 .main.spectrum-mode { max-width: 1200px; }
 .spectrum-section { display: flex; flex-direction: column; flex: 1; }

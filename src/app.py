@@ -139,14 +139,19 @@ def get_node_id():
 # Inject common template variables (navbar, footer)
 @app.context_processor
 def inject_globals():
+    # Imported here rather than at module scope: the route modules are
+    # deliberately imported at the bottom of this file, after the app exists.
+    from routes.fleet import banner_nodes
+
     owl_os_version, retina_node_version = mender.get_versions()
     return {
         'node_id': get_node_id(),
         'owl_os_version': owl_os_version,
         'retina_node_version': retina_node_version,
-        # Drives the Nodes tab, which is only worth showing once there is more
-        # than one node to switch between. Reading an in-memory list.
-        'fleet_count': peers.count(),
+        # One banner tab per node, on every page. An in-memory list, copied
+        # and sorted — cheap enough to do per render, and it has to be here
+        # rather than per-route because the banner is in base.html.
+        'fleet_nodes': banner_nodes(),
     }
 
 
@@ -183,13 +188,13 @@ _CALIBRATION_ALLOWED_PREFIXES = (
     '/calibrate',     # status, cancel, apply
     '/static',
     '/favicon',
-    # The fleet routes belong to whoever is browsing owl.local, who may not be
-    # anywhere near this node and is not the person who started a calibration
-    # on it. Holding them on this node's config page would be answering a
-    # question about the fleet with a page about one node — and /healthz is how
-    # every other node decides whether this one still exists, so a redirect
-    # there would make a calibrating node look unreachable to its peers.
-    '/fleet',
+    # Fleet-scope routes belong to whoever is browsing, who may not be anywhere
+    # near this node and is not the person who started a calibration on it.
+    # Holding them on this node's config page would be answering a question
+    # about the fleet with a page about one node — and /healthz is how every
+    # other node decides whether this one still exists, so a redirect there
+    # would make a calibrating node look unreachable to its peers.
+    '/summary',
     '/api/fleet',
     '/healthz',
 )

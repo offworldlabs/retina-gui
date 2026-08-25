@@ -1,0 +1,60 @@
+{% extends "base.html" %}
+{% set active_page = 'summary' %}
+{% block title %}Summary - OWL-OS{% endblock %}
+
+{# Fleet scope, not node scope: Home and Config below would be about whichever
+   node happened to serve this page, which is not what the reader is asking
+   about here. #}
+{% block subnav %}{% endblock %}
+
+{% block content %}
+<main class="main">
+
+    <div class="page-head">
+        <div>
+            <h1>Summary</h1>
+            <div class="sub">About this system</div>
+        </div>
+    </div>
+
+    <section>
+        <div class="section-head"><h2>Your nodes</h2></div>
+        <div class="svc-card">
+            <div class="svc-desc">
+                Every node on this network appears in the bar at the top of the
+                page. Select one to see its data and change its settings. The bar
+                stays with you, so you can move between nodes at any point.
+            </div>
+            <div class="svc-desc">
+                Each node also has a permanent address of its own, shown under
+                Config, that always reaches that node and nothing else. It is
+                worth bookmarking. The shared address, owl.local, is answered by
+                whichever node replies first, so it is a way in rather than a way
+                to reach one node in particular.
+            </div>
+        </div>
+    </section>
+
+    {# The caveat the old node-list page carried. The banner has nowhere to put
+       it, and it is the difference between "that node is off" and "that node is
+       fine and this page cannot see it", which is not a distinction the
+       software can make for the reader. #}
+    <section>
+        <div class="section-head"><h2>If a node is missing</h2></div>
+        <div class="svc-card">
+            <div class="svc-desc">
+                Nodes find each other by broadcasting on the local network. Some
+                networks block that, including guest WiFi and access points with
+                client isolation turned on, and a node on the far side of one
+                will not appear above even though it is running normally.
+            </div>
+            <div class="svc-desc">
+                A node that is missing can still be reached directly by its
+                address, which your router will list among its connected
+                devices.
+            </div>
+        </div>
+    </section>
+
+</main>
+{% endblock %}

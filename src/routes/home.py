@@ -1,6 +1,5 @@
 from flask import Blueprint, redirect, render_template, request
 
-from routes.fleet import entry_point_response, is_entry_point
 from routes.mode import get_current_mode
 
 bp = Blueprint('home', __name__)
@@ -8,18 +7,13 @@ bp = Blueprint('home', __name__)
 
 @bp.route("/")
 def index():
-    """Home page with node ID, services, and SSH keys."""
-    from app import config_mgr, device_state, get_node_id, mender, ssh_keys, telemetry_status
+    """Home page with node ID, services, and SSH keys.
 
-    # Someone who typed owl.local is asking for "a node", and on a network with
-    # several of them the honest answer is the list, not whichever one happened
-    # to win the race to answer. Checked before the setup wizard: a visitor
-    # looking for the fleet should not be dropped into one node's first-run
-    # wizard just because that node is the one that replied.
-    if is_entry_point(request.host):
-        response = entry_point_response()
-        if response is not None:
-            return response
+    Host-agnostic. Arriving on owl.local and arriving on this node's own
+    ret<node_id>.local produce the same page: the shared alias is just a way in,
+    and the banner is what moves you between nodes from there.
+    """
+    from app import config_mgr, device_state, get_node_id, mender, ssh_keys, telemetry_status
 
     if device_state.is_setup_wizard_in_progress():
         return redirect('/set-up')
