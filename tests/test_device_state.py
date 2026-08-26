@@ -432,6 +432,69 @@ class TestTowersCache:
         assert ds.get_towers_cache() is None
 
 
+class TestBackfillSetupWizardCompleted:
+    """Test the flag backfill for nodes that finished setup before it existed.
+
+    retina-telemetry gates registration on this flag, so a false negative here
+    strands a fully configured node permanently. The evidence is a location in
+    user.yml, which `/towers/select` has written since 4afa307 (2026-03-23),
+    three months before the flag arrived in aee29a6 (2026-06-24).
+    """
+
+    CONFIGURED = {"location": {"rx": {"latitude": 42.241528, "longitude": -72.648361}}}
+
+    def test_writes_the_flag_for_a_configured_node(self, ds):
+        """The case this exists for: an old node with a real location."""
+        assert ds.backfill_setup_wizard_completed(self.CONFIGURED) is True
+        assert ds.has_completed_setup_wizard()
+
+    def test_leaves_an_unconfigured_node_blocked(self, ds):
+        """No evidence the owner chose anything, so no flag. This node should
+        stay unregistered rather than report the Greenwich default."""
+        assert ds.backfill_setup_wizard_completed({"capture": {"fc": 503000000}}) is False
+        assert not ds.has_completed_setup_wizard()
+
+    def test_empty_user_config_is_not_evidence(self, ds):
+        for empty in ({}, None):
+            assert ds.backfill_setup_wizard_completed(empty) is False
+            assert not ds.has_completed_setup_wizard()
+
+    def test_partial_coordinates_are_not_evidence(self, ds):
+        """A half-written block does not prove a completed tower step."""
+        half = {"location": {"rx": {"latitude": 42.241528}}}
+        assert ds.backfill_setup_wizard_completed(half) is False
+        assert not ds.has_completed_setup_wizard()
+
+    def test_zero_is_a_real_coordinate(self, ds):
+        """Null Island is a legitimate latitude and longitude. Testing these
+        for truthiness rather than presence would strand a node on the equator
+        or the prime meridian."""
+        origin = {"location": {"rx": {"latitude": 0, "longitude": 0}}}
+        assert ds.backfill_setup_wizard_completed(origin) is True
+
+    def test_existing_flag_is_not_redated(self, ds):
+        """The flag answers "when was setup finished", and a backfill has not
+        finished anything. Rewriting it would also make a re-run look recent."""
+        ds.mark_setup_wizard_completed()
+        with open(ds.setup_wizard_completed_flag) as f:
+            original = f.read()
+
+        assert ds.backfill_setup_wizard_completed(self.CONFIGURED) is False
+        with open(ds.setup_wizard_completed_flag) as f:
+            assert f.read() == original
+
+    def test_malformed_user_config_does_not_raise(self, ds):
+        """Startup must not die on a config it cannot make sense of."""
+        for junk in ("a string", ["a", "list"], {"location": "not a dict"},
+                     {"location": {"rx": "not a dict"}}):
+            assert ds.backfill_setup_wizard_completed(junk) is False
+
+    def test_unwritable_data_dir_does_not_raise(self, ds):
+        """Best effort on startup, as elsewhere in this class."""
+        with patch.object(ds, "mark_setup_wizard_completed", side_effect=OSError):
+            assert ds.backfill_setup_wizard_completed(self.CONFIGURED) is False
+
+
 class TestTelemetryConsent:
     """Test the consent records retina-telemetry refuses to register without.
 

@@ -57,6 +57,19 @@ except OSError:
 # A calibration run cannot survive a GUI restart — any lock left behind is stale
 device_state.release_calibration_lock()
 
+# Nodes that finished setup before the completion flag existed have none, and
+# retina-telemetry will not register a node without it. Runs on every boot
+# rather than once because there is nowhere to record that it has been done,
+# and it is a no-op the moment the flag is present.
+#
+# Guarded because this is the only thing that parses user.yml at import time:
+# an unparseable one would otherwise stop the GUI booting at all, which is a
+# worse failure than the missing flag this exists to repair.
+try:
+    device_state.backfill_setup_wizard_completed(config_mgr.load_user_config())
+except Exception:
+    pass
+
 # Enforce radar at the Docker level: stop and remove retina-spectrum if it is running.
 # retina-spectrum is only allowed while the wizard location step or config toggle is active.
 if config_mgr.is_retina_node_installed():

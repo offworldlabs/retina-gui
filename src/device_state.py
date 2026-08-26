@@ -64,6 +64,10 @@ class DeviceState:
         self.mender_conf_backup_dir = mender_conf_backup_dir
         self.mender_conf_backup_path = mender_conf_backup_path
         self.setup_wizard_file = os.path.join(data_dir, "setup-wizard.json")
+        # Also read by the retina-telemetry container, which will not register a
+        # node without it: it is what proves the owner has been through the
+        # tower step, so the config being reported is theirs rather than the
+        # shipped default. A cross-repo contract, like the consent file below.
         self.setup_wizard_completed_flag = os.path.join(data_dir, "setup-wizard-completed")
         self.calibrate_lock_file = os.path.join(data_dir, "calibrate.lock")
         self.towers_cache_file = os.path.join(data_dir, "towers-cache.json")
@@ -549,6 +553,60 @@ class DeviceState:
         os.makedirs(os.path.dirname(self.setup_wizard_completed_flag), exist_ok=True)
         with open(self.setup_wizard_completed_flag, "w") as f:
             f.write(datetime.now().isoformat())
+
+    def backfill_setup_wizard_completed(self, user_config: dict | None) -> bool:
+        """Write the completion flag for a node that finished setup before it existed.
+
+        retina-telemetry gates registration on this flag, so that a node cannot
+        register while its config is still the shipped Greenwich/Crystal Palace
+        default. The flag only arrived in aee29a6 (2026-06-24), and nodes that
+        completed the wizard before then have none. Without this they would be
+        blocked from registering forever, which is the same failure the gate
+        exists to prevent.
+
+        `location` in user.yml is the evidence, because that is the *override*
+        layer: the merged config.yml always carries a location, so the presence
+        of one there proves nothing, whereas an entry in user.yml means someone
+        chose it. `/towers/select` has written it since 4afa307 (2026-03-23),
+        three months before the flag, so every node in the gap is covered.
+
+        Deliberately not a coordinate check against the default. A node genuinely
+        sited near Greenwich would be refused registration for life, and it would
+        make a config default load-bearing across two repos.
+
+        Returns:
+            True if a flag was written. False if one already existed (its
+            original timestamp is kept: this answers "when was setup finished",
+            and a backfill has not finished anything), or if there is no
+            evidence the owner ever chose a location.
+        """
+        if self.has_completed_setup_wizard():
+            return False
+        if not self._has_user_chosen_location(user_config):
+            return False
+        try:
+            self.mark_setup_wizard_completed()
+        except OSError:
+            return False  # Best effort on startup, as elsewhere in this class.
+        return True
+
+    @staticmethod
+    def _has_user_chosen_location(user_config: dict | None) -> bool:
+        """Whether user.yml records a receiver position the owner picked.
+
+        Both coordinates are required. A partial block is not evidence of a
+        completed tower step, and `0` is a legitimate latitude, so this tests
+        for presence rather than truthiness.
+        """
+        if not isinstance(user_config, dict):
+            return False
+        location = user_config.get("location")
+        if not isinstance(location, dict):
+            return False
+        rx = location.get("rx")
+        if not isinstance(rx, dict):
+            return False
+        return rx.get("latitude") is not None and rx.get("longitude") is not None
 
     def is_setup_wizard_in_progress(self) -> bool:
         """Check if setup wizard is active (not completed)."""
