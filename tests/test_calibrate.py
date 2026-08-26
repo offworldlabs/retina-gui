@@ -1122,6 +1122,25 @@ class TestNoTrackFallback:
         assert fallback["lna_state"] == client.current["lna_state"]
         assert fallback["tower_name"] == TOWER["name"]
 
+    def test_fallback_carries_the_top_tower_position(self, fast):
+        """fc and tx have to reach /calibrate/apply together: persisting one
+        tower's frequency against another's coordinates would leave blah2
+        computing bistatic geometry from the wrong transmitter."""
+        client = FakeBlah2Client()
+        tower = dict(TOWER, tx={"latitude": 37.75, "longitude": -122.45,
+                                "altitude": 310.0})
+        status = run_to_completion(Calibrator(client, FakeRetinaTrackerClient()),
+                                   [tower])
+        assert status["fallback"]["tx"] == tower["tx"]
+
+    def test_fallback_carries_no_position_for_the_configured_tower(self, fast):
+        """The currently-configured tower is passed without one, and that
+        absence is what stops a run that stays put rewriting location.tx."""
+        client = FakeBlah2Client()
+        status = run_to_completion(Calibrator(client, FakeRetinaTrackerClient()),
+                                   [TOWER])
+        assert status["fallback"]["tx"] is None
+
     def test_fallback_names_the_top_tower_not_the_last_tried(self, fast):
         """fc must stay on the top-ranked tower — in the setup wizard that
         is the tower the user just chose, and persisting a different one
@@ -2160,6 +2179,167 @@ class TestRoutes:
         assert user['capture']['device']['gainReduction'] == [30, 45]
         assert user['capture']['device']['lnaState'] == 6
 
+    def test_apply_moves_the_transmitter_with_the_frequency(self, app_client, config_files):
+        """A run that settles on an alternate tower must persist that tower's
+        position too. blah2 computes bistatic geometry from location.tx, so
+        writing the new fc against the old tower's coordinates leaves the node
+        processing one tower's signal as if it came from another - and the
+        Configuration page still naming the tower it is no longer using."""
+        import app as app_module
+        moved = {
+            "state": "done",
+            "result": {"tower_name": "KQED-TV", "fc": 105_100_000,
+                       "tx": {"latitude": 37.75, "longitude": -122.45,
+                              "altitude": 310.0},
+                       "gain_a": 30, "gain_b": 45, "lna_state": 6,
+                       "track_id": "0A3F"},
+        }
+        with patch.object(app_module.calibrator, 'get_status', return_value=moved), \
+             patch.object(app_module.apply_service, 'request',
+                          return_value={"state": "running"}):
+            resp = app_client.post('/calibrate/apply')
+        assert resp.status_code == 202
+
+        user_path, _ = config_files
+        with open(user_path) as f:
+            user = yaml.safe_load(f)
+        assert user['capture']['fc'] == 105_100_000
+        assert user['location']['tx']['latitude'] == 37.75
+        assert user['location']['tx']['longitude'] == -122.45
+        assert user['location']['tx']['altitude'] == 310.0
+        assert user['location']['tx']['name'] == 'KQED-TV'
+        # The receiver is nothing to do with the tower search and must survive
+        # untouched - it is the one half of location the owner measured.
+        assert user['location']['rx']['name'] == '150 Mississippi'
+        assert user['location']['rx']['latitude'] == 37.7644
+
+    def test_apply_leaves_the_transmitter_alone_when_the_tower_did_not_change(
+            self, app_client, config_files):
+        """The currently-configured tower is offered without a tx block (see
+        _towers_to_alternates), so a run that stays put must not rewrite the
+        location the owner chose - not even with the same values."""
+        import app as app_module
+        stayed = {
+            "state": "done",
+            "result": {"tower_name": "Current tower", "fc": 105_100_000,
+                       "gain_a": 30, "gain_b": 45, "lna_state": 6},
+        }
+        with patch.object(app_module.calibrator, 'get_status', return_value=stayed), \
+             patch.object(app_module.apply_service, 'request',
+                          return_value={"state": "running"}):
+            resp = app_client.post('/calibrate/apply')
+        assert resp.status_code == 202
+        assert resp.get_json()["persisted"]["tx"] is None
+
+        user_path, _ = config_files
+        with open(user_path) as f:
+            user = yaml.safe_load(f)
+        assert user['location']['tx']['name'] == 'KSCZ-LD'
+        assert user['location']['tx']['latitude'] == 37.49917
+
+    def test_apply_truncates_an_over_long_tower_name(self, app_client, config_files):
+        """TX_NAME_MAX_LENGTH is retina-telemetry's tx_callsign limit: a longer
+        name means the node cannot build a NodeConfig at all, so it would stop
+        registering. Live tower-finder results are not length-checked anywhere
+        on this path."""
+        import app as app_module
+        from config_schema import TX_NAME_MAX_LENGTH
+        moved = {
+            "state": "done",
+            "result": {"tower_name": "K" * (TX_NAME_MAX_LENGTH + 20),
+                       "fc": 105_100_000,
+                       "tx": {"latitude": 37.75, "longitude": -122.45,
+                              "altitude": 310.0},
+                       "gain_a": 30, "gain_b": 45, "lna_state": 6},
+        }
+        with patch.object(app_module.calibrator, 'get_status', return_value=moved), \
+             patch.object(app_module.apply_service, 'request',
+                          return_value={"state": "running"}):
+            resp = app_client.post('/calibrate/apply')
+        assert resp.status_code == 202
+
+        user_path, _ = config_files
+        with open(user_path) as f:
+            user = yaml.safe_load(f)
+        assert len(user['location']['tx']['name']) == TX_NAME_MAX_LENGTH
+
+    def test_apply_reports_exactly_what_it_persisted(self, app_client, config_files):
+        """The Configuration page is not reloaded by persisting, so it fills
+        its own fields from this payload. Without it the page keeps showing the
+        pre-calibration tuning, and the next Save posts those stale values back
+        over the calibration (compute_user_overrides drops an override that
+        matches the merged config)."""
+        import app as app_module
+        moved = {
+            "state": "done",
+            "result": {"tower_name": "KQED-TV", "fc": 105_100_000,
+                       "tx": {"latitude": 37.75, "longitude": -122.45,
+                              "altitude": 310.0},
+                       "gain_a": 30, "gain_b": 45, "lna_state": 6},
+        }
+        with patch.object(app_module.calibrator, 'get_status', return_value=moved), \
+             patch.object(app_module.apply_service, 'request',
+                          return_value={"state": "running"}):
+            resp = app_client.post('/calibrate/apply')
+        persisted = resp.get_json()["persisted"]
+        assert persisted["fc"] == 105_100_000
+        assert persisted["gain_a"] == 30
+        assert persisted["gain_b"] == 45
+        assert persisted["lna_state"] == 6
+        # Reported as well as written: the AGC Bandwidth field on the page has
+        # to move too, or a later Save puts hardware AGC back on.
+        assert persisted["bandwidth_number"] == 0
+        assert persisted["tx"]["name"] == "KQED-TV"
+        assert persisted["tx"]["latitude"] == 37.75
+
+        # What was reported is what is on disk, field for field.
+        user_path, _ = config_files
+        with open(user_path) as f:
+            user = yaml.safe_load(f)
+        assert persisted["fc"] == user['capture']['fc']
+        assert [persisted["gain_a"], persisted["gain_b"]] == \
+            user['capture']['device']['gainReduction']
+        assert persisted["lna_state"] == user['capture']['device']['lnaState']
+        assert persisted["bandwidth_number"] == user['capture']['device']['bandwidthNumber']
+        assert persisted["tx"] == user['location']['tx']
+
+
+class TestAlternateTowers:
+    """routes/calibrate._towers_to_alternates - where a candidate tower picks
+    up the transmitter position that has to be persisted with its fc."""
+
+    @staticmethod
+    def _tower(**overrides):
+        tower = {"callsign": "KQED-TV", "frequency_mhz": 105.1,
+                 "latitude": 37.75, "longitude": -122.45, "altitude_m": 310}
+        tower.update(overrides)
+        return tower
+
+    def test_alternates_carry_their_transmitter_position(self):
+        from routes.calibrate import _towers_to_alternates
+        alternates = _towers_to_alternates([self._tower()], 98_000_000, 2)
+        assert alternates[0]["fc"] == 105_100_000
+        assert alternates[0]["tx"] == {"latitude": 37.75, "longitude": -122.45,
+                                       "altitude": 310.0}
+
+    def test_a_tower_without_coordinates_is_searchable_but_not_persistable(self):
+        """fc alone is all a run needs to tune, so the tower is still worth
+        trying - but persisting its frequency against the previous tower's
+        position would be worse than either tower on its own."""
+        from routes.calibrate import _towers_to_alternates
+        alternates = _towers_to_alternates([self._tower(latitude=None)],
+                                           98_000_000, 2)
+        assert alternates[0]["fc"] == 105_100_000
+        assert alternates[0]["tx"] is None
+
+    def test_a_missing_altitude_defaults_to_sea_level(self):
+        """Matches what the wizard's tower select does with the same records
+        (tx_altitude: selectedTower.altitude_m || 0)."""
+        from routes.calibrate import _towers_to_alternates
+        alternates = _towers_to_alternates([self._tower(altitude_m=None)],
+                                           98_000_000, 2)
+        assert alternates[0]["tx"]["altitude"] == 0.0
+
 
 REPO_ROOT = os.path.join(os.path.dirname(__file__), '..')
 
@@ -2217,3 +2397,68 @@ class TestSharedCalibrateDriver:
         for dupe in ('var OUTCOME_TEXT', 'function diagnose(', 'function mhz(',
                      'function preflightNotice(', 'function updateWarning('):
             assert dupe not in cfg, f"{dupe} is defined again in config.html"
+
+
+class TestPersistedTuningReachesTheForm:
+    """The Configuration page fills its own fields from /calibrate/apply's
+    `persisted` payload, because persisting does not reload the page.
+
+    Two silent failure modes to guard, both invisible in a browser until a
+    user loses a calibration: a field name that no longer matches the form
+    (adoptSaved simply finds nothing and leaves the stale value in place),
+    and a persisted key the page never reads."""
+
+    @staticmethod
+    def _adopt_block():
+        with open(os.path.join(REPO_ROOT, 'templates', 'config.html')) as f:
+            src = f.read()
+        start = src.index('var TX_FIELDS = {')
+        return src[start:src.index('applyBtn.addEventListener', start)]
+
+    def test_every_field_name_it_writes_exists_on_the_form(self):
+        import re
+
+        from config_schema import CaptureFormConfig, LocationFormConfig
+
+        def field_names(model, section):
+            fields = getattr(model, 'model_fields', None) or model.__fields__
+            return {f'{section}.{name}' for name in fields}
+
+        form_fields = (field_names(CaptureFormConfig, 'capture')
+                       | field_names(LocationFormConfig, 'location'))
+        written = set(re.findall(r"'((?:capture|location)\.\w+)'",
+                                 self._adopt_block()))
+        assert written, "the page no longer writes any field - fix this test"
+        missing = written - form_fields
+        assert not missing, (
+            f"config.html writes {sorted(missing)} after persisting a "
+            f"calibration, but no form field is named that - the stale value "
+            f"stays on the page and the next Save undoes the calibration")
+
+    def test_it_reads_every_value_the_route_reports(self, app_client, config_files):
+        """A key added to `persisted` that the page ignores is a setting that
+        silently stays stale on screen."""
+        import app as app_module
+        moved = {
+            "state": "done",
+            "result": {"tower_name": "KQED-TV", "fc": 105_100_000,
+                       "tx": {"latitude": 37.75, "longitude": -122.45,
+                              "altitude": 310.0},
+                       "gain_a": 30, "gain_b": 45, "lna_state": 6},
+        }
+        with patch.object(app_module.calibrator, 'get_status', return_value=moved), \
+             patch.object(app_module.apply_service, 'request',
+                          return_value={"state": "running"}):
+            persisted = app_client.post('/calibrate/apply').get_json()["persisted"]
+
+        block = self._adopt_block()
+        for key in persisted:
+            if key == 'tx':
+                continue  # read through TX_FIELDS, keyed by the tx sub-keys
+            assert f'persisted.{key}' in block, (
+                f"/calibrate/apply reports '{key}' but config.html never "
+                f"puts it into a form field")
+        for key in persisted['tx']:
+            assert f'{key}:' in block, (
+                f"the persisted transmitter carries '{key}' but config.html "
+                f"has no field mapping for it")

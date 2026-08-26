@@ -471,8 +471,12 @@ class Calibrator:
               dwell_seconds=None, mode=MODE_TRACK, skip_confirmation=False):
         """Start a run. Returns (started, error).
 
-        towers: list of {"name": str, "fc": int Hz} — first entry is dwelt on
-        first (normally the currently-configured tower).
+        towers: list of {"name": str, "fc": int Hz, "tx": dict | None}.
+        The first entry is dwelt on first (normally the currently-configured
+        tower). "tx" is the transmitter position to persist alongside that
+        tower's fc, and is carried through to `result`/`fallback` untouched:
+        the currently-configured tower is passed without one, so only a run
+        that actually moves to a different tower can rewrite location.tx.
         original: {"fc": int, "gain_a": int, "gain_b": int} — restored on any
         non-success terminal state.
         dwell_seconds: fixed per-tower *dwell* window override, mainly for
@@ -1260,6 +1264,7 @@ class Calibrator:
                 tower_entry["final_lna_state"] = lna_state
                 return {
                     "tower_name": tower.get("name"), "fc": fc,
+                    "tx": tower.get("tx"),
                     "gain_a": gain_a, "gain_b": gain_b,
                     "lna_state": lna_state,
                     "track_id": confirmed.get("track_id"),
@@ -1477,6 +1482,7 @@ class Calibrator:
                         tower_entry["gains_tried"] = gains_tried
                         return {
                             "tower_name": tower.get("name"), "fc": fc,
+                            "tx": tower.get("tx"),
                             "gain_a": gain_a, "gain_b": gain_b,
                             "track_id": confirmed.get("track_id"),
                             "adsb_hex": confirmed.get("adsb_hex"),
@@ -1552,6 +1558,12 @@ class Calibrator:
         self._update(fallback={
             "tower_name": top_tower.get("name"),
             "fc": top_fc,
+            # The transmitter position that goes with this fc, when the
+            # caller supplied one (alternate towers only, see
+            # routes/calibrate._towers_to_alternates). fc and tx have to be
+            # persisted together or blah2 processes one tower's signal
+            # against another's geometry.
+            "tx": top_tower.get("tx"),
             "gain_a": gain_a,
             "gain_b": gain_b,
             "lna_state": lna_state,

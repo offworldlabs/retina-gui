@@ -10,6 +10,7 @@ from calibrator import (
     MODE_TRACK,
     VALID_MODES,
 )
+from config_schema import TX_NAME_MAX_LENGTH
 
 bp = Blueprint('calibrate', __name__, url_prefix='/calibrate')
 
@@ -27,10 +28,35 @@ MAX_TOWERS = 3
 AGC_BANDWIDTHS = (5, 50, 100)
 
 
+def _tower_tx(tower):
+    """The transmitter position to persist along with this tower's fc, or
+    None if the record has no usable one.
+
+    blah2 computes its bistatic geometry from location.tx, so a tower is only
+    safe to move to if its position can move with it. A record without
+    coordinates is still worth searching, since fc alone is what the run
+    tunes, but it must not be persisted: a new fc against the old tower's
+    position is worse than either tower on its own.
+    """
+    latitude, longitude = tower.get("latitude"), tower.get("longitude")
+    if latitude is None or longitude is None:
+        return None
+    try:
+        return {"latitude": float(latitude), "longitude": float(longitude),
+                "altitude": float(tower.get("altitude_m") or 0)}
+    except (TypeError, ValueError):
+        return None
+
+
 def _towers_to_alternates(towers, current_fc, limit):
     """Convert a tower-finder `towers` list (cached or live) into the
-    {name, fc} shape the calibrator expects, excluding the current tower and
-    capping at `limit`."""
+    {name, fc, tx} shape the calibrator expects, excluding the current tower
+    and capping at `limit`.
+
+    Only alternates carry a `tx` block. The currently-configured tower is
+    added by start() without one, which is what tells /calibrate/apply that a
+    run staying put must not rewrite the location the owner chose.
+    """
     alternates = []
     for tower in towers:
         frequency_mhz = tower.get("frequency_mhz")
@@ -40,7 +66,8 @@ def _towers_to_alternates(towers, current_fc, limit):
         if fc == current_fc:
             continue  # already first in the list
         alternates.append({"name": tower.get("callsign") or f"{frequency_mhz} MHz",
-                           "fc": fc})
+                           "fc": fc,
+                           "tx": _tower_tx(tower)})
         if len(alternates) >= limit:
             break
     return alternates
@@ -268,10 +295,56 @@ def apply():
     device['bandwidthNumber'] = 0
     capture['device'] = device
     user_config['capture'] = capture
+
+    # A run that settled on an alternate tower moved fc to a different
+    # transmitter, and blah2 derives its whole bistatic geometry from
+    # location.tx. Persisting fc on its own would leave the node
+    # processing the new tower's signal against the old tower's position,
+    # with nothing on the Configuration page to show which one it is really
+    # listening to. Mirrors what /towers/select writes for a hand-picked
+    # tower. Only alternates carry `tx` (see _towers_to_alternates), so a run
+    # that stays on the configured tower leaves location untouched.
+    persisted_tx = None
+    tx = tuning.get('tx')
+    if tx:
+        location = dict(user_config.get('location', {}) or {})
+        persisted_tx = dict(location.get('tx', {}) or {})
+        persisted_tx['latitude'] = tx['latitude']
+        persisted_tx['longitude'] = tx['longitude']
+        persisted_tx['altitude'] = tx['altitude']
+        name = (tuning.get('tower_name') or '').strip()
+        if name:
+            # Truncated rather than dropped: TX_NAME_MAX_LENGTH is
+            # retina-telemetry's tx_callsign limit (a longer name means the
+            # node cannot build a NodeConfig at all), and keeping the old
+            # tower's name next to the new tower's coordinates would be a
+            # plain lie about what this node is pointed at.
+            persisted_tx['name'] = name[:TX_NAME_MAX_LENGTH]
+        location['tx'] = persisted_tx
+        user_config['location'] = location
+
     config_mgr.save_user_config(user_config)
 
     # The user.yml write above stays synchronous — it must be on disk before
     # this returns. Only the slow merge+restart goes to the shared queue,
     # which always merges whatever is in user.yml when it runs, so it picks up
     # the write above. Poll /config/apply/status for progress.
-    return jsonify({"success": True, "status": apply_service.request()}), 202
+    return jsonify({
+        "success": True,
+        # Exactly what was written, so the Configuration page can put these
+        # into its own form fields instead of going on showing the values it
+        # rendered before the run. That page is not reloaded by persisting,
+        # and a Save from a stale form posts the pre-calibration values back
+        # over these: compute_user_overrides drops an override whose
+        # submitted value matches the merged config, so the calibration
+        # disappears from user.yml without a word.
+        "persisted": {
+            "fc": capture['fc'],
+            "gain_a": device['gainReduction'][0],
+            "gain_b": device['gainReduction'][1],
+            "lna_state": device['lnaState'],
+            "bandwidth_number": device['bandwidthNumber'],
+            "tx": persisted_tx,
+        },
+        "status": apply_service.request(),
+    }), 202
