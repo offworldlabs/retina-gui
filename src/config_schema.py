@@ -144,19 +144,42 @@ class CaptureFormConfig(BaseModel):
 # ============================================================================
 # Location Settings
 # ============================================================================
+#: The six numbers that make a bistatic geometry. Names are excluded: they are
+#: labels, and a position without one is still a position.
+LOCATION_COORDINATE_FIELDS = (
+    "rx_latitude", "rx_longitude", "rx_altitude",
+    "tx_latitude", "tx_longitude", "tx_altitude",
+)
+
+
 class LocationFormConfig(BaseModel):
-    """Flat location config for form display."""
-    rx_latitude: float = Field(ge=-90, le=90, title="Receiver Latitude", description="decimal degrees")
-    rx_longitude: float = Field(ge=-180, le=180, title="Receiver Longitude", description="decimal degrees")
-    rx_altitude: float = Field(title="Receiver Altitude", description="meters")
-    rx_name: str = Field(title="Receiver Name", description="location name")
-    tx_latitude: float = Field(ge=-90, le=90, title="Transmitter Latitude", description="decimal degrees")
-    tx_longitude: float = Field(ge=-180, le=180, title="Transmitter Longitude", description="decimal degrees")
-    tx_altitude: float = Field(title="Transmitter Altitude", description="meters")
+    """Flat location config for form display.
+
+    Optional, because a node has no location until its owner picks a tower and
+    retina-node ships these null rather than defaulting to a plausible site.
+    Optional is not partial, though: see the validator below.
+    """
+    rx_latitude: float | None = Field(None, ge=-90, le=90, title="Receiver Latitude", description="decimal degrees")
+    rx_longitude: float | None = Field(None, ge=-180, le=180, title="Receiver Longitude", description="decimal degrees")
+    rx_altitude: float | None = Field(None, title="Receiver Altitude", description="meters")
+    rx_name: str | None = Field(None, title="Receiver Name", description="location name")
+    tx_latitude: float | None = Field(None, ge=-90, le=90, title="Transmitter Latitude", description="decimal degrees")
+    tx_longitude: float | None = Field(None, ge=-180, le=180, title="Transmitter Longitude", description="decimal degrees")
+    tx_altitude: float | None = Field(None, title="Transmitter Altitude", description="meters")
     # 32 chars is retina-telemetry's tx_callsign limit, not a display concern:
     # a longer name means it cannot build a NodeConfig, so registration and
     # every config resend fail and the node never reaches the server.
-    tx_name: str = Field(max_length=TX_NAME_MAX_LENGTH, title="Transmitter Name", description="location name")
+    tx_name: str | None = Field(None, max_length=TX_NAME_MAX_LENGTH, title="Transmitter Name", description="location name")
+
+    # The all-or-nothing rule is enforced on save in routes/config.py, not
+    # here: it is a cross-field rule like the ADS-B source trio, so each
+    # complaint can be attached to the box it concerns. A model validator would
+    # also need pydantic v2, and nodes run v1.
+
+    @property
+    def is_located(self) -> bool:
+        """Whether this carries a usable geometry. Never partially true."""
+        return all(getattr(self, f) is not None for f in LOCATION_COORDINATE_FIELDS)
 
 
 # ============================================================================

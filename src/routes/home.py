@@ -22,10 +22,12 @@ def index():
 
     config = config_mgr.load_merged_config()
     location = config.get('location', {}) or {}
+    # `or ''` rather than a .get default: on an unsited node the key exists
+    # with a null value, so the default never fires and the page renders "None".
     tx = location.get('tx', {}) or {}
-    tx_name = tx.get('name', '')
+    tx_name = tx.get('name') or ''
     rx = location.get('rx', {}) or {}
-    rx_name = rx.get('name', '')
+    rx_name = rx.get('name') or ''
 
     # None when the telemetry package isn't installed, which is not a fault —
     # the card is simply absent. See telemetry_status.py.
