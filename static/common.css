@@ -141,7 +141,17 @@ h1, h2, h3, h4, h5, h6 {
     color: var(--ink-3);
     text-decoration: none;
     transition: background .12s, color .12s;
+    /* inline-flex so a tab can carry an icon beside its label. Harmless for
+       the text-only tabs: with one child there is nothing for gap to act on. */
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
 }
+/* Held a step back from the label so the mark reads as a bullet rather than
+   as part of the name, and does not compete with it on the active tab. */
+.nav-tab-icon { color: var(--ink-3); flex-shrink: 0; }
+.nav-tab.active .nav-tab-icon,
+.nav-tab:hover .nav-tab-icon { color: var(--ink-2); }
 .nav-tab:hover  { color: var(--ink); background: var(--surface-2); }
 .nav-tab.active { color: var(--ink); background: var(--surface-2); }
 .nav-spacer { flex: 1; }

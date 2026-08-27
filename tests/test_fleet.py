@@ -33,6 +33,22 @@ SELF = "ret7dd2cb0d"      # the node_id the app_client fixture writes
 OTHER = "ret4c844c20"
 
 
+def tab_strip(body):
+    """The parent row's tabs, as a list of raw <a> fragments.
+
+    Parsed rather than string-matched so that adding a class or an icon to a
+    tab does not silently break every assertion about which one is active.
+    """
+    strip = body.split('<div class="nav-tabs">')[1].split("</div>")[0]
+    return ["<a" + frag for frag in strip.split("<a")[1:]]
+
+
+def active_tab(body):
+    live = [t for t in tab_strip(body) if " active" in t.split(">")[0]]
+    assert len(live) == 1, f"expected exactly one active tab, got {len(live)}"
+    return live[0]
+
+
 @pytest.fixture
 def fleet(monkeypatch):
     """Give the running app a peer directory the test controls."""
@@ -84,14 +100,27 @@ def test_tabs_are_absolute_so_a_click_leaves_the_shared_alias(app_client, fleet)
 
 def test_the_serving_node_is_the_active_tab(app_client, fleet):
     fleet(node(SELF, is_self=True), node(OTHER, "192.168.1.58"))
-    tabs = app_client.get("/").data.decode() \
-        .split('<div class="nav-tabs">')[1].split("</div>")[0]
+    tab = active_tab(app_client.get("/").data.decode())
+    assert f"http://{SELF}.local/" in tab
+    assert OTHER not in tab
 
-    # Exactly one tab is active, and it is the node serving this page.
-    assert tabs.count("nav-tab active") == 1
-    active_tab = tabs.split("nav-tab active")[1].split("</a>")[0]
-    assert f"http://{SELF}.local/" in active_tab
-    assert OTHER not in active_tab
+
+def test_node_tabs_carry_the_node_mark(app_client, fleet):
+    """So a tab reads as a node at a glance, not another section of the page."""
+    fleet(node(SELF, is_self=True), node(OTHER, "192.168.1.58"))
+    tabs = tab_strip(app_client.get("/").data.decode())
+    node_tabs = [t for t in tabs if ".local/" in t]
+    assert len(node_tabs) == 2
+    assert all("nav-tab-icon" in t for t in node_tabs)
+
+
+def test_the_summary_tab_has_no_node_mark(app_client, fleet):
+    """It is not a node, and the mark is what separates the two at a glance."""
+    fleet(node(SELF, is_self=True))
+    summary = [t for t in tab_strip(app_client.get("/").data.decode())
+               if 'href="/summary"' in t]
+    assert len(summary) == 1
+    assert "nav-tab-icon" not in summary[0]
 
 
 # ── Both external links ────────────────────────────────────────
@@ -123,12 +152,19 @@ def test_the_child_row_is_absent_on_summary(app_client, fleet):
 
 def test_summary_renders_and_marks_its_own_tab(app_client, fleet):
     fleet(node(SELF, is_self=True), node(OTHER, "192.168.1.58"))
-    body = app_client.get("/summary").data.decode()
-    assert "<h1>Summary</h1>" in body
-    tabs = body.split('<div class="nav-tabs">')[1].split("</div>")[0]
+    response = app_client.get("/summary")
+    assert response.status_code == 200
     # Summary is active, and no node tab is.
-    assert tabs.count("nav-tab active") == 1
-    assert 'href="/summary"' in tabs
+    assert 'href="/summary"' in active_tab(response.data.decode())
+
+
+def test_summary_is_deliberately_blank(app_client, fleet):
+    """Held empty for the UX and setup teams to design into. If this fails,
+    something has been added here that should have been theirs to decide."""
+    fleet(node(SELF, is_self=True))
+    body = app_client.get("/summary").data.decode()
+    content = body.split('<main class="main">')[1].split("</main>")[0]
+    assert content.strip() == "", f"summary page is no longer blank: {content[:200]!r}"
 
 
 # ── The setup wizard ───────────────────────────────────────────
