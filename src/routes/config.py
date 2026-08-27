@@ -3,6 +3,7 @@ from pydantic import ValidationError
 
 from apply_service import ConfigChangeRefused
 from config_schema import (
+    LOCATION_COORDINATE_FIELDS,
     AdsbTruthConfig,
     CaptureFormConfig,
     LocationFormConfig,
@@ -111,6 +112,34 @@ def delete_key():
 _ADSB_SOURCE_FIELDS = ("adsb_source_host", "adsb_source_port", "adsb_source_protocol")
 
 
+def _location_errors(location_flat):
+    """Per-field errors for a geometry that is neither complete nor empty.
+
+    A node legitimately has no location until its owner picks a tower, so an
+    empty set is fine. A partial one is not: blah2 derives its whole bistatic
+    solution from these six numbers, and a missing one becomes NaN rather than
+    an error, so the radar runs and silently associates nothing. This is the
+    only place an owner finds out.
+
+    Names are excluded. They are labels, and a position without one is still a
+    position.
+    """
+    missing = [f for f in LOCATION_COORDINATE_FIELDS if location_flat.get(f) in (None, "")]
+    if not missing or len(missing) == len(LOCATION_COORDINATE_FIELDS):
+        return {}
+
+    # Form-level rather than per-field: the location block in config.html is
+    # hand-rendered and does not look up config_errors, so per-field keys would
+    # re-render the page with nothing highlighted and no explanation. It also
+    # reads better as one sentence than as five lit-up boxes, because the rule
+    # is about the group.
+    return {"_form": (
+        "A location needs all six coordinates or none. Missing: "
+        + ", ".join(f.replace("_", " ") for f in missing)
+        + ". Clear all six to leave this node unsited."
+    )}
+
+
 def _adsb_source_errors(tar1090_data):
     """Per-field errors for a source that is neither complete nor legitimately empty."""
     missing = [f for f in _ADSB_SOURCE_FIELDS if tar1090_data.get(f) in (None, "")]
@@ -163,6 +192,8 @@ def save_config():
             LocationFormConfig(**location_flat)
         except ValidationError as e:
             all_errors.update(ConfigManager.format_validation_errors(e, 'location'))
+        for key, message in _location_errors(location_flat).items():
+            all_errors.setdefault(key, message)
 
     if truth_data:
         try:
