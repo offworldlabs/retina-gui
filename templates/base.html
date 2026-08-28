@@ -38,6 +38,14 @@
         <span>owl-os <span class="mono">{{ owl_os_version or '-' }}</span></span>
         <span>retina-node <span class="mono">{{ retina_node_version or 'Not installed' }}</span></span>
         <div class="foot-spacer"></div>
+        {# Only on the owner pathway: the LAN has no session to end, and an
+           admin's session belongs to Cloudflare Access, not to us. #}
+        {% if pathway == 'owner' %}
+        <form method="post" action="/logout" style="margin:0;">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <button type="submit" class="ds-btn sm">Sign out</button>
+        </form>
+        {% endif %}
     </footer>
     {% endblock %}
 

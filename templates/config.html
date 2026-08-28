@@ -96,6 +96,7 @@
         <h3>Administration</h3>
         <a href="#this-node">This node</a>
         <a href="#ssh">SSH access</a>
+        <a href="#remote">Remote access</a>
         <a href="#cloud">Cloud services</a>
         <a href="#wizard">Setup wizard</a>
         <a href="#network">Network</a>
@@ -473,6 +474,65 @@
                 {% else %}
                 <p style="color:var(--ink-3);font-size:13px;margin:14px 0 0;">No SSH keys configured.</p>
                 {% endif %}
+            </div>
+        </section>
+
+        {# ── Remote access ── #}
+        <section id="remote" class="cfg-section" style="margin-top:12px;">
+            <div class="cfg-section-head">
+                <h2>Remote access</h2>
+                <span class="desc">Reach this node from outside your home network, over a Cloudflare tunnel. On your own network you never need a password &mdash; keep using <span class="mono">{{ node_id }}.local</span>.</span>
+            </div>
+            <div class="cfg-body">
+                <div class="toggle-row" style="padding:0;border:0;">
+                    <label class="ds-switch">
+                        <input type="checkbox" id="remoteToggle"
+                               {% if remote_access.enabled %}checked{% endif %}
+                               {% if not remote_access.has_password %}disabled{% endif %}>
+                        <span class="ds-switch-track"></span>
+                    </label>
+                    <div class="body">
+                        <div class="name">Enable remote access</div>
+                        <div class="desc" id="remoteToggleStatus">
+                            {% if not remote_access.has_password %}Set a password below first.
+                            {% elif remote_access.enabled %}Reachable at <span class="mono">{{ remote_host }}</span>.
+                            {% else %}Off. Nothing outside your network can reach this node.{% endif %}
+                        </div>
+                    </div>
+                </div>
+
+                <div class="cfg-row" style="margin-top:4px;">
+                    <div class="label-col">
+                        <label for="remotePassword">Password</label>
+                        <span class="help" id="remotePasswordState">
+                            {% if remote_access.has_password %}Set. Enter a new one to replace it.
+                            {% else %}Not set.{% endif %}
+                        </span>
+                    </div>
+                    <div>
+                        <div style="display:flex;gap:8px;">
+                            <input type="password" id="remotePassword" class="ds-input mono"
+                                   autocomplete="new-password"
+                                   placeholder="At least {{ remote_password_min }} characters" style="min-width:0;">
+                            <button type="button" class="ds-btn primary" id="remotePasswordSave" style="flex-shrink:0;">Save</button>
+                            <button type="button" class="ds-btn" id="remotePasswordGenerate" style="flex-shrink:0;">Generate</button>
+                        </div>
+                        <div id="remotePasswordMsg" style="font-size:12.5px;margin-top:8px;display:none;"></div>
+                        {# Shown once, right after generating. Only the hash is stored,
+                           so there is no second chance to read it. #}
+                        <div id="remotePasswordReveal"
+                             style="display:none;margin-top:10px;padding:10px 12px;border-radius:6px;
+                                    background:rgba(45,91,214,.10);border:1px solid rgba(45,91,214,.35);">
+                            <div style="font-size:12px;opacity:.75;margin-bottom:4px;">Write this down now &mdash; it is not shown again.</div>
+                            <div class="mono" id="remotePasswordValue" style="font-size:15px;letter-spacing:.02em;"></div>
+                        </div>
+                        <div class="help" style="margin-top:10px;">
+                            Anyone with this password gets the same control you have here, apart from
+                            SSH keys, software updates and this section &mdash; those need you to be on
+                            the node&rsquo;s own network.
+                        </div>
+                    </div>
+                </div>
             </div>
         </section>
 
@@ -1990,6 +2050,94 @@ if (discardBtn) discardBtn.addEventListener('click', () => location.reload());
             .then(function() { setTimeout(pollCapturePeak, 1000); });
     }
     pollCapturePeak();
+})();
+</script>
+
+{# ── Remote access ── #}
+<script>
+(function () {
+    var toggle = document.getElementById('remoteToggle');
+    if (!toggle) return;
+
+    var status   = document.getElementById('remoteToggleStatus');
+    var pw       = document.getElementById('remotePassword');
+    var save     = document.getElementById('remotePasswordSave');
+    var generate = document.getElementById('remotePasswordGenerate');
+    var state    = document.getElementById('remotePasswordState');
+    var msg      = document.getElementById('remotePasswordMsg');
+    var reveal   = document.getElementById('remotePasswordReveal');
+    var value    = document.getElementById('remotePasswordValue');
+    var host     = {{ remote_host | tojson }};
+    var csrf     = document.querySelector('meta[name="csrf-token"]').content;
+
+    function post(url, body) {
+        return fetch(url, {
+            method: 'POST',
+            headers: {'X-CSRFToken': csrf, 'Content-Type': 'application/x-www-form-urlencoded'},
+            body: body
+        }).then(function (r) { return r.json().then(function (j) { return {ok: r.ok, body: j}; }); });
+    }
+
+    function say(text, bad) {
+        msg.textContent = text;
+        msg.style.color = bad ? 'var(--danger)' : 'var(--ink-3)';
+        msg.style.display = text ? 'block' : 'none';
+    }
+
+    function passwordIsSet() {
+        state.textContent = 'Set. Enter a new one to replace it.';
+        toggle.disabled = false;
+    }
+
+    toggle.addEventListener('change', function () {
+        var want = toggle.checked;
+        toggle.disabled = true;
+        post('/remote-access/toggle', 'enabled=' + (want ? '1' : '0'))
+            .then(function (r) {
+                if (!r.ok) {
+                    toggle.checked = !want;
+                    say(r.body.error || 'Could not change remote access', true);
+                    return;
+                }
+                say('');
+                status.innerHTML = r.body.enabled
+                    ? 'Reachable at <span class="mono"></span>'
+                    : 'Off. Nothing outside your network can reach this node.';
+                if (r.body.enabled) status.querySelector('.mono').textContent = host;
+            })
+            .catch(function () { toggle.checked = !want; say('Could not reach the node', true); })
+            .then(function () { toggle.disabled = false; });
+    });
+
+    save.addEventListener('click', function () {
+        if (!pw.value) { say('Enter a password first', true); return; }
+        save.disabled = true;
+        post('/remote-access/password', 'password=' + encodeURIComponent(pw.value))
+            .then(function (r) {
+                if (!r.ok) { say(r.body.error || 'Could not save the password', true); return; }
+                pw.value = '';
+                reveal.style.display = 'none';
+                passwordIsSet();
+                say('Password saved.');
+            })
+            .catch(function () { say('Could not reach the node', true); })
+            .then(function () { save.disabled = false; });
+    });
+
+    generate.addEventListener('click', function () {
+        generate.disabled = true;
+        post('/remote-access/generate', '')
+            .then(function (r) {
+                if (!r.ok) { say(r.body.error || 'Could not generate a password', true); return; }
+                value.textContent = r.body.password;
+                reveal.style.display = 'block';
+                pw.value = '';
+                passwordIsSet();
+                say('');
+            })
+            .catch(function () { say('Could not reach the node', true); })
+            .then(function () { generate.disabled = false; });
+    });
 })();
 </script>
 {% endblock %}

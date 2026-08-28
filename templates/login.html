@@ -1,0 +1,62 @@
+{# Deliberately does not extend base.html.
+
+   base.html renders the fleet bar and the Home/Config tabs, which are links to
+   pages this visitor has not been let into yet. A login page that shows the
+   navigation of the thing it is guarding invites people to click it and collect
+   a redirect back here, which reads as the page being broken. #}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <title>Sign in · {{ node_id }}</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <link rel="icon" type="image/png" href="/static/favicon.png">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+    <link href="/static/common.css" rel="stylesheet">
+    <style>
+        body{
+            min-height:100vh; margin:0; display:flex;
+            align-items:center; justify-content:center; padding:24px;
+            font-family:Inter,system-ui,sans-serif;
+        }
+        .signin{width:100%; max-width:380px;}
+        .signin h1{font-size:20px; font-weight:600; margin:0 0 4px;}
+        .signin .sub{font-size:13px; opacity:.7; margin:0 0 20px;}
+        .signin .node{font-family:"JetBrains Mono",monospace; font-size:12px; opacity:.6;}
+        .signin label{display:block; font-size:13px; font-weight:500; margin-bottom:6px;}
+        .signin input[type=password]{width:100%; margin-bottom:14px;}
+        .signin button{width:100%;}
+        .err{
+            font-size:13px; padding:9px 11px; border-radius:6px; margin-bottom:14px;
+            background:rgba(220,53,69,.12); border:1px solid rgba(220,53,69,.35);
+        }
+        .hint{font-size:12px; opacity:.65; margin-top:18px; line-height:1.5;}
+    </style>
+</head>
+<body>
+<main class="signin">
+    <h1>Sign in</h1>
+    <p class="sub">Enter this node's remote access password.</p>
+
+    {% if error %}<div class="err" role="alert">{{ error }}</div>{% endif %}
+
+    <form method="post" action="/login">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <input type="hidden" name="next" value="{{ next }}">
+        <label for="password">Password</label>
+        {# autofocus so the only control on the page is the one already selected.
+           autocomplete=current-password lets a password manager fill it. #}
+        <input type="password" id="password" name="password" class="ds-input mono"
+               autocomplete="current-password" autofocus required>
+        <button type="submit" class="ds-btn primary">Sign in</button>
+    </form>
+
+    <p class="hint">
+        Set and changed on the node itself, under Configuration &rsaquo; Remote
+        access. Anyone on the node's own network reaches it without a password.
+    </p>
+    <p class="node">{{ node_id }}</p>
+</main>
+</body>
+</html>

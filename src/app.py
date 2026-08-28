@@ -2,7 +2,7 @@ import os
 import subprocess
 import sys
 
-from flask import Flask, jsonify, redirect, request
+from flask import Flask, abort, g, jsonify, redirect, request, session, url_for
 from flask_wtf.csrf import CSRFError, CSRFProtect
 
 # Configuration and shared services live in their own module because this one
@@ -18,6 +18,7 @@ from services import (  # noqa: F401  (re-exported for routes)
     MERGED_CONFIG_PATH,
     NODE_ID_FILE,
     PROJECT_ROOT,
+    REMOTE_ACCESS_DOMAIN,
     RETINA_NODE_PATH,
     RETINA_SPECTRUM_URL,
     RETINA_TRACKER_EVENTS_PATH,
@@ -36,7 +37,9 @@ from services import (  # noqa: F401  (re-exported for routes)
     node_name,
     peers,
     read_node_id,
+    remote_access,
     retina_tracker_client,
+    secret_key,
     ssh_keys,
     telemetry_status,
     tracker_capture,
@@ -45,13 +48,8 @@ from services import (  # noqa: F401  (re-exported for routes)
 app = Flask(__name__,
             template_folder=os.path.join(PROJECT_ROOT, 'templates'),
             static_folder=os.path.join(PROJECT_ROOT, 'static'))
-# Left as-is deliberately. Persisting this key is a real fix, but it is
-# already implemented as services.secret_key() on 20260828-remote-access,
-# whose login session needs the same guarantee. Carrying a second copy
-# here merges without a conflict and leaves TWO identical definitions in
-# services.py, which is worse than the gap. See that branch, or land it
-# on main on its own if it is needed before that one is reviewed.
-app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', os.urandom(32).hex())
+# Persisted to /data rather than regenerated per process. See services.secret_key.
+app.config['SECRET_KEY'] = secret_key()
 # Flask-WTF expires a CSRF token 3600s after it is issued. The setup wizard
 # reads its token once at page load and reuses it for the entire run (see
 # postJSON in setup.js), and a real run routinely passes the hour: reading
@@ -63,6 +61,25 @@ app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', os.urandom(32).hex())
 # stays signed with SECRET_KEY and bound to the session cookie, so it still
 # expires when the session does.
 app.config['WTF_CSRF_TIME_LIMIT'] = None
+
+# The session only ever exists on the owner pathway, which is always HTTPS
+# through the tunnel, so Secure costs nothing there. The LAN stays plain HTTP
+# and stays session-less. SESSION_COOKIE_SECURE is settable so tests (and a dev
+# server on http://localhost) can still hold a cookie.
+app.config['SESSION_COOKIE_SECURE'] = (
+    os.environ.get('SESSION_COOKIE_SECURE', '' if DEV_MODE else '1').lower()
+    in ('1', 'true', 'yes')
+)
+app.config['SESSION_COOKIE_HTTPONLY'] = True
+app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
+# Host-only, enforced by the browser rather than by us remembering not to set a
+# Domain. Every node is a sibling under one registrable domain, so without this
+# one node could set a `.retnode.com` cookie that shadows another node's and
+# leaves a working node refusing to log anybody in. The prefix requires Secure,
+# so it can only be used where the cookie is Secure anyway.
+if app.config['SESSION_COOKIE_SECURE']:
+    app.config['SESSION_COOKIE_NAME'] = '__Host-session'
+
 csrf = CSRFProtect(app)
 
 if not DEV_MODE:
@@ -163,6 +180,9 @@ def inject_globals():
     owl_os_version, retina_node_version = mender.get_versions()
     return {
         'node_id': get_node_id(),
+        # Which of the three pathways this request arrived on, so templates can
+        # hide what the owner pathway is not allowed to reach anyway.
+        'pathway': getattr(g, 'pathway', 'lan'),
         'owl_os_version': owl_os_version,
         'retina_node_version': retina_node_version,
         # One banner tab per node, on every page. An in-memory list, copied
@@ -180,6 +200,7 @@ from routes.home import bp as home_bp
 from routes.mender_routes import bp as mender_bp
 from routes.mode import bp as mode_bp
 from routes.network import bp as network_bp
+from routes.remote_access import bp as remote_access_bp
 from routes.setup import bp as setup_bp
 from routes.towers import bp as towers_bp
 from routes.tracker_preview import bp as tracker_preview_bp
@@ -194,6 +215,76 @@ app.register_blueprint(network_bp)
 app.register_blueprint(calibrate_bp)
 app.register_blueprint(tracker_preview_bp)
 app.register_blueprint(fleet_bp)
+app.register_blueprint(remote_access_bp)
+
+
+# Reachable on the owner pathway without a session: the login page itself, the
+# assets it needs to render, and the favicon. Everything else is behind the
+# password.
+_REMOTE_PUBLIC_PREFIXES = ('/login', '/static', '/favicon')
+
+
+@app.before_request
+def _gate_the_remote_pathways():
+    """Decide what this request is allowed to be, based on the hostname it used.
+
+    Three pathways, and only one of them is challenged here:
+
+      LAN     owl.local, ret4c844c20.local, a bare IP. Unauthenticated, exactly
+              as it has always been — being on the network is the credential.
+      ADMIN   ret4c844c20.admin.retnode.com. Cloudflare Access already
+              authenticated whoever this is, at the edge, before the request
+              reached the tunnel.
+      OWNER   ret<id>.retnode.com. Nothing upstream checked anybody, so the
+              password is the only gate and it is checked here.
+
+    Registered before the calibration hook below, and that ordering is load
+    bearing: Flask runs app-level before_request handlers in registration order,
+    and the calibration hook redirects GETs to /config. If it ran first, an
+    unauthenticated visitor arriving during a calibration would be bounced to a
+    page they are not allowed to see instead of to the login form.
+    """
+    from remote_access import ADMIN, LAN, classify_host, requires_presence
+
+    g.pathway = classify_host(request.host, read_node_id(), REMOTE_ACCESS_DOMAIN)
+    if g.pathway in (LAN, ADMIN):
+        return None
+
+    # 404 rather than 403 when the owner has not turned this on. The tunnel
+    # should not be up at all in that state, so anything arriving here is either
+    # a stale DNS record or someone guessing; neither is owed confirmation that
+    # a node answers to this name.
+    if not remote_access.is_enabled():
+        abort(404)
+
+    if request.path.startswith(_REMOTE_PUBLIC_PREFIXES):
+        return None
+
+    if not session.get('remote_authed'):
+        if request.method == 'GET':
+            # full_path always appends '?', even with no query string, which
+            # would send people to '/config?' after signing in.
+            wanted = request.full_path.rstrip('?') or '/'
+            return redirect(url_for('remote_access.login', next=wanted))
+        # A POST from a page whose session expired. 403 rather than a redirect,
+        # so fetch() callers get a status they can act on instead of an HTML
+        # login page parsed as JSON.
+        #
+        # Note this is not the only rejection such a request can get. CSRFProtect
+        # is constructed above, so its before_request is registered first and
+        # runs first: a stale page's POST usually carries a stale token and is
+        # refused with 400 before reaching here. Both are refusals; only the
+        # status differs, and which one you see depends on whether the token
+        # outlived the session.
+        abort(403)
+
+    # Authenticated, but some things still need someone at the device. The
+    # password may have been shared, and these are the operations that would let
+    # the person it was shared with outlast a rotation of it.
+    if requires_presence(request.path):
+        abort(403, "This can only be done from the local network")
+
+    return None
 
 
 @app.errorhandler(CSRFError)

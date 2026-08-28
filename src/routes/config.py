@@ -12,6 +12,7 @@ from config_schema import (
 )
 from form_utils import schema_to_form_fields
 from node_name import MAX_LENGTH as NAME_MAX_LENGTH
+from remote_access import MIN_PASSWORD_LENGTH
 
 bp = Blueprint('config', __name__)
 
@@ -36,6 +37,31 @@ def _check_wizard_not_active():
         return None
     if device_state.is_setup_wizard_in_progress():
         return redirect('/set-up')
+
+
+@bp.context_processor
+def _remote_access_context():
+    """Remote access state, for every template this blueprint renders.
+
+    Deliberately not passed per call site. config.html has two render points —
+    /config, and the validation-error branch of /config/save — and handing them
+    the same three arguments by hand is how the second one shipped without them.
+    A context processor is the version of this that cannot drift when a third
+    render point appears.
+
+    remote_host is derived rather than reported: the hostname is a pure function
+    of node_id and the zone, so the page can name the address before anything
+    has provisioned it. Whether the tunnel is actually *up* is a separate
+    question, and comes from retina-telemetry's status document once that side
+    exists.
+    """
+    from app import REMOTE_ACCESS_DOMAIN, read_node_id, remote_access
+
+    return {
+        'remote_access': remote_access.status(),
+        'remote_host': f"{read_node_id()}.{REMOTE_ACCESS_DOMAIN}",
+        'remote_password_min': MIN_PASSWORD_LENGTH,
+    }
 
 
 @bp.route("/config")

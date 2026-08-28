@@ -38,6 +38,7 @@ from mdns_peers import peer_directory_from_env
 from mender import MenderClient
 from network_manager import NetworkManager
 from node_name import NodeName
+from remote_access import RemoteAccess
 from retina_tracker_client import RetinaTrackerClient
 from ssh_keys import SSHKeyManager
 from telemetry_status import TelemetryStatus
@@ -83,6 +84,13 @@ TELEMETRY_STATUS_PATH = os.environ.get('TELEMETRY_STATUS_PATH',
     else '/data/retina-telemetry/status.json'
 )
 
+# The zone the Cloudflare tunnel publishes this node under. Deliberately not
+# retina.fm: a page served from a node can set a cookie scoped to its parent
+# domain, which the browser would then send to every other host on that domain —
+# including the ingest API. Nodes run in customers' homes on hardware they
+# control, so that separation is not theoretical.
+REMOTE_ACCESS_DOMAIN = os.environ.get('REMOTE_ACCESS_DOMAIN', 'retnode.com')
+
 MENDER_SERVICES = ["mender-authd", "mender-updated", "mender-connect"]
 
 # ── Shared services ────────────────────────────────────────────
@@ -119,6 +127,46 @@ telemetry_status = TelemetryStatus(
 )
 
 node_name = NodeName(os.path.join(DATA_DIR, "node-name"), dev_mode=DEV_MODE)
+
+remote_access = RemoteAccess(os.path.join(DATA_DIR, "remote-access.json"))
+
+
+def secret_key():
+    """Flask's signing key, persisted so sessions survive a restart.
+
+    This used to be `os.urandom(32).hex()` with no fallback to disk, which was
+    harmless while nothing used the session: every restart minted a new key and
+    invalidated cookies nobody held. It stops being harmless the moment remote
+    access exists, because every GUI restart — and every OTA — would then sign
+    the owner out mid-session with no explanation.
+
+    Mode 0600, and never logged. Anyone able to read it can forge a session
+    cookie for the owner pathway.
+    """
+    from_env = os.environ.get('SECRET_KEY')
+    if from_env:
+        return from_env
+
+    key_file = os.path.join(DATA_DIR, "secret-key")
+    try:
+        with open(key_file) as f:
+            key = f.read().strip()
+            if key:
+                return key
+    except OSError:
+        pass
+
+    key = os.urandom(32).hex()
+    try:
+        os.makedirs(DATA_DIR, exist_ok=True)
+        fd = os.open(key_file, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(fd, "w") as f:
+            f.write(key)
+    except OSError:
+        # An unwritable /data means sessions do not survive this process, which
+        # is a worse GUI rather than a broken one. Everything else still works.
+        pass
+    return key
 
 
 def read_node_id():
