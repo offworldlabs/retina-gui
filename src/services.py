@@ -86,7 +86,7 @@ TELEMETRY_STATUS_PATH = os.environ.get('TELEMETRY_STATUS_PATH',
 
 # The zone the Cloudflare tunnel publishes this node under. Deliberately not
 # retina.fm: a page served from a node can set a cookie scoped to its parent
-# domain, which the browser would then send to every other host on that domain —
+# domain, which the browser would then send to every other host on that domain,
 # including the ingest API. Nodes run in customers' homes on hardware they
 # control, so that separation is not theoretical.
 REMOTE_ACCESS_DOMAIN = os.environ.get('REMOTE_ACCESS_DOMAIN', 'retnode.com')
@@ -137,8 +137,8 @@ def secret_key():
     This used to be `os.urandom(32).hex()` with no fallback to disk, which was
     harmless while nothing used the session: every restart minted a new key and
     invalidated cookies nobody held. It stops being harmless the moment remote
-    access exists, because every GUI restart — and every OTA — would then sign
-    the owner out mid-session with no explanation.
+    access exists, because every GUI restart, and every OTA, would then sign the
+    owner out mid-session with no explanation.
 
     Mode 0600, and never logged. Anyone able to read it can forge a session
     cookie for the owner pathway.

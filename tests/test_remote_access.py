@@ -386,10 +386,22 @@ def test_generate_returns_a_working_password_once(live):
 
 
 def test_secret_key_survives_a_restart(client, temp_dir):
-    """Otherwise every GUI restart and every OTA signs the owner out."""
+    """Otherwise every GUI restart and every OTA signs the owner out.
+
+    Deliberately does not reload services to simulate the restart. secret_key()
+    reads the file on every call, so the persistence being tested is the file
+    itself, and asserting its contents proves it without touching module state.
+    An earlier version did reload, which left app.py's singletons bound to the
+    previous services objects and broke TestSharedServiceSingletons for whatever
+    ran next. The alphabetical suite order hid that.
+    """
     import services as services_module
+
     first = services_module.secret_key()
-    importlib.reload(services_module)
+    assert first
     assert services_module.secret_key() == first
+
     key_file = os.path.join(temp_dir, "secret-key")
+    with open(key_file) as f:
+        assert f.read().strip() == first
     assert stat.S_IMODE(os.stat(key_file).st_mode) == 0o600

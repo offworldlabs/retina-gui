@@ -231,7 +231,7 @@ def _gate_the_remote_pathways():
     Three pathways, and only one of them is challenged here:
 
       LAN     owl.local, ret4c844c20.local, a bare IP. Unauthenticated, exactly
-              as it has always been — being on the network is the credential.
+              as it has always been. Being on the network is the credential.
       ADMIN   ret4c844c20.admin.retnode.com. Cloudflare Access already
               authenticated whoever this is, at the edge, before the request
               reached the tunnel.

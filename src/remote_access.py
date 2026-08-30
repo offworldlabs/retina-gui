@@ -7,7 +7,7 @@ apart by nothing except the ``Host`` header:
     ret4c844c20.admin.retnode.com    Offworld staff. Gated by Cloudflare Access
                                      at the edge; this GUI asks them for nothing.
 
-Everything else — ``owl.local``, ``ret4c844c20.local``, an IP — is the LAN, which
+Everything else (``owl.local``, ``ret4c844c20.local``, an IP) is the LAN, which
 is unauthenticated exactly as it has always been. Being on the network is the
 credential there, and nothing in this module changes that.
 
@@ -24,7 +24,7 @@ and there is no account to create and no email to collect.
 This is the phone-hotspot model, not the user-account model: the owner sets
 something memorable, looks it up whenever they need to share it, and changes it
 when they want. A hash cannot do the middle one, and encrypting instead would be
-theatre — any key the node needs to decrypt has to live on the node beside the
+theatre: any key the node needs to decrypt has to live on the node beside the
 ciphertext.
 
 It costs less than it sounds like it does. The only readers of the plaintext are
@@ -36,7 +36,7 @@ protected by hashing here that is not already open.
 
 Two consequences worth being deliberate about. Someone briefly on the house
 network can note the password down and keep *remote* access after they leave,
-which LAN access alone would not have given them — the owner's remedy is to
+which LAN access alone would not have given them. The owner's remedy is to
 change it, same as a hotspot. And a memorable password is the kind people reuse,
 so the config page says out loud that anyone on the local network can see it.
 
@@ -46,7 +46,7 @@ Rotating the password has to *mean* something. If a visitor authenticated with a
 shared password could add an SSH key, they would keep a way in that outlived the
 rotation, and the owner's only remedy would be reinstalling the node. So key
 management, password changes and Mender installs are refused on the owner
-pathway even when the session is valid — see PRESENCE_REQUIRED_PREFIXES. The LAN
+pathway even when the session is valid. See PRESENCE_REQUIRED_PREFIXES. The LAN
 and the admin hostname are unaffected.
 """
 
@@ -65,7 +65,7 @@ import time
 # rate limit at Cloudflare's edge is now the only thing standing between this and
 # an offline-speed guessing run. It is not optional.
 
-#: Eight, matching the WPA2 minimum a phone hotspot enforces — this imitates that
+#: Eight, matching the WPA2 minimum a phone hotspot enforces. This imitates that
 #: model, and a floor people already recognise beats one they have to discover.
 #: It is short, and deliberately so; the edge rate limit is what makes it safe
 #: rather than the length. Anyone wanting real strength can press Generate.
@@ -239,7 +239,7 @@ def classify_host(host, node_id, domain):
     cannot reach the owner hostname and present themselves as the admin one.
 
     Fails closed on the remote domain. Anything under it that is not recognised
-    as the admin name is treated as OWNER — so a hostname this node does not
+    as the admin name is treated as OWNER, so a hostname this node does not
     expect (a stale DNS record, a provisioning bug, a domain-wide wildcard
     someone added) demands a password rather than being mistaken for the LAN and
     waved through. Only names with no relationship to the remote domain are LAN.

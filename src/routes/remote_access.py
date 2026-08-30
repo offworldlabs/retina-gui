@@ -1,7 +1,7 @@
 """Login for the owner pathway, and the controls that configure it.
 
-The login half is reachable from the owner hostname (it has to be — it is the
-thing standing in front of everything else). The configuration half lives under
+The login half is reachable from the owner hostname, as it has to be: it is the
+thing standing in front of everything else. The configuration half lives under
 /remote-access, which app.py's gate refuses on that pathway entirely: changing
 the password or the toggle needs someone at the device or on the admin hostname.
 See remote_access.PRESENCE_REQUIRED_PREFIXES.
@@ -63,8 +63,8 @@ def do_login():
         return redirect(target)
 
     # Deliberately says nothing about whether a password is even set. The only
-    # real defence against guessing is the rate limit at Cloudflare's edge —
-    # there is none in this process — so this page gives an attacker no signal
+    # real defence against guessing is the rate limit at Cloudflare's edge, and
+    # there is none in this process, so this page gives an attacker no signal
     # to work with beyond pass or fail.
     return render_template("login.html", next=request.form.get('next', ''),
                            error="Incorrect password"), 401

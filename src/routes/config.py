@@ -43,8 +43,8 @@ def _check_wizard_not_active():
 def _remote_access_context():
     """Remote access state, for every template this blueprint renders.
 
-    Deliberately not passed per call site. config.html has two render points —
-    /config, and the validation-error branch of /config/save — and handing them
+    Deliberately not passed per call site. config.html has two render points:
+    /config, and the validation-error branch of /config/save. Handing them
     the same three arguments by hand is how the second one shipped without them.
     A context processor is the version of this that cannot drift when a third
     render point appears.
@@ -61,7 +61,7 @@ def _remote_access_context():
 
     # The password is rendered only where the owner expects it to be visible:
     # their own network. /config is reachable on the owner pathway too, and
-    # showing it there would make "nobody off your network can see this" false —
+    # showing it there would make "nobody off your network can see this" false:
     # someone the password was shared with could read it back off the page.
     # Withheld rather than masked, so it is not in the HTML at all.
     pathway = getattr(g, 'pathway', 'lan')
