@@ -19,11 +19,26 @@ tunnel neither receives it nor could ask for it. That is the point of doing this
 on the node rather than with an identity provider: the owner decides who gets in,
 and there is no account to create and no email to collect.
 
-Stored hashed, so a lost password is replaced rather than recovered. That is a
-deliberate departure from the phone-hotspot model this otherwise imitates — a
-hotspot shows you its password whenever you ask, and this cannot. Recovery is
-setting a new one from the LAN, which needs physical presence, which is the same
-authority a factory reset would need.
+## Stored in the clear, deliberately
+
+This is the phone-hotspot model, not the user-account model: the owner sets
+something memorable, looks it up whenever they need to share it, and changes it
+when they want. A hash cannot do the middle one, and encrypting instead would be
+theatre — any key the node needs to decrypt has to live on the node beside the
+ciphertext.
+
+It costs less than it sounds like it does. The only readers of the plaintext are
+people who already own the node: the config page shows it on the LAN pathway
+alone, and the LAN pathway is unauthenticated anyway, so anyone who can read it
+there could already change every setting on the box. Mender's remote terminal is
+root, so staff are in the same position with or without this. Nothing is
+protected by hashing here that is not already open.
+
+Two consequences worth being deliberate about. Someone briefly on the house
+network can note the password down and keep *remote* access after they leave,
+which LAN access alone would not have given them — the owner's remedy is to
+change it, same as a hotspot. And a memorable password is the kind people reuse,
+so the config page says out loud that anyone on the local network can see it.
 
 ## Why the device-presence tier exists
 
@@ -41,22 +56,20 @@ import secrets
 import tempfile
 import time
 
-from werkzeug.security import check_password_hash, generate_password_hash
-
-# Hashing method is werkzeug's default, whatever that is for the version
-# installed. Measured on a live pi5-v3 node (werkzeug 2.2.2, which predates
-# scrypt and so picks pbkdf2:sha256:260000): ~147 ms to hash, ~143 ms to verify.
+# Comparison is constant-time, which is the one thing a plaintext store still has
+# to get right: a plain == leaks the password a character at a time through how
+# long the mismatch took to find.
 #
-# That cost is the point on a login form, but it is also why the edge rate limit
-# is not optional: at 143 ms of CPU per attempt, an unthrottled guessing run is a
-# load problem on a board already busy running the radar, quite apart from
-# eventually finding the password.
+# Note what is *not* here any more. Hashing used to cost ~145 ms per attempt on a
+# pi5-v3, which incidentally throttled guessing. A string compare is free, so the
+# rate limit at Cloudflare's edge is now the only thing standing between this and
+# an offline-speed guessing run. It is not optional.
 
-#: Twelve is the floor for anything the owner types. Short enough to be typed on
-#: a phone, long enough that the edge rate limit is a backstop rather than the
-#: only defence. The generated default below is much stronger and is what most
-#: nodes will actually run with.
-MIN_PASSWORD_LENGTH = 12
+#: Eight, matching the WPA2 minimum a phone hotspot enforces — this imitates that
+#: model, and a floor people already recognise beats one they have to discover.
+#: It is short, and deliberately so; the edge rate limit is what makes it safe
+#: rather than the length. Anyone wanting real strength can press Generate.
+MIN_PASSWORD_LENGTH = 8
 
 #: No 0/O, 1/l/I. A password read aloud across a room or copied off a screen is
 #: the normal case here, and character pairs nobody can distinguish turn that
@@ -119,18 +132,29 @@ class RemoteAccess:
         because the owner has no way to tell the difference from outside.
         """
         state = self._read()
-        return bool(state.get("enabled")) and bool(state.get("password_hash"))
+        return bool(state.get("enabled")) and bool(state.get("password"))
 
     def has_password(self):
-        return bool(self._read().get("password_hash"))
+        return bool(self._read().get("password"))
+
+    def get_password(self):
+        """The password itself, for display. "" when none is set.
+
+        Separate from status() on purpose. status() is handed to the config
+        template on every pathway and returned by the toggle endpoint as JSON;
+        this is only ever read where the pathway allows it (see routes/config.py).
+        Keeping them apart means the password cannot reach a template or a
+        response by being carried along inside something else.
+        """
+        return self._read().get("password") or ""
 
     def status(self):
-        """What the config page needs to render the section."""
+        """What the config page needs to render the section. Never the password."""
         state = self._read()
         return {
-            "enabled": bool(state.get("enabled")) and bool(state.get("password_hash")),
+            "enabled": bool(state.get("enabled")) and bool(state.get("password")),
             "requested": bool(state.get("enabled")),
-            "has_password": bool(state.get("password_hash")),
+            "has_password": bool(state.get("password")),
             "updated_at": state.get("updated_at"),
         }
 
@@ -139,18 +163,14 @@ class RemoteAccess:
     def verify(self, password):
         """Check a submitted password. False whenever no password is set.
 
-        ``check_password_hash`` compares in constant time, so this does not leak
-        the password through how long it took to reject it.
+        Encoded before comparing because compare_digest refuses non-ASCII str,
+        and nothing stops an owner picking a password with an accent in it.
         """
-        password_hash = self._read().get("password_hash")
-        if not password_hash or not password:
+        stored = self._read().get("password")
+        if not stored or not password:
             return False
-        try:
-            return check_password_hash(password_hash, password)
-        except (ValueError, TypeError):
-            # A hash written by a future format, or a corrupted file. Refusing
-            # is the only safe reading of "we cannot tell".
-            return False
+        return secrets.compare_digest(stored.encode("utf-8"),
+                                      password.encode("utf-8"))
 
     # ── writing ──────────────────────────────────────────────────
 
@@ -170,7 +190,7 @@ class RemoteAccess:
         ok, error = self.validate_password(password)
         if not ok:
             return False, error
-        return self._update(password_hash=generate_password_hash(password))
+        return self._update(password=password)
 
     def set_enabled(self, enabled):
         """Turn remote access on or off. Returns (ok, error).
@@ -190,9 +210,9 @@ class RemoteAccess:
         state["updated_at"] = int(time.time())
         try:
             os.makedirs(self.data_dir, exist_ok=True)
-            # 0600 from creation rather than chmod-ed afterwards, so the hash is
-            # never briefly world-readable. Same reasoning as the telemetry
-            # bearer token's handling in retina-telemetry's state.py.
+            # 0600 from creation rather than chmod-ed afterwards, so the
+            # password is never briefly world-readable. It matters more now that
+            # the file holds the password itself rather than a hash of it.
             fd, tmp_path = tempfile.mkstemp(dir=self.data_dir)
             os.chmod(tmp_path, 0o600)
             with os.fdopen(fd, "w") as f:

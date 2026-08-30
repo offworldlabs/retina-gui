@@ -55,10 +55,21 @@ def _remote_access_context():
     question, and comes from retina-telemetry's status document once that side
     exists.
     """
+    from flask import g
+
     from app import REMOTE_ACCESS_DOMAIN, read_node_id, remote_access
+
+    # The password is rendered only where the owner expects it to be visible:
+    # their own network. /config is reachable on the owner pathway too, and
+    # showing it there would make "nobody off your network can see this" false —
+    # someone the password was shared with could read it back off the page.
+    # Withheld rather than masked, so it is not in the HTML at all.
+    pathway = getattr(g, 'pathway', 'lan')
 
     return {
         'remote_access': remote_access.status(),
+        'remote_password': remote_access.get_password() if pathway != 'owner' else '',
+        'remote_password_visible': pathway != 'owner',
         'remote_host': f"{read_node_id()}.{REMOTE_ACCESS_DOMAIN}",
         'remote_password_min': MIN_PASSWORD_LENGTH,
     }

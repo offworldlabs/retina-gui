@@ -51,11 +51,28 @@ def test_password_round_trip(store):
     assert store.verify("something else") is False
 
 
-def test_password_is_not_stored_in_the_clear(store):
-    """The file holds a hash. A password read off disk is the whole feature gone."""
+def test_password_is_stored_in_the_clear_deliberately(store):
+    """This is the hotspot model: the owner reads it back to share it.
+
+    Pinned as a test rather than left implicit, so switching to a hash later is
+    a decision someone argues for rather than a refactor that quietly breaks
+    the config page's ability to show the password.
+    """
     store.set_password(GOOD_PASSWORD)
     with open(store.state_file) as f:
-        assert GOOD_PASSWORD not in f.read()
+        assert GOOD_PASSWORD in f.read()
+    assert store.get_password() == GOOD_PASSWORD
+
+
+def test_get_password_is_empty_when_unset(store):
+    assert store.get_password() == ""
+
+
+def test_status_never_carries_the_password(store):
+    """status() reaches the template on every pathway and the toggle response as
+    JSON. The password travels by its own method or not at all."""
+    store.set_password(GOOD_PASSWORD)
+    assert GOOD_PASSWORD not in repr(store.status())
 
 
 def test_state_file_is_not_world_readable(store):
@@ -99,6 +116,21 @@ def test_replacing_the_password_invalidates_the_old_one(store):
     store.set_password("a-different-password")
     assert store.verify(GOOD_PASSWORD) is False
     assert store.verify("a-different-password") is True
+    assert store.get_password() == "a-different-password"
+
+
+def test_a_memorable_password_is_allowed(store):
+    """The point of the change: the owner picks something they can say aloud."""
+    assert store.set_password("kitchen radar") == (True, None)
+    assert store.verify("kitchen radar") is True
+    assert store.get_password() == "kitchen radar"
+
+
+def test_non_ascii_passwords_work(store):
+    """compare_digest refuses non-ASCII str, so verify() encodes first."""
+    assert store.set_password("cafe\u0301-radar-8") == (True, None)
+    assert store.verify("cafe\u0301-radar-8") is True
+    assert store.verify("cafe-radar-8") is False
 
 
 def test_verify_is_false_when_nothing_is_set(store):
@@ -309,6 +341,20 @@ def test_the_sign_out_control_only_appears_on_the_owner_pathway(live):
     assert b"/logout" in live.get("/", base_url=OWNER_URL).data
     assert b"/logout" not in live.get("/", base_url=LAN_URL).data
     assert b"/logout" not in live.get("/", base_url=ADMIN_URL).data
+
+
+def test_the_password_is_shown_on_the_lan(live):
+    live.remote_access.set_password("kitchen radar")
+    assert b"kitchen radar" in live.get("/config", base_url=LAN_URL).data
+
+
+def test_the_password_is_withheld_on_the_owner_pathway(live):
+    """Otherwise "only people on your network can see it" would be false: whoever
+    the password was shared with could read it straight back off the page."""
+    live.remote_access.set_password("kitchen radar")
+    _sign_in(live, "kitchen radar")
+    body = live.get("/config", base_url=OWNER_URL).data
+    assert b"kitchen radar" not in body
 
 
 def test_logout_ends_the_session(live):
