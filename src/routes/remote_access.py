@@ -3,7 +3,8 @@
 The login half is reachable from the owner hostname, as it has to be: it is the
 thing standing in front of everything else. The configuration half lives under
 /remote-access, which app.py's gate refuses on that pathway entirely: changing
-the password or the toggle needs someone at the device or on the admin hostname.
+the password or the toggle needs someone on the node's own network, which
+includes an engineer on a Mender port-forward.
 See remote_access.PRESENCE_REQUIRED_PREFIXES.
 """
 
@@ -108,11 +109,14 @@ def generate():
 def toggle():
     """Turn remote access on or off.
 
-    TODO(server): switching this on is what should ask retina-telemetry to call
-    PUT /nodes/tunnel and provision the tunnel, and switching it off is what
-    should tear it down. Neither exists yet, so for now this records the owner's
-    choice and nothing else acts on it. The state file is the interface the
-    telemetry container will read, so wiring that up later changes nothing here.
+    Nothing here talks to a server, and nothing needs to. set_enabled() writes
+    the marker file that owl-os's mender-inventory-retina-remote-access script
+    reports as the `remote_access` inventory attribute; node-infra reads that on
+    its next pass and creates or tears down the tunnel accordingly.
+
+    So this route is the whole of the node's side of provisioning. The owner
+    should expect a delay rather than an immediate result: the marker reaches
+    Mender on the next inventory poll, which owl-os sets to 600 seconds.
     """
     from app import remote_access
 

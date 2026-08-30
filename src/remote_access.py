@@ -1,23 +1,28 @@
 """Remote access: the opt-in switch, and the password the node checks visitors against.
 
-Two hostnames reach this GUI once a Cloudflare tunnel is up, and they are told
-apart by nothing except the ``Host`` header:
+One hostname reaches this GUI once a Cloudflare tunnel is up:
 
-    ret4c844c20.retnode.com          the owner. Must present the password below.
-    ret4c844c20.admin.retnode.com    Offworld staff. Gated by Cloudflare Access
-                                     at the edge; this GUI asks them for nothing.
+    ret4c844c20.retnode.com    the owner, from anywhere. Must present the
+                               password below.
 
 Everything else (``owl.local``, ``ret4c844c20.local``, an IP) is the LAN, which
 is unauthenticated exactly as it has always been. Being on the network is the
 credential there, and nothing in this module changes that.
 
+Offworld staff are not a third case. They reach a node with
+``mender-cli port-forward``, which arrives with a Host of ``localhost`` and so
+counts as the LAN. Mender has already authenticated them and logged the session,
+which is why there is no staff hostname, no Cloudflare Access application and no
+fleet-wide staff password anywhere in this design.
+
 ## The password never leaves the node
 
-It is generated here, stored here, verified here. It is not in the tunnel token,
-not in the telemetry registration payload, and the server that provisions the
-tunnel neither receives it nor could ask for it. That is the point of doing this
-on the node rather than with an identity provider: the owner decides who gets in,
-and there is no account to create and no email to collect.
+It is generated here, stored here, verified here. Nothing sends it anywhere: the
+only thing that leaves this node is a marker file saying remote access is on,
+carried up as a Mender inventory attribute. node-infra provisions a tunnel from
+that and never learns the password, because it has no reason to. That is the
+point of doing this on the node rather than with an identity provider: the owner
+decides who gets in, and there is no account to create and no email to collect.
 
 ## Stored in the clear, deliberately
 
@@ -47,12 +52,14 @@ shared password could add an SSH key, they would keep a way in that outlived the
 rotation, and the owner's only remedy would be reinstalling the node. So key
 management, password changes and Mender installs are refused on the owner
 pathway even when the session is valid. See PRESENCE_REQUIRED_PREFIXES. The LAN
-and the admin hostname are unaffected.
+is unaffected, so an owner at home and an engineer on a port-forward both keep
+the full interface.
 """
 
 import json
 import os
 import secrets
+import subprocess
 import tempfile
 import time
 
@@ -70,6 +77,22 @@ import time
 #: It is short, and deliberately so; the edge rate limit is what makes it safe
 #: rather than the length. Anyone wanting real strength can press Generate.
 MIN_PASSWORD_LENGTH = 8
+
+#: Where owl-os keeps the connector token, and the unit that consumes it. Read
+#: only to report whether the tunnel is actually up; nothing here writes either.
+TUNNEL_TOKEN_PATH = "/data/cloudflared/tunnel-token"
+CLOUDFLARED_UNIT = "cloudflared.service"
+
+#: The file owl-os's mender-inventory-retina-remote-access script looks for.
+#:
+#: This is the entire node-to-server channel for this feature. The node states
+#: what its owner wants by the presence of this file; Mender carries it up as
+#: the `remote_access` inventory attribute on its next poll; node-infra reads
+#: that and decides whether a tunnel should exist. Nothing here calls a server.
+#:
+#: A marker rather than the state file itself because that one is 0600 root and
+#: holds the password, and the inventory script is POSIX shell.
+ENABLED_MARKER = "remote-access-enabled"
 
 #: No 0/O, 1/l/I. A password read aloud across a room or copied off a screen is
 #: the normal case here, and character pairs nobody can distinguish turn that
@@ -220,29 +243,99 @@ class RemoteAccess:
             os.rename(tmp_path, self.state_file)
         except OSError as e:
             return False, f"Could not save remote access settings: {e}"
+
+        self._sync_marker()
         return True, None
+
+    def _sync_marker(self):
+        """Make the inventory marker agree with is_enabled().
+
+        Recomputed after every write rather than set at the toggle. The marker
+        has to reflect the conjunction of two values written by two different
+        methods, so deriving it in one of them is how the two drift apart.
+
+        Best effort. A marker that failed to appear costs the owner one Mender
+        inventory cycle, whereas refusing the whole save because of it would
+        lose a password they just typed.
+        """
+        marker = os.path.join(self.data_dir, ENABLED_MARKER)
+        try:
+            if self.is_enabled():
+                # World readable on purpose: mender-authd runs the inventory
+                # scripts and there is nothing in here to protect.
+                with open(marker, "w") as f:
+                    f.write("")
+                os.chmod(marker, 0o644)
+            else:
+                try:
+                    os.remove(marker)
+                except FileNotFoundError:
+                    pass
+        except OSError:
+            pass
+
+
+# ── is the tunnel actually up ────────────────────────────────────
+
+def tunnel_status(token_path=TUNNEL_TOKEN_PATH, unit=CLOUDFLARED_UNIT):
+    """Report the connector's real state, asked of systemd rather than a server.
+
+    Nothing on the node knows whether provisioning succeeded, and under this
+    design nothing needs to: node-infra puts a token on the box, owl-os starts
+    the connector, and the honest answer to "is it working" is whether that unit
+    is up. cloudflared is Type=notify and only signals ready once it has
+    connections to the edge, so an active unit means genuinely reachable rather
+    than merely launched.
+
+    Returns one of:
+      "waiting"  opted in, but no token has arrived yet
+      "up"       token installed and the connector is running
+      "down"     token installed and the connector is not
+      "unknown"  systemctl could not be asked (dev machine, test run)
+    """
+    try:
+        if os.path.getsize(token_path) == 0:
+            return "waiting"
+    except OSError:
+        return "waiting"
+
+    try:
+        result = subprocess.run(["systemctl", "is-active", unit],
+                                capture_output=True, timeout=5)
+    except (OSError, subprocess.SubprocessError):
+        return "unknown"
+    return "up" if result.returncode == 0 else "down"
 
 
 # ── which pathway a request arrived on ───────────────────────────
 
 LAN = "lan"
 OWNER = "owner"
-ADMIN = "admin"
 
 
 def classify_host(host, node_id, domain):
-    """Return LAN, OWNER or ADMIN for the Host header of a request.
+    """Return LAN or OWNER for the Host header of a request.
 
-    The three pathways are distinguished by name alone, because they are the
-    same service on the same port and there is nothing else to distinguish them
-    by. cloudflared forwards the hostname the request arrived on, so a visitor
-    cannot reach the owner hostname and present themselves as the admin one.
+    Two pathways, distinguished by name alone, because they are the same service
+    on the same port and there is nothing else to tell them apart. cloudflared
+    forwards the hostname the request arrived on, so a visitor cannot reach the
+    tunnel hostname and present themselves as something else.
 
-    Fails closed on the remote domain. Anything under it that is not recognised
-    as the admin name is treated as OWNER, so a hostname this node does not
-    expect (a stale DNS record, a provisioning bug, a domain-wide wildcard
-    someone added) demands a password rather than being mistaken for the LAN and
-    waved through. Only names with no relationship to the remote domain are LAN.
+    There is deliberately no staff pathway. Offworld engineers reach a node
+    through Mender port-forward, which lands with a Host of `localhost` and is
+    therefore LAN: unauthenticated, exactly like standing in the house. That is
+    why no second hostname, Cloudflare Access application or fleet-wide staff
+    password is needed anywhere in this design.
+
+    Fails closed on the remote domain. Anything under it is treated as OWNER, so
+    a hostname this node does not expect (a stale DNS record, a provisioning
+    bug, a domain-wide wildcard someone added) demands a password rather than
+    being mistaken for the LAN and waved through. Only names with no
+    relationship to the remote domain are LAN.
+
+    node_id is unused now that there is only one remote name to recognise. It
+    stays in the signature because the caller has it and a future scheme that
+    varies by node would want it back.
     """
     host = (host or "").split(":")[0].strip().rstrip(".").lower()
     domain = (domain or "").strip().rstrip(".").lower()
@@ -250,13 +343,9 @@ def classify_host(host, node_id, domain):
         return LAN
 
     suffix = "." + domain
-    if not (host == domain or host.endswith(suffix)):
-        return LAN
-
-    node_id = (node_id or "").strip().lower()
-    if node_id and host == f"{node_id}.admin{suffix}":
-        return ADMIN
-    return OWNER
+    if host == domain or host.endswith(suffix):
+        return OWNER
+    return LAN
 
 
 def requires_presence(path):

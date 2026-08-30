@@ -58,6 +58,7 @@ def _remote_access_context():
     from flask import g
 
     from app import REMOTE_ACCESS_DOMAIN, read_node_id, remote_access
+    from remote_access import tunnel_status
 
     # The password is rendered only where the owner expects it to be visible:
     # their own network. /config is reachable on the owner pathway too, and
@@ -68,6 +69,10 @@ def _remote_access_context():
 
     return {
         'remote_access': remote_access.status(),
+        # Asked of systemd, not of a server. Nothing on the node is told whether
+        # provisioning worked, so the honest answer to "is it reachable" is
+        # whether the connector is up. See remote_access.tunnel_status.
+        'remote_tunnel': tunnel_status() if remote_access.is_enabled() else 'off',
         'remote_password': remote_access.get_password() if pathway != 'owner' else '',
         'remote_password_visible': pathway != 'owner',
         'remote_host': f"{read_node_id()}.{REMOTE_ACCESS_DOMAIN}",

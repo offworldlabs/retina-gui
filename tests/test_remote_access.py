@@ -12,7 +12,7 @@ import stat
 import pytest
 
 from remote_access import (
-    ADMIN,
+    ENABLED_MARKER,
     LAN,
     MIN_PASSWORD_LENGTH,
     OWNER,
@@ -20,13 +20,16 @@ from remote_access import (
     classify_host,
     generate_password,
     requires_presence,
+    tunnel_status,
 )
 
 NODE_ID = "ret7dd2cb0d"
 DOMAIN = "retnode.com"
 OWNER_URL = f"http://{NODE_ID}.{DOMAIN}"
-ADMIN_URL = f"http://{NODE_ID}.admin.{DOMAIN}"
 LAN_URL = "http://owl.local"
+# What a Mender port-forward looks like from inside the GUI. Staff reach nodes
+# this way instead of through a hostname of their own, so it must be LAN.
+PORT_FORWARD_URL = "http://localhost:8080"
 
 GOOD_PASSWORD = "correct-horse-battery"
 
@@ -155,6 +158,112 @@ def test_generated_passwords_are_long_and_distinct():
     assert not set("01lIO") & set(a)
 
 
+# ── the inventory marker ─────────────────────────────────────────
+#
+# This file is the entire node-to-server channel. owl-os's
+# mender-inventory-retina-remote-access tests for it and reports remote_access
+# up to Mender; node-infra reads that and decides whether a tunnel exists. If it
+# stops tracking is_enabled(), nodes silently stop getting tunnels, or keep them
+# after being switched off.
+
+def _marker(store):
+    return os.path.join(os.path.dirname(store.state_file), ENABLED_MARKER)
+
+
+def test_no_marker_before_anything_is_set(store):
+    store.set_password(GOOD_PASSWORD)
+    assert not os.path.exists(_marker(store))
+
+
+def test_marker_appears_when_enabled(store):
+    store.set_password(GOOD_PASSWORD)
+    store.set_enabled(True)
+    assert os.path.exists(_marker(store))
+
+
+def test_marker_goes_away_when_disabled(store):
+    store.set_password(GOOD_PASSWORD)
+    store.set_enabled(True)
+    store.set_enabled(False)
+    assert not os.path.exists(_marker(store))
+
+
+def test_marker_survives_a_password_change(store):
+    """Both inputs are written by different methods, which is why the marker is
+    recomputed after every write rather than set at the toggle."""
+    store.set_password(GOOD_PASSWORD)
+    store.set_enabled(True)
+    store.set_password("kitchen radar")
+    assert os.path.exists(_marker(store))
+
+
+def test_marker_is_readable_by_the_inventory_script(store):
+    """mender-authd runs the inventory scripts, and there is nothing in the
+    marker to protect. The state file beside it stays 0600."""
+    store.set_password(GOOD_PASSWORD)
+    store.set_enabled(True)
+    assert stat.S_IMODE(os.stat(_marker(store)).st_mode) == 0o644
+
+
+def test_the_marker_holds_no_secrets(store):
+    store.set_password(GOOD_PASSWORD)
+    store.set_enabled(True)
+    with open(_marker(store)) as f:
+        assert GOOD_PASSWORD not in f.read()
+
+
+# ── is the tunnel actually up ────────────────────────────────────
+
+def _fake_systemctl(monkeypatch, returncode):
+    import remote_access as module
+
+    def fake_run(*args, **kwargs):
+        class R:
+            pass
+        r = R()
+        r.returncode = returncode
+        return r
+
+    monkeypatch.setattr(module.subprocess, "run", fake_run)
+
+
+def test_tunnel_waiting_when_no_token_has_arrived(tmp_path):
+    assert tunnel_status(token_path=str(tmp_path / "nope")) == "waiting"
+
+
+def test_tunnel_waiting_when_the_token_is_empty(tmp_path):
+    token = tmp_path / "tunnel-token"
+    token.write_text("")
+    assert tunnel_status(token_path=str(token)) == "waiting"
+
+
+def test_tunnel_up_when_the_connector_is_running(tmp_path, monkeypatch):
+    token = tmp_path / "tunnel-token"
+    token.write_text("eyJhIjoi")
+    _fake_systemctl(monkeypatch, 0)
+    assert tunnel_status(token_path=str(token)) == "up"
+
+
+def test_tunnel_down_when_the_connector_is_not(tmp_path, monkeypatch):
+    token = tmp_path / "tunnel-token"
+    token.write_text("eyJhIjoi")
+    _fake_systemctl(monkeypatch, 3)
+    assert tunnel_status(token_path=str(token)) == "down"
+
+
+def test_tunnel_unknown_off_a_node(tmp_path, monkeypatch):
+    """A dev machine has no systemctl, and that is not a tunnel being down."""
+    import remote_access as module
+    token = tmp_path / "tunnel-token"
+    token.write_text("eyJhIjoi")
+
+    def boom(*args, **kwargs):
+        raise FileNotFoundError("systemctl")
+
+    monkeypatch.setattr(module.subprocess, "run", boom)
+    assert tunnel_status(token_path=str(token)) == "unknown"
+
+
 # ── which pathway a request is on ────────────────────────────────
 
 @pytest.mark.parametrize("host,expected", [
@@ -166,7 +275,7 @@ def test_generated_passwords_are_long_and_distinct():
     (f"{NODE_ID}.{DOMAIN}:443", OWNER),
     (f"{NODE_ID}.{DOMAIN}.", OWNER),
     (f"{NODE_ID}.{DOMAIN}".upper(), OWNER),
-    (f"{NODE_ID}.admin.{DOMAIN}", ADMIN),
+    (f"{NODE_ID}.admin.{DOMAIN}", OWNER),
     ("", LAN),
 ])
 def test_classify_host(host, expected):
@@ -180,15 +289,24 @@ def test_unknown_names_on_the_remote_domain_fail_closed():
     assert classify_host(DOMAIN, NODE_ID, DOMAIN) == OWNER
 
 
-def test_another_nodes_admin_name_is_not_our_admin_name():
-    assert classify_host(f"ret9f2b1e44.admin.{DOMAIN}", NODE_ID, DOMAIN) == OWNER
+def test_every_name_under_the_zone_needs_the_password():
+    """There is no staff hostname any more, so nothing under the zone is exempt."""
+    for host in (f"ret9f2b1e44.{DOMAIN}", f"anything.{DOMAIN}",
+                 f"{NODE_ID}.admin.{DOMAIN}"):
+        assert classify_host(host, NODE_ID, DOMAIN) == OWNER
 
 
 def test_an_unreadable_node_id_does_not_open_the_owner_path():
     """read_node_id() returns 'Unknown' when /data/mender is missing. That must
-    not turn the owner hostname into an unauthenticated one."""
+    not turn the tunnel hostname into an unauthenticated one."""
     assert classify_host(f"{NODE_ID}.{DOMAIN}", "Unknown", DOMAIN) == OWNER
-    assert classify_host(f"{NODE_ID}.admin.{DOMAIN}", "Unknown", DOMAIN) == OWNER
+
+
+def test_a_mender_port_forward_counts_as_local():
+    """This is the whole of the staff access story. If it ever stops being LAN,
+    engineers are locked out of every node at once."""
+    assert classify_host("localhost:8080", NODE_ID, DOMAIN) == LAN
+    assert classify_host("127.0.0.1:8080", NODE_ID, DOMAIN) == LAN
 
 
 @pytest.mark.parametrize("path", [
@@ -264,9 +382,9 @@ def test_lan_never_asks_for_a_password(live):
     assert live.get("/", base_url=LAN_URL).status_code == 200
 
 
-def test_admin_pathway_is_not_challenged(live):
-    """Cloudflare Access authenticated them at the edge. Asking again is theatre."""
-    assert live.get("/", base_url=ADMIN_URL).status_code == 200
+def test_a_mender_port_forward_is_not_challenged(live):
+    """How Offworld engineers reach a node. Mender already authenticated them."""
+    assert live.get("/", base_url=PORT_FORWARD_URL).status_code == 200
 
 
 def test_owner_pathway_is_404_while_remote_access_is_off(client):
@@ -327,9 +445,10 @@ def test_the_presence_tier_still_works_on_the_lan(live):
     assert r.status_code in (200, 302)
 
 
-def test_the_presence_tier_still_works_for_admins(live):
+def test_the_presence_tier_still_works_over_a_port_forward(live):
+    """An engineer on a port-forward gets the same reach as someone at home."""
     r = live.post("/remote-access/toggle", data={"enabled": "0"},
-                  base_url=ADMIN_URL)
+                  base_url=PORT_FORWARD_URL)
     assert r.status_code == 200
     assert live.remote_access.is_enabled() is False
 
@@ -340,7 +459,7 @@ def test_the_sign_out_control_only_appears_on_the_owner_pathway(live):
     _sign_in(live)
     assert b"/logout" in live.get("/", base_url=OWNER_URL).data
     assert b"/logout" not in live.get("/", base_url=LAN_URL).data
-    assert b"/logout" not in live.get("/", base_url=ADMIN_URL).data
+    assert b"/logout" not in live.get("/", base_url=PORT_FORWARD_URL).data
 
 
 def test_the_password_is_shown_on_the_lan(live):

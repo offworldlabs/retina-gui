@@ -180,8 +180,8 @@ def inject_globals():
     owl_os_version, retina_node_version = mender.get_versions()
     return {
         'node_id': get_node_id(),
-        # Which of the three pathways this request arrived on, so templates can
-        # hide what the owner pathway is not allowed to reach anyway.
+        # Which pathway this request arrived on, so templates can hide what the
+        # owner pathway is not allowed to reach anyway.
         'pathway': getattr(g, 'pathway', 'lan'),
         'owl_os_version': owl_os_version,
         'retina_node_version': retina_node_version,
@@ -228,15 +228,15 @@ _REMOTE_PUBLIC_PREFIXES = ('/login', '/static', '/favicon')
 def _gate_the_remote_pathways():
     """Decide what this request is allowed to be, based on the hostname it used.
 
-    Three pathways, and only one of them is challenged here:
+    Two pathways, and only one of them is challenged here:
 
-      LAN     owl.local, ret4c844c20.local, a bare IP. Unauthenticated, exactly
-              as it has always been. Being on the network is the credential.
-      ADMIN   ret4c844c20.admin.retnode.com. Cloudflare Access already
-              authenticated whoever this is, at the edge, before the request
-              reached the tunnel.
-      OWNER   ret<id>.retnode.com. Nothing upstream checked anybody, so the
-              password is the only gate and it is checked here.
+      LAN     owl.local, ret4c844c20.local, a bare IP, and anything arriving
+              over a Mender port-forward, which lands as `localhost`.
+              Unauthenticated, exactly as it has always been: being on the
+              network is the credential, and Mender has already authenticated
+              and logged the engineer who opened the forward.
+      OWNER   ret<id>.retnode.com, over the tunnel. Nothing upstream checked
+              anybody, so the password is the only gate and it is checked here.
 
     Registered before the calibration hook below, and that ordering is load
     bearing: Flask runs app-level before_request handlers in registration order,
@@ -244,10 +244,10 @@ def _gate_the_remote_pathways():
     unauthenticated visitor arriving during a calibration would be bounced to a
     page they are not allowed to see instead of to the login form.
     """
-    from remote_access import ADMIN, LAN, classify_host, requires_presence
+    from remote_access import LAN, classify_host, requires_presence
 
     g.pathway = classify_host(request.host, read_node_id(), REMOTE_ACCESS_DOMAIN)
-    if g.pathway in (LAN, ADMIN):
+    if g.pathway == LAN:
         return None
 
     # 404 rather than 403 when the owner has not turned this on. The tunnel

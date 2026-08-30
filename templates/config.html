@@ -495,8 +495,11 @@
                         <div class="name">Enable remote access</div>
                         <div class="desc" id="remoteToggleStatus">
                             {% if not remote_access.has_password %}Set a password below first.
-                            {% elif remote_access.enabled %}Reachable at <span class="mono">{{ remote_host }}</span>.
-                            {% else %}Off. Nothing outside your network can reach this node.{% endif %}
+                            {% elif not remote_access.enabled %}Off. Nothing outside your network can reach this node.
+                            {% elif remote_tunnel == 'up' %}Reachable at <span class="mono">{{ remote_host }}</span>.
+                            {% elif remote_tunnel == 'waiting' %}Setting up. This can take around 15 minutes, and you can leave this page.
+                            {% elif remote_tunnel == 'down' %}Set up, but not connected right now. It should recover on its own.
+                            {% else %}On. <span class="mono">{{ remote_host }}</span>{% endif %}
                         </div>
                     </div>
                 </div>
