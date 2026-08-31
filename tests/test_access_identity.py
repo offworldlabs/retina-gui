@@ -6,6 +6,7 @@ verifies and should not have. A mocked verifier would pass all of them.
 """
 
 import json
+import logging
 import time
 
 import jwt
@@ -219,3 +220,86 @@ def test_small_clock_drift_is_tolerated(verifier, keys):
 
 def test_large_drift_is_not_tolerated(verifier, keys):
     assert verifier.identity(token(keys, exp_delta=-120)) is None
+
+
+# ── explaining refusals ──────────────────────────────────────────
+#
+# Every refusal returns a bare None, which is right for the caller and useless
+# for whoever has to work out why a node stopped admitting anyone. These assert
+# the log makes up the difference, and that it does so without handing out the
+# credential it is describing.
+
+def test_every_refusal_says_why(verifier, keys, caplog):
+    caplog.set_level(logging.WARNING)
+    cases = {
+        "wrong audience": token(keys, aud=OTHER_AUD),
+        "wrong team": token(keys, iss="https://someone-else.cloudflareaccess.com"),
+        "expired": token(keys, exp_delta=-600),
+        "no email": token(keys, email=""),
+        "unknown kid": token(keys, kid="never-published"),
+    }
+    for label, bad in cases.items():
+        caplog.clear()
+        assert verifier.identity(bad) is None, label
+        assert caplog.records, f"{label} was refused silently"
+        assert all(r.levelno >= logging.WARNING for r in caplog.records), label
+
+
+def test_the_token_is_never_logged(verifier, keys, caplog):
+    """A refused assertion is still a live bearer credential for its session.
+    A log that quotes it hands that session to anyone who can read logs, and
+    these lines exist to be read by people debugging."""
+    caplog.set_level(logging.DEBUG)
+    for bad in (token(keys, aud=OTHER_AUD),
+                token(keys, exp_delta=-600),
+                token(keys, kid="never-published")):
+        caplog.clear()
+        verifier.identity(bad)
+        logged = " ".join(r.getMessage() for r in caplog.records)
+        assert bad not in logged
+        # Not even a substantial slice of it. Signatures are the long tail.
+        assert bad.split(".")[2][:24] not in logged
+
+
+def test_a_wrong_audience_names_both(verifier, keys, caplog):
+    """The failure a misconfiguration actually produces, and the one that is
+    invisible from outside: the hostname is up and refuses everybody."""
+    caplog.set_level(logging.WARNING)
+    verifier.identity(token(keys, aud=OTHER_AUD))
+    logged = " ".join(r.getMessage() for r in caplog.records)
+    assert OTHER_AUD[:12] in logged, "does not say what the token claimed"
+    assert AUD[:12] in logged, "does not say what this node expects"
+
+
+def test_unreachable_cloudflare_is_distinguishable_from_a_bad_token(config, keys,
+                                                                    caplog):
+    """An outage and a forgery both return None. Confusing the two sends
+    somebody hunting an attacker during a network problem."""
+    caplog.set_level(logging.WARNING)
+    v = AccessIdentity(config_path=str(config), http=FakeHTTP({}, fail=True))
+    assert v.identity(token(keys)) is None
+    logged = " ".join(r.getMessage() for r in caplog.records).lower()
+    assert "could not reach" in logged
+
+
+def test_missing_config_is_reported_as_such(tmp_path, keys, caplog):
+    caplog.set_level(logging.WARNING)
+    v = AccessIdentity(config_path=str(tmp_path / "absent.json"))
+    assert v.identity(token(keys)) is None
+    logged = " ".join(r.getMessage() for r in caplog.records)
+    assert "absent.json" in logged
+
+
+def test_no_token_at_all_is_not_logged(verifier, caplog):
+    """Unauthenticated requests are ordinary on a public hostname. Logging each
+    one would bury the refusals that mean something."""
+    caplog.set_level(logging.WARNING)
+    assert verifier.identity(None) is None
+    assert verifier.identity("") is None
+    assert not caplog.records
+
+
+def test_a_success_is_not_logged_as_a_refusal(verifier, keys, caplog):
+    caplog.set_level(logging.WARNING)
+    assert verifier.identity(token(keys)) == EMAIL
+    assert not caplog.records

@@ -38,12 +38,15 @@ refuses. Failing closed is the only safe reading of "we cannot tell who this is"
 """
 
 import json
+import logging
 import threading
 import time
 
 import jwt
 import requests
 from jwt import PyJWKSet
+
+log = logging.getLogger(__name__)
 
 #: Written by node-infra alongside the connector token and installed by owl-os.
 #: {"team_domain": "offworldlab.cloudflareaccess.com", "aud": "<64 hex chars>"}
@@ -59,6 +62,40 @@ JWKS_TTL_SECONDS = 3600
 #: freshly issued token because the node is three seconds behind would be a
 #: confusing way to fail.
 CLOCK_LEEWAY_SECONDS = 30
+
+
+def _short(value):
+    """Enough of an identifier to match against, not enough to fill a line."""
+    value = str(value or "")
+    return value if len(value) <= 12 else value[:12] + "..."
+
+
+def _kid(token):
+    """The key id a token claims, for the log only.
+
+    Read without verifying anything, which is safe here precisely because the
+    caller has already decided to refuse: this only ever describes a rejection.
+    """
+    try:
+        return _short(jwt.get_unverified_header(token).get("kid"))
+    except Exception:
+        return "unreadable"
+
+
+def _claim(token, name):
+    """One unverified claim, for explaining a rejection.
+
+    Never use this to decide anything. It exists so a log line can say which
+    audience a refused token named, which is the difference between a two minute
+    fix and an afternoon on a live node.
+    """
+    try:
+        value = jwt.decode(token, options={"verify_signature": False}).get(name)
+    except Exception:
+        return "unreadable"
+    if isinstance(value, list):
+        return [_short(v) for v in value]
+    return _short(value)
 
 
 class AccessIdentity:
@@ -148,17 +185,36 @@ class AccessIdentity:
         Cloudflare being unreachable. The caller cannot act differently on any
         of them, and distinguishing them in a return value would invite somebody
         to treat one as good enough.
+
+        The *log* does distinguish them, at WARNING, because operationally they
+        could not be more different: a wrong audience is a misconfiguration
+        nobody will spot from the outside, and an unreachable Cloudflare is an
+        outage. Returning a bare None for both once cost an afternoon of
+        instrumenting a live node to find out which had happened, since a
+        refusal left no trace anywhere.
+
+        The token is never logged. It is a bearer credential for its session,
+        and a log that quotes it hands that session to anyone who can read logs.
+        The claims are, because they are what the decision turned on.
         """
         if not token:
             return None
 
         team_domain, audience = self.config()
         if not team_domain:
+            log.warning(
+                "Refusing an Access assertion: no usable configuration at %s. "
+                "Every request on the support hostname will be refused until "
+                "node-infra delivers it.", self.config_path)
             return None
 
         try:
             key = self._signing_key(token, team_domain)
             if key is None:
+                log.warning(
+                    "Refusing an Access assertion: signed with key id %s, which "
+                    "is not one of %s's published keys.",
+                    _kid(token), team_domain)
                 return None
             claims = jwt.decode(
                 token,
@@ -169,11 +225,38 @@ class AccessIdentity:
                 leeway=CLOCK_LEEWAY_SECONDS,
                 options={"require": ["exp", "aud", "iss"]},
             )
-        except (jwt.InvalidTokenError, requests.RequestException,
-                ValueError, KeyError):
+        except jwt.InvalidAudienceError:
+            # Worth its own message. This is what a token minted for one of the
+            # team's other Access applications looks like, and the fix is a
+            # configuration change rather than anything the caller did wrong.
+            log.warning(
+                "Refusing an Access assertion: it names audience %r, but this "
+                "node's application is %s. Either it was issued for a different "
+                "application, or access.json is stale.",
+                _claim(token, "aud"), _short(audience))
+            return None
+        except jwt.InvalidTokenError as exc:
+            log.warning("Refusing an Access assertion: %s: %s",
+                        type(exc).__name__, exc)
+            return None
+        except requests.RequestException as exc:
+            # Not a refusal of *this* token so much as an inability to judge it.
+            # Distinct from the above because nothing is wrong with the request.
+            log.warning(
+                "Refusing an Access assertion: could not reach %s for signing "
+                "keys: %s", team_domain, exc)
+            return None
+        except (ValueError, KeyError) as exc:
+            log.warning("Refusing an Access assertion: malformed: %s: %s",
+                        type(exc).__name__, exc)
             return None
 
         # Cloudflare puts the address in `email`. A token that verifies but
         # names nobody is not an identity, and returning something truthy for it
         # would let a caller believe it had authenticated a person.
-        return (claims.get("email") or "").strip() or None
+        email = (claims.get("email") or "").strip()
+        if not email:
+            log.warning("Refusing an Access assertion: it verifies, but carries "
+                        "no email claim, so it identifies nobody.")
+            return None
+        return email
