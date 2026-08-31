@@ -105,6 +105,34 @@ def generate():
     return jsonify({"ok": True, "password": password, "has_password": True})
 
 
+@bp.route("/remote-access/shell", methods=["POST"])
+def set_shell():
+    """Record and apply the remote shell agreement.
+
+    Enforced before it is recorded, and the record is skipped if enforcement
+    failed. The reverse order would leave the marker, and therefore the
+    inventory attribute we report upstream, claiming the owner had declined
+    interactive access while mender-connect happily kept serving it.
+
+    Refused on the support pathway by the gate, like everything under
+    /remote-access: the control an owner uses to withdraw our access is not
+    reachable through the access being withdrawn.
+    """
+    from app import mender_connect, remote_access
+
+    allowed = str(request.form.get('allowed', '')).lower() in ('1', 'true', 'on', 'yes')
+
+    ok, error = mender_connect.set_shell_enabled(allowed)
+    if not ok:
+        return jsonify({"ok": False, "error": error}), 400
+
+    ok, error = remote_access.record_shell_allowed(allowed)
+    if not ok:
+        return jsonify({"ok": False, "error": error}), 400
+
+    return jsonify({"ok": True, "shell_allowed": allowed})
+
+
 @bp.route("/remote-access/toggle", methods=["POST"])
 def toggle():
     """Turn remote access on or off.

@@ -12,7 +12,6 @@ from config_schema import (
 )
 from form_utils import schema_to_form_fields
 from node_name import MAX_LENGTH as NAME_MAX_LENGTH
-from remote_access import MIN_PASSWORD_LENGTH
 
 bp = Blueprint('config', __name__)
 
@@ -51,32 +50,24 @@ def _remote_access_context():
 
     remote_host is derived rather than reported: the hostname is a pure function
     of node_id and the zone, so the page can name the address before anything
-    has provisioned it. Whether the tunnel is actually *up* is a separate
-    question, and comes from retina-telemetry's status document once that side
-    exists.
+    has provisioned it.
     """
-    from flask import g
-
-    from app import REMOTE_ACCESS_DOMAIN, read_node_id, remote_access
+    from app import REMOTE_ACCESS_DOMAIN, mender_connect, read_node_id, remote_access
     from remote_access import tunnel_status
-
-    # The password is rendered only where the owner expects it to be visible:
-    # their own network. /config is reachable on the owner pathway too, and
-    # showing it there would make "nobody off your network can see this" false:
-    # someone the password was shared with could read it back off the page.
-    # Withheld rather than masked, so it is not in the HTML at all.
-    pathway = getattr(g, 'pathway', 'lan')
 
     return {
         'remote_access': remote_access.status(),
+        # The *enforced* shell state, read back from mender-connect's own config
+        # rather than from what we recorded. They can disagree: an enforcement
+        # that failed, or a hand-edited config, would otherwise leave this page
+        # confidently showing a choice the node is not honouring. True, False,
+        # or None when the config cannot be read at all.
+        'shell_enforced': mender_connect.is_shell_enabled(),
         # Asked of systemd, not of a server. Nothing on the node is told whether
         # provisioning worked, so the honest answer to "is it reachable" is
         # whether the connector is up. See remote_access.tunnel_status.
         'remote_tunnel': tunnel_status() if remote_access.is_enabled() else 'off',
-        'remote_password': remote_access.get_password() if pathway != 'owner' else '',
-        'remote_password_visible': pathway != 'owner',
         'remote_host': f"{read_node_id()}.{REMOTE_ACCESS_DOMAIN}",
-        'remote_password_min': MIN_PASSWORD_LENGTH,
     }
 
 

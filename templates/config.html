@@ -477,66 +477,62 @@
             </div>
         </section>
 
-        {# ── Remote access ── #}
+        {# ── Remote support ── #}
         <section id="remote" class="cfg-section" style="margin-top:12px;">
             <div class="cfg-section-head">
-                <h2>Remote access</h2>
-                <span class="desc">Reach this node from outside your home network, over a Cloudflare tunnel. On your own network you never need a password. Keep using <span class="mono">{{ node_id }}.local</span>.</span>
+                <h2>Remote support</h2>
+                <span class="desc">What our support team may do with this node when they are not at your location. Both settings are yours to change at any time, and neither affects how the node works day to day.</span>
             </div>
             <div class="cfg-body">
                 <div class="toggle-row" style="padding:0;border:0;">
                     <label class="ds-switch">
-                        <input type="checkbox" id="remoteToggle"
-                               {% if remote_access.enabled %}checked{% endif %}
-                               {% if not remote_access.has_password %}disabled{% endif %}>
+                        <input type="checkbox" id="remoteToggle" {% if remote_access.enabled %}checked{% endif %}>
                         <span class="ds-switch-track"></span>
                     </label>
                     <div class="body">
-                        <div class="name">Enable remote access</div>
+                        <div class="name">Let support open this node&rsquo;s interface</div>
                         <div class="desc" id="remoteToggleStatus">
-                            {% if not remote_access.has_password %}Set a password below first.
-                            {% elif not remote_access.enabled %}Off. Nothing outside your network can reach this node.
-                            {% elif remote_tunnel == 'up' %}Reachable at <span class="mono">{{ remote_host }}</span>.
-                            {% elif remote_tunnel == 'waiting' %}Setting up. This can take around 15 minutes, and you can leave this page.
-                            {% elif remote_tunnel == 'down' %}Set up, but not connected right now. It should recover on its own.
-                            {% else %}On. <span class="mono">{{ remote_host }}</span>{% endif %}
+                            {% if not remote_access.enabled %}Off. Support can only reach this node from your own network.
+                            {% elif remote_tunnel == 'up' %}On and connected.
+                            {% elif remote_tunnel == 'waiting' %}On. The connection is not live yet.
+                            {% elif remote_tunnel == 'down' %}On, but the connection has dropped. It should recover on its own.
+                            {% else %}On.{% endif %}
                         </div>
                     </div>
                 </div>
+                <div class="help" style="margin:2px 0 16px 52px;">
+                    They see the same pages you see and can change the same settings. They cannot
+                    open a command line or add an SSH key this way.
+                </div>
 
-                <div class="cfg-row" style="margin-top:4px;">
-                    <div class="label-col">
-                        <label for="remotePassword">Password</label>
-                        <span class="help" id="remotePasswordState">
-                            {% if remote_password_visible %}Set it to whatever you like, and read it back here whenever you need to share it.
-                            {% else %}Only shown on the node&rsquo;s own network.{% endif %}
-                        </span>
+                <div class="toggle-row" style="padding:0;border:0;border-top:1px solid var(--line);padding-top:16px;">
+                    <label class="ds-switch">
+                        <input type="checkbox" id="shellToggle" {% if remote_access.shell_allowed %}checked{% endif %}>
+                        <span class="ds-switch-track"></span>
+                    </label>
+                    <div class="body">
+                        <div class="name">Let support open a command line</div>
+                        <div class="desc" id="shellToggleStatus">
+                            {% if shell_enforced is none %}On this node&rsquo;s settings, but we could not confirm it is applied.
+                            {% elif shell_enforced != remote_access.shell_allowed %}Not applied. This node is still set to
+                                {% if shell_enforced %}allow{% else %}refuse{% endif %} sessions. Try again, or ask support.
+                            {% elif remote_access.shell_allowed %}On.
+                            {% else %}Off. No session can be opened, from anywhere.{% endif %}
+                        </div>
                     </div>
-                    <div>
-                        {% if remote_password_visible %}
-                        <div style="display:flex;gap:8px;">
-                            {# Plain text, not a password field: this is the phone-hotspot
-                               model, and the whole point is that the owner can read it
-                               back to share it. #}
-                            <input type="text" id="remotePassword" class="ds-input mono"
-                                   value="{{ remote_password }}" autocomplete="off"
-                                   spellcheck="false" placeholder="At least {{ remote_password_min }} characters"
-                                   style="min-width:0;">
-                            <button type="button" class="ds-btn primary" id="remotePasswordSave" style="flex-shrink:0;">Save</button>
-                            <button type="button" class="ds-btn" id="remotePasswordGenerate" style="flex-shrink:0;">Generate</button>
-                        </div>
-                        <div id="remotePasswordMsg" style="font-size:12.5px;margin-top:8px;display:none;"></div>
-                        <div class="help" style="margin-top:10px;">
-                            Anyone with local network access to your device can read this password, so
-                            don&rsquo;t reuse one from somewhere else.
-                        </div>
-                        {% else %}
-                        <div class="help">
-                            The password is only shown to someone on the same network as the node.
-                            Open <span class="mono">{{ node_id }}.local</span> from home to see or change it.
-                        </div>
-                        {% endif %}
-                    </div>
+                </div>
+                <div class="help" style="margin:2px 0 0 52px;">
+                    This is how we diagnose problems the interface cannot show, and it is the
+                    deepest access anyone can have to your node. Turning it off does not affect
+                    the setting above.
+                </div>
+
+                <div id="remoteMsg" style="font-size:12.5px;margin-top:14px;display:none;"></div>
+
+                <div class="help" style="margin-top:16px;padding-top:14px;border-top:1px solid var(--line);">
+                    Software updates and registration continue whichever way these are set. What
+                    you are choosing here is whether a person can reach the node, not whether it
+                    stays up to date.
                 </div>
             </div>
         </section>
@@ -2058,15 +2054,23 @@ if (discardBtn) discardBtn.addEventListener('click', () => location.reload());
 })();
 </script>
 
-{# ── Remote access ── #}
+{# ── Remote support ── #}
 <script>
 (function () {
-    var toggle = document.getElementById('remoteToggle');
-    if (!toggle) return;
+    var support = document.getElementById('remoteToggle');
+    var shell   = document.getElementById('shellToggle');
+    if (!support || !shell) return;
 
-    var status = document.getElementById('remoteToggleStatus');
-    var host   = {{ remote_host | tojson }};
-    var csrf   = document.querySelector('meta[name="csrf-token"]').content;
+    var supportStatus = document.getElementById('remoteToggleStatus');
+    var shellStatus   = document.getElementById('shellToggleStatus');
+    var msg           = document.getElementById('remoteMsg');
+    var csrf          = document.querySelector('meta[name="csrf-token"]').content;
+
+    function say(text, bad) {
+        msg.textContent = text;
+        msg.style.color = bad ? 'var(--danger)' : 'var(--ink-3)';
+        msg.style.display = text ? 'block' : 'none';
+    }
 
     function post(url, body) {
         return fetch(url, {
@@ -2076,66 +2080,45 @@ if (discardBtn) discardBtn.addEventListener('click', () => location.reload());
         }).then(function (r) { return r.json().then(function (j) { return {ok: r.ok, body: j}; }); });
     }
 
-    toggle.addEventListener('change', function () {
-        var want = toggle.checked;
-        toggle.disabled = true;
-        post('/remote-access/toggle', 'enabled=' + (want ? '1' : '0'))
-            .then(function (r) {
-                if (!r.ok) { toggle.checked = !want; return; }
-                status.innerHTML = r.body.enabled
-                    ? 'Reachable at <span class="mono"></span>'
-                    : 'Off. Nothing outside your network can reach this node.';
-                if (r.body.enabled) status.querySelector('.mono').textContent = host;
-            })
-            .catch(function () { toggle.checked = !want; })
-            .then(function () { toggle.disabled = false; });
-    });
-
-    // The password controls are only rendered on the local network, so
-    // everything below is absent on the owner pathway and must not be assumed.
-    var pw = document.getElementById('remotePassword');
-    if (!pw) return;
-
-    var save     = document.getElementById('remotePasswordSave');
-    var generate = document.getElementById('remotePasswordGenerate');
-    var msg      = document.getElementById('remotePasswordMsg');
-
-    function say(text, bad) {
-        msg.textContent = text;
-        msg.style.color = bad ? 'var(--danger)' : 'var(--ink-3)';
-        msg.style.display = text ? 'block' : 'none';
+    // Each toggle drives its own endpoint and reverts itself on failure. They
+    // are deliberately not wired together: the whole point of two settings is
+    // that changing one says nothing about the other.
+    function wire(input, url, field, statusEl, describe) {
+        input.addEventListener('change', function () {
+            var want = input.checked;
+            input.disabled = true;
+            say('');
+            post(url, field + '=' + (want ? '1' : '0'))
+                .then(function (r) {
+                    if (!r.ok) {
+                        input.checked = !want;
+                        say(r.body.error || 'Could not change this setting', true);
+                        return;
+                    }
+                    statusEl.textContent = describe(r.body);
+                })
+                .catch(function () {
+                    input.checked = !want;
+                    say('Could not reach the node', true);
+                })
+                .then(function () { input.disabled = false; });
+        });
     }
 
-    function store(password, okText) {
-        return post('/remote-access/password', 'password=' + encodeURIComponent(password))
-            .then(function (r) {
-                if (!r.ok) { say(r.body.error || 'Could not save the password', true); return false; }
-                pw.value = password;
-                // Turning it on needs a password, so the toggle stays disabled
-                // until there is one. Setting one is what releases it.
-                toggle.disabled = false;
-                say(okText);
-                return true;
-            })
-            .catch(function () { say('Could not reach the node', true); return false; });
-    }
-
-    save.addEventListener('click', function () {
-        save.disabled = true;
-        store(pw.value, 'Password saved.').then(function () { save.disabled = false; });
+    wire(support, '/remote-access/toggle', 'enabled', supportStatus, function (b) {
+        // No estimate offered. How long this takes depends on node-infra's
+        // scheduling, which this node has no knowledge of and cannot promise.
+        return b.enabled
+            ? 'On. The connection is not live yet.'
+            : 'Off. Support can only reach this node from your own network.';
     });
 
-    generate.addEventListener('click', function () {
-        generate.disabled = true;
-        post('/remote-access/generate', '')
-            .then(function (r) {
-                if (!r.ok) { say(r.body.error || 'Could not generate a password', true); return; }
-                pw.value = r.body.password;
-                toggle.disabled = false;
-                say('New password generated and saved.');
-            })
-            .catch(function () { say('Could not reach the node', true); })
-            .then(function () { generate.disabled = false; });
+    // Safe to state plainly here: the route enforces before it records and
+    // errors if enforcement failed, so an ok response means the node really is
+    // in this state. The page-load branch cannot assume that and reads the
+    // enforced value back instead.
+    wire(shell, '/remote-access/shell', 'allowed', shellStatus, function (b) {
+        return b.shell_allowed ? 'On.' : 'Off. No session can be opened, from anywhere.';
     });
 })();
 </script>

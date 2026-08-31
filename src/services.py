@@ -29,6 +29,7 @@ re-exports the names, so `from app import ...` continues to work unchanged.
 
 import os
 
+from access_identity import AccessIdentity
 from apply_service import ApplyService
 from blah2_client import Blah2Client
 from calibrator import Calibrator
@@ -36,6 +37,7 @@ from config_manager import ConfigManager
 from device_state import DeviceState
 from mdns_peers import peer_directory_from_env
 from mender import MenderClient
+from mender_connect import MenderConnect
 from network_manager import NetworkManager
 from node_name import NodeName
 from remote_access import RemoteAccess
@@ -129,6 +131,23 @@ telemetry_status = TelemetryStatus(
 node_name = NodeName(os.path.join(DATA_DIR, "node-name"), dev_mode=DEV_MODE)
 
 remote_access = RemoteAccess(os.path.join(DATA_DIR, "remote-access.json"))
+
+# Enforces the remote shell agreement by editing mender-connect's own config.
+# Separate from RemoteAccess on purpose: that one records what the owner chose,
+# this one makes it true, and keeping them apart is what lets the recording stay
+# testable without a systemd on the other end of it.
+# Verifies Cloudflare Access assertions. Its config (team domain and this
+# node's application audience) is delivered by node-infra beside the tunnel
+# token, so until that arrives it reports "not configured" and refuses
+# everything, which is the safe state to be in while it is unwired.
+access_identity = AccessIdentity(
+    config_path=os.environ.get("ACCESS_CONFIG_PATH", "/data/cloudflared/access.json"),
+)
+
+mender_connect = MenderConnect(
+    conf_path=os.environ.get("MENDER_CONNECT_CONF", "/etc/mender/mender-connect.conf"),
+    dev_mode=DEV_MODE,
+)
 
 
 def secret_key():

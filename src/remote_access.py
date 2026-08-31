@@ -94,6 +94,17 @@ CLOUDFLARED_UNIT = "cloudflared.service"
 #: holds the password, and the inventory script is POSIX shell.
 ENABLED_MARKER = "remote-access-enabled"
 
+#: The remote shell agreement, recorded by its exception rather than its
+#: presence, exactly as device_state records cloud services.
+#:
+#: The two agreements default differently and so are stored differently. Support
+#: access defaults OFF, so its marker means "wanted". Shell access defaults ON,
+#: because every node in the fleet already has it and defaulting off would
+#: silently withdraw something owners already rely on; recording only the
+#: exception means an untouched node needs no migration, and a missing or
+#: unwritable /data cannot quietly revoke access nobody declined.
+SHELL_DISABLED_MARKER = "remote-shell-disabled"
+
 #: No 0/O, 1/l/I. A password read aloud across a room or copied off a screen is
 #: the normal case here, and character pairs nobody can distinguish turn that
 #: into a support conversation.
@@ -160,6 +171,42 @@ class RemoteAccess:
     def has_password(self):
         return bool(self._read().get("password"))
 
+    # ── the remote shell agreement ───────────────────────────────
+
+    def is_shell_allowed(self):
+        """Whether the owner permits interactive access over Mender.
+
+        Independent of everything else in this module. Declining it does not
+        affect the support tunnel, and declining support does not affect this.
+        """
+        return not os.path.exists(
+            os.path.join(self.data_dir, SHELL_DISABLED_MARKER))
+
+    def record_shell_allowed(self, allowed):
+        """Record the owner's choice. Returns (ok, error).
+
+        Records only. Enforcing it is mender_connect's job, and the caller
+        applies that FIRST so this file never claims a state the node is not
+        actually in.
+        """
+        marker = os.path.join(self.data_dir, SHELL_DISABLED_MARKER)
+        try:
+            os.makedirs(self.data_dir, exist_ok=True)
+            if allowed:
+                try:
+                    os.remove(marker)
+                except FileNotFoundError:
+                    pass
+            else:
+                # World readable like the other marker: the inventory scripts
+                # run as root and there is nothing here to protect.
+                with open(marker, "w") as f:
+                    f.write("")
+                os.chmod(marker, 0o644)
+        except OSError as e:
+            return False, f"Could not record the remote shell setting: {e}"
+        return True, None
+
     def get_password(self):
         """The password itself, for display. "" when none is set.
 
@@ -178,6 +225,7 @@ class RemoteAccess:
             "enabled": bool(state.get("enabled")) and bool(state.get("password")),
             "requested": bool(state.get("enabled")),
             "has_password": bool(state.get("password")),
+            "shell_allowed": self.is_shell_allowed(),
             "updated_at": state.get("updated_at"),
         }
 
