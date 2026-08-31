@@ -281,6 +281,26 @@ class TestTowerCacheRemove:
 class TestTowerSelect:
     """Tests for POST /towers/select route."""
 
+    def test_select_refuses_an_empty_location(self, app_client, config_files):
+        """The model now allows an empty location, because a node legitimately
+        has none. This endpoint sets one, so it must never clear one."""
+        resp = app_client.post(
+            '/towers/select',
+            data=json.dumps({"tx_callsign": "ATN6"}),
+            content_type='application/json',
+        )
+
+        assert resp.status_code == 400
+
+    def test_select_refuses_a_partial_location(self, app_client, config_files):
+        resp = app_client.post(
+            '/towers/select',
+            data=json.dumps({"rx_latitude": -33.8688, "tx_callsign": "ATN6"}),
+            content_type='application/json',
+        )
+
+        assert resp.status_code == 400
+
     def test_select_saves_location(self, app_client, config_files):
         """Saves RX + TX location to user.yml with node_id and callsign."""
         user_path, _ = config_files

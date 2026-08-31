@@ -226,6 +226,33 @@ class TestConfigSaveRoute:
     'capture.device.type' because we use flat Pydantic schemas for validation.
     """
 
+    def test_save_accepts_an_empty_location(self, app_client, user_config_file):
+        """A node legitimately has no location until its owner picks a tower,
+        so clearing every field must be allowed rather than rejected."""
+        response = app_client.post('/config/save', data={
+            'location.rx_latitude': '', 'location.rx_longitude': '',
+            'location.rx_altitude': '', 'location.rx_name': '',
+            'location.tx_latitude': '', 'location.tx_longitude': '',
+            'location.tx_altitude': '', 'location.tx_name': '',
+        }, follow_redirects=False)
+
+        assert response.status_code == 302
+
+    def test_save_rejects_a_partial_location(self, app_client, user_config_file):
+        """blah2 derives its whole bistatic solution from these six numbers, and
+        a missing one becomes NaN rather than an error, so the radar would run
+        and silently associate nothing. This is where an owner finds out."""
+        response = app_client.post('/config/save', data={
+            'location.rx_latitude': '42.241528',
+            'location.rx_longitude': '-72.648361',
+            'location.rx_altitude': '619.2',
+            'location.rx_name': 'ret824685c9',
+        }, follow_redirects=False)
+
+        # Re-renders the form with errors rather than redirecting.
+        assert response.status_code == 200
+        assert b'all six coordinates or none' in response.data
+
     def test_save_valid_config(self, app_client, user_config_file):
         """Valid config should be saved to user.yml."""
         response = app_client.post('/config/save', data={

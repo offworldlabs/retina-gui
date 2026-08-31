@@ -206,10 +206,20 @@ def select():
     }
 
     try:
-        LocationFormConfig(**location_flat)
+        validated = LocationFormConfig(**location_flat)
     except ValidationError as e:
         errors = ConfigManager.format_validation_errors(e, "location")
         return jsonify({"success": False, "errors": errors}), 400
+
+    # The model now permits a wholly empty location, because a node
+    # legitimately has none. This endpoint is the one that sets one, so an
+    # empty POST must not silently unsite a configured node.
+    if not validated.is_located:
+        return jsonify({
+            "success": False,
+            "errors": {"location": "a tower selection must carry a full receiver "
+                                   "and transmitter position"},
+        }), 400
 
     location_nested = ConfigManager.unflatten_location_from_form(location_flat)
     existing_user = config_mgr.load_user_config()

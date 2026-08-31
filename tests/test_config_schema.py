@@ -161,6 +161,39 @@ class TestLocationFormConfig:
         assert config.rx_latitude == 37.7644
         assert config.tx_name == 'KSCZ-LD'
 
+    def test_an_unsited_node_is_valid(self):
+        """A node has no location until its owner picks a tower, and
+        retina-node ships these null. The schema has to be able to say that."""
+        config = LocationFormConfig()
+
+        assert config.is_located is False
+        assert config.rx_latitude is None
+
+    def test_a_partial_location_is_not_located(self):
+        """The model permits it; the all-or-nothing rule is enforced on save in
+        routes/config.py, beside the ADS-B source trio."""
+        assert LocationFormConfig(rx_latitude=37.7644, rx_longitude=-122.3954).is_located is False
+
+    def test_names_alone_do_not_make_a_location(self):
+        assert LocationFormConfig(rx_name='somewhere', tx_name='a tower').is_located is False
+
+    def test_zero_counts_as_located(self):
+        """Testing for truthiness would report a node on the equator as unsited."""
+        config = LocationFormConfig(
+            rx_latitude=0, rx_longitude=0, rx_altitude=0, rx_name='x',
+            tx_latitude=0, tx_longitude=0, tx_altitude=0, tx_name='y'
+        )
+
+        assert config.is_located is True
+
+    def test_bounds_still_apply_to_a_set_coordinate(self):
+        """Optional must not mean unchecked."""
+        with pytest.raises(ValidationError):
+            LocationFormConfig(
+                rx_latitude=91, rx_longitude=0, rx_altitude=0, rx_name='Test',
+                tx_latitude=0, tx_longitude=0, tx_altitude=0, tx_name='Test'
+            )
+
     def test_tx_name_length_cap(self):
         """tx_name is capped at 32 — retina-telemetry's tx_callsign limit.
 

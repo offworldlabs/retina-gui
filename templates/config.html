@@ -1329,6 +1329,31 @@ if (window.location.search.includes('saved=1')) {
 
     form.addEventListener('input', update);
     form.addEventListener('change', update);
+
+    // Adopt values that were written to config by something other than this
+    // form. Today that is only Auto-Calibrate persisting a run (see the
+    // modal's apply handler). Both halves matter: the fields have to change,
+    // or the page goes on showing the pre-calibration tuning and a later Save posts
+    // it back over what was just persisted; and the baseline has to move with
+    // them, or the savebar claims unsaved changes for values that are
+    // already on disk.
+    window.RetinaConfigForm = {
+        adoptSaved: function(values) {
+            Object.keys(values).forEach(function(name) {
+                if (values[name] === null || values[name] === undefined) return;
+                const el = form.querySelector('[name="' + name + '"]');
+                if (!el) return;
+                el.value = values[name];
+                // Read back rather than storing what we set: the snapshot
+                // holds the element's own string form, and a select that
+                // rejects the value must not be recorded as if it took it.
+                initial[el.name + '||' + el.type] = el.value;
+                el.dispatchEvent(new Event('input', { bubbles: true }));
+                el.dispatchEvent(new Event('change', { bubbles: true }));
+            });
+            update();
+        }
+    };
 })();
 
 // Discard button reloads page
@@ -1464,6 +1489,9 @@ if (discardBtn) discardBtn.addEventListener('click', () => location.reload());
     var applyBtn = document.getElementById('calApplyBtn');
     var pollTimer = null;
     var lastStatus = null;
+    // Whether the tuning just persisted also moved the transmitter, so the
+    // "saved" line can name the fields that changed.
+    var movedTower = false;
 
     // Shared with the setup wizard's calibrate step — see static/calibrate.js
     // for why the vocabulary and interpretation live there rather than here.
@@ -1639,6 +1667,7 @@ if (discardBtn) discardBtn.addEventListener('click', () => location.reload());
         applyBtn.style.display = 'none';
         applyBtn.disabled = false;
         applyBtn.textContent = 'Persist to config';
+        movedTower = false;
     }
 
     // Show the in-progress view rather than the "start a run" prompt — used
@@ -1721,6 +1750,42 @@ if (discardBtn) discardBtn.addEventListener('click', () => location.reload());
         }).finally(function() { cancelBtn.disabled = false; });
     });
 
+    // The fields behind this modal were rendered from config.yml before the
+    // run, so persisting a result leaves them showing the old tuning. That is
+    // not only confusing (reported as "auto-calibrate set 59/54/7 but the
+    // config screen still shows 59/59/9"), it is destructive: Save posts every
+    // field, and compute_user_overrides drops an override whose submitted
+    // value matches the merged config, so one Save from a stale form deletes
+    // the calibration from user.yml. Adopt what the server says it wrote,
+    // as soon as it says so: user.yml is written synchronously inside that
+    // POST, well before the merge finishes.
+    var TX_FIELDS = {
+        name: 'location.tx_name',
+        latitude: 'location.tx_latitude',
+        longitude: 'location.tx_longitude',
+        altitude: 'location.tx_altitude'
+    };
+
+    function adoptPersisted(persisted) {
+        if (!persisted || !window.RetinaConfigForm) return;
+        var values = {
+            'capture.fc': persisted.fc,
+            'capture.device_gainReductionA': persisted.gain_a,
+            'capture.device_gainReductionB': persisted.gain_b,
+            'capture.device_lnaState': persisted.lna_state,
+            'capture.device_bandwidthNumber': persisted.bandwidth_number
+        };
+        // Only present when the run moved to a different tower, which is the
+        // one case where fc alone would leave the page (and blah2's geometry)
+        // describing the wrong transmitter.
+        if (persisted.tx) {
+            Object.keys(TX_FIELDS).forEach(function(key) {
+                values[TX_FIELDS[key]] = persisted.tx[key];
+            });
+        }
+        window.RetinaConfigForm.adoptSaved(values);
+    }
+
     applyBtn.addEventListener('click', function() {
         applyBtn.disabled = true;
         applyBtn.innerHTML = '<span class="spinner-border spinner-border-sm" style="width:.8em;height:.8em;border-width:1.5px;"></span> Applying…';
@@ -1731,6 +1796,8 @@ if (discardBtn) discardBtn.addEventListener('click', () => location.reload());
         .then(function(r) { return r.json(); })
         .then(function(d) {
             if (!d.success) { calApplyFailed(d.error || 'Apply failed'); return; }
+            adoptPersisted(d.persisted);
+            movedTower = !!(d.persisted && d.persisted.tx);
             // The tuning is already written to user.yml; the merge and restart
             // run on the server's shared queue (see apply_service.py).
             pollCalApply();
@@ -1760,7 +1827,9 @@ if (discardBtn) discardBtn.addEventListener('click', () => location.reload());
                 calApplyFailed(s.error || 'Apply failed');
             } else {
                 applyBtn.style.display = 'none';
-                resultEl.innerHTML += '<br><strong>Saved and applied.</strong> Services are restarting with the new tuning.';
+                resultEl.innerHTML += '<br><strong>Saved and applied.</strong> Services are restarting with the new tuning. '
+                    + 'The ' + (movedTower ? 'Capture and Transmitter' : 'Capture')
+                    + ' settings on this page now show it.';
             }
         })
         .catch(function() { setTimeout(pollCalApply, 2000); });  // transient: keep watching
