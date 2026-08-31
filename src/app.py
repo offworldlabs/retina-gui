@@ -3,6 +3,7 @@ import subprocess
 import sys
 
 from flask import Flask, abort, g, jsonify, redirect, request, session, url_for
+from flask.sessions import SecureCookieSessionInterface
 from flask_wtf.csrf import CSRFError, CSRFProtect
 
 # Configuration and shared services live in their own module because this one
@@ -64,23 +65,59 @@ app.config['SECRET_KEY'] = secret_key()
 # expires when the session does.
 app.config['WTF_CSRF_TIME_LIMIT'] = None
 
-# The session only ever exists on the owner pathway, which is always HTTPS
-# through the tunnel, so Secure costs nothing there. The LAN stays plain HTTP
-# and stays session-less. SESSION_COOKIE_SECURE is settable so tests (and a dev
-# server on http://localhost) can still hold a cookie.
+# Whether Secure cookies are permitted at all. Off in dev so a server on
+# http://localhost can still hold one; on elsewhere, where it gates the remote
+# pathway below rather than applying to every response.
 app.config['SESSION_COOKIE_SECURE'] = (
     os.environ.get('SESSION_COOKIE_SECURE', '' if DEV_MODE else '1').lower()
     in ('1', 'true', 'yes')
 )
 app.config['SESSION_COOKIE_HTTPONLY'] = True
 app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
-# Host-only, enforced by the browser rather than by us remembering not to set a
-# Domain. Every node is a sibling under one registrable domain, so without this
-# one node could set a `.retnode.com` cookie that shadows another node's and
-# leaves a working node refusing to log anybody in. The prefix requires Secure,
-# so it can only be used where the cookie is Secure anyway.
-if app.config['SESSION_COOKIE_SECURE']:
-    app.config['SESSION_COOKIE_NAME'] = '__Host-session'
+
+
+class _PathwaySessionInterface(SecureCookieSessionInterface):
+    """Cookie flags that follow the pathway instead of one global setting.
+
+    This used to be a single config: Secure everywhere, and the `__Host-` name
+    whenever Secure was on. The reasoning was that the session only mattered on
+    the remote pathway, which is always HTTPS, so the LAN could simply go
+    without one.
+
+    That was wrong, and badly so. A browser silently discards a Secure cookie
+    delivered over plain HTTP, which is exactly what the LAN is. So the LAN held
+    no session at all, and CSRFProtect keeps its token *in the session*, so
+    every POST an owner made from their own network was rejected with 400: the
+    config page, every toggle, the setup wizard. Curl hid it completely, because
+    it keeps the cookie where a browser refuses to.
+
+    So Secure is applied where it is true rather than where it is convenient.
+    The `__Host-` prefix is still worth having on the remote pathway, where
+    every node is a sibling under one registrable domain and without it one node
+    could set a `.retnode.com` cookie that shadows another's. The prefix
+    requires Secure, so the two answers have to move together.
+    """
+
+    def _is_remote(self):
+        try:
+            from remote_access import OWNER, classify_host
+            return (app.config['SESSION_COOKIE_SECURE']
+                    and classify_host(request.host, read_node_id(),
+                                      REMOTE_ACCESS_DOMAIN) == OWNER)
+        except Exception:
+            # Fail towards the LAN. A node that cannot tell which pathway it is
+            # on must not end up unable to hold a session on the one owners
+            # actually use, which is the failure this class exists to fix.
+            return False
+
+    def get_cookie_secure(self, app):
+        return self._is_remote()
+
+    def get_cookie_name(self, app):
+        return '__Host-session' if self._is_remote() else 'session'
+
+
+app.session_interface = _PathwaySessionInterface()
 
 csrf = CSRFProtect(app)
 
