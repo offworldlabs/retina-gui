@@ -262,12 +262,13 @@
     </section>
     {% endif %}
 
-
 </main>
 {% endblock %}
 
 {% block scripts %}
 <script>
+// Built from the host actually used to get here, so the links stay on this
+// node rather than pointing somewhere the operator did not ask for.
 document.querySelectorAll('.svc-card[data-port]').forEach(function(el) {
     el.href = 'http://' + window.location.hostname + ':' + el.dataset.port + (el.dataset.path || '');
 });

@@ -1,4 +1,7 @@
 {% extends "base.html" %}
+{# Imported again here: base.html's import lives in its own namespace and is
+   not inherited by child templates, and the bar is used inside a block below. #}
+{% from "_fleet_bar.html" import fleet_bar %}
 {% block title %}OWL-OS Setup{% endblock %}
 
 {% block head %}
@@ -6,12 +9,29 @@
     <style>html, body { overflow: hidden; }</style>
 {% endblock %}
 
-{# Override the full navbar/footer — wizard has its own chrome #}
+{# The wizard has its own chrome and its own full-height layout, so it takes
+   neither of base.html's rows in their usual slots. The fleet bar is included
+   inside .wiz below instead; the child row is gone entirely and stays gone.
+
+   That split is deliberate. Home and Config must not be reachable on a node
+   that is mid-setup, and the redirects enforcing that are untouched. But being
+   unable to leave *this node* is a different thing: without the fleet bar, a
+   node part-way through setup becomes a dead end in every other node's banner,
+   and an abandoned wizard keeps it that way until the 24h timeout in
+   device_state clears it. Leaving for another node is not wandering out of
+   setup. #}
 {% block navbar %}{% endblock %}
+{% block subnav %}{% endblock %}
 {% block footer %}{% endblock %}
 
 {% block content %}
 <div class="wiz">
+
+    {# First child of .wiz on purpose. .wiz is a 100vh flex column and .wiz-body
+       is flex:1, so the bar takes its natural height and the body shrinks to
+       fit. Placed outside .wiz it would push a full-height element down and
+       overflow the viewport. #}
+    {{ fleet_bar(fleet_nodes, node_id, active_page, show_brand=false) }}
 
     {# ── Wizard header: brand left, step indicator right ── #}
     <div class="wiz-head">

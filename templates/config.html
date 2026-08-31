@@ -94,6 +94,7 @@
         <a href="#tar1090">tar1090</a>
         <a href="#retina-tracker">Retina Tracker</a>
         <h3>Administration</h3>
+        <a href="#this-node">This node</a>
         <a href="#ssh">SSH access</a>
         <a href="#cloud">Cloud services</a>
         <a href="#wizard">Setup wizard</a>
@@ -389,6 +390,51 @@
         </form>
 
         {# ── SSH access ── #}
+        {# ── This node ──
+           Deliberately outside #configForm, which closes above: like the rest
+           of Administration, this saves on its own rather than on Apply. #}
+        <section id="this-node" class="cfg-section" style="margin-top:12px;">
+            <div class="cfg-section-head">
+                <h2>This node</h2>
+                <span class="desc">What this node is called, and the address that always reaches it.</span>
+            </div>
+            <div class="cfg-body">
+                <div class="cfg-row">
+                    <div class="label-col">
+                        <label for="nodeNameInput">Name</label>
+                        <span class="help">
+                            Shown on the Nodes page when there is more than one node
+                            on the network. Leave it empty to be listed by
+                            identifier. This is only a label, so changing it never
+                            affects how the node is reached.
+                        </span>
+                    </div>
+                    <div>
+                        <div class="cfg-input-row">
+                            <input class="ds-input" id="nodeNameInput" type="text"
+                                   value="{{ node_name }}" maxlength="{{ node_name_max_length }}"
+                                   placeholder="{{ node_id }}">
+                            <button type="button" class="ds-btn primary" id="nodeNameSave" style="flex-shrink:0;">Save</button>
+                        </div>
+                        <div id="nodeNameStatus" style="font-size:12px;margin-top:6px;"></div>
+                    </div>
+                </div>
+                <div class="cfg-row">
+                    <div class="label-col">
+                        <label>Address</label>
+                        <span class="help">
+                            This node's own address. It comes from the hardware and
+                            never changes, so it is the one to bookmark. owl.local is
+                            shared by every node on the network and may reach any of them.
+                        </span>
+                    </div>
+                    <div>
+                        <div class="cfg-readonly mono">http://{{ node_id }}.local</div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
         <section id="ssh" class="cfg-section" style="margin-top:12px;">
             <div class="cfg-section-head">
                 <h2>SSH access</h2>
@@ -663,6 +709,52 @@
 {% block scripts %}
 <script src="/static/calibrate.js"></script>
 <script>
+// This node's own permanent address. Deliberately not owl.local: that name is
+// answered by every node on the network at once, so telling someone to check
+// it proves only that *a* node is reachable, not this one — and on a network
+// with more than one node it would send them to the fleet list instead.
+var NODE_URL = 'http://{{ node_id }}.local';
+
+// This node: rename. Saves on its own, not with the config form, so the button
+// is type=button and posts by itself.
+(function () {
+    var input  = document.getElementById('nodeNameInput');
+    var save   = document.getElementById('nodeNameSave');
+    var status = document.getElementById('nodeNameStatus');
+    if (!input || !save) { return; }
+
+    function show(message, ok) {
+        status.textContent = message;
+        status.style.color = ok ? 'var(--ok)' : 'var(--danger)';
+    }
+
+    save.addEventListener('click', function () {
+        save.disabled = true;
+        show('Saving...', true);
+        var body = new URLSearchParams();
+        body.append('name', input.value);
+        fetch('/node-name', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/x-www-form-urlencoded',
+                'X-CSRFToken': document.querySelector('meta[name="csrf-token"]').content
+            },
+            body: body.toString()
+        })
+            .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, d: d }; }); })
+            .then(function (result) {
+                if (result.ok && result.d.ok) {
+                    input.value = result.d.name;
+                    show(result.d.name ? 'Saved.' : 'Saved. This node will be listed by identifier.', true);
+                } else {
+                    show(result.d.error || 'Could not save the name.', false);
+                }
+            })
+            .catch(function () { show('Could not reach the node.', false); })
+            .finally(function () { save.disabled = false; });
+    });
+})();
+
 // Mode segmented control — change is staged; applied when user clicks Apply changes
 (function() {
     var segmented    = document.getElementById('modeSegmented');
@@ -1088,9 +1180,9 @@
                 if (currentMode() === 'same_network') {
                     connectStatus.textContent = 'Connected to ' + d.ssid + ', verified active. You can safely disconnect Ethernet now.';
                 } else if (lastStatus.ethernet_connected) {
-                    connectStatus.textContent = 'Connected to ' + d.ssid + ', verified active. This device may now only be reachable from ' + d.ssid + '. Keep Ethernet connected for now, join ' + d.ssid + ' with your own computer, and confirm http://retina.local loads there. Once confirmed, it\'s safe to disconnect Ethernet.';
+                    connectStatus.textContent = 'Connected to ' + d.ssid + ', verified active. This device may now only be reachable from ' + d.ssid + '. Keep Ethernet connected for now, join ' + d.ssid + ' with your own computer, and confirm ' + NODE_URL + ' loads there. Once confirmed, it\'s safe to disconnect Ethernet.';
                 } else {
-                    connectStatus.textContent = 'Connected to ' + d.ssid + ', verified active. Join ' + d.ssid + ' with your own computer now and confirm http://retina.local loads there.';
+                    connectStatus.textContent = 'Connected to ' + d.ssid + ', verified active. Join ' + d.ssid + ' with your own computer now and confirm ' + NODE_URL + ' loads there.';
                 }
                 loadStatus();
             } else if (d.state === 'failed') {

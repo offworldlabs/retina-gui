@@ -11,6 +11,7 @@ from config_schema import (
     Tar1090Config,
 )
 from form_utils import schema_to_form_fields
+from node_name import MAX_LENGTH as NAME_MAX_LENGTH
 
 bp = Blueprint('config', __name__)
 
@@ -40,7 +41,7 @@ def _check_wizard_not_active():
 @bp.route("/config")
 def config_page():
     """Configuration page with all settings."""
-    from app import DEV_MODE, config_mgr, device_state, ssh_keys
+    from app import DEV_MODE, config_mgr, device_state, node_name, ssh_keys
 
     config = config_mgr.load_merged_config()
     retina_installed = config_mgr.is_retina_node_installed() or DEV_MODE or request.args.get('demo') == '1'
@@ -68,6 +69,8 @@ def config_page():
                            tar1090_fields=tar1090_fields,
                            retina_tracker_fields=retina_tracker_fields,
                            towers_cache=device_state.get_towers_cache(),
+                           node_name=node_name.get(),
+                           node_name_max_length=NAME_MAX_LENGTH,
                            ssh_keys=ssh_keys.get_keys())
 
 
@@ -97,6 +100,23 @@ def delete_key():
     if key:
         ssh_keys.remove_key(key)
     return redirect(url_for("config.config_page"))
+
+
+@bp.route("/node-name", methods=["POST"])
+def set_node_name():
+    """Rename this node.
+
+    The name is only a label — it is what the fleet page shows on this node's
+    card instead of ret4c844c20, and it reaches the other nodes through the
+    DNS-SD TXT record. Nothing addresses the node by it, so a rename cannot
+    break a bookmark or an SSH config.
+    """
+    from app import node_name
+
+    ok, error = node_name.set(request.form.get("name", ""))
+    if not ok:
+        return jsonify({"ok": False, "error": error}), 400
+    return jsonify({"ok": True, "name": node_name.get()})
 
 
 # The three ADS-B source boxes are one YAML value (host,port,protocol), so they
@@ -215,7 +235,7 @@ def save_config():
             all_errors.update(ConfigManager.format_validation_errors(e, 'retina_tracker'))
 
     if all_errors:
-        from app import DEV_MODE, device_state, ssh_keys
+        from app import DEV_MODE, device_state, node_name, ssh_keys
         return render_template("config.html",
                                retina_installed=config_mgr.is_retina_node_installed() or DEV_MODE or request.args.get('demo') == '1',
                                capture_fields=schema_to_form_fields(CaptureFormConfig, capture_flat),
@@ -225,6 +245,8 @@ def save_config():
                                retina_tracker_fields=schema_to_form_fields(RetinaTrackerConfig, retina_tracker_data),
                                towers_cache=device_state.get_towers_cache(),
                                config_errors=all_errors,
+                               node_name=node_name.get(),
+                               node_name_max_length=NAME_MAX_LENGTH,
                                ssh_keys=ssh_keys.get_keys())
 
     capture_nested = ConfigManager.unflatten_capture_from_form(capture_flat)

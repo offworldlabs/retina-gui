@@ -1,3 +1,4 @@
+{% from "_fleet_bar.html" import fleet_bar %}
 <!DOCTYPE html>
 <html>
 <head>
@@ -16,29 +17,17 @@
 <body>
 <div class="page">
 
-    {% block navbar %}
-    <nav class="nav">
-        <a href="/" style="text-decoration:none;color:inherit;">
-        <div class="ds-brand">
-            <div class="ds-brand-logo" style="background:transparent;border:0;padding:0;">
-                <img src="/static/logo-192.png" alt="OWL-OS" width="28" height="28" style="display:block;" />
-            </div>
-            <div class="ds-brand-text">
-                <div class="ds-brand-name">OWL-OS</div>
-                <div class="ds-brand-node">Node <span class="mono">{{ node_id or '-' }}</span></div>
-            </div>
-        </div>
-        </a>
-        <div class="nav-tabs">
-            <a class="nav-tab{% if active_page == 'home' %} active{% endif %}" href="/">Home</a>
-            <a class="nav-tab{% if active_page == 'config' %} active{% endif %}" href="/config">Config</a>
-        </div>
-        <div class="nav-spacer"></div>
-        <a class="ds-btn ghost sm" href="https://dash.retina.fm" target="_blank" rel="noopener">
-            <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3h7v7"/><path d="M21 3l-9 9"/><path d="M21 14v5a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5"/></svg>
-            Retina Dashboard
-        </a>
-    </nav>
+    {# Parent row: which node (or the fleet-wide Summary). #}
+    {% block navbar %}{{ fleet_bar(fleet_nodes, node_id, active_page) }}{% endblock %}
+
+    {# Child row: which page of the node named above. Blanked by pages that are
+       not scoped to a single node — Summary — and by the setup wizard, where
+       Home and Config are deliberately unreachable until setup finishes. #}
+    {% block subnav %}
+    <div class="subnav">
+        <a class="nav-tab{% if active_page == 'home' %} active{% endif %}" href="/">Home</a>
+        <a class="nav-tab{% if active_page == 'config' %} active{% endif %}" href="/config">Config</a>
+    </div>
     {% endblock %}
 
     {% block content %}{% endblock %}

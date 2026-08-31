@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+{% set active_page = 'summary' %}
+{% block title %}Summary - OWL-OS{% endblock %}
+
+{# Fleet scope, not node scope: Home and Config below would be about whichever
+   node happened to serve this page, which is not what is being asked about
+   here. #}
+{% block subnav %}{% endblock %}
+
+{% block content %}
+{#
+   Deliberately empty.
+
+   This page is the fleet-scope slot in the banner and is left as a blank
+   slate for the UX and setup teams to design into. It renders the banner and
+   nothing else on purpose, so anything that appears here later is theirs
+   rather than a developer's placeholder that has to be argued out of the way.
+
+   Add page content inside <main class="main"> below.
+#}
+<main class="main">
+</main>
+{% endblock %}

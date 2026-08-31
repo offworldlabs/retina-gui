@@ -7,7 +7,12 @@ bp = Blueprint('home', __name__)
 
 @bp.route("/")
 def index():
-    """Home page with node ID, services, and SSH keys."""
+    """Home page with node ID, services, and SSH keys.
+
+    Host-agnostic. Arriving on owl.local and arriving on this node's own
+    ret<node_id>.local produce the same page: the shared alias is just a way in,
+    and the banner is what moves you between nodes from there.
+    """
     from app import config_mgr, device_state, get_node_id, mender, ssh_keys, telemetry_status
 
     if device_state.is_setup_wizard_in_progress():

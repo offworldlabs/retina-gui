@@ -131,8 +131,41 @@ h1, h2, h3, h4, h5, h6 {
     position: sticky;
     top: 0;
     z-index: 5;
+    /* Bootstrap also defines .nav, and sets flex-wrap:wrap on it. Left to that,
+       the banner folds onto a second row once the tab strip grows: at six nodes
+       on a 1400px screen the Retina Dashboard button dropped to its own line.
+       The tab strip scrolls instead (see .nav-tabs). */
+    flex-wrap: nowrap;
 }
-.nav-tabs { display: flex; gap: 2px; align-self: stretch; align-items: center; border-bottom: none; }
+/* The brand and the two outbound buttons keep their size; the tab strip is the
+   only part that gives, so a long fleet never squashes the furniture around it. */
+.nav > a { flex-shrink: 0; }
+.nav-tabs {
+    display: flex;
+    gap: 2px;
+    align-self: stretch;
+    align-items: center;
+    border-bottom: none;
+    /* Scroll rather than clip once there are more nodes than fit. min-width:0
+       is what lets a flex item shrink below its content width at all; without
+       it overflow-x never engages and the tabs just push the row wider.
+       Deliberately `auto`, not a hidden-scrollbar trick: with a normal fleet
+       there is no overflow and so no scrollbar, and when there is one it is
+       the only affordance saying more nodes are off to the right. */
+    overflow-x: auto;
+    min-width: 0;
+}
+/* Individual tabs never compress; the strip scrolls past them instead. */
+.nav-tabs > .nav-tab { flex-shrink: 0; }
+
+/* Below the app's narrow breakpoint there is not room for the brand, the tab
+   strip and both outbound buttons on one line, and holding nowrap there
+   squeezes the tab strip to nothing: every node tab disappears rather than
+   scrolling. Wrapping is the right answer at this width (the footer already
+   wraps), so the strip gets its own row and still scrolls within it. */
+@media (max-width: 600px) {
+    .nav { flex-wrap: wrap; }
+}
 .nav-tab {
     padding: 7px 14px;
     border-radius: 8px;
@@ -141,10 +174,32 @@ h1, h2, h3, h4, h5, h6 {
     color: var(--ink-3);
     text-decoration: none;
     transition: background .12s, color .12s;
+    /* inline-flex so a tab can carry an icon beside its label. Harmless for
+       the text-only tabs: with one child there is nothing for gap to act on. */
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
 }
+/* Held a step back from the label so the mark reads as a bullet rather than
+   as part of the name, and does not compete with it on the active tab. */
+.nav-tab-icon { color: var(--ink-3); flex-shrink: 0; }
+.nav-tab.active .nav-tab-icon,
+.nav-tab:hover .nav-tab-icon { color: var(--ink-2); }
 .nav-tab:hover  { color: var(--ink); background: var(--surface-2); }
 .nav-tab.active { color: var(--ink); background: var(--surface-2); }
 .nav-spacer { flex: 1; }
+
+/* Child row of the banner: which page of the node named in the row above.
+   Set apart from .nav by a lighter ground and no border of its own, so the two
+   rows read as one banner with a hierarchy rather than as two navbars. */
+.subnav {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    padding: 8px 28px;
+    border-bottom: 1px solid var(--line);
+    background: var(--surface-2);
+}
 /* ── Spectrum mode overrides ──────────────────── */
 .main.spectrum-mode { max-width: 1200px; }
 .spectrum-section { display: flex; flex-direction: column; flex: 1; }

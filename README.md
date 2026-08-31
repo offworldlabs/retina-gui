@@ -1,6 +1,6 @@
 # retina-gui
 
-Python-based web GUI baked into owl-os and deployed to every Retina node. Served locally at `owl.local` and `retina.local` on port 80.
+Python-based web GUI baked into owl-os and deployed to every Retina node. Served on port 80 at the node's own `ret<node_id>.local`, and at the shared `owl.local`, which every node on the network answers.
 
 ## Features
 

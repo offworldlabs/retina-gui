@@ -33,6 +33,9 @@ from services import (  # noqa: F401  (re-exported for routes)
     device_state,
     mender,
     network_mgr,
+    node_name,
+    peers,
+    read_node_id,
     retina_tracker_client,
     ssh_keys,
     telemetry_status,
@@ -114,6 +117,9 @@ except Exception:
 # globally).
 if "pytest" not in sys.modules:
     tracker_capture.start()
+    # Same reasoning: the peer directory owns a browse thread and a probe
+    # thread, and the probe thread makes real HTTP requests to other nodes.
+    peers.start()
 
 
 def get_node_id():
@@ -133,17 +139,26 @@ def get_node_id():
 # Inject common template variables (navbar, footer)
 @app.context_processor
 def inject_globals():
+    # Imported here rather than at module scope: the route modules are
+    # deliberately imported at the bottom of this file, after the app exists.
+    from routes.fleet import banner_nodes
+
     owl_os_version, retina_node_version = mender.get_versions()
     return {
         'node_id': get_node_id(),
         'owl_os_version': owl_os_version,
         'retina_node_version': retina_node_version,
+        # One banner tab per node, on every page. An in-memory list, copied
+        # and sorted — cheap enough to do per render, and it has to be here
+        # rather than per-route because the banner is in base.html.
+        'fleet_nodes': banner_nodes(),
     }
 
 
 # Register blueprints
 from routes.calibrate import bp as calibrate_bp
 from routes.config import bp as config_bp
+from routes.fleet import bp as fleet_bp
 from routes.home import bp as home_bp
 from routes.mender_routes import bp as mender_bp
 from routes.mode import bp as mode_bp
@@ -161,6 +176,7 @@ app.register_blueprint(mode_bp)
 app.register_blueprint(network_bp)
 app.register_blueprint(calibrate_bp)
 app.register_blueprint(tracker_preview_bp)
+app.register_blueprint(fleet_bp)
 
 
 # Paths that must keep working while a run holds the GUI: the config page
@@ -172,6 +188,15 @@ _CALIBRATION_ALLOWED_PREFIXES = (
     '/calibrate',     # status, cancel, apply
     '/static',
     '/favicon',
+    # Fleet-scope routes belong to whoever is browsing, who may not be anywhere
+    # near this node and is not the person who started a calibration on it.
+    # Holding them on this node's config page would be answering a question
+    # about the fleet with a page about one node — and /healthz is how every
+    # other node decides whether this one still exists, so a redirect there
+    # would make a calibrating node look unreachable to its peers.
+    '/summary',
+    '/api/fleet',
+    '/healthz',
 )
 
 
