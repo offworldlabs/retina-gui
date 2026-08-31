@@ -288,6 +288,31 @@ def test_prune_runs_independent_of_viewers(monkeypatch):
     assert _wait_until(lambda: len(service.history.raw_points) == 0, timeout=1.0)
 
 
+class EndlessBlah2Client:
+    """Never runs out of frames, each with a fresh timestamp.
+
+    The draining FakeBlah2Client cannot be used for a test that waits on a
+    *second* render. `_run()` only re-renders when `new_frames_since_render >
+    0`, and the first render resets that counter. The capture thread starts on
+    service.start() and consumes frames at POLL_INTERVAL_S while the main
+    thread is still on its way to attach(), so with a fixed two-frame list
+    there is a race: if both frames are gone before a viewer is registered,
+    the first render fires on _refresh_requested, the counter resets, no frame
+    ever arrives again and the second render can never happen. The wait then
+    expires no matter how long it is.
+
+    That raced roughly 1 run in 20, on any machine, and a longer timeout would
+    not have helped.
+    """
+
+    def __init__(self):
+        self._ts = 1000
+
+    def get_detection(self):
+        self._ts += 1000
+        return make_frame(self._ts)
+
+
 def test_refresh_failure_does_not_kill_capture_loop(monkeypatch):
     calls = {"n": 0}
 
@@ -297,8 +322,7 @@ def test_refresh_failure_does_not_kill_capture_loop(monkeypatch):
             raise ValueError("boom")
 
     stub_refresh(monkeypatch, None, side_effect=flaky)
-    client = FakeBlah2Client([make_frame(1000), make_frame(2000)])
-    service = make_service(client)
+    service = make_service(EndlessBlah2Client())
     service.start()
 
     q = service.attach()
