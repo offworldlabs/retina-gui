@@ -541,7 +541,7 @@
         <section id="cloud" class="cfg-section">
             <div class="cfg-section-head">
                 <h2>Cloud services</h2>
-                <span class="desc">Automatic OS &amp; package updates and remote support.</span>
+                <span class="desc">This node's link to Offworld: software updates and registration.</span>
             </div>
             <div class="cfg-body">
                 <div class="toggle-row" style="padding:0;border:0;">
@@ -551,7 +551,7 @@
                     </label>
                     <div class="body">
                         <div class="name">Enable cloud services</div>
-                        <div class="desc" id="cloudServicesStatus">Automatic software updates and remote support.</div>
+                        <div class="desc" id="cloudServicesStatus">Software updates and registration. The Remote support settings above need this too.</div>
                     </div>
                 </div>
             </div>
@@ -703,7 +703,8 @@
                 <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
             </div>
             <div class="modal-body" style="font-size:13.5px;color:var(--ink-2);">
-                <p>This will stop automatic software updates and disable remote support access.</p>
+                <p>This stops automatic software updates and registration with Offworld.</p>
+                <p>It also switches off everything under Remote support, whatever those two settings say.</p>
                 <p class="mb-0">You can re-enable at any time.</p>
             </div>
             <div class="modal-footer">
@@ -1437,7 +1438,7 @@ if (discardBtn) discardBtn.addEventListener('click', () => location.reload());
                     setTimeout(loadCloudStatus, 10000);
                 } else {
                     toggle.disabled = false;
-                    status.textContent = 'Automatic software updates and remote support.';
+                    status.textContent = 'Software updates and registration. The Remote support settings above need this too.';
                 }
             })
             .catch(() => { toggle.checked = true; toggle.disabled = false; });
@@ -1469,7 +1470,7 @@ if (discardBtn) discardBtn.addEventListener('click', () => location.reload());
         })
         .then(r => r.json().then(data => ({ok: r.ok, data})))
         .then(({ok, data}) => {
-            if (ok && data.success) { status.textContent = 'Settings applied'; setTimeout(() => { status.textContent = 'Automatic software updates and remote support.'; }, 3000); }
+            if (ok && data.success) { status.textContent = 'Settings applied'; setTimeout(() => { status.textContent = 'Software updates and registration. The Remote support settings above need this too.'; }, 3000); }
             else { status.textContent = data.error; toggle.checked = !toggle.checked; }
         })
         .catch(e => { status.textContent = 'Error: ' + e.message; toggle.checked = !toggle.checked; })
