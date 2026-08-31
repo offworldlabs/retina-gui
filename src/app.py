@@ -27,12 +27,14 @@ from services import (  # noqa: F401  (re-exported for routes)
     TELEMETRY_STATUS_PATH,
     TOWER_FINDER_URL,
     USER_CONFIG_PATH,
+    access_identity,
     apply_service,
     blah2_client,
     calibrator,
     config_mgr,
     device_state,
     mender,
+    mender_connect,
     network_mgr,
     node_name,
     peers,
@@ -260,7 +262,16 @@ def _gate_the_remote_pathways():
     if request.path.startswith(_REMOTE_PUBLIC_PREFIXES):
         return None
 
-    if not session.get('remote_authed'):
+    # Cloudflare Access is the gate in front of this hostname, so a valid
+    # assertion is who this is. Verified on the node rather than trusted from a
+    # header: if the Access application were ever deleted or misconfigured the
+    # hostname would be open, and this is the only thing that would notice.
+    identity = access_identity.identity(
+        request.headers.get('Cf-Access-Jwt-Assertion'))
+    if identity:
+        g.access_identity = identity
+
+    if not (identity or session.get('remote_authed')):
         if request.method == 'GET':
             # full_path always appends '?', even with no query string, which
             # would send people to '/config?' after signing in.
@@ -278,9 +289,10 @@ def _gate_the_remote_pathways():
         # outlived the session.
         abort(403)
 
-    # Authenticated, but some things still need someone at the device. The
-    # password may have been shared, and these are the operations that would let
-    # the person it was shared with outlast a rotation of it.
+    # Authenticated, but some things still need someone at the device, and that
+    # applies to our own engineers too. If an Access session could add an SSH key
+    # here, support access would be a route to shell access and the two owner
+    # agreements would stop being independent of each other.
     if requires_presence(request.path):
         abort(403, "This can only be done from the local network")
 

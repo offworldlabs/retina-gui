@@ -6,6 +6,7 @@ else's node.
 """
 
 import importlib
+import json
 import os
 import stat
 
@@ -156,6 +157,53 @@ def test_generated_passwords_are_long_and_distinct():
     # Ambiguous glyphs would be read aloud wrong, which is the normal way this
     # password gets shared.
     assert not set("01lIO") & set(a)
+
+
+# ── the remote shell agreement ───────────────────────────────────
+#
+# Recorded by its exception, unlike support access, because it defaults ON.
+# Every node in the fleet already has interactive access, so an untouched node
+# must keep it, and an unwritable /data must not silently revoke it.
+
+def test_shell_is_allowed_by_default(store):
+    assert store.is_shell_allowed() is True
+
+
+def test_declining_shell_is_recorded(store):
+    assert store.record_shell_allowed(False) == (True, None)
+    assert store.is_shell_allowed() is False
+
+
+def test_shell_can_be_allowed_again(store):
+    store.record_shell_allowed(False)
+    assert store.record_shell_allowed(True) == (True, None)
+    assert store.is_shell_allowed() is True
+
+
+def test_allowing_shell_twice_is_harmless(store):
+    assert store.record_shell_allowed(True) == (True, None)
+    assert store.record_shell_allowed(True) == (True, None)
+    assert store.is_shell_allowed() is True
+
+
+def test_the_two_agreements_are_independent(store):
+    """The whole point of two settings. Neither may move the other."""
+    store.set_password(GOOD_PASSWORD)
+    store.set_enabled(True)
+    store.record_shell_allowed(False)
+    assert store.is_enabled() is True
+    assert store.is_shell_allowed() is False
+
+    store.set_enabled(False)
+    assert store.is_shell_allowed() is False
+    store.record_shell_allowed(True)
+    assert store.is_enabled() is False
+    assert store.is_shell_allowed() is True
+
+
+def test_shell_state_reaches_the_status(store):
+    store.record_shell_allowed(False)
+    assert store.status()["shell_allowed"] is False
 
 
 # ── the inventory marker ─────────────────────────────────────────
@@ -323,6 +371,109 @@ def test_ordinary_paths_do_not_need_presence(path):
     assert requires_presence(path) is False
 
 
+# ── Cloudflare Access at the gate ────────────────────────────────
+#
+# Support access is gated by Access at the edge; the node verifies the assertion
+# rather than trusting it, so a deleted or misconfigured Access application
+# cannot silently leave a node open.
+
+ACCESS_TEAM = "offworldlab.cloudflareaccess.com"
+ACCESS_AUD = "b62aeb13c198cd2118bd5d92b350f2af5c42830c703baeab42aad5fa3e01f29a"
+ENGINEER = "jehan@offworldlab.com"
+
+
+@pytest.fixture(scope="module")
+def access_keys():
+    from cryptography.hazmat.primitives.asymmetric import rsa
+    private = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    return private, private.public_key()
+
+
+def _arm_access(client, temp_dir, access_keys):
+    """Point the node's verifier at a key set we control, as Cloudflare would."""
+    import jwt as pyjwt
+
+    _, public = access_keys
+    jwk = json.loads(pyjwt.algorithms.RSAAlgorithm.to_jwk(public))
+    jwk.update({"kid": "kid-1", "alg": "RS256", "use": "sig"})
+
+    with open(os.path.join(temp_dir, "access.json"), "w") as f:
+        json.dump({"team_domain": ACCESS_TEAM, "aud": ACCESS_AUD}, f)
+
+    class HTTP:
+        @staticmethod
+        def get(url, timeout=None):
+            class R:
+                @staticmethod
+                def raise_for_status():
+                    return None
+
+                @staticmethod
+                def json():
+                    return {"keys": [jwk]}
+            return R()
+
+    client.access_identity.http = HTTP()
+
+
+def _assertion(access_keys, *, aud=ACCESS_AUD, email=ENGINEER):
+    import time as _time
+
+    import jwt as pyjwt
+    private, _ = access_keys
+    return pyjwt.encode(
+        {"aud": aud, "iss": f"https://{ACCESS_TEAM}", "email": email,
+         "exp": int(_time.time()) + 300},
+        private, algorithm="RS256", headers={"kid": "kid-1"})
+
+
+def test_a_verified_access_assertion_needs_no_password(live, temp_dir, access_keys):
+    _arm_access(live, temp_dir, access_keys)
+    r = live.get("/", base_url=OWNER_URL,
+                 headers={"Cf-Access-Jwt-Assertion": _assertion(access_keys)})
+    assert r.status_code == 200
+
+
+def test_an_assertion_for_another_application_is_not_accepted(live, temp_dir, access_keys):
+    """This team runs Access on other hostnames. A session for one of those is
+    perfectly signed and must not open a node."""
+    _arm_access(live, temp_dir, access_keys)
+    r = live.get("/", base_url=OWNER_URL,
+                 headers={"Cf-Access-Jwt-Assertion": _assertion(access_keys, aud="other")})
+    assert r.status_code == 302
+
+
+def test_a_forged_header_is_not_accepted(live, temp_dir, access_keys):
+    _arm_access(live, temp_dir, access_keys)
+    r = live.get("/", base_url=OWNER_URL,
+                 headers={"Cf-Access-Jwt-Assertion": "not-a-token"})
+    assert r.status_code == 302
+
+
+def test_an_assertion_does_not_lift_the_presence_tier(live, temp_dir, access_keys):
+    """The invariant the two owner agreements rest on.
+
+    An engineer authenticated by Access still cannot add an SSH key through the
+    browser. If they could, support access would be a route to shell access and
+    an owner who declined the shell would not actually have declined it.
+    """
+    _arm_access(live, temp_dir, access_keys)
+    headers = {"Cf-Access-Jwt-Assertion": _assertion(access_keys)}
+    assert live.get("/", base_url=OWNER_URL, headers=headers).status_code == 200
+    for path in ("/ssh-keys", "/remote-access/shell", "/mender/install"):
+        r = live.post(path, data={"x": "1"}, base_url=OWNER_URL, headers=headers)
+        assert r.status_code == 403, path
+
+
+def test_an_unconfigured_verifier_refuses_every_assertion(live, access_keys):
+    """Before node-infra delivers the audience there is nothing to check
+    against, and admitting anyone meanwhile would be the worst default."""
+    assert live.access_identity.is_configured() is False
+    r = live.get("/", base_url=OWNER_URL,
+                 headers={"Cf-Access-Jwt-Assertion": _assertion(access_keys)})
+    assert r.status_code == 302
+
+
 # ── the gate, end to end ─────────────────────────────────────────
 
 @pytest.fixture
@@ -348,6 +499,8 @@ def client(temp_dir, config_files, test_manifests_dir):
     os.environ["NODE_ID_FILE"] = node_id_file
     os.environ["REMOTE_ACCESS_DOMAIN"] = DOMAIN
     os.environ["SESSION_COOKIE_SECURE"] = "0"
+    os.environ["MENDER_CONNECT_CONF"] = os.path.join(temp_dir, "mender-connect.conf")
+    os.environ["ACCESS_CONFIG_PATH"] = os.path.join(temp_dir, "access.json")
 
     import services as services_module
     importlib.reload(services_module)
@@ -358,10 +511,13 @@ def client(temp_dir, config_files, test_manifests_dir):
     app_module.app.config["WTF_CSRF_ENABLED"] = False
     with app_module.app.test_client() as c:
         c.remote_access = services_module.remote_access
+        c.access_identity = services_module.access_identity
         yield c
 
     del os.environ["SESSION_COOKIE_SECURE"]
     del os.environ["REMOTE_ACCESS_DOMAIN"]
+    del os.environ["MENDER_CONNECT_CONF"]
+    del os.environ["ACCESS_CONFIG_PATH"]
 
 
 @pytest.fixture
@@ -462,18 +618,64 @@ def test_the_sign_out_control_only_appears_on_the_owner_pathway(live):
     assert b"/logout" not in live.get("/", base_url=PORT_FORWARD_URL).data
 
 
-def test_the_password_is_shown_on_the_lan(live):
-    live.remote_access.set_password("kitchen radar")
-    assert b"kitchen radar" in live.get("/config", base_url=LAN_URL).data
-
-
-def test_the_password_is_withheld_on_the_owner_pathway(live):
-    """Otherwise "only people on your network can see it" would be false: whoever
-    the password was shared with could read it straight back off the page."""
+def test_the_password_is_never_rendered(live):
+    """Support access is gated by Cloudflare Access, so the node password is not
+    part of the owner-facing design and must not leak onto a page on any path."""
     live.remote_access.set_password("kitchen radar")
     _sign_in(live, "kitchen radar")
-    body = live.get("/config", base_url=OWNER_URL).data
-    assert b"kitchen radar" not in body
+    for url in (LAN_URL, OWNER_URL, PORT_FORWARD_URL):
+        assert b"kitchen radar" not in live.get("/config", base_url=url).data
+
+
+def _write_connect_conf(temp_dir, shell_enabled):
+    with open(os.path.join(temp_dir, "mender-connect.conf"), "w") as f:
+        json.dump({"Terminal": {"Disable": not shell_enabled},
+                   "PortForward": {"Disable": not shell_enabled},
+                   "FileTransfer": {"Disable": False}}, f)
+
+
+def test_page_warns_when_the_setting_was_not_applied(live, temp_dir):
+    """The page must show what the node is doing, not what we recorded.
+
+    Without this the owner sees their own choice reflected back while
+    mender-connect carries on serving the opposite, which for a setting whose
+    entire job is stating what we can and cannot do is the wrong way to fail.
+    """
+    _write_connect_conf(temp_dir, shell_enabled=True)   # node still allows it
+    live.remote_access.record_shell_allowed(False)      # but we recorded declined
+    body = live.get("/config", base_url=LAN_URL).data
+    assert b"Not applied" in body
+
+
+def test_page_is_plain_when_record_and_node_agree(live, temp_dir):
+    _write_connect_conf(temp_dir, shell_enabled=False)
+    live.remote_access.record_shell_allowed(False)
+    body = live.get("/config", base_url=LAN_URL).data
+    assert b"Not applied" not in body
+    assert b"No session can be opened" in body
+
+
+def test_page_says_so_when_the_node_cannot_be_read(live, temp_dir):
+    """No mender-connect.conf at all, which is every dev machine and any node
+    where the file has gone missing."""
+    path = os.path.join(temp_dir, "mender-connect.conf")
+    if os.path.exists(path):
+        os.remove(path)
+    body = live.get("/config", base_url=LAN_URL).data
+    assert b"could not confirm" in body
+
+
+def test_no_estimate_is_promised_for_the_connection(live):
+    """The old copy quoted 15 minutes, a figure that depends on node-infra's
+    timer, which this node has no knowledge of and cannot promise."""
+    body = live.get("/config", base_url=LAN_URL).data
+    assert b"15 minutes" not in body
+
+
+def test_both_agreements_appear_on_the_config_page(live):
+    body = live.get("/config", base_url=LAN_URL).data
+    assert b'id="remoteToggle"' in body
+    assert b'id="shellToggle"' in body
 
 
 def test_logout_ends_the_session(live):
