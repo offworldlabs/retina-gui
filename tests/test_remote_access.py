@@ -465,6 +465,48 @@ def test_an_assertion_does_not_lift_the_presence_tier(live, temp_dir, access_key
         assert r.status_code == 403, path
 
 
+def test_no_email_is_ever_written_to_the_device(live, temp_dir, access_keys):
+    """Nothing identifying a person may persist on a customer's node.
+
+    Access assertions carry an email, and Cloudflare adds a plain
+    Cf-Access-Authenticated-User-Email header alongside. Both are read in
+    memory for the duration of a request and neither is stored, logged or
+    rendered. Who may access a node lives in the Access policy, in Cloudflare,
+    not on the node.
+
+    Pinned here because it is the kind of property that is true until somebody
+    adds a log line meaning well.
+    """
+    _arm_access(live, temp_dir, access_keys)
+    headers = {"Cf-Access-Jwt-Assertion": _assertion(access_keys),
+               "Cf-Access-Authenticated-User-Email": ENGINEER}
+
+    for url in (OWNER_URL, LAN_URL):
+        body = live.get("/config", base_url=url, headers=headers).data
+        assert ENGINEER.encode() not in body, f"email rendered into a page on {url}"
+
+    written = []
+    for root, _dirs, files in os.walk(temp_dir):
+        for name in files:
+            path = os.path.join(root, name)
+            try:
+                with open(path, "rb") as f:
+                    if ENGINEER.encode() in f.read():
+                        written.append(path)
+            except OSError:
+                pass
+    assert not written, f"email persisted to {written}"
+
+
+def test_the_access_config_holds_nothing_personal(live, temp_dir, access_keys):
+    """What node-infra delivers is a team domain and an opaque application id."""
+    _arm_access(live, temp_dir, access_keys)
+    with open(os.path.join(temp_dir, "access.json")) as f:
+        config = json.load(f)
+    assert set(config) == {"team_domain", "aud"}
+    assert "@" not in json.dumps(config)
+
+
 def test_an_unconfigured_verifier_refuses_every_assertion(live, access_keys):
     """Before node-infra delivers the audience there is nothing to check
     against, and admitting anyone meanwhile would be the worst default."""
