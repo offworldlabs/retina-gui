@@ -159,14 +159,19 @@ class RemoteAccess:
         return state if isinstance(state, dict) else {}
 
     def is_enabled(self):
-        """True only when the owner turned it on *and* set a password.
+        """Whether the owner permits support to reach this node's interface.
 
-        Both halves are required deliberately. A node advertising a hostname it
-        will refuse every visitor on is worse than one that never advertised it,
-        because the owner has no way to tell the difference from outside.
+        The owner's choice alone. It used to also require a password, from when
+        the owner signed in with one; support access is gated by Cloudflare
+        Access now and the page no longer offers a way to set one, so that
+        condition made the setting impossible to turn on at all.
+
+        Nothing is advertised prematurely by dropping it. The hostname only
+        starts serving once the connector has a token, and node-infra installs
+        the Access config before the token precisely so the node can identify
+        callers from the first request it answers.
         """
-        state = self._read()
-        return bool(state.get("enabled")) and bool(state.get("password"))
+        return bool(self._read().get("enabled"))
 
     def has_password(self):
         return bool(self._read().get("password"))
@@ -222,8 +227,7 @@ class RemoteAccess:
         """What the config page needs to render the section. Never the password."""
         state = self._read()
         return {
-            "enabled": bool(state.get("enabled")) and bool(state.get("password")),
-            "requested": bool(state.get("enabled")),
+            "enabled": bool(state.get("enabled")),
             "has_password": bool(state.get("password")),
             "shell_allowed": self.is_shell_allowed(),
             "updated_at": state.get("updated_at"),
@@ -264,16 +268,8 @@ class RemoteAccess:
         return self._update(password=password)
 
     def set_enabled(self, enabled):
-        """Turn remote access on or off. Returns (ok, error).
-
-        Turning it on without a password is refused rather than silently
-        half-applied: see is_enabled() for why an advertised-but-unusable
-        hostname is the worst of the three states.
-        """
-        enabled = bool(enabled)
-        if enabled and not self.has_password():
-            return False, "Set a password before turning on remote access"
-        return self._update(enabled=enabled)
+        """Turn support access on or off. Returns (ok, error)."""
+        return self._update(enabled=bool(enabled))
 
     def _update(self, **changes):
         state = self._read()

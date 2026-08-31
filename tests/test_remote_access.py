@@ -92,16 +92,11 @@ def test_short_passwords_are_refused(store):
     assert store.has_password() is False
 
 
-def test_cannot_enable_without_a_password(store):
-    """An advertised hostname that refuses everyone is the worst of the states."""
-    ok, error = store.set_enabled(True)
-    assert ok is False
-    assert "password" in error.lower()
-    assert store.is_enabled() is False
-
-
-def test_enable_after_setting_a_password(store):
-    store.set_password(GOOD_PASSWORD)
+def test_support_access_needs_no_password(store):
+    """Cloudflare Access gates the support path, and the page offers no way to
+    set a password. Requiring one made the setting impossible to turn on, which
+    is how it shipped broken and why this test exists."""
+    assert store.has_password() is False
     assert store.set_enabled(True) == (True, None)
     assert store.is_enabled() is True
 
