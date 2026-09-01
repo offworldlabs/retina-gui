@@ -212,3 +212,54 @@ def test_dev_mode_writes_without_restarting(tmp_path, monkeypatch):
     mc = MenderConnect(conf_path=str(path), dev_mode=True)
     assert mc.set_shell_enabled(False) == (True, None)
     assert mc.is_shell_enabled() is False
+
+
+# ── surviving an OS update ───────────────────────────────────────
+#
+# The owner's choice lives in /data and survives an update. The enforcement
+# lives on the rootfs and does not: owl-os ships mender-connect.conf with both
+# gated features enabled, so an update silently restores a shell the owner had
+# declined, while the marker, the config page and the inventory attribute all
+# still reported it declined.
+
+def _shipped(conf):
+    """Put the config back exactly as owl-os ships it, which is what an OS
+    update does to the rootfs."""
+    conf.write_text(json.dumps(SHIPPED_CONF, indent=2))
+
+
+def test_startup_reapplies_a_declined_agreement(conf, connect):
+    """The defect, from the owner's side: they declined, an update happened,
+    and without this the daemon would accept sessions again."""
+    connect.set_shell_enabled(False)
+    assert connect.is_shell_enabled() is False
+
+    _shipped(conf)  # the update
+    assert connect.is_shell_enabled() is True, "precondition: update re-enabled it"
+
+    # What startup does: recorded choice wins over whatever is on disk.
+    connect.set_shell_enabled(False)
+    data = _load(conf)
+    for feature in GATED_FEATURES:
+        assert data[feature]["Disable"] is True, feature
+
+
+def test_reapplying_still_leaves_file_transfer_alone(conf, connect):
+    """A repair must not widen or narrow anything the agreement does not cover.
+    File transfer carries the tunnel token, so gating it here would couple the
+    two agreements together through the back door."""
+    _shipped(conf)
+    connect.set_shell_enabled(False)
+    assert _load(conf)["FileTransfer"] == {"Disable": False}
+
+
+def test_reapplying_preserves_what_the_update_shipped(conf, connect):
+    """The update's config is the authority on everything except the two gated
+    features: transfer limits, the shell user, session caps. A repair that
+    reverted those would undo part of the update it is reacting to."""
+    updated = dict(SHIPPED_CONF)
+    updated["Sessions"] = {"ExpireAfterIdle": 7200, "MaxPerUser": 9}
+    conf.write_text(json.dumps(updated))
+
+    connect.set_shell_enabled(False)
+    assert _load(conf)["Sessions"] == {"ExpireAfterIdle": 7200, "MaxPerUser": 9}

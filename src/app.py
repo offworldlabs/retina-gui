@@ -121,8 +121,64 @@ app.session_interface = _PathwaySessionInterface()
 
 csrf = CSRFProtect(app)
 
+
+def _reapply_shell_agreement():
+    """Make mender-connect agree with the owner's recorded choice.
+
+    The choice lives in /data, which is its own partition and survives an OS
+    update. The enforcement lives in /etc/mender/mender-connect.conf, on the
+    A/B rootfs, which does not: an update replaces it with the template owl-os
+    ships, where Terminal and PortForward are both enabled.
+
+    Nothing re-applied it, so an owner who declined a shell had it restored by
+    the next update while the marker, the config page and the `remote_shell`
+    inventory attribute all still reported it declined. Recorded state and
+    enforced state diverged silently, in the permissive direction, which is the
+    only direction that matters here: everyone would have believed the refusal
+    was still in force.
+
+    That makes the marker in /data authoritative and this the thing that
+    enforces it, rather than the write that happened to run when the owner last
+    clicked.
+
+    Acts only on a mismatch, which matters twice over. This module body is
+    executed twice per process (see services.py), so the second pass finds
+    nothing to do; and a node whose config already agrees is left alone rather
+    than rewritten and its daemon restarted on every boot.
+    """
+    if DEV_MODE:
+        return
+    try:
+        wanted = remote_access.is_shell_allowed()
+        actual = mender_connect.is_shell_enabled()
+        # None means the config could not be read. mender_connect refuses to
+        # invent a replacement, and it is right to: writing a plausible one
+        # would reconstruct transfer limits and a shell user we have no basis
+        # for, and could widen access rather than restore it.
+        if actual is None or actual == wanted:
+            return
+        ok, error = mender_connect.set_shell_enabled(wanted)
+        if ok:
+            app.logger.warning(
+                "Re-applied the remote shell agreement: the owner has it %s, "
+                "but this node was set to %s sessions. An OS update replaces "
+                "mender-connect.conf, so this is the expected repair after one.",
+                "on" if wanted else "off",
+                "allow" if actual else "refuse")
+        else:
+            app.logger.error(
+                "Could not re-apply the remote shell agreement (%s). This node "
+                "will %s sessions while its owner has it %s.",
+                error, "allow" if actual else "refuse", "on" if wanted else "off")
+    except Exception:
+        # Never let this stop the GUI booting. A node that will not serve its
+        # own config page is worse than one whose shell setting needs a click.
+        app.logger.exception("Re-applying the remote shell agreement failed")
+
+
 if not DEV_MODE:
     device_state.apply_startup_preferences()
+    _reapply_shell_agreement()
 
 # Always boot into radar mode — delete any persisted spectrum state
 try:
