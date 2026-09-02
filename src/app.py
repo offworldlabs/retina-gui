@@ -179,6 +179,17 @@ def _reapply_shell_agreement():
 if not DEV_MODE:
     device_state.apply_startup_preferences()
     _reapply_shell_agreement()
+    # The inventory marker is the only thing node-infra reads, and a node that
+    # has never been touched has no state file and so no marker. That was
+    # consistent while support access defaulted off; it is not now that it
+    # defaults on, and without this such a node would keep reporting
+    # remote_access=false until somebody happened to toggle something.
+    #
+    # Best effort, like the marker write it wraps: never worth failing a boot.
+    try:
+        remote_access.publish_marker()
+    except Exception:
+        app.logger.exception("Could not publish the support access marker")
 
 # Always boot into radar mode — delete any persisted spectrum state
 try:

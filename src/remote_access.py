@@ -92,6 +92,10 @@ CLOUDFLARED_UNIT = "cloudflared.service"
 #:
 #: A marker rather than the state file itself because that one is 0600 root and
 #: holds the password, and the inventory script is POSIX shell.
+#:
+#: Presence still means enabled, which is why defaulting on needs the file to
+#: appear on a node nobody has touched: the inventory script reads the file, not
+#: is_enabled(). publish_marker() at startup is what puts it there.
 ENABLED_MARKER = "remote-access-enabled"
 
 #: The remote shell agreement, recorded by its exception rather than its
@@ -166,12 +170,21 @@ class RemoteAccess:
         Access now and the page no longer offers a way to set one, so that
         condition made the setting impossible to turn on at all.
 
-        Nothing is advertised prematurely by dropping it. The hostname only
+        Nothing is advertised prematurely by defaulting on. The hostname only
         starts serving once the connector has a token, and node-infra installs
         the Access config before the token precisely so the node can identify
         callers from the first request it answers.
+
+        TEMPORARY: defaults ON, so a node that has never been touched publishes
+        `remote_access=true` and gets a tunnel without anyone opting in. That is
+        deliberate for now and is meant to be reverted: the setting exists to be
+        the owner's choice, and a default of on makes it a choice they have to
+        discover in order to decline. Tracked, with the revert, on the ticket in
+        Deployment Issues & Improvements.
+
+        Restoring the old behaviour is one word: drop the `True` below.
         """
-        return bool(self._read().get("enabled"))
+        return bool(self._read().get("enabled", True))
 
     def has_password(self):
         return bool(self._read().get("password"))
@@ -227,7 +240,9 @@ class RemoteAccess:
         """What the config page needs to render the section. Never the password."""
         state = self._read()
         return {
-            "enabled": bool(state.get("enabled")),
+            # is_enabled(), not the raw field: the default lives in one place
+            # and this is the page that would otherwise disagree with it.
+            "enabled": self.is_enabled(),
             "has_password": bool(state.get("password")),
             "shell_allowed": self.is_shell_allowed(),
             "updated_at": state.get("updated_at"),
@@ -290,6 +305,17 @@ class RemoteAccess:
 
         self._sync_marker()
         return True, None
+
+    def publish_marker(self):
+        """Write the inventory marker to match is_enabled(), at startup.
+
+        The marker is the whole node-to-server channel for this setting, and a
+        node that has never been touched has no state file and so has never had
+        one written. While the default was off that was consistent: no file, no
+        tunnel. With the default on it is not, and the node would keep reporting
+        `remote_access=false` until somebody happened to toggle something.
+        """
+        self._sync_marker()
 
     def _sync_marker(self):
         """Make the inventory marker agree with is_enabled().

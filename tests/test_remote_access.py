@@ -42,10 +42,12 @@ def store(tmp_path):
     return RemoteAccess(str(tmp_path / "remote-access.json"))
 
 
-def test_starts_off_with_no_password(store):
-    assert store.is_enabled() is False
+def test_starts_on_with_no_password(store):
+    """TEMPORARY: support access defaults ON. See is_enabled() and the revert
+    ticket in Deployment Issues & Improvements."""
+    assert store.is_enabled() is True
     assert store.has_password() is False
-    assert store.status()["enabled"] is False
+    assert store.status()["enabled"] is True
 
 
 def test_password_round_trip(store):
@@ -137,11 +139,17 @@ def test_verify_is_false_when_nothing_is_set(store):
     assert store.verify("anything") is False
 
 
-def test_a_corrupt_state_file_reads_as_unset(store):
+def test_a_corrupt_state_file_reads_as_the_default(store):
+    """Unreadable state means no recorded choice, so the default applies.
+
+    Worth being explicit that while the default is ON, this fails *open*: a
+    corrupt file gets a tunnel rather than losing one. That is the default doing
+    what it says rather than a separate decision, and the hostname is still
+    Access-gated either way, but it reverses with the default."""
     os.makedirs(os.path.dirname(store.state_file), exist_ok=True)
     with open(store.state_file, "w") as f:
         f.write("{ not json")
-    assert store.is_enabled() is False
+    assert store.is_enabled() is True
     assert store.verify("anything") is False
 
 
@@ -213,9 +221,22 @@ def _marker(store):
     return os.path.join(os.path.dirname(store.state_file), ENABLED_MARKER)
 
 
-def test_no_marker_before_anything_is_set(store):
+def test_the_marker_follows_the_default(store):
+    """The marker is the whole node-to-server channel, so it has to agree with
+    is_enabled() rather than with whether anyone has touched the setting."""
     store.set_password(GOOD_PASSWORD)
+    assert os.path.exists(_marker(store))
+
+    store.set_enabled(False)
     assert not os.path.exists(_marker(store))
+
+
+def test_a_node_nobody_has_touched_publishes_the_marker(store):
+    """Without this the default would be inert: node-infra reads the file, not
+    is_enabled(), and a fresh node has never had one written."""
+    assert not os.path.exists(_marker(store))
+    store.publish_marker()
+    assert os.path.exists(_marker(store))
 
 
 def test_marker_appears_when_enabled(store):
@@ -581,7 +602,11 @@ def test_a_mender_port_forward_is_not_challenged(live):
 
 
 def test_owner_pathway_is_404_while_remote_access_is_off(client):
-    """Nothing should be answering on that name, so do not confirm it exists."""
+    """Nothing should be answering on that name, so do not confirm it exists.
+
+    Turned off explicitly now that the default is on, which is the point: this
+    protects the refusal, not the default."""
+    client.remote_access.set_enabled(False)
     assert client.get("/", base_url=OWNER_URL).status_code == 404
 
 
