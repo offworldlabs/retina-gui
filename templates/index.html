@@ -144,7 +144,7 @@
         <div class="section-head"><h2>Services</h2></div>
         <div class="svc-grid">
             {% if retina_node_version %}
-            <a class="svc-card" href="#" data-port="49152" target="_blank">
+            <a class="svc-card" href="#" data-port="49152" data-remote-path="/display/map/" target="_blank">
                 <div class="svc-head">
                     <div class="svc-icon">
                         <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
@@ -162,7 +162,7 @@
                 </div>
                 <div class="svc-desc">Live radar data.</div>
             </a>
-            <a class="svc-card" href="#" data-port="49152" data-path="/display/maxhold" target="_blank">
+            <a class="svc-card" href="#" data-port="49152" data-path="/display/maxhold" data-remote-path="/display/maxhold/" target="_blank">
                 <div class="svc-head">
                     <div class="svc-icon">
                         <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
@@ -179,7 +179,7 @@
                 </div>
                 <div class="svc-desc">~10s rolling peak-hold view.</div>
             </a>
-            <a class="svc-card" href="#" data-port="49152" data-path="/controller/" target="_blank">
+            <a class="svc-card" href="#" data-port="49152" data-path="/controller/" data-remote-path="/controller/" target="_blank">
                 <div class="svc-head">
                     <div class="svc-icon">
                         <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
@@ -269,8 +269,34 @@
 <script>
 // Built from the host actually used to get here, so the links stay on this
 // node rather than pointing somewhere the operator did not ask for.
+//
+// Over the support tunnel these ports are not reachable: Cloudflare proxies a
+// fixed set and blah2's are not among them, and an http:// link on an https://
+// page is blocked as mixed content anyway. The tunnel instead routes a few
+// paths on this same hostname straight to those services, so remotely the
+// links are same-origin paths. A card with no remote path has no such route
+// and says so, rather than looking clickable and failing.
+var isRemote = {{ 'true' if is_remote else 'false' }};
 document.querySelectorAll('.svc-card[data-port]').forEach(function(el) {
-    el.href = 'http://' + window.location.hostname + ':' + el.dataset.port + (el.dataset.path || '');
+    if (!isRemote) {
+        el.href = 'http://' + window.location.hostname + ':' + el.dataset.port + (el.dataset.path || '');
+        return;
+    }
+    if (el.dataset.remotePath) {
+        el.href = el.dataset.remotePath;
+        return;
+    }
+    // .disabled already means exactly this on a card, and carries
+    // pointer-events:none, so the link cannot be followed.
+    el.href = '#';
+    el.classList.add('disabled');
+    el.setAttribute('aria-disabled', 'true');
+    var name = el.querySelector('.svc-name');
+    if (name && !el.dataset.remoteNoted) {
+        el.dataset.remoteNoted = '1';
+        name.insertAdjacentHTML('afterend',
+            '<div class="svc-remote-note">Only on this node\u2019s own network</div>');
+    }
 });
 </script>
 {% if mode == 'spectrum' %}

@@ -763,3 +763,70 @@ def test_secret_key_survives_a_restart(client, temp_dir):
     with open(key_file) as f:
         assert f.read().strip() == first
     assert stat.S_IMODE(os.stat(key_file).st_mode) == 0o600
+
+
+# ── service cards, per pathway ───────────────────────────────────
+#
+# On the LAN these link to other ports on this node. Over the tunnel those
+# ports are not reachable at all: Cloudflare proxies a fixed set and 49152 is
+# not among them, and an http:// link on an https:// page is blocked as mixed
+# content regardless. The tunnel routes a few paths on the same hostname to
+# those services instead, so remotely the links must be same-origin paths.
+
+@pytest.fixture
+def home(live, monkeypatch):
+    """The home page with its service cards rendered.
+
+    They are gated on `retina_node_version`, which is empty in a bare fixture,
+    so without this the cards are simply absent and every assertion below
+    passes vacuously.
+    """
+    import app as app_module
+    monkeypatch.setattr(app_module.mender, "get_versions",
+                        lambda: ("v1.2.3", "v0.4.4.0"))
+
+    def get(base_url=LAN_URL, **kw):
+        return live.get("/", base_url=base_url, **kw).get_data(as_text=True)
+    return get
+
+
+def _cards(html):
+    """Every service card's data attributes, keyed by its visible name."""
+    import re
+    out = {}
+    for tag, rest in re.findall(r'<a class="svc-card"([^>]*)>(.*?)</a>', html, re.S):
+        name = re.search(r'<div class="svc-name">([^<]*)</div>', rest)
+        if name:
+            out[name.group(1).strip()] = dict(re.findall(r'data-([a-z-]+)="([^"]*)"', tag))
+    return out
+
+
+def test_the_three_supported_views_have_a_remote_path(home):
+    """Passive Radar, Max-Hold and Controller are the views support asked for,
+    and the tunnel has ingress rules for exactly these paths."""
+    cards = _cards(home())
+    assert cards, "no service cards rendered"
+    for name, path in {
+        "Passive Radar": "/display/map/",
+        "Max-Hold": "/display/maxhold/",
+        "Controller": "/controller/",
+    }.items():
+        assert name in cards, f"{name} card missing"
+        assert cards[name].get("remote-path") == path, name
+
+
+def test_a_card_without_ingress_has_no_remote_path(home):
+    """Anything the tunnel does not route must not claim a remote path, or it
+    becomes a link that looks fine and cannot possibly work."""
+    routed = {"Passive Radar", "Max-Hold", "Controller"}
+    for name, attrs in _cards(home()).items():
+        if name not in routed:
+            assert "remote-path" not in attrs, f"{name} claims a remote path"
+
+
+def test_the_lan_still_builds_port_links(home):
+    """LAN behaviour must not change. blah2's own JS switches on is_localhost,
+    so it still expects the cross-origin port URLs there."""
+    body = home()
+    assert "var isRemote = false;" in body
+    assert "window.location.hostname + \':\' + el.dataset.port" in body

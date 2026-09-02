@@ -273,7 +273,17 @@ def inject_globals():
     from routes.fleet import banner_nodes
 
     owl_os_version, retina_node_version = mender.get_versions()
+
+    # Which pathway this request arrived on. Templates need it because some
+    # links are only reachable one way: the service cards point at other ports
+    # on the LAN, and at tunnel paths remotely. Defaults to LAN, so anything
+    # rendered outside a request (or before the gate runs) keeps the behaviour
+    # the node has always had.
+    from remote_access import LAN, OWNER
+    is_remote = getattr(g, 'pathway', LAN) == OWNER
+
     return {
+        'is_remote': is_remote,
         'node_id': get_node_id(),
         # Which pathway this request arrived on, so templates can hide what the
         # owner pathway is not allowed to reach anyway.
