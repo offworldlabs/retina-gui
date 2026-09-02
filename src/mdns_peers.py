@@ -30,6 +30,7 @@ failures are required before it drops off, so that a marginal WiFi link cannot
 flip the page between its one-node and many-node forms on every refresh.
 """
 
+import ipaddress
 import json
 import os
 import re
@@ -77,6 +78,22 @@ _TXT = re.compile(r'"((?:[^"\\]|\\.)*)"')
 
 def _unescape(value):
     return _ESCAPE.sub(lambda m: chr(int(m.group(1))), value)
+
+
+def _is_ipv4(address):
+    """Whether this address can be dropped into a URL as it stands.
+
+    Judged from the address itself rather than from avahi's protocol column,
+    which describes the socket an announcement arrived on and not what was
+    resolved. An `IPv4` resolve line has been observed in the field carrying an
+    IPv6 link-local address, and taking that column at its word is what made a
+    healthy node vanish from every other node's banner 40 seconds after it
+    appeared.
+    """
+    try:
+        return isinstance(ipaddress.ip_address(address), ipaddress.IPv4Address)
+    except ValueError:
+        return False
 
 
 def parse_txt(blob):
@@ -237,7 +254,9 @@ class PeerDirectory:
                 "node_id": event["node_id"],
                 "friendly_name": event["friendly_name"],
                 "hostname": event["hostname"],
-                "address": event["address"],
+                # Only ever an address we can use. See _is_ipv4, and the note
+                # further down where a later resolve may fill this in.
+                "address": event["address"] if _is_ipv4(event["address"]) else "",
                 "port": event["port"],
                 "sources": set(),
                 # Assumed present on first sight. The prober demotes it if that
@@ -256,9 +275,13 @@ class PeerDirectory:
             peer["friendly_name"] = event["friendly_name"]
             peer["hostname"] = event["hostname"]
             peer["is_self"] = event["node_id"] == own
-            # Prefer IPv4: it is what every client here can reach, and it is
-            # what the card offers as the by-address fallback.
-            if event["protocol"] == "IPv4" or not peer["address"]:
+            # Keep an address only when it is one anything can actually
+            # reach. A link-local needs a zone index to be usable, so it fails
+            # every probe, and it is worse than useless to an owner reading it
+            # off a card as the fallback for when the name will not resolve.
+            # Better to hold no address at all: the hostname still serves both
+            # the prober and the browser, and a later resolve fills this in.
+            if _is_ipv4(event["address"]):
                 peer["address"] = event["address"]
                 peer["port"] = event["port"]
 
@@ -302,16 +325,20 @@ class PeerDirectory:
         if self._fixture_path:
             return
         with self._lock:
-            targets = [(name, p["address"], p["is_self"])
+            targets = [(name, p["address"], p["hostname"], p["is_self"])
                        for name, p in self._peers.items()]
 
-        for name, address, is_self in targets:
+        for name, address, hostname, is_self in targets:
             # No point probing ourselves over the network to find out we are
             # up: this process is what would be answering.
             if is_self:
                 reachable, payload = True, None
             else:
-                reachable, payload = self._probe_peer(address)
+                # By name when no usable address has been seen yet. mDNS
+                # resolution is how every other client here reaches a node, so
+                # this keeps one whose A record has not arrived from being
+                # declared gone while it is running perfectly well.
+                reachable, payload = self._probe_peer(address or hostname)
             with self._lock:
                 peer = self._peers.get(name)
                 if not peer:

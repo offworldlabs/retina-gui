@@ -278,3 +278,46 @@ def test_a_node_just_discovered_has_no_answer_yet():
     d = directory()
     d._apply(resolve("ret1", "192.168.1.57"))
     assert d.peers()[0]["healthz"] is None
+
+
+# ── Addresses that cannot be used ──────────────────────────────
+#
+# Observed in the field: avahi labelling a resolve line IPv4 while the address
+# on it is an IPv6 link-local. Trusting the label stored an address nothing
+# could reach, so the node failed both its probes and left the banner 40
+# seconds after appearing, while serving pages perfectly well the whole time.
+
+
+def test_a_link_local_is_not_kept_as_an_address():
+    d = directory()
+    d._apply(resolve("ret1", "fe80::1f69:be26:cc20:2f18"))
+    assert d.peers()[0]["address"] == ""
+
+
+def test_a_usable_address_fills_in_later():
+    d = directory()
+    d._apply(resolve("ret1", "fe80::1f69:be26:cc20:2f18"))
+    d._apply(resolve("ret1", "192.168.1.57"))
+    assert d.peers()[0]["address"] == "192.168.1.57"
+
+
+def test_a_link_local_never_replaces_a_usable_address():
+    d = directory()
+    d._apply(resolve("ret1", "192.168.1.57"))
+    d._apply(resolve("ret1", "fe80::1f69:be26:cc20:2f18", protocol="IPv6"))
+    assert d.peers()[0]["address"] == "192.168.1.57"
+
+
+def test_a_node_with_no_usable_address_is_probed_by_name(monkeypatch):
+    """It is how every other client here reaches the node, and it is the
+    difference between a card missing its address row and a node that is
+    declared gone while running."""
+    probed = []
+    monkeypatch.setattr(PeerDirectory, "_probe_peer",
+                        staticmethod(lambda a: (probed.append(a) or True, None)))
+    d = directory()
+    d._apply(resolve("ret1", "fe80::1f69:be26:cc20:2f18"))
+    d._probe_once()
+
+    assert probed == ["ret1.local"]
+    assert d.count() == 1
