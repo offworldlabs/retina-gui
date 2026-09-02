@@ -7,7 +7,7 @@ that it survives base.html inheritance and the blocks pages override.
 
 import pytest
 
-from routes.fleet import banner_nodes, node_url, peer_view
+from routes.fleet import RESOURCES, banner_nodes, node_url, peer_view
 
 
 class FakePeers:
@@ -473,3 +473,55 @@ def test_a_card_with_nothing_to_say_has_no_divider(app_client, fleet, telemetry)
     fleet(node(SELF, is_self=True), node(OTHER, address=""))
     card = node_cards(app_client.get("/summary").data.decode())[1]
     assert "node-rows" not in card
+
+
+# ── Resources ──────────────────────────────────────────────────
+
+
+def resource_strip(body):
+    """The Resources cards, as raw <a> fragments."""
+    section = body.split('<div class="section-head resources-head">')[1]
+    return ["<a" + frag for frag in section.split("<a")[1:]]
+
+
+def test_every_resource_is_offered(app_client, fleet, telemetry):
+    fleet(node(SELF, is_self=True))
+    body = app_client.get("/summary").data.decode()
+    for resource in RESOURCES:
+        assert f'href="{resource["url"]}"' in body, resource["name"]
+
+
+def test_a_resource_says_where_it_goes(app_client, fleet, telemetry):
+    """These all leave the device, so an owner should see they are about to be
+    sent to github.com before the click rather than after."""
+    fleet(node(SELF, is_self=True))
+    cards = resource_strip(app_client.get("/summary").data.decode())
+    assert "github.com" in "".join(cards)
+
+
+def test_the_host_is_derived_from_the_url():
+    """So the line under a name cannot drift from where the card really goes."""
+    for resource in RESOURCES:
+        assert resource["host"] in resource["url"]
+
+
+def test_every_resource_opens_away_from_the_page(app_client, fleet, telemetry):
+    """A node's own page is a poor thing to lose to an outbound click, and
+    rel=noopener is the plain safety requirement for target=_blank."""
+    fleet(node(SELF, is_self=True))
+    for card in resource_strip(app_client.get("/summary").data.decode()):
+        assert 'target="_blank"' in card and 'rel="noopener"' in card
+
+
+def test_resources_are_not_mixed_in_with_the_nodes(app_client, fleet, telemetry):
+    """The antenna mark means "this is a node". It stops meaning anything if a
+    link to a website sits in the same grid wearing one."""
+    fleet(node(SELF, is_self=True))
+    for card in node_cards(app_client.get("/summary").data.decode()):
+        assert "link-card" not in card
+
+
+def test_the_offer_of_a_second_node_points_at_the_store(app_client, fleet, telemetry):
+    fleet(node(SELF, is_self=True))
+    body = app_client.get("/summary").data.decode()
+    assert 'href="https://retina.fm"' in body

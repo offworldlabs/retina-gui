@@ -98,5 +98,50 @@
         </a>
         {% endif %}
     </div>
+
+    {# Fixed links out. A separate section rather than more cards in the grid
+       above: those stand for hardware on this network and this one does not,
+       and mixing them would make the antenna mark stop meaning anything. #}
+    <div class="section-head resources-head"><h2>Resources</h2></div>
+
+    <div class="node-grid">
+        {% for resource in resources %}
+        <a class="link-card" href="{{ resource.url }}" target="_blank" rel="noopener">
+            <span class="link-icon">
+                {% if resource.icon == 'globe' %}
+                <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <circle cx="12" cy="12" r="9"></circle><path d="M3 12h18"></path>
+                    <path d="M12 3a15 15 0 0 1 0 18a15 15 0 0 1 0-18"></path>
+                </svg>
+                {% elif resource.icon == 'book' %}
+                <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <path d="M5 5a2 2 0 0 1 2-2h12v18H7a2 2 0 0 0-2 2z"></path>
+                    <path d="M9 7h6"></path><path d="M9 11h6"></path>
+                </svg>
+                {% elif resource.icon == 'map' %}
+                <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <path d="m9 4 6 2 5-2v14l-5 2-6-2-5 2V6z"></path>
+                    <path d="M9 4v14"></path><path d="M15 6v14"></path>
+                </svg>
+                {% else %}
+                <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <path d="M4 20h16"></path><path d="M7 20v-6"></path>
+                    <path d="M12 20V6"></path><path d="M17 20v-9"></path>
+                </svg>
+                {% endif %}
+            </span>
+            <span class="link-text">
+                <span class="link-name">{{ resource.name }}</span>
+                <span class="link-host">{{ resource.host }}</span>
+            </span>
+            {# Every one of these leaves the app, so every one carries the same
+               outbound arrow the banner's buttons do. #}
+            <svg class="link-arrow" viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="M14 3h7v7"></path><path d="M21 3l-9 9"></path>
+                <path d="M21 14v5a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5"></path>
+            </svg>
+        </a>
+        {% endfor %}
+    </div>
 </main>
 {% endblock %}

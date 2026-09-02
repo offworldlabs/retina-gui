@@ -20,14 +20,37 @@ nice-to-have, and a nice-to-have that polls the fleet would not be worth
 having.
 """
 
+from urllib.parse import urlsplit
+
 from flask import Blueprint, jsonify, render_template
 
 bp = Blueprint("fleet", __name__)
 
-# Where "Add another node" sends an owner with only one. A stand-in: there is
-# no store URL anywhere in the codebase yet, so this goes where the banner's
-# Server button goes until the real one is known.
-BUY_URL = "https://map.retina.fm"
+# Where "Add another node" sends an owner with only one.
+BUY_URL = "https://retina.fm"
+
+
+def _resource(name, url, icon):
+    """One Resources card.
+
+    The host is derived rather than written out, so the line under the name
+    cannot drift from where the card actually goes. It is there because every
+    one of these leaves the device: an owner should be able to see they are
+    about to be sent to github.com before they click, not after.
+    """
+    return {"name": name, "url": url, "icon": icon, "host": urlsplit(url).netloc}
+
+
+# Fixed links out, ordered by distance from the node: the company, the manual
+# for this box, then the two live views of the wider network.
+RESOURCES = (
+    _resource("Offworld Labs", "https://offworldlabs.com", "globe"),
+    _resource("Retina Wiki",
+              "https://github.com/offworldlabs/owl-os/wiki/4-Troubleshooting-and-Tuning",
+              "book"),
+    _resource("Retina Network Map", "https://map.retina.fm", "map"),
+    _resource("Retina Dashboard", "https://dash.retina.fm", "chart"),
+)
 
 # The one telemetry state with nothing to say for itself. Everything else gets
 # a chip, including states retina-telemetry grows later: an unfamiliar state
@@ -207,6 +230,7 @@ def summary():
     return render_template("summary.html",
                            active_page="summary",
                            cards=[card_view(p) for p in discovered_nodes()],
+                           resources=RESOURCES,
                            buy_url=BUY_URL)
 
 

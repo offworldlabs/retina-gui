@@ -1141,3 +1141,51 @@ h1, h2, h3, h4, h5, h6 {
     font-size: 14px; font-weight: 600; color: var(--ink);
 }
 .node-invite-sub { display: block; font-size: 12.5px; color: var(--ink-3); margin-top: 1px; }
+
+/* Fixed links out, below the nodes. */
+.resources-head { margin-top: 28px; }
+
+.link-card {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 14px 16px;
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: var(--r-md);
+    box-shadow: var(--shadow-sm);
+    text-decoration: none;
+    color: inherit;
+    transition: border-color .12s, box-shadow .12s;
+}
+.link-card:hover { border-color: var(--accent-edge); box-shadow: var(--shadow-md); }
+
+.link-icon {
+    width: 34px; height: 34px; flex: none;
+    border-radius: 8px;
+    border: 1px solid var(--line);
+    background: var(--surface-2);
+    display: grid; place-items: center;
+    color: var(--ink-2);
+    transition: color .12s, border-color .12s;
+}
+.link-card:hover .link-icon { color: var(--accent); border-color: var(--accent-edge); }
+
+.link-text { min-width: 0; flex: 1; }
+.link-name {
+    display: block;
+    font-size: 14.5px; font-weight: 600; letter-spacing: -0.005em;
+    color: var(--ink);
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+/* Where the card actually goes, said before the click rather than after. */
+.link-host {
+    display: block;
+    font-family: var(--font-mono);
+    font-size: 11.5px;
+    color: var(--ink-3);
+    margin-top: 1px;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.link-arrow { flex: none; color: var(--ink-3); transition: transform .12s, color .12s; }
+.link-card:hover .link-arrow { color: var(--ink); transform: translate(1px, -1px); }
