@@ -245,6 +245,10 @@ class PeerDirectory:
                 # that just appeared is almost always real.
                 "alive": True,
                 "failures": 0,
+                # The peer's last good /healthz body. Filled by the prober, and
+                # the only channel by which anything a node holds on its own
+                # disk reaches another node's page.
+                "healthz": None,
                 "is_self": event["node_id"] == own,
             })
             peer["sources"].add((event["interface"], event["protocol"]))
@@ -280,6 +284,7 @@ class PeerDirectory:
                     "sources": {("fixture", "IPv4")},
                     "alive": entry.get("alive", True),
                     "failures": 0,
+                    "healthz": entry.get("healthz"),
                     "is_self": node_id == own,
                 }
 
@@ -303,7 +308,10 @@ class PeerDirectory:
         for name, address, is_self in targets:
             # No point probing ourselves over the network to find out we are
             # up: this process is what would be answering.
-            reachable = True if is_self else self._reachable(address)
+            if is_self:
+                reachable, payload = True, None
+            else:
+                reachable, payload = self._probe_peer(address)
             with self._lock:
                 peer = self._peers.get(name)
                 if not peer:
@@ -311,25 +319,43 @@ class PeerDirectory:
                 if reachable:
                     peer["failures"] = 0
                     peer["alive"] = True
+                    # Only when the answer parsed. A node that redirects or
+                    # errors is still present, and its last good answer beats
+                    # blanking the card it feeds.
+                    if payload is not None:
+                        peer["healthz"] = payload
                 else:
                     peer["failures"] += 1
                     if peer["failures"] >= FAILURES_BEFORE_GONE:
                         peer["alive"] = False
 
     @staticmethod
-    def _reachable(address):
+    def _probe_peer(address):
+        """Ask a peer whether it is there, and keep what it says.
+
+        Returns `(reachable, payload)`, and the two are deliberately
+        independent. Reachable is any answer at all, not a 200 carrying valid
+        JSON: a node mid-calibration redirects most GETs, and one returning 500
+        is still a node the operator should be able to reach and look at. Only
+        the payload needs a clean answer, and a node that cannot give one is
+        just a card with less on it.
+
+        This is also why the Summary page costs nothing. The request happens
+        every 20 seconds regardless, to keep the banner honest. Until now the
+        body was read and thrown away.
+        """
         if not address:
-            return False
+            return False, None
         try:
-            http_requests.get(f"http://{address}/healthz",
-                              timeout=PROBE_TIMEOUT_SECONDS)
+            response = http_requests.get(f"http://{address}/healthz",
+                                         timeout=PROBE_TIMEOUT_SECONDS)
         except http_requests.RequestException:
-            return False
-        # Any answer at all means something is serving. Deliberately not a
-        # 200 check: a node mid-calibration redirects most GETs, and one
-        # returning 500 is still a node the operator should be able to reach
-        # and look at.
-        return True
+            return False, None
+        try:
+            payload = response.json()
+        except ValueError:
+            return True, None
+        return True, payload if isinstance(payload, dict) else None
 
 
 def peer_directory_from_env(own_node_id_fn, dev_mode):
