@@ -591,9 +591,11 @@ h1, h2, h3, h4, h5, h6 {
     /* Hide "Step X of Y" on mobile — too cluttered */
     #progressLabel { display: none; }
 
-    /* Footer: switch to space-between, remove the flex-1 spacer, wrap if needed */
+    /* Footer: the step's own buttons are the only content now that the wizard
+       is forward-only, so keep them right-aligned rather than space-between,
+       which with a single child would push them to the left edge. */
     .wiz-foot-inner {
-        justify-content: space-between;
+        justify-content: flex-end;
         flex-wrap: wrap;
         gap: 8px;
     }
@@ -726,6 +728,32 @@ h1, h2, h3, h4, h5, h6 {
 /* setup-card compat — .wide removes column max-width for towers step */
 .setup-card        { --wiz-col: 560px; }
 .setup-card.wide   { --wiz-col: 100%; }
+
+/* ── Session timed out (wizard) ─────────────────
+   Covers the wizard rather than sitting inside a step: once the session is
+   gone every control on the page is dead, so offering one that still works
+   is clearer than leaving live-looking buttons behind it. */
+.wiz-expired {
+    position: fixed; inset: 0; z-index: 2000;
+    display: flex; align-items: center; justify-content: center;
+    padding: 24px;
+    background: oklch(0.20 0.012 260 / 0.45);
+}
+.wiz-expired-box {
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: var(--r-lg);
+    box-shadow: var(--shadow-pop);
+    padding: 28px;
+    max-width: 420px;
+    text-align: center;
+}
+.wiz-expired-box h3 {
+    margin: 0 0 10px; font-size: 17px; font-weight: 600; color: var(--ink);
+}
+.wiz-expired-box p {
+    margin: 0 0 20px; font-size: 13.5px; line-height: 1.55; color: var(--ink-2);
+}
 
 /* ── ds-field (location step) ──────────────────── */
 .ds-field { display: flex; flex-direction: column; gap: 6px; }

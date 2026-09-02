@@ -3,22 +3,14 @@ function formatSize(bytes) {
     return mb + ' · 5–10 minutes';
 }
 
-function initSetupWizard(resumeStep, highestStepName, devMode, isRerun, demoMode) {
+function initSetupWizard(resumeStep, devMode, isRerun, demoMode) {
     var steps = [];
     var currentIndex = 0;
-    var highestStep = 0;
     var pollTimer = null;
 
     document.querySelectorAll('[data-step]').forEach(function(el) {
         steps.push({ name: el.getAttribute('data-step'), el: el });
     });
-
-    // Restore highest step from server state
-    if (highestStepName) {
-        for (var i = 0; i < steps.length; i++) {
-            if (steps[i].name === highestStepName) { highestStep = i; break; }
-        }
-    }
 
     var stepNames = {
         agreements: 'Agreements',
@@ -37,28 +29,12 @@ function initSetupWizard(resumeStep, highestStepName, devMode, isRerun, demoMode
         dot.className = 'progress-dot';
         dot.setAttribute('data-dot', i);
         dot.title = stepNames[s.name] || '';
-        dot.addEventListener('click', function() {
-            if (i <= highestStep && i !== currentIndex) showStep(i);
-        });
         // Insert before progressLabel so dots appear left of the label
         var lbl = document.getElementById('progressLabel');
         if (lbl) { track.insertBefore(dot, lbl); } else { track.appendChild(dot); }
     });
 
-    // Wire back/exit button
-    var backBtn = document.getElementById('wizBackBtn');
-    if (backBtn) {
-        backBtn.addEventListener('click', function() {
-            if (currentIndex === 0) {
-                window.location.href = '/';
-            } else {
-                showStep(currentIndex - 1);
-            }
-        });
-    }
-
     function updateProgress(index) {
-        highestStep = Math.max(highestStep, index);
         var label = document.getElementById('progressLabel');
         var fill = document.getElementById('progressFill');
         var total = steps.length;
@@ -85,7 +61,7 @@ function initSetupWizard(resumeStep, highestStepName, devMode, isRerun, demoMode
         var leavePromise = Promise.resolve(leaveFn ? leaveFn() : null);
 
         // Disable navigation while an async leave hook (e.g. mode revert) completes.
-        var navBtns = document.querySelectorAll('.step-foot-btns button, #wizBackBtn');
+        var navBtns = document.querySelectorAll('.step-foot-btns button');
         navBtns.forEach(function(b) { b.disabled = true; });
 
         function doTransition() {
@@ -106,19 +82,16 @@ function initSetupWizard(resumeStep, highestStepName, devMode, isRerun, demoMode
             currentIndex = index;
             updateProgress(index);
 
-            var backBtn = document.getElementById('wizBackBtn');
-            if (backBtn) {
-                backBtn.style.display = index === 0 ? 'none' : '';
-                if (index > 0) backBtn.textContent = '← Back';
-            }
-
             document.querySelectorAll('.step-foot-btns').forEach(function(el) {
                 el.style.display = 'none';
             });
             var activeBtns = document.getElementById('stepBtns-' + steps[index].name);
             if (activeBtns) activeBtns.style.display = '';
 
-            postJSON('/set-up/save-step', { step: steps[index].name });
+            // Best effort: a failed save only costs the resume point, and
+            // postJSON already raises the session notice if that is the cause.
+            postJSON('/set-up/save-step', { step: steps[index].name })
+                .catch(function() {});
 
             var enterFn = enterHooks[steps[index].name];
             if (enterFn) enterFn();
@@ -144,6 +117,14 @@ function initSetupWizard(resumeStep, highestStepName, devMode, isRerun, demoMode
 
     var csrfToken = (document.querySelector('meta[name="csrf-token"]') || {}).content || '';
 
+    // fetch() resolves for every HTTP status, so a caller that only chains
+    // .then() treats a 400 as a success. That is how an expired CSRF token
+    // reached the owner as two different bugs: the location step's mode
+    // switch "succeeded", so its catch never ran and the step sat on
+    // "Waiting for sweep to start" with Find Towers disabled forever, while
+    // steps that do parse the body handed the HTML error page to r.json()
+    // and reported `Failed to save: Unexpected token '<'`. Rejecting here
+    // makes every existing catch block correct.
     function postJSON(url, body) {
         return fetch(url, {
             method: 'POST',
@@ -152,7 +133,55 @@ function initSetupWizard(resumeStep, highestStepName, devMode, isRerun, demoMode
                 'X-CSRFToken': csrfToken
             },
             body: body ? JSON.stringify(body) : undefined
+        }).then(function(r) {
+            if (r.ok) return r;
+            return r.json().then(function(data) {
+                throw failure(r, data);
+            }, function() {
+                throw failure(r, null);
+            });
         });
+    }
+
+    function failure(r, data) {
+        if (data && data.session_expired) showSessionExpired();
+        var err = new Error((data && data.error) || ('Request failed (' + r.status + ')'));
+        err.status = r.status;
+        return err;
+    }
+
+    // The wizard is a single page load that deliberately outlives a reboot
+    // and can sit open for hours while an owner reads the agreements or
+    // researches towers. If the session behind it does go, every button
+    // silently stops working, so say so once and offer the only fix there
+    // is. A reload resumes at the step the server last recorded.
+    var sessionExpiredShown = false;
+    function showSessionExpired() {
+        if (sessionExpiredShown) return;
+        sessionExpiredShown = true;
+        // Reloading is the instruction, so don't also challenge them with
+        // the browser's "leave site?" dialog on the way out.
+        window.removeEventListener('beforeunload', handleBeforeUnload);
+        var overlay = document.createElement('div');
+        overlay.className = 'wiz-expired';
+        var box = document.createElement('div');
+        box.className = 'wiz-expired-box';
+        var h = document.createElement('h3');
+        h.textContent = 'This page timed out';
+        var p = document.createElement('p');
+        p.textContent = 'Your setup session expired while this page was open. '
+            + 'Reload to continue from where you left off. Nothing you have '
+            + 'already confirmed is lost.';
+        var btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'ds-btn primary';
+        btn.textContent = 'Reload and continue';
+        btn.addEventListener('click', function() { window.location.reload(); });
+        box.appendChild(h);
+        box.appendChild(p);
+        box.appendChild(btn);
+        overlay.appendChild(box);
+        document.body.appendChild(overlay);
     }
 
     // Single beforeunload guard for the entire wizard lifetime.
@@ -219,8 +248,6 @@ function initSetupWizard(resumeStep, highestStepName, devMode, isRerun, demoMode
 
     // Step 1: Agreements
     enterHooks.agreements = function() {
-        if (hookInitialized.agreements) return;
-        hookInitialized.agreements = true;
         var boxes = ['eulaCheck', 'cloudCheck'];
         var btn = document.getElementById('agreementsContinueBtn');
 
@@ -230,6 +257,19 @@ function initSetupWizard(resumeStep, highestStepName, devMode, isRerun, demoMode
             });
             btn.disabled = !allChecked;
         }
+
+        // Derived on every entry, not just the first. The click handler below
+        // sets the label imperatively and only the failure path put it back,
+        // so returning to a step whose consent had already succeeded found a
+        // button still reading "Connecting..." and still disabled, with
+        // nothing in flight and no code left to clear it. Deriving the label
+        // and the disabled state from the checkboxes here is what makes
+        // re-entry correct, rather than adding another restore path.
+        btn.textContent = 'Continue';
+        update();
+
+        if (hookInitialized.agreements) return;
+        hookInitialized.agreements = true;
 
         boxes.forEach(function(id) {
             document.getElementById(id).addEventListener('change', update);
@@ -351,7 +391,6 @@ function initSetupWizard(resumeStep, highestStepName, devMode, isRerun, demoMode
         }
 
         function startSystemPoll() {
-            if (backBtn) backBtn.style.display = 'none';
             if (pollTimer) clearInterval(pollTimer);
 
             function poll() {
@@ -386,7 +425,6 @@ function initSetupWizard(resumeStep, highestStepName, devMode, isRerun, demoMode
                         clearInterval(pollTimer);
                         pollTimer = null;
                         clearStuckTimer();
-                        if (backBtn) backBtn.style.display = '';
                         status.innerHTML = 'System is up to date &#10003;';
                         cardStatus.innerHTML = '<span class="text-success">&#10003;</span>';
                         installStatus.innerHTML = '<span class="text-success">Complete!</span>';
@@ -479,7 +517,6 @@ function initSetupWizard(resumeStep, highestStepName, devMode, isRerun, demoMode
                         status.textContent = data.reason || 'Installation in progress...';
                         installStatus.innerHTML = '<span class="text-warning">Do not power off the device.</span>';
                         packageStatus.innerHTML = '<span class="spinner-border spinner-border-sm text-primary"></span>';
-                        if (backBtn) backBtn.style.display = 'none';
                         startRadarPoll();
                         return;
                     }
@@ -519,7 +556,6 @@ function initSetupWizard(resumeStep, highestStepName, devMode, isRerun, demoMode
 
         installBtn.addEventListener('click', function() {
             installBtn.style.display = 'none';
-            if (backBtn) backBtn.style.display = 'none';
             packageStatus.innerHTML = '<span class="spinner-border spinner-border-sm text-primary"></span>';
             status.textContent = 'Installing...';
             installStatus.innerHTML = '<span class="text-warning">Do not power off the device.</span>';
@@ -534,16 +570,22 @@ function initSetupWizard(resumeStep, highestStepName, devMode, isRerun, demoMode
                         packageStatus.innerHTML = '';
                         status.textContent = '';
                         installBtn.style.display = '';
-                        if (backBtn) backBtn.style.display = '';
                         updateInstallGate();
                     }
                 })
-                .catch(function() {
-                    installStatus.innerHTML = '<span class="text-danger">Request failed. Please try again.</span>';
+                .catch(function(err) {
+                    // /mender/install answers 409 with a reason worth reading
+                    // ("Auto-calibration is running", "Install already in
+                    // progress"). Those used to arrive here as a parsed body;
+                    // now that a non-2xx rejects, the reason travels on the
+                    // error, and dropping it for a generic string would tell
+                    // the owner to retry something that cannot succeed yet.
+                    installStatus.innerHTML = '<span class="text-danger">'
+                        + esc(err.message || 'Request failed. Please try again.')
+                        + '</span>';
                     packageStatus.innerHTML = '';
                     status.textContent = '';
                     installBtn.style.display = '';
-                    if (backBtn) backBtn.style.display = '';
                     updateInstallGate();
                 });
         });
@@ -577,14 +619,12 @@ function initSetupWizard(resumeStep, highestStepName, devMode, isRerun, demoMode
                                 installBtn.textContent = 'Try again';
                                 nextBtn.textContent = 'Continue without updating';
                                 nextBtn.style.display = '';
-                                if (backBtn) backBtn.style.display = '';
                                 updateInstallGate();
                             } else {
                                 installStatus.innerHTML = '<span class="text-danger">Install may have failed. Try again.</span>';
                                 packageStatus.innerHTML = '';
                                 status.textContent = '';
                                 installBtn.style.display = '';
-                                if (backBtn) backBtn.style.display = '';
                                 updateInstallGate();
                             }
                         } else {
@@ -891,9 +931,17 @@ function initSetupWizard(resumeStep, highestStepName, devMode, isRerun, demoMode
         // Start search immediately on entering this step
         var params = window._towerSearchParams;
         if (!params) {
+            // Reachable only when no search has ever been cached for this
+            // device, since the page rehydrates from that cache on load. The
+            // wizard runs forwards, so offer the way on rather than naming a
+            // Back button that no longer exists: the tower is editable in
+            // Config, and Auto-Calibrate can pick one from a later search.
             loadingEl.style.display = 'none';
-            errorEl.textContent = 'No location set. Go back and enter your location.';
+            errorEl.textContent = 'No location has been saved for this device, '
+                + 'so there is nothing to search with yet. Skip this step and '
+                + 'choose a tower on the Config page once setup has finished.';
             errorEl.style.display = '';
+            skipBtn.style.display = '';
             return;
         }
 
@@ -1410,8 +1458,7 @@ function initSetupWizard(resumeStep, highestStepName, devMode, isRerun, demoMode
     // Step 7: Complete
     enterHooks.complete = function() {
         window.removeEventListener('beforeunload', handleBeforeUnload);
-        if (backBtn) backBtn.style.display = 'none';
-        postJSON('/set-up/complete');
+        postJSON('/set-up/complete').catch(function() {});
     };
 
     // ── Init ─────────────────────────────────────────────

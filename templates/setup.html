@@ -74,10 +74,9 @@
         </div>
     </div>
 
-    {# ── Wizard footer: back + per-step action buttons ── #}
+    {# ── Wizard footer: per-step action buttons ── #}
     <div class="wiz-foot">
         <div class="wiz-foot-inner">
-            <button type="button" class="ds-btn ghost" id="wizBackBtn" style="display:none;">← Back</button>
             <div class="foot-spacer"></div>
 
             {# Agreements #}
@@ -135,6 +134,18 @@
     <script src="/static/calibrate.js"></script>
     <script src="/static/setup.js"></script>
     <script>
-        initSetupWizard({{ resume_step|tojson }}, {{ highest_step|default(none)|tojson }}, {{ dev_mode|default(false)|tojson }}, {{ is_rerun|default(false)|tojson }}, {{ demo_mode|default(false)|tojson }});
+        {% if towers_cache and towers_cache.lat is not none and towers_cache.lon is not none %}
+        // Rehydrate the last search so a reload onto the tower step still has
+        // coordinates. RF measurements are not cached, so this re-runs as a
+        // location-only search, the same fallback used when the spectrum
+        // analyser is unavailable.
+        window._towerSearchParams = {
+            lat: {{ towers_cache.lat|tojson }},
+            lon: {{ towers_cache.lon|tojson }},
+            alt: 0,
+            measurements: []
+        };
+        {% endif %}
+        initSetupWizard({{ resume_step|tojson }}, {{ dev_mode|default(false)|tojson }}, {{ is_rerun|default(false)|tojson }}, {{ demo_mode|default(false)|tojson }});
     </script>
 {% endblock %}
