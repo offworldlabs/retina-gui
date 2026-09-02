@@ -2,8 +2,8 @@ import os
 import subprocess
 import sys
 
-from flask import Flask, redirect, request
-from flask_wtf.csrf import CSRFProtect
+from flask import Flask, jsonify, redirect, request
+from flask_wtf.csrf import CSRFError, CSRFProtect
 
 # Configuration and shared services live in their own module because this one
 # is executed twice — once as __main__ (systemd runs `python3 src/app.py`) and
@@ -45,7 +45,24 @@ from services import (  # noqa: F401  (re-exported for routes)
 app = Flask(__name__,
             template_folder=os.path.join(PROJECT_ROOT, 'templates'),
             static_folder=os.path.join(PROJECT_ROOT, 'static'))
+# Left as-is deliberately. Persisting this key is a real fix, but it is
+# already implemented as services.secret_key() on 20260828-remote-access,
+# whose login session needs the same guarantee. Carrying a second copy
+# here merges without a conflict and leaves TWO identical definitions in
+# services.py, which is worse than the gap. See that branch, or land it
+# on main on its own if it is needed before that one is reviewed.
 app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', os.urandom(32).hex())
+# Flask-WTF expires a CSRF token 3600s after it is issued. The setup wizard
+# reads its token once at page load and reuses it for the entire run (see
+# postJSON in setup.js), and a real run routinely passes the hour: reading
+# the agreements, an OS update, ~600 MB of packages, then calibration.
+# Every POST past that point 400s. Consent, tower selection and
+# /set-up/complete all fail, and /set-up/save-step stops recording progress
+# without anything on screen saying so, which leaves even a reload resuming
+# at the wrong step. Dropping the wall clock does not weaken the token: it
+# stays signed with SECRET_KEY and bound to the session cookie, so it still
+# expires when the session does.
+app.config['WTF_CSRF_TIME_LIMIT'] = None
 csrf = CSRFProtect(app)
 
 if not DEV_MODE:
@@ -177,6 +194,29 @@ app.register_blueprint(network_bp)
 app.register_blueprint(calibrate_bp)
 app.register_blueprint(tracker_preview_bp)
 app.register_blueprint(fleet_bp)
+
+
+@app.errorhandler(CSRFError)
+def handle_csrf_error(e):
+    """Answer a rejected CSRF token in the caller's own format.
+
+    Flask-WTF's default is an HTML error page, which every fetch() in the GUI
+    then hands to r.json(). The owner does not see "your session expired",
+    they see `Failed to save: Unexpected token '<'` on top of a wizard step
+    that looks fine, because the parse error lands in the same catch block as
+    a genuine save failure.
+
+    A JSON body with session_expired lets the caller say the one useful thing
+    instead: reload the page. The token is only rejected now if the GUI
+    restarted without its persisted key (see load_or_create_secret_key) or
+    the browser dropped the session cookie, both of which a reload fixes.
+    """
+    if request.accept_mimetypes.best == 'text/html' and not request.is_json:
+        return e.description, 400
+    return jsonify({
+        'error': 'Your setup session expired. Reload the page to continue.',
+        'session_expired': True,
+    }), 400
 
 
 # Paths that must keep working while a run holds the GUI: the config page

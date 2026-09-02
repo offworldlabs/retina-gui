@@ -11,11 +11,17 @@ def wizard():
     resume_step = device_state.get_setup_wizard_step()
     owl_os_version, retina_node_version = mender.get_versions()
     node_id = get_node_id()
-    highest_step = device_state.get_setup_wizard_highest_step()
     # A node can ship with retina-node pre-installed but never have had the
     # wizard run on it — that's still a first run, so re-run status is based
     # on wizard completion history, not on whether a package is present.
     is_rerun = device_state.has_completed_setup_wizard()
+    # The wizard is forward-only, so a reload is the whole recovery story
+    # and it has to land somewhere usable. The tower step's search
+    # parameters otherwise live only in a page-scoped variable, so a
+    # reload onto that step had nothing to search with and no way back to
+    # the location step to get it. The cache already holds the coordinates
+    # the last search used.
+    towers_cache = device_state.get_towers_cache()
 
     demo_mode = request.args.get('demo') == '1'
     if demo_mode:
@@ -23,7 +29,7 @@ def wizard():
 
     return render_template("setup.html",
                            resume_step=resume_step,
-                           highest_step=highest_step,
+                           towers_cache=towers_cache,
                            node_id=node_id,
                            owl_os_version=owl_os_version,
                            retina_node_version=retina_node_version,
