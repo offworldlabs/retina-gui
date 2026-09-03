@@ -30,6 +30,7 @@ failures are required before it drops off, so that a marginal WiFi link cannot
 flip the page between its one-node and many-node forms on every refresh.
 """
 
+import ipaddress
 import json
 import os
 import re
@@ -77,6 +78,22 @@ _TXT = re.compile(r'"((?:[^"\\]|\\.)*)"')
 
 def _unescape(value):
     return _ESCAPE.sub(lambda m: chr(int(m.group(1))), value)
+
+
+def _is_ipv4(address):
+    """Whether this address can be dropped into a URL as it stands.
+
+    Judged from the address itself rather than from avahi's protocol column,
+    which describes the socket an announcement arrived on and not what was
+    resolved. An `IPv4` resolve line has been observed in the field carrying an
+    IPv6 link-local address, and taking that column at its word is what made a
+    healthy node vanish from every other node's banner 40 seconds after it
+    appeared.
+    """
+    try:
+        return isinstance(ipaddress.ip_address(address), ipaddress.IPv4Address)
+    except ValueError:
+        return False
 
 
 def parse_txt(blob):
@@ -237,7 +254,9 @@ class PeerDirectory:
                 "node_id": event["node_id"],
                 "friendly_name": event["friendly_name"],
                 "hostname": event["hostname"],
-                "address": event["address"],
+                # Only ever an address we can use. See _is_ipv4, and the note
+                # further down where a later resolve may fill this in.
+                "address": event["address"] if _is_ipv4(event["address"]) else "",
                 "port": event["port"],
                 "sources": set(),
                 # Assumed present on first sight. The prober demotes it if that
@@ -245,6 +264,10 @@ class PeerDirectory:
                 # that just appeared is almost always real.
                 "alive": True,
                 "failures": 0,
+                # The peer's last good /healthz body. Filled by the prober, and
+                # the only channel by which anything a node holds on its own
+                # disk reaches another node's page.
+                "healthz": None,
                 "is_self": event["node_id"] == own,
             })
             peer["sources"].add((event["interface"], event["protocol"]))
@@ -252,9 +275,13 @@ class PeerDirectory:
             peer["friendly_name"] = event["friendly_name"]
             peer["hostname"] = event["hostname"]
             peer["is_self"] = event["node_id"] == own
-            # Prefer IPv4: it is what every client here can reach, and it is
-            # what the card offers as the by-address fallback.
-            if event["protocol"] == "IPv4" or not peer["address"]:
+            # Keep an address only when it is one anything can actually
+            # reach. A link-local needs a zone index to be usable, so it fails
+            # every probe, and it is worse than useless to an owner reading it
+            # off a card as the fallback for when the name will not resolve.
+            # Better to hold no address at all: the hostname still serves both
+            # the prober and the browser, and a later resolve fills this in.
+            if _is_ipv4(event["address"]):
                 peer["address"] = event["address"]
                 peer["port"] = event["port"]
 
@@ -280,6 +307,7 @@ class PeerDirectory:
                     "sources": {("fixture", "IPv4")},
                     "alive": entry.get("alive", True),
                     "failures": 0,
+                    "healthz": entry.get("healthz"),
                     "is_self": node_id == own,
                 }
 
@@ -297,13 +325,20 @@ class PeerDirectory:
         if self._fixture_path:
             return
         with self._lock:
-            targets = [(name, p["address"], p["is_self"])
+            targets = [(name, p["address"], p["hostname"], p["is_self"])
                        for name, p in self._peers.items()]
 
-        for name, address, is_self in targets:
+        for name, address, hostname, is_self in targets:
             # No point probing ourselves over the network to find out we are
             # up: this process is what would be answering.
-            reachable = True if is_self else self._reachable(address)
+            if is_self:
+                reachable, payload = True, None
+            else:
+                # By name when no usable address has been seen yet. mDNS
+                # resolution is how every other client here reaches a node, so
+                # this keeps one whose A record has not arrived from being
+                # declared gone while it is running perfectly well.
+                reachable, payload = self._probe_peer(address or hostname)
             with self._lock:
                 peer = self._peers.get(name)
                 if not peer:
@@ -311,25 +346,43 @@ class PeerDirectory:
                 if reachable:
                     peer["failures"] = 0
                     peer["alive"] = True
+                    # Only when the answer parsed. A node that redirects or
+                    # errors is still present, and its last good answer beats
+                    # blanking the card it feeds.
+                    if payload is not None:
+                        peer["healthz"] = payload
                 else:
                     peer["failures"] += 1
                     if peer["failures"] >= FAILURES_BEFORE_GONE:
                         peer["alive"] = False
 
     @staticmethod
-    def _reachable(address):
+    def _probe_peer(address):
+        """Ask a peer whether it is there, and keep what it says.
+
+        Returns `(reachable, payload)`, and the two are deliberately
+        independent. Reachable is any answer at all, not a 200 carrying valid
+        JSON: a node mid-calibration redirects most GETs, and one returning 500
+        is still a node the operator should be able to reach and look at. Only
+        the payload needs a clean answer, and a node that cannot give one is
+        just a card with less on it.
+
+        This is also why the Summary page costs nothing. The request happens
+        every 20 seconds regardless, to keep the banner honest. Until now the
+        body was read and thrown away.
+        """
         if not address:
-            return False
+            return False, None
         try:
-            http_requests.get(f"http://{address}/healthz",
-                              timeout=PROBE_TIMEOUT_SECONDS)
+            response = http_requests.get(f"http://{address}/healthz",
+                                         timeout=PROBE_TIMEOUT_SECONDS)
         except http_requests.RequestException:
-            return False
-        # Any answer at all means something is serving. Deliberately not a
-        # 200 check: a node mid-calibration redirects most GETs, and one
-        # returning 500 is still a node the operator should be able to reach
-        # and look at.
-        return True
+            return False, None
+        try:
+            payload = response.json()
+        except ValueError:
+            return True, None
+        return True, payload if isinstance(payload, dict) else None
 
 
 def peer_directory_from_env(own_node_id_fn, dev_mode):

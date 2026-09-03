@@ -23,10 +23,34 @@ class FakePeers:
         return len(self._nodes)
 
 
-def node(node_id, address="192.168.1.57", friendly="", is_self=False):
+def node(node_id, address="192.168.1.57", friendly="", is_self=False,
+         healthz=None):
     return {"node_id": node_id, "friendly_name": friendly,
             "hostname": f"{node_id}.local", "address": address,
-            "port": "80", "is_self": is_self}
+            "port": "80", "is_self": is_self, "healthz": healthz}
+
+
+def probe(node_ref=None, state="streaming", stale=False, installed=True):
+    """A /healthz body, as a peer's last answer to this node's prober."""
+    telemetry = (None if not installed
+                 else {"node_ref": node_ref, "state": state, "stale": stale})
+    return {"ok": True, "node_id": "ret0", "telemetry": telemetry}
+
+
+def local_status(node_ref=None, state="streaming", stale=False):
+    """What telemetry_status.read() returns on this node."""
+    return {"state": state, "detail": None, "node_ref": node_ref,
+            "node_id": "", "stale": stale, "last_report": None}
+
+
+class FakeTelemetry:
+    """Stands in for the reader of retina-telemetry's status document."""
+
+    def __init__(self, status):
+        self._status = status
+
+    def read(self):
+        return self._status
 
 
 SELF = "ret7dd2cb0d"      # the node_id the app_client fixture writes
@@ -158,13 +182,15 @@ def test_summary_renders_and_marks_its_own_tab(app_client, fleet):
     assert 'href="/summary"' in active_tab(response.data.decode())
 
 
-def test_summary_is_deliberately_blank(app_client, fleet):
-    """Held empty for the UX and setup teams to design into. If this fails,
-    something has been added here that should have been theirs to decide."""
-    fleet(node(SELF, is_self=True))
-    body = app_client.get("/summary").data.decode()
-    content = body.split('<main class="main">')[1].split("</main>")[0]
-    assert content.strip() == "", f"summary page is no longer blank: {content[:200]!r}"
+def card_strip(body):
+    """The card grid, as a list of raw <a> fragments."""
+    grid = body.split('<div class="node-grid">')[1].split("</main>")[0]
+    return ["<a" + frag for frag in grid.split("<a")[1:]]
+
+
+def node_cards(body):
+    """The cards that stand for a node, excluding the invitation to buy one."""
+    return [c for c in card_strip(body) if "node-card invite" not in c]
 
 
 # ── The setup wizard ───────────────────────────────────────────
@@ -235,7 +261,8 @@ def test_the_url_falls_back_to_the_node_id_without_a_hostname():
 
 
 def test_healthz_answers_with_this_node_s_id(app_client):
-    assert app_client.get("/healthz").get_json() == {"ok": True, "node_id": SELF}
+    body = app_client.get("/healthz").get_json()
+    assert body["ok"] is True and body["node_id"] == SELF
 
 
 # ── Interaction with a running calibration ─────────────────────
@@ -267,3 +294,182 @@ def test_a_calibration_still_holds_the_node_s_own_pages(app_client, monkeypatch)
     response = app_client.get("/", headers={"Host": f"{SELF}.local"})
     assert response.status_code == 302
     assert response.headers["Location"].endswith("/config")
+
+
+# ── The cards ──────────────────────────────────────────────────
+
+
+@pytest.fixture
+def telemetry(monkeypatch):
+    """Control what this node believes about its own telemetry."""
+    import app as app_module
+
+    def set_status(status):
+        monkeypatch.setattr(app_module, "telemetry_status", FakeTelemetry(status))
+
+    set_status(None)
+    return set_status
+
+
+def test_this_node_gets_a_card_even_before_discovery_has_run(app_client, fleet,
+                                                            telemetry):
+    """The banner already guarantees itself a tab in this window. A page of
+    cards that disagreed with the banner directly above it would be worse than
+    either answer on its own."""
+    fleet()
+    cards = node_cards(app_client.get("/summary").data.decode())
+    assert len(cards) == 1 and SELF in cards[0]
+
+
+def test_a_card_per_discovered_node(app_client, fleet, telemetry):
+    fleet(node(SELF, is_self=True), node(OTHER, "192.168.1.58"))
+    cards = node_cards(app_client.get("/summary").data.decode())
+    assert len(cards) == 2
+
+
+def test_a_card_is_a_link_to_that_node(app_client, fleet, telemetry):
+    """Same as the banner tab above it. A card that only looked clickable
+    would be the odd one out on this page."""
+    fleet(node(SELF, is_self=True), node(OTHER, "192.168.1.58"))
+    cards = node_cards(app_client.get("/summary").data.decode())
+    assert f'href="http://{OTHER}.local/"' in cards[1]
+
+
+def test_the_serving_node_is_marked_and_comes_first(app_client, fleet, telemetry):
+    fleet(node(SELF, is_self=True), node(OTHER, "192.168.1.58"))
+    cards = node_cards(app_client.get("/summary").data.decode())
+    assert "This node" in cards[0] and "This node" not in cards[1]
+
+
+def test_a_named_node_still_shows_its_node_id(app_client, fleet, telemetry):
+    """It is the identifier support asks for, so a name never replaces it."""
+    fleet(node(SELF, friendly="Garage", is_self=True))
+    card = node_cards(app_client.get("/summary").data.decode())[0]
+    assert "Garage" in card and SELF in card
+
+
+def test_an_unnamed_node_is_titled_by_its_id(app_client, fleet, telemetry):
+    fleet(node(SELF, is_self=True))
+    card = node_cards(app_client.get("/summary").data.decode())[0]
+    assert SELF in card and "Not yet named" in card
+
+
+def test_the_address_is_shown(app_client, fleet, telemetry):
+    """The by-IP fallback for when the mDNS name will not resolve. It had
+    nowhere to live between the node-list page being deleted and this one."""
+    fleet(node(SELF, address="192.168.0.144", is_self=True))
+    card = node_cards(app_client.get("/summary").data.decode())[0]
+    assert "192.168.0.144" in card
+
+
+# ── Telemetry on a card ────────────────────────────────────────
+
+
+def test_a_peers_telemetry_comes_from_its_last_probe(app_client, fleet, telemetry):
+    """No fetch of any kind happens when this page is rendered: the answer
+    arrived on the /healthz probe that runs every 20 seconds anyway."""
+    fleet(node(SELF, is_self=True),
+          node(OTHER, "192.168.1.58", healthz=probe(node_ref="ndabc123")))
+    card = node_cards(app_client.get("/summary").data.decode())[1]
+    assert "ndabc123" in card
+
+
+def test_a_healthy_node_shows_its_id_and_no_chip(app_client, fleet, telemetry):
+    """A working node has nothing to report about itself."""
+    telemetry(local_status(node_ref="ndabc123", state="streaming"))
+    fleet(node(SELF, is_self=True))
+    card = node_cards(app_client.get("/summary").data.decode())[0]
+    assert "ndabc123" in card
+    assert "node-chip" not in card
+
+
+def test_an_unregistered_node_keeps_its_identifier(app_client, fleet, telemetry):
+    """The two are independent, and a node can hold a node_ref from a past
+    registration while the server currently refuses it. Showing only the state
+    would throw away the reference support asks for; showing only the
+    reference would hide the fault."""
+    telemetry(local_status(node_ref="ndabc123", state="unregistered"))
+    fleet(node(SELF, is_self=True))
+    card = node_cards(app_client.get("/summary").data.decode())[0]
+    assert "ndabc123" in card and "Unregistered" in card
+
+
+def test_a_state_name_is_made_readable(app_client, fleet, telemetry):
+    telemetry(local_status(node_ref="ndabc123", state="awaiting_config"))
+    fleet(node(SELF, is_self=True))
+    card = node_cards(app_client.get("/summary").data.decode())[0]
+    assert "Awaiting config" in card
+
+
+def test_a_stale_document_reads_as_not_reporting(app_client, fleet, telemetry):
+    """Whatever state it last claimed, a document too old to believe describes
+    a service that is no longer running."""
+    telemetry(local_status(node_ref="ndabc123", state="streaming", stale=True))
+    fleet(node(SELF, is_self=True))
+    card = node_cards(app_client.get("/summary").data.decode())[0]
+    assert "Not reporting" in card
+
+
+def test_a_node_without_the_telemetry_package_says_so(app_client, fleet, telemetry):
+    telemetry(None)
+    fleet(node(SELF, is_self=True))
+    card = node_cards(app_client.get("/summary").data.decode())[0]
+    assert "Not installed" in card
+
+
+def test_a_peer_not_yet_heard_from_has_no_telemetry_row(app_client, fleet, telemetry):
+    """Distinct from having no telemetry. We have not asked yet, so the card
+    omits the row rather than asserting something we do not know."""
+    fleet(node(SELF, is_self=True), node(OTHER, "192.168.1.58"))
+    card = node_cards(app_client.get("/summary").data.decode())[1]
+    assert "Telemetry" not in card
+
+
+def test_a_peer_on_an_older_build_has_no_telemetry_row(app_client, fleet, telemetry):
+    """Its /healthz predates the field. The card is quieter, not wrong."""
+    fleet(node(SELF, is_self=True),
+          node(OTHER, "192.168.1.58", healthz={"ok": True, "node_id": OTHER}))
+    card = node_cards(app_client.get("/summary").data.decode())[1]
+    assert "Telemetry" not in card
+
+
+# ── A fleet of one ─────────────────────────────────────────────
+
+
+def test_a_lone_node_is_offered_a_second(app_client, fleet, telemetry):
+    fleet(node(SELF, is_self=True))
+    body = app_client.get("/summary").data.decode()
+    assert "Add another node" in body
+
+
+def test_the_offer_goes_once_there_are_two(app_client, fleet, telemetry):
+    fleet(node(SELF, is_self=True), node(OTHER, "192.168.1.58"))
+    body = app_client.get("/summary").data.decode()
+    assert "Add another node" not in body
+
+
+# ── What a peer is told ────────────────────────────────────────
+
+
+def test_healthz_carries_this_nodes_telemetry(app_client, telemetry):
+    """The only channel by which an identifier held on this node's disk
+    reaches a card on someone else's Summary page."""
+    telemetry(local_status(node_ref="ndabc123", state="streaming"))
+    body = app_client.get("/healthz").get_json()
+    assert body["telemetry"] == {"node_ref": "ndabc123",
+                                 "state": "streaming", "stale": False}
+
+
+def test_healthz_says_null_when_telemetry_is_absent(app_client, telemetry):
+    telemetry(None)
+    assert app_client.get("/healthz").get_json()["telemetry"] is None
+
+
+
+def test_a_card_with_nothing_to_say_has_no_divider(app_client, fleet, telemetry):
+    """A peer can legitimately have neither row: not heard from yet, and no
+    address resolved. An empty rows block leaves a rule across the card with
+    nothing beneath it."""
+    fleet(node(SELF, is_self=True), node(OTHER, address=""))
+    card = node_cards(app_client.get("/summary").data.decode())[1]
+    assert "node-rows" not in card

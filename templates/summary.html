@@ -8,16 +8,95 @@
 {% block subnav %}{% endblock %}
 
 {% block content %}
-{#
-   Deliberately empty.
-
-   This page is the fleet-scope slot in the banner and is left as a blank
-   slate for the UX and setup teams to design into. It renders the banner and
-   nothing else on purpose, so anything that appears here later is theirs
-   rather than a developer's placeholder that has to be argued out of the way.
-
-   Add page content inside <main class="main"> below.
-#}
 <main class="main">
+    <div class="section-head"><h2>Nodes on this network</h2></div>
+
+    <div class="node-grid">
+        {% for card in cards %}
+        {# The whole card is the link, exactly as a banner tab is. A card that
+           only looked clickable would be the odd one out on this page. #}
+        <a class="node-card{% if card.is_self %} self{% endif %}" href="{{ card.url }}">
+            <div class="node-head">
+                {# The same antenna mark the tabs and the "listening on" row
+                   use, so a card reads as a node without a label saying so. #}
+                <svg class="node-mark" viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <circle cx="12" cy="12" r="2"></circle>
+                    <path d="M8.5 8.5a5 5 0 0 1 7 0"></path>
+                    <path d="M5.5 5.5a9 9 0 0 1 13 0"></path>
+                    <path d="M12 14v8"></path>
+                </svg>
+                <div class="node-heading">
+                    <div class="node-name{% if not card.has_friendly_name %} unnamed{% endif %}">{{ card.name }}</div>
+                    {# The node ID is the identifier support asks for, so it is
+                       always on the card. When there is no name it has already
+                       been promoted to the title, and the line below says why. #}
+                    <div class="node-id">{% if card.has_friendly_name %}{{ card.node_id }}{% else %}Not yet named{% endif %}</div>
+                </div>
+                {% if card.is_self %}<span class="node-here">This node</span>{% endif %}
+            </div>
+
+            {# Omitted whole rather than left as a divider with nothing under
+               it: a node can legitimately have neither row, being one we have
+               not heard from yet and whose address has not resolved. #}
+            {% if card.telemetry or card.address %}
+            <div class="node-rows">
+                {# Absent entirely until this node has answered a probe, so that
+                   "not heard from yet" is not drawn as "has no telemetry".
+                   See telemetry_view() in routes/fleet.py. #}
+                {% if card.telemetry %}
+                <div class="node-row">
+                    <span class="node-row-label">Telemetry</span>
+                    <span class="node-row-body">
+                        {% if card.telemetry.node_ref %}
+                        <span class="node-value ident">{{ card.telemetry.node_ref }}</span>
+                        {# Only when something is wrong. A registered, streaming
+                           node shows its identifier and nothing else. #}
+                        {% if card.telemetry.label %}
+                        <span class="node-chip {{ card.telemetry.kind or 'muted' }}">{{ card.telemetry.label }}</span>
+                        {% endif %}
+                        {% else %}
+                        {# No identifier to qualify, so the state is the value
+                           itself and reads as prose rather than as a chip. #}
+                        <span class="node-value absent">{{ card.telemetry.label }}</span>
+                        {% endif %}
+                    </span>
+                </div>
+                {% endif %}
+
+                {% if card.address %}
+                <div class="node-row">
+                    <span class="node-row-label">Address</span>
+                    <span class="node-row-body"><span class="node-value">{{ card.address }}</span></span>
+                </div>
+                {% endif %}
+            </div>
+            {% endif %}
+        </a>
+        {% endfor %}
+
+        {# Only when this node is the whole fleet. One card in a grid built for
+           several reads as a page that half loaded, and an owner with one node
+           is the common case rather than the edge one. #}
+        {% if cards|length == 1 %}
+        <a class="node-card invite" href="{{ buy_url }}" target="_blank" rel="noopener">
+            <span class="node-invite-plus">
+                <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" aria-hidden="true">
+                    <path d="M12 5v14"></path><path d="M5 12h14"></path>
+                </svg>
+            </span>
+            <span class="node-invite-text">
+                <span class="node-invite-title">
+                    Add another node
+                    {# It leaves the app, so it carries the same outbound arrow
+                       the banner's Server and Dashboard buttons do. #}
+                    <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                        <path d="M14 3h7v7"></path><path d="M21 3l-9 9"></path><path d="M21 14v5a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5"></path>
+                    </svg>
+                </span>
+                <span class="node-invite-sub">See the range</span>
+            </span>
+        </a>
+        {% endif %}
+    </div>
 </main>
 {% endblock %}

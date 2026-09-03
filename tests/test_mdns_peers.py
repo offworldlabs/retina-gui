@@ -147,7 +147,7 @@ def test_one_failed_probe_does_not_remove_a_node(monkeypatch):
     """The hysteresis that stops a marginal link flipping the page."""
     d = directory()
     d._apply(resolve("ret1", "192.168.1.57"))
-    monkeypatch.setattr(PeerDirectory, "_reachable", staticmethod(lambda a: False))
+    monkeypatch.setattr(PeerDirectory, "_probe_peer", staticmethod(lambda a: (False, None)))
 
     d._probe_once()
     assert d.count() == 1, "one miss is not evidence a node is gone"
@@ -159,12 +159,12 @@ def test_one_failed_probe_does_not_remove_a_node(monkeypatch):
 def test_a_node_comes_back_when_it_answers_again(monkeypatch):
     d = directory()
     d._apply(resolve("ret1", "192.168.1.57"))
-    monkeypatch.setattr(PeerDirectory, "_reachable", staticmethod(lambda a: False))
+    monkeypatch.setattr(PeerDirectory, "_probe_peer", staticmethod(lambda a: (False, None)))
     d._probe_once()
     d._probe_once()
     assert d.count() == 0
 
-    monkeypatch.setattr(PeerDirectory, "_reachable", staticmethod(lambda a: True))
+    monkeypatch.setattr(PeerDirectory, "_probe_peer", staticmethod(lambda a: (True, None)))
     d._probe_once()
     assert d.count() == 1
 
@@ -173,11 +173,11 @@ def test_a_recovered_node_gets_a_full_allowance_again(monkeypatch):
     """A success must reset the counter, not leave it one miss from death."""
     d = directory()
     d._apply(resolve("ret1", "192.168.1.57"))
-    monkeypatch.setattr(PeerDirectory, "_reachable", staticmethod(lambda a: False))
+    monkeypatch.setattr(PeerDirectory, "_probe_peer", staticmethod(lambda a: (False, None)))
     d._probe_once()
-    monkeypatch.setattr(PeerDirectory, "_reachable", staticmethod(lambda a: True))
+    monkeypatch.setattr(PeerDirectory, "_probe_peer", staticmethod(lambda a: (True, None)))
     d._probe_once()
-    monkeypatch.setattr(PeerDirectory, "_reachable", staticmethod(lambda a: False))
+    monkeypatch.setattr(PeerDirectory, "_probe_peer", staticmethod(lambda a: (False, None)))
     d._probe_once()
     assert d.count() == 1
 
@@ -185,8 +185,8 @@ def test_a_recovered_node_gets_a_full_allowance_again(monkeypatch):
 def test_this_node_is_never_probed_over_the_network(monkeypatch):
     """It is the thing that would be answering; asking proves nothing."""
     probed = []
-    monkeypatch.setattr(PeerDirectory, "_reachable",
-                        staticmethod(lambda a: probed.append(a) or False))
+    monkeypatch.setattr(PeerDirectory, "_probe_peer",
+                        staticmethod(lambda a: (probed.append(a) or False, None)))
     d = directory()
     d._apply(resolve("retself", "192.168.1.10"))
     d._probe_once()
@@ -196,21 +196,25 @@ def test_this_node_is_never_probed_over_the_network(monkeypatch):
 
 
 def test_a_peer_with_no_address_is_not_reachable():
-    assert PeerDirectory._reachable("") is False
-    assert PeerDirectory._reachable(None) is False
+    assert PeerDirectory._probe_peer("") == (False, None)
+    assert PeerDirectory._probe_peer(None) == (False, None)
 
 
 def test_a_probe_that_answers_at_all_counts_as_alive(monkeypatch):
     """Not a 200 check: a calibrating node redirects, and a broken one 500s.
 
-    Both are nodes the operator should still be able to open and look at.
+    Both are nodes the operator should still be able to open and look at, so
+    both are alive. Neither carries a body worth keeping.
     """
     class Response:
         status_code = 302
 
+        def json(self):
+            raise ValueError("not JSON")
+
     monkeypatch.setattr(mdns_peers.http_requests, "get",
                         lambda *a, **k: Response())
-    assert PeerDirectory._reachable("192.168.1.57") is True
+    assert PeerDirectory._probe_peer("192.168.1.57") == (True, None)
 
 
 def test_a_connection_error_is_not_alive(monkeypatch):
@@ -218,4 +222,102 @@ def test_a_connection_error_is_not_alive(monkeypatch):
         raise mdns_peers.http_requests.ConnectionError("refused")
 
     monkeypatch.setattr(mdns_peers.http_requests, "get", boom)
-    assert PeerDirectory._reachable("192.168.1.57") is False
+    assert PeerDirectory._probe_peer("192.168.1.57") == (False, None)
+
+
+def test_a_json_answer_comes_back_with_the_verdict(monkeypatch):
+    """The body is the whole point: it is what a peer's card is drawn from."""
+    class Response:
+        status_code = 200
+
+        def json(self):
+            return {"ok": True, "node_id": "ret1"}
+
+    monkeypatch.setattr(mdns_peers.http_requests, "get",
+                        lambda *a, **k: Response())
+    assert PeerDirectory._probe_peer("192.168.1.57") == (
+        True, {"ok": True, "node_id": "ret1"})
+
+
+# ── What the probe brings back ─────────────────────────────────
+#
+# The Summary card for a peer is drawn from whatever its last good /healthz
+# said, because that request is the only regular contact between two nodes.
+
+
+def test_a_good_answer_is_kept_for_the_card(monkeypatch):
+    body = {"ok": True, "node_id": "ret1", "telemetry": {"node_ref": "ndabc"}}
+    monkeypatch.setattr(PeerDirectory, "_probe_peer",
+                        staticmethod(lambda a: (True, body)))
+    d = directory()
+    d._apply(resolve("ret1", "192.168.1.57"))
+    d._probe_once()
+
+    assert d.peers()[0]["healthz"] == body
+
+
+def test_a_bad_answer_does_not_wipe_the_last_good_one(monkeypatch):
+    """Better a card a few seconds out of date than one that empties itself
+    every time a peer happens to be busy."""
+    body = {"ok": True, "telemetry": {"node_ref": "ndabc"}}
+    monkeypatch.setattr(PeerDirectory, "_probe_peer",
+                        staticmethod(lambda a: (True, body)))
+    d = directory()
+    d._apply(resolve("ret1", "192.168.1.57"))
+    d._probe_once()
+
+    monkeypatch.setattr(PeerDirectory, "_probe_peer",
+                        staticmethod(lambda a: (True, None)))
+    d._probe_once()
+
+    assert d.peers()[0]["healthz"] == body
+
+
+def test_a_node_just_discovered_has_no_answer_yet():
+    """So a card can tell "not heard from yet" apart from "has no telemetry"."""
+    d = directory()
+    d._apply(resolve("ret1", "192.168.1.57"))
+    assert d.peers()[0]["healthz"] is None
+
+
+# ── Addresses that cannot be used ──────────────────────────────
+#
+# Observed in the field: avahi labelling a resolve line IPv4 while the address
+# on it is an IPv6 link-local. Trusting the label stored an address nothing
+# could reach, so the node failed both its probes and left the banner 40
+# seconds after appearing, while serving pages perfectly well the whole time.
+
+
+def test_a_link_local_is_not_kept_as_an_address():
+    d = directory()
+    d._apply(resolve("ret1", "fe80::1f69:be26:cc20:2f18"))
+    assert d.peers()[0]["address"] == ""
+
+
+def test_a_usable_address_fills_in_later():
+    d = directory()
+    d._apply(resolve("ret1", "fe80::1f69:be26:cc20:2f18"))
+    d._apply(resolve("ret1", "192.168.1.57"))
+    assert d.peers()[0]["address"] == "192.168.1.57"
+
+
+def test_a_link_local_never_replaces_a_usable_address():
+    d = directory()
+    d._apply(resolve("ret1", "192.168.1.57"))
+    d._apply(resolve("ret1", "fe80::1f69:be26:cc20:2f18", protocol="IPv6"))
+    assert d.peers()[0]["address"] == "192.168.1.57"
+
+
+def test_a_node_with_no_usable_address_is_probed_by_name(monkeypatch):
+    """It is how every other client here reaches the node, and it is the
+    difference between a card missing its address row and a node that is
+    declared gone while running."""
+    probed = []
+    monkeypatch.setattr(PeerDirectory, "_probe_peer",
+                        staticmethod(lambda a: (probed.append(a) or True, None)))
+    d = directory()
+    d._apply(resolve("ret1", "fe80::1f69:be26:cc20:2f18"))
+    d._probe_once()
+
+    assert probed == ["ret1.local"]
+    assert d.count() == 1
