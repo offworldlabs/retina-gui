@@ -339,31 +339,43 @@ def test_tunnel_unknown_off_a_node(tmp_path, monkeypatch):
     (f"{NODE_ID}.{DOMAIN}:443", OWNER),
     (f"{NODE_ID}.{DOMAIN}.", OWNER),
     (f"{NODE_ID}.{DOMAIN}".upper(), OWNER),
-    (f"{NODE_ID}.admin.{DOMAIN}", OWNER),
+    # Under the zone but not our own name, so no longer ours to challenge.
+    (f"{NODE_ID}.admin.{DOMAIN}", LAN),
     ("", LAN),
 ])
 def test_classify_host(host, expected):
     assert classify_host(host, NODE_ID, DOMAIN) == expected
 
 
-def test_unknown_names_on_the_remote_domain_fail_closed():
-    """Anything unrecognised under the zone must ask for a password, not be
-    mistaken for the LAN and waved through."""
-    assert classify_host(f"surprise.{DOMAIN}", NODE_ID, DOMAIN) == OWNER
-    assert classify_host(DOMAIN, NODE_ID, DOMAIN) == OWNER
+def test_unknown_names_on_the_remote_domain_are_not_ours():
+    """Narrowed deliberately. These used to be gated, which swept up hostnames
+    we built by hand and have served unauthenticated for months: they were asked
+    for an Access assertion no application exists to issue, and sent to a
+    password page that cannot be satisfied.
+
+    A name under this zone is one *we* created, in our own zone. It is our
+    mistake to make rather than an attacker's to exploit, and treating it as LAN
+    restores exactly what it did before this feature existed."""
+    assert classify_host(f"surprise.{DOMAIN}", NODE_ID, DOMAIN) == LAN
+    assert classify_host(DOMAIN, NODE_ID, DOMAIN) == LAN
 
 
-def test_every_name_under_the_zone_needs_the_password():
-    """There is no staff hostname any more, so nothing under the zone is exempt."""
+def test_only_our_own_hostname_is_the_remote_pathway():
+    """Including another node's: reaching us on a sibling's name is not us, and
+    challenging for an audience we can never match helps nobody."""
     for host in (f"ret9f2b1e44.{DOMAIN}", f"anything.{DOMAIN}",
-                 f"{NODE_ID}.admin.{DOMAIN}"):
-        assert classify_host(host, NODE_ID, DOMAIN) == OWNER
+                 f"{NODE_ID}.admin.{DOMAIN}", f"{NODE_ID}-ui.{DOMAIN}"):
+        assert classify_host(host, NODE_ID, DOMAIN) == LAN, host
+    assert classify_host(f"{NODE_ID}.{DOMAIN}", NODE_ID, DOMAIN) == OWNER
 
 
 def test_an_unreadable_node_id_does_not_open_the_owner_path():
     """read_node_id() returns 'Unknown' when /data/mender is missing. That must
     not turn the tunnel hostname into an unauthenticated one."""
     assert classify_host(f"{NODE_ID}.{DOMAIN}", "Unknown", DOMAIN) == OWNER
+    # And anything else that is not a node id: empty, None, junk.
+    for bad in ("", None, "not-a-node-id", "ret123"):
+        assert classify_host(f"{NODE_ID}.{DOMAIN}", bad, DOMAIN) == OWNER, bad
 
 
 def test_a_mender_port_forward_counts_as_local():
@@ -855,3 +867,68 @@ def test_the_lan_still_builds_port_links(home):
     body = home()
     assert "var isRemote = false;" in body
     assert "window.location.hostname + \':\' + el.dataset.port" in body
+
+
+# ── which names are the remote pathway ───────────────────────────
+#
+# Only this node's own support hostname. It used to be every name under the
+# remote domain, which swept up hand-built hostnames that predate the feature:
+# they were gated, asked for an Access assertion no application exists to issue,
+# and sent to a password page that cannot be satisfied.
+
+def test_this_nodes_own_hostname_is_the_remote_pathway():
+    assert classify_host(f"{NODE_ID}.{DOMAIN}", NODE_ID, DOMAIN) == OWNER
+
+
+def test_another_name_on_the_domain_is_not_gated():
+    """The regression. These are hostnames we built by hand and have served
+    unauthenticated for months; the feature must not claim them."""
+    for host in (f"{NODE_ID}-ui.{DOMAIN}", "jonathan-node-1-ui." + DOMAIN,
+                 "jonathan-node-1." + DOMAIN, DOMAIN):
+        assert classify_host(host, NODE_ID, DOMAIN) == LAN, host
+
+
+def test_another_nodes_hostname_is_not_our_remote_pathway():
+    """Reaching us on a sibling's name is not us. Treating it as OWNER would
+    have this node challenge for an audience it can never match."""
+    assert classify_host(f"ret00000000.{DOMAIN}", NODE_ID, DOMAIN) == LAN
+
+
+def test_the_lan_is_unchanged():
+    for host in ("owl.local", f"{NODE_ID}.local", "localhost", "192.168.0.10"):
+        assert classify_host(host, NODE_ID, DOMAIN) == LAN, host
+
+
+def test_without_a_node_id_it_falls_back_to_the_blunt_rule():
+    """Fail closed where it genuinely cannot tell. With no node_id there is no
+    way to recognise our own hostname, and serving the real support hostname
+    unauthenticated would be far worse than over-challenging."""
+    assert classify_host(f"{NODE_ID}.{DOMAIN}", "", DOMAIN) == OWNER
+    assert classify_host(f"anything.{DOMAIN}", None, DOMAIN) == OWNER
+    assert classify_host("owl.local", "", DOMAIN) == LAN
+
+
+# ── where a failed verification lands ────────────────────────────
+
+def test_a_failed_verification_explains_itself(client):
+    """Not the password form. No password can be set from this pathway and the
+    page offers no way to set one, so redirecting there could only ever refuse
+    and told the visitor nothing.
+
+    Uses `client`, not `live`: the live fixture sets a password, which is the
+    one case where the form is still the right destination."""
+    client.remote_access.set_enabled(True)
+    r = client.get("/", base_url=OWNER_URL)
+    assert r.status_code == 403
+    body = r.get_data(as_text=True)
+    assert "could not verify you" in body
+    assert "password" not in body.lower()
+
+
+def test_the_password_form_is_still_offered_once_one_exists(live):
+    """The deferred owner-password design still works the moment a password is
+    set (the live fixture sets one). It is simply no longer where failures
+    land."""
+    r = live.get("/", base_url=OWNER_URL)
+    assert r.status_code == 302
+    assert "/login" in r.headers["Location"]
