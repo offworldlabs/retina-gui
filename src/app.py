@@ -2,7 +2,8 @@ import os
 import subprocess
 import sys
 
-from flask import Flask, jsonify, redirect, request
+from flask import Flask, abort, g, jsonify, redirect, request, session, url_for
+from flask.sessions import SecureCookieSessionInterface
 from flask_wtf.csrf import CSRFError, CSRFProtect
 
 # Configuration and shared services live in their own module because this one
@@ -18,6 +19,7 @@ from services import (  # noqa: F401  (re-exported for routes)
     MERGED_CONFIG_PATH,
     NODE_ID_FILE,
     PROJECT_ROOT,
+    REMOTE_ACCESS_DOMAIN,
     RETINA_NODE_PATH,
     RETINA_SPECTRUM_URL,
     RETINA_TRACKER_EVENTS_PATH,
@@ -26,17 +28,21 @@ from services import (  # noqa: F401  (re-exported for routes)
     TELEMETRY_STATUS_PATH,
     TOWER_FINDER_URL,
     USER_CONFIG_PATH,
+    access_identity,
     apply_service,
     blah2_client,
     calibrator,
     config_mgr,
     device_state,
     mender,
+    mender_connect,
     network_mgr,
     node_name,
     peers,
     read_node_id,
+    remote_access,
     retina_tracker_client,
+    secret_key,
     ssh_keys,
     telemetry_status,
     tracker_capture,
@@ -45,13 +51,8 @@ from services import (  # noqa: F401  (re-exported for routes)
 app = Flask(__name__,
             template_folder=os.path.join(PROJECT_ROOT, 'templates'),
             static_folder=os.path.join(PROJECT_ROOT, 'static'))
-# Left as-is deliberately. Persisting this key is a real fix, but it is
-# already implemented as services.secret_key() on 20260828-remote-access,
-# whose login session needs the same guarantee. Carrying a second copy
-# here merges without a conflict and leaves TWO identical definitions in
-# services.py, which is worse than the gap. See that branch, or land it
-# on main on its own if it is needed before that one is reviewed.
-app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', os.urandom(32).hex())
+# Persisted to /data rather than regenerated per process. See services.secret_key.
+app.config['SECRET_KEY'] = secret_key()
 # Flask-WTF expires a CSRF token 3600s after it is issued. The setup wizard
 # reads its token once at page load and reuses it for the entire run (see
 # postJSON in setup.js), and a real run routinely passes the hour: reading
@@ -63,10 +64,132 @@ app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', os.urandom(32).hex())
 # stays signed with SECRET_KEY and bound to the session cookie, so it still
 # expires when the session does.
 app.config['WTF_CSRF_TIME_LIMIT'] = None
+
+# Whether Secure cookies are permitted at all. Off in dev so a server on
+# http://localhost can still hold one; on elsewhere, where it gates the remote
+# pathway below rather than applying to every response.
+app.config['SESSION_COOKIE_SECURE'] = (
+    os.environ.get('SESSION_COOKIE_SECURE', '' if DEV_MODE else '1').lower()
+    in ('1', 'true', 'yes')
+)
+app.config['SESSION_COOKIE_HTTPONLY'] = True
+app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
+
+
+class _PathwaySessionInterface(SecureCookieSessionInterface):
+    """Cookie flags that follow the pathway instead of one global setting.
+
+    This used to be a single config: Secure everywhere, and the `__Host-` name
+    whenever Secure was on. The reasoning was that the session only mattered on
+    the remote pathway, which is always HTTPS, so the LAN could simply go
+    without one.
+
+    That was wrong, and badly so. A browser silently discards a Secure cookie
+    delivered over plain HTTP, which is exactly what the LAN is. So the LAN held
+    no session at all, and CSRFProtect keeps its token *in the session*, so
+    every POST an owner made from their own network was rejected with 400: the
+    config page, every toggle, the setup wizard. Curl hid it completely, because
+    it keeps the cookie where a browser refuses to.
+
+    So Secure is applied where it is true rather than where it is convenient.
+    The `__Host-` prefix is still worth having on the remote pathway, where
+    every node is a sibling under one registrable domain and without it one node
+    could set a `.retnode.com` cookie that shadows another's. The prefix
+    requires Secure, so the two answers have to move together.
+    """
+
+    def _is_remote(self):
+        try:
+            from remote_access import OWNER, classify_host
+            return (app.config['SESSION_COOKIE_SECURE']
+                    and classify_host(request.host, read_node_id(),
+                                      REMOTE_ACCESS_DOMAIN) == OWNER)
+        except Exception:
+            # Fail towards the LAN. A node that cannot tell which pathway it is
+            # on must not end up unable to hold a session on the one owners
+            # actually use, which is the failure this class exists to fix.
+            return False
+
+    def get_cookie_secure(self, app):
+        return self._is_remote()
+
+    def get_cookie_name(self, app):
+        return '__Host-session' if self._is_remote() else 'session'
+
+
+app.session_interface = _PathwaySessionInterface()
+
 csrf = CSRFProtect(app)
+
+
+def _reapply_shell_agreement():
+    """Make mender-connect agree with the owner's recorded choice.
+
+    The choice lives in /data, which is its own partition and survives an OS
+    update. The enforcement lives in /etc/mender/mender-connect.conf, on the
+    A/B rootfs, which does not: an update replaces it with the template owl-os
+    ships, where Terminal and PortForward are both enabled.
+
+    Nothing re-applied it, so an owner who declined a shell had it restored by
+    the next update while the marker, the config page and the `remote_shell`
+    inventory attribute all still reported it declined. Recorded state and
+    enforced state diverged silently, in the permissive direction, which is the
+    only direction that matters here: everyone would have believed the refusal
+    was still in force.
+
+    That makes the marker in /data authoritative and this the thing that
+    enforces it, rather than the write that happened to run when the owner last
+    clicked.
+
+    Acts only on a mismatch, which matters twice over. This module body is
+    executed twice per process (see services.py), so the second pass finds
+    nothing to do; and a node whose config already agrees is left alone rather
+    than rewritten and its daemon restarted on every boot.
+    """
+    if DEV_MODE:
+        return
+    try:
+        wanted = remote_access.is_shell_allowed()
+        actual = mender_connect.is_shell_enabled()
+        # None means the config could not be read. mender_connect refuses to
+        # invent a replacement, and it is right to: writing a plausible one
+        # would reconstruct transfer limits and a shell user we have no basis
+        # for, and could widen access rather than restore it.
+        if actual is None or actual == wanted:
+            return
+        ok, error = mender_connect.set_shell_enabled(wanted)
+        if ok:
+            app.logger.warning(
+                "Re-applied the remote shell agreement: the owner has it %s, "
+                "but this node was set to %s sessions. An OS update replaces "
+                "mender-connect.conf, so this is the expected repair after one.",
+                "on" if wanted else "off",
+                "allow" if actual else "refuse")
+        else:
+            app.logger.error(
+                "Could not re-apply the remote shell agreement (%s). This node "
+                "will %s sessions while its owner has it %s.",
+                error, "allow" if actual else "refuse", "on" if wanted else "off")
+    except Exception:
+        # Never let this stop the GUI booting. A node that will not serve its
+        # own config page is worse than one whose shell setting needs a click.
+        app.logger.exception("Re-applying the remote shell agreement failed")
+
 
 if not DEV_MODE:
     device_state.apply_startup_preferences()
+    _reapply_shell_agreement()
+    # The inventory marker is the only thing node-infra reads, and a node that
+    # has never been touched has no state file and so no marker. That was
+    # consistent while support access defaulted off; it is not now that it
+    # defaults on, and without this such a node would keep reporting
+    # remote_access=false until somebody happened to toggle something.
+    #
+    # Best effort, like the marker write it wraps: never worth failing a boot.
+    try:
+        remote_access.publish_marker()
+    except Exception:
+        app.logger.exception("Could not publish the support access marker")
 
 # Always boot into radar mode — delete any persisted spectrum state
 try:
@@ -161,8 +284,21 @@ def inject_globals():
     from routes.fleet import banner_nodes
 
     owl_os_version, retina_node_version = mender.get_versions()
+
+    # Which pathway this request arrived on. Templates need it because some
+    # links are only reachable one way: the service cards point at other ports
+    # on the LAN, and at tunnel paths remotely. Defaults to LAN, so anything
+    # rendered outside a request (or before the gate runs) keeps the behaviour
+    # the node has always had.
+    from remote_access import LAN, OWNER
+    is_remote = getattr(g, 'pathway', LAN) == OWNER
+
     return {
+        'is_remote': is_remote,
         'node_id': get_node_id(),
+        # Which pathway this request arrived on, so templates can hide what the
+        # owner pathway is not allowed to reach anyway.
+        'pathway': getattr(g, 'pathway', 'lan'),
         'owl_os_version': owl_os_version,
         'retina_node_version': retina_node_version,
         # One banner tab per node, on every page. An in-memory list, copied
@@ -180,6 +316,7 @@ from routes.home import bp as home_bp
 from routes.mender_routes import bp as mender_bp
 from routes.mode import bp as mode_bp
 from routes.network import bp as network_bp
+from routes.remote_access import bp as remote_access_bp
 from routes.setup import bp as setup_bp
 from routes.towers import bp as towers_bp
 from routes.tracker_preview import bp as tracker_preview_bp
@@ -194,6 +331,86 @@ app.register_blueprint(network_bp)
 app.register_blueprint(calibrate_bp)
 app.register_blueprint(tracker_preview_bp)
 app.register_blueprint(fleet_bp)
+app.register_blueprint(remote_access_bp)
+
+
+# Reachable on the owner pathway without a session: the login page itself, the
+# assets it needs to render, and the favicon. Everything else is behind the
+# password.
+_REMOTE_PUBLIC_PREFIXES = ('/login', '/static', '/favicon')
+
+
+@app.before_request
+def _gate_the_remote_pathways():
+    """Decide what this request is allowed to be, based on the hostname it used.
+
+    Two pathways, and only one of them is challenged here:
+
+      LAN     owl.local, ret4c844c20.local, a bare IP, and anything arriving
+              over a Mender port-forward, which lands as `localhost`.
+              Unauthenticated, exactly as it has always been: being on the
+              network is the credential, and Mender has already authenticated
+              and logged the engineer who opened the forward.
+      OWNER   ret<id>.retnode.com, over the tunnel. Nothing upstream checked
+              anybody, so the password is the only gate and it is checked here.
+
+    Registered before the calibration hook below, and that ordering is load
+    bearing: Flask runs app-level before_request handlers in registration order,
+    and the calibration hook redirects GETs to /config. If it ran first, an
+    unauthenticated visitor arriving during a calibration would be bounced to a
+    page they are not allowed to see instead of to the login form.
+    """
+    from remote_access import LAN, classify_host, requires_presence
+
+    g.pathway = classify_host(request.host, read_node_id(), REMOTE_ACCESS_DOMAIN)
+    if g.pathway == LAN:
+        return None
+
+    # 404 rather than 403 when the owner has not turned this on. The tunnel
+    # should not be up at all in that state, so anything arriving here is either
+    # a stale DNS record or someone guessing; neither is owed confirmation that
+    # a node answers to this name.
+    if not remote_access.is_enabled():
+        abort(404)
+
+    if request.path.startswith(_REMOTE_PUBLIC_PREFIXES):
+        return None
+
+    # Cloudflare Access is the gate in front of this hostname, so a valid
+    # assertion is who this is. Verified on the node rather than trusted from a
+    # header: if the Access application were ever deleted or misconfigured the
+    # hostname would be open, and this is the only thing that would notice.
+    identity = access_identity.identity(
+        request.headers.get('Cf-Access-Jwt-Assertion'))
+    if identity:
+        g.access_identity = identity
+
+    if not (identity or session.get('remote_authed')):
+        if request.method == 'GET':
+            # full_path always appends '?', even with no query string, which
+            # would send people to '/config?' after signing in.
+            wanted = request.full_path.rstrip('?') or '/'
+            return redirect(url_for('remote_access.login', next=wanted))
+        # A POST from a page whose session expired. 403 rather than a redirect,
+        # so fetch() callers get a status they can act on instead of an HTML
+        # login page parsed as JSON.
+        #
+        # Note this is not the only rejection such a request can get. CSRFProtect
+        # is constructed above, so its before_request is registered first and
+        # runs first: a stale page's POST usually carries a stale token and is
+        # refused with 400 before reaching here. Both are refusals; only the
+        # status differs, and which one you see depends on whether the token
+        # outlived the session.
+        abort(403)
+
+    # Authenticated, but some things still need someone at the device, and that
+    # applies to our own engineers too. If an Access session could add an SSH key
+    # here, support access would be a route to shell access and the two owner
+    # agreements would stop being independent of each other.
+    if requires_presence(request.path):
+        abort(403, "This can only be done from the local network")
+
+    return None
 
 
 @app.errorhandler(CSRFError)

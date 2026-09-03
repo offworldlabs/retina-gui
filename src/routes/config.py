@@ -38,6 +38,39 @@ def _check_wizard_not_active():
         return redirect('/set-up')
 
 
+@bp.context_processor
+def _remote_access_context():
+    """Remote access state, for every template this blueprint renders.
+
+    Deliberately not passed per call site. config.html has two render points:
+    /config, and the validation-error branch of /config/save. Handing them
+    the same three arguments by hand is how the second one shipped without them.
+    A context processor is the version of this that cannot drift when a third
+    render point appears.
+
+    remote_host is derived rather than reported: the hostname is a pure function
+    of node_id and the zone, so the page can name the address before anything
+    has provisioned it.
+    """
+    from app import REMOTE_ACCESS_DOMAIN, mender_connect, read_node_id, remote_access
+    from remote_access import tunnel_status
+
+    return {
+        'remote_access': remote_access.status(),
+        # The *enforced* shell state, read back from mender-connect's own config
+        # rather than from what we recorded. They can disagree: an enforcement
+        # that failed, or a hand-edited config, would otherwise leave this page
+        # confidently showing a choice the node is not honouring. True, False,
+        # or None when the config cannot be read at all.
+        'shell_enforced': mender_connect.is_shell_enabled(),
+        # Asked of systemd, not of a server. Nothing on the node is told whether
+        # provisioning worked, so the honest answer to "is it reachable" is
+        # whether the connector is up. See remote_access.tunnel_status.
+        'remote_tunnel': tunnel_status() if remote_access.is_enabled() else 'off',
+        'remote_host': f"{read_node_id()}.{REMOTE_ACCESS_DOMAIN}",
+    }
+
+
 @bp.route("/config")
 def config_page():
     """Configuration page with all settings."""

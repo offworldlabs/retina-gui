@@ -4,3 +4,7 @@ tests/__pycache__/
 
 # Dev mode local data
 src/dev_data/
+# Also at the repo root: services.secret_key() writes one there the first
+# time the app or the suite runs outside DEV_MODE's temp dirs. Only the
+# src/ path was ignored, so it kept turning up in commits.
+dev_data/

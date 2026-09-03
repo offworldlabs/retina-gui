@@ -96,6 +96,7 @@
         <h3>Administration</h3>
         <a href="#this-node">This node</a>
         <a href="#ssh">SSH access</a>
+        <a href="#remote">Remote access</a>
         <a href="#cloud">Cloud services</a>
         <a href="#wizard">Setup wizard</a>
         <a href="#network">Network</a>
@@ -476,11 +477,71 @@
             </div>
         </section>
 
+        {# ── Remote support ── #}
+        <section id="remote" class="cfg-section" style="margin-top:12px;">
+            <div class="cfg-section-head">
+                <h2>Remote support</h2>
+                <span class="desc">What our support team may do with this node when they are not at your location. Both settings are yours to change at any time, and neither affects how the node works day to day.</span>
+            </div>
+            <div class="cfg-body">
+                <div class="toggle-row" style="padding:0;border:0;">
+                    <label class="ds-switch">
+                        <input type="checkbox" id="remoteToggle" {% if remote_access.enabled %}checked{% endif %}>
+                        <span class="ds-switch-track"></span>
+                    </label>
+                    <div class="body">
+                        <div class="name">Let support open this node&rsquo;s interface</div>
+                        <div class="desc" id="remoteToggleStatus">
+                            {% if not remote_access.enabled %}Off. Support can only reach this node from your own network.
+                            {% elif remote_tunnel == 'up' %}On and connected.
+                            {% elif remote_tunnel == 'waiting' %}On. The connection is not live yet.
+                            {% elif remote_tunnel == 'down' %}On, but the connection has dropped. It should recover on its own.
+                            {% else %}On.{% endif %}
+                        </div>
+                    </div>
+                </div>
+                <div class="help" style="margin:2px 0 16px 52px;">
+                    They see the same pages you see and can change the same settings. They cannot
+                    open a command line or add an SSH key this way.
+                </div>
+
+                <div class="toggle-row" style="padding:0;border:0;border-top:1px solid var(--line);padding-top:16px;">
+                    <label class="ds-switch">
+                        <input type="checkbox" id="shellToggle" {% if remote_access.shell_allowed %}checked{% endif %}>
+                        <span class="ds-switch-track"></span>
+                    </label>
+                    <div class="body">
+                        <div class="name">Let support open a command line</div>
+                        <div class="desc" id="shellToggleStatus">
+                            {% if shell_enforced is none %}On this node&rsquo;s settings, but we could not confirm it is applied.
+                            {% elif shell_enforced != remote_access.shell_allowed %}Not applied. This node is still set to
+                                {% if shell_enforced %}allow{% else %}refuse{% endif %} sessions. Try again, or ask support.
+                            {% elif remote_access.shell_allowed %}On.
+                            {% else %}Off. No session can be opened, from anywhere.{% endif %}
+                        </div>
+                    </div>
+                </div>
+                <div class="help" style="margin:2px 0 0 52px;">
+                    This is how we diagnose problems the interface cannot show, and it is the
+                    deepest access anyone can have to your node. Turning it off does not affect
+                    the setting above.
+                </div>
+
+                <div id="remoteMsg" style="font-size:12.5px;margin-top:14px;display:none;"></div>
+
+                <div class="help" style="margin-top:16px;padding-top:14px;border-top:1px solid var(--line);">
+                    Software updates and registration continue whichever way these are set. What
+                    you are choosing here is whether a person can reach the node, not whether it
+                    stays up to date.
+                </div>
+            </div>
+        </section>
+
         {# ── Cloud services ── #}
         <section id="cloud" class="cfg-section">
             <div class="cfg-section-head">
                 <h2>Cloud services</h2>
-                <span class="desc">Automatic OS &amp; package updates and remote support.</span>
+                <span class="desc">This node's link to Offworld: software updates and registration.</span>
             </div>
             <div class="cfg-body">
                 <div class="toggle-row" style="padding:0;border:0;">
@@ -490,7 +551,7 @@
                     </label>
                     <div class="body">
                         <div class="name">Enable cloud services</div>
-                        <div class="desc" id="cloudServicesStatus">Automatic software updates and remote support.</div>
+                        <div class="desc" id="cloudServicesStatus">Software updates and registration. The Remote support settings above need this too.</div>
                     </div>
                 </div>
             </div>
@@ -642,7 +703,8 @@
                 <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
             </div>
             <div class="modal-body" style="font-size:13.5px;color:var(--ink-2);">
-                <p>This will stop automatic software updates and disable remote support access.</p>
+                <p>This stops automatic software updates and registration with Offworld.</p>
+                <p>It also switches off everything under Remote support, whatever those two settings say.</p>
                 <p class="mb-0">You can re-enable at any time.</p>
             </div>
             <div class="modal-footer">
@@ -1376,7 +1438,7 @@ if (discardBtn) discardBtn.addEventListener('click', () => location.reload());
                     setTimeout(loadCloudStatus, 10000);
                 } else {
                     toggle.disabled = false;
-                    status.textContent = 'Automatic software updates and remote support.';
+                    status.textContent = 'Software updates and registration. The Remote support settings above need this too.';
                 }
             })
             .catch(() => { toggle.checked = true; toggle.disabled = false; });
@@ -1408,7 +1470,7 @@ if (discardBtn) discardBtn.addEventListener('click', () => location.reload());
         })
         .then(r => r.json().then(data => ({ok: r.ok, data})))
         .then(({ok, data}) => {
-            if (ok && data.success) { status.textContent = 'Settings applied'; setTimeout(() => { status.textContent = 'Automatic software updates and remote support.'; }, 3000); }
+            if (ok && data.success) { status.textContent = 'Settings applied'; setTimeout(() => { status.textContent = 'Software updates and registration. The Remote support settings above need this too.'; }, 3000); }
             else { status.textContent = data.error; toggle.checked = !toggle.checked; }
         })
         .catch(e => { status.textContent = 'Error: ' + e.message; toggle.checked = !toggle.checked; })
@@ -1990,6 +2052,75 @@ if (discardBtn) discardBtn.addEventListener('click', () => location.reload());
             .then(function() { setTimeout(pollCapturePeak, 1000); });
     }
     pollCapturePeak();
+})();
+</script>
+
+{# ── Remote support ── #}
+<script>
+(function () {
+    var support = document.getElementById('remoteToggle');
+    var shell   = document.getElementById('shellToggle');
+    if (!support || !shell) return;
+
+    var supportStatus = document.getElementById('remoteToggleStatus');
+    var shellStatus   = document.getElementById('shellToggleStatus');
+    var msg           = document.getElementById('remoteMsg');
+    var csrf          = document.querySelector('meta[name="csrf-token"]').content;
+
+    function say(text, bad) {
+        msg.textContent = text;
+        msg.style.color = bad ? 'var(--danger)' : 'var(--ink-3)';
+        msg.style.display = text ? 'block' : 'none';
+    }
+
+    function post(url, body) {
+        return fetch(url, {
+            method: 'POST',
+            headers: {'X-CSRFToken': csrf, 'Content-Type': 'application/x-www-form-urlencoded'},
+            body: body
+        }).then(function (r) { return r.json().then(function (j) { return {ok: r.ok, body: j}; }); });
+    }
+
+    // Each toggle drives its own endpoint and reverts itself on failure. They
+    // are deliberately not wired together: the whole point of two settings is
+    // that changing one says nothing about the other.
+    function wire(input, url, field, statusEl, describe) {
+        input.addEventListener('change', function () {
+            var want = input.checked;
+            input.disabled = true;
+            say('');
+            post(url, field + '=' + (want ? '1' : '0'))
+                .then(function (r) {
+                    if (!r.ok) {
+                        input.checked = !want;
+                        say(r.body.error || 'Could not change this setting', true);
+                        return;
+                    }
+                    statusEl.textContent = describe(r.body);
+                })
+                .catch(function () {
+                    input.checked = !want;
+                    say('Could not reach the node', true);
+                })
+                .then(function () { input.disabled = false; });
+        });
+    }
+
+    wire(support, '/remote-access/toggle', 'enabled', supportStatus, function (b) {
+        // No estimate offered. How long this takes depends on node-infra's
+        // scheduling, which this node has no knowledge of and cannot promise.
+        return b.enabled
+            ? 'On. The connection is not live yet.'
+            : 'Off. Support can only reach this node from your own network.';
+    });
+
+    // Safe to state plainly here: the route enforces before it records and
+    // errors if enforcement failed, so an ok response means the node really is
+    // in this state. The page-load branch cannot assume that and reads the
+    // enforced value back instead.
+    wire(shell, '/remote-access/shell', 'allowed', shellStatus, function (b) {
+        return b.shell_allowed ? 'On.' : 'Off. No session can be opened, from anywhere.';
+    });
 })();
 </script>
 {% endblock %}

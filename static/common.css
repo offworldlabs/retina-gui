@@ -363,6 +363,10 @@ h1, h2, h3, h4, h5, h6 {
     flex-shrink: 0;
 }
 .svc-name { font-weight: 600; font-size: 14.5px; letter-spacing: -0.005em; }
+/* Why a card is greyed out over the support tunnel: the service is on a port
+   the tunnel does not route, so it is reachable from the node's own network
+   only. Said on the card rather than left to be discovered by clicking. */
+.svc-remote-note { font-size: 12px; color: var(--ink-3, #888); margin-top: 2px; }
 .svc-arrow { margin-left: auto; color: var(--ink-3); transition: transform .12s, color .12s; }
 .svc-card:hover .svc-arrow { color: var(--ink); transform: translateX(2px); }
 .svc-desc { font-size: 13px; color: var(--ink-2); line-height: 1.5; }
