@@ -24,6 +24,20 @@ _ = type("_", (), {})()
 #   src/app.py:44
 csrf
 
+# Flask's session machinery calls these on the interface it is given; nothing in
+# this codebase calls them directly. They decide the cookie's flags per request,
+# which is why they are overridden at all.
+#   src/app.py  (_PathwaySessionInterface)
+get_cookie_secure
+get_cookie_name
+# Flask reads app.session_interface when it opens and saves a session. Assigning
+# it is the whole mechanism, so vulture sees a write with no read.
+session_interface
+# flask.session.permanent, set to extend the signed-in lifetime past the browser
+# session. Read by Flask when it serialises the cookie.
+#   src/routes/remote_access.py:63
+permanent
+
 # ── UNREVIEWED: appears dead, needs a decision (delete, or finish wiring) ──────
 # TODO: config field: parsed but no reader found — wire it up or drop it
 #   src/config_schema.py:161  (unused variable)

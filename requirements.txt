@@ -3,4 +3,8 @@ flask-wtf
 pydantic
 requests
 pyyaml
-pyjwt
+# [crypto] because Cloudflare Access signs its assertions RS256, and PyJWT
+# cannot verify those without cryptography. It has been present transitively so
+# far, which is why nothing noticed: a clean install would leave the node unable
+# to verify any assertion, failing closed and locking support out.
+pyjwt[crypto]
