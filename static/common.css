@@ -437,6 +437,18 @@ h1, h2, h3, h4, h5, h6 {
 }
 .ds-input.mono { font-family: var(--font-mono); }
 
+/* Invalid state. Bootstrap's own .is-invalid rules are all scoped to
+   .form-control / .form-select / .form-check-input, so the class the config
+   page sets on its .ds-input boxes drew nothing at all and "Please fix the
+   highlighted fields below" pointed at an unmarked form. */
+.ds-input.is-invalid, .ds-select.is-invalid, .ds-textarea.is-invalid {
+    border-color: var(--danger);
+}
+.ds-input.is-invalid:focus, .ds-select.is-invalid:focus, .ds-textarea.is-invalid:focus {
+    border-color: var(--danger);
+    box-shadow: 0 0 0 3px oklch(0.62 0.20 25 / 0.14);
+}
+
 /* ══════════════════════════════════════════════
    SWITCH
    ══════════════════════════════════════════════ */

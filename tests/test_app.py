@@ -417,7 +417,12 @@ class TestLocationSave:
         assert saved['location']['rx']['name'] == 'NYC'
 
     def test_save_invalid_latitude(self, app_client):
-        """Invalid latitude should show error banner."""
+        """An out-of-range latitude marks its own box and says why.
+
+        Asserting only the banner is what let this go unnoticed: the location
+        block never consulted config_errors, so the page came back telling the
+        owner to fix the highlighted fields with nothing highlighted anywhere.
+        """
         response = app_client.post('/config/save', data={
             'location.rx_latitude': '100',  # Invalid > 90
             'location.rx_longitude': '-74.0',
@@ -430,9 +435,13 @@ class TestLocationSave:
         })
         assert response.status_code == 200
         assert b'Please fix the highlighted fields below' in response.data
+        assert b'name="location.rx_latitude" class="ds-input mono is-invalid"' in response.data
+        assert b'less than or equal to 90' in response.data
+        # Only the offending box, not a blanket highlight over the section.
+        assert b'name="location.rx_longitude" class="ds-input mono is-invalid"' not in response.data
 
     def test_save_invalid_longitude(self, app_client):
-        """Invalid longitude should show error banner."""
+        """An out-of-range longitude marks its own box and says why."""
         response = app_client.post('/config/save', data={
             'location.rx_latitude': '40.0',
             'location.rx_longitude': '200',  # Invalid > 180
@@ -445,6 +454,47 @@ class TestLocationSave:
         })
         assert response.status_code == 200
         assert b'Please fix the highlighted fields below' in response.data
+        assert b'name="location.rx_longitude" class="ds-input mono is-invalid"' in response.data
+        assert b'less than or equal to 180' in response.data
+        assert b'name="location.rx_latitude" class="ds-input mono is-invalid"' not in response.data
+
+    def test_save_overlong_transmitter_name(self, app_client):
+        """An over-length transmitter name marks its own box.
+
+        maxlength on the input constrains typing, not the programmatic
+        assignment the Tower preset picker makes, and the form is novalidate,
+        so this arrives without the owner having typed anything wrong.
+        """
+        response = app_client.post('/config/save', data={
+            'location.rx_latitude': '40.0',
+            'location.rx_longitude': '-74.0',
+            'location.rx_altitude': '10',
+            'location.rx_name': 'Test',
+            'location.tx_latitude': '40.0',
+            'location.tx_longitude': '-74.0',
+            'location.tx_altitude': '100',
+            'location.tx_name': 'A' * 33,
+        })
+        assert response.status_code == 200
+        assert b'Please fix the highlighted fields below' in response.data
+        assert b'name="location.tx_name" class="ds-input is-invalid"' in response.data
+        assert b'at most 32 characters' in response.data
+
+    def test_save_invalid_transmitter_coordinates_are_highlighted(self, app_client):
+        """The transmitter half of the section is wired up too."""
+        response = app_client.post('/config/save', data={
+            'location.rx_latitude': '40.0',
+            'location.rx_longitude': '-74.0',
+            'location.rx_altitude': '10',
+            'location.rx_name': 'Test',
+            'location.tx_latitude': '442.2',
+            'location.tx_longitude': '-74.0',
+            'location.tx_altitude': '100',
+            'location.tx_name': 'Transmitter',
+        })
+        assert response.status_code == 200
+        assert b'name="location.tx_latitude" class="ds-input mono is-invalid"' in response.data
+        assert b'less than or equal to 90' in response.data
 
 
 class TestTar1090Save:

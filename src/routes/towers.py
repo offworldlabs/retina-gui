@@ -15,6 +15,53 @@ bp = Blueprint('towers', __name__, url_prefix='/towers')
 MAX_CACHED_TOWERS = 5
 
 
+def _cacheable_towers(towers):
+    """Screen finder results before they back /config's preset picker.
+
+    Picking a preset assigns straight into the location inputs with
+    `el.value = ...`. maxlength does not constrain a programmatic assignment
+    and the validity flag it would otherwise raise is ignored because the form
+    is novalidate, so an over-long or out-of-range tower lands in the form
+    intact and the save then fails on a field the owner never touched. Manual
+    adds are already screened in cache_add; this is the same screen on the
+    search path, which until now cached whatever the service returned.
+
+    Auto-Calibrate reads the same cache as its alternate-tower list, and a
+    tower whose coordinates cannot be a position is no use to either caller.
+    """
+    from app import app
+
+    kept = []
+    for tower in towers:
+        if not isinstance(tower, dict):
+            continue
+        try:
+            latitude = float(tower.get("latitude"))
+            longitude = float(tower.get("longitude"))
+        except (TypeError, ValueError):
+            continue
+        if not (-90 <= latitude <= 90) or not (-180 <= longitude <= 180):
+            continue
+        # Names are trimmed rather than dropped: TX_NAME_MAX_LENGTH is
+        # retina-telemetry's tx_callsign limit, not a reason to lose an
+        # otherwise usable tower. Both keys are trimmed because the picker
+        # falls back callsign -> name, and a facility name runs long far more
+        # readily than a callsign does.
+        trimmed = dict(tower)
+        for key in ("callsign", "name"):
+            value = trimmed.get(key)
+            if isinstance(value, str) and len(value) > TX_NAME_MAX_LENGTH:
+                trimmed[key] = value[:TX_NAME_MAX_LENGTH]
+        kept.append(trimmed)
+
+    if len(kept) != len(towers):
+        app.logger.warning(
+            f"Dropped {len(towers) - len(kept)} tower search result(s) with "
+            "unusable coordinates before caching"
+        )
+    return kept
+
+
 @bp.route("/search", methods=["POST"])
 def search():
     """Proxy RF-profile tower search to retina-server API."""
@@ -68,7 +115,7 @@ def search():
             )
         resp.raise_for_status()
         result = resp.json()
-        towers = result.get("towers") or []
+        towers = _cacheable_towers(result.get("towers") or [])
         if towers:
             try:
                 device_state.save_towers_cache(body["lat"], body["lon"], towers[:MAX_CACHED_TOWERS])

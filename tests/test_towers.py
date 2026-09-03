@@ -167,6 +167,92 @@ class TestTowerSearch:
         assert len(cached['towers']) == 5
         assert [t['callsign'] for t in cached['towers']] == ['T0', 'T1', 'T2', 'T3', 'T4']
 
+    @patch('routes.towers.http_requests.get')
+    def test_search_trims_an_overlong_name_before_caching(self, mock_get, app_client):
+        """Picking a preset assigns straight into location.tx_name, which
+        maxlength does not constrain and novalidate does not catch, so an
+        over-long finder result would fail the save with no user mistake."""
+        import app as app_module
+        from config_schema import TX_NAME_MAX_LENGTH
+        mock_resp = MagicMock()
+        mock_resp.raise_for_status.return_value = None
+        mock_resp.json.return_value = {"towers": [{
+            "callsign": "C" * 40,
+            "name": "Some Very Long Broadcast Facility Name Indeed",
+            "frequency_mhz": 177.5,
+            "latitude": -33.82,
+            "longitude": 151.185,
+        }], "count": 1}
+        mock_get.return_value = mock_resp
+
+        app_client.post('/towers/search', json={'lat': -33.8688, 'lon': 151.2093})
+
+        cached = app_module.device_state.get_towers_cache()['towers'][0]
+        assert cached['callsign'] == 'C' * TX_NAME_MAX_LENGTH
+        # Trimmed too: the picker falls back callsign -> name, and a facility
+        # name runs long far more readily than a callsign does.
+        assert len(cached['name']) == TX_NAME_MAX_LENGTH
+
+    @patch('routes.towers.http_requests.get')
+    def test_search_drops_towers_with_unusable_coordinates(self, mock_get, app_client):
+        """A tower whose position cannot be a position is no use to the preset
+        picker or to Auto-Calibrate's alternate-tower list."""
+        import app as app_module
+        mock_resp = MagicMock()
+        mock_resp.raise_for_status.return_value = None
+        mock_resp.json.return_value = {"towers": [
+            {"callsign": "BAD_LAT", "frequency_mhz": 100.0, "latitude": 442.2, "longitude": 151.0},
+            {"callsign": "BAD_LON", "frequency_mhz": 101.0, "latitude": -33.8, "longitude": 999.0},
+            {"callsign": "NO_POS", "frequency_mhz": 102.0},
+            {"callsign": "GOOD", "frequency_mhz": 103.0, "latitude": -33.8, "longitude": 151.0},
+        ], "count": 4}
+        mock_get.return_value = mock_resp
+
+        resp = app_client.post('/towers/search', json={'lat': -33.8688, 'lon': 151.2093})
+
+        # The wizard's own response is untouched; only the cache is screened.
+        assert len(resp.get_json()['towers']) == 4
+
+        cached = app_module.device_state.get_towers_cache()
+        assert [t['callsign'] for t in cached['towers']] == ['GOOD']
+
+    @patch('routes.towers.http_requests.get')
+    def test_search_keeps_the_best_few_after_screening(self, mock_get, app_client):
+        """Screening runs before the cap, so a dropped result does not cost a
+        slot in the picker."""
+        import app as app_module
+        towers = [{"callsign": "BAD", "frequency_mhz": 99.0, "latitude": 442.2, "longitude": 0}]
+        towers += [{"callsign": f"T{i}", "frequency_mhz": 100.0 + i, "latitude": 0, "longitude": 0}
+                   for i in range(10)]
+        mock_resp = MagicMock()
+        mock_resp.raise_for_status.return_value = None
+        mock_resp.json.return_value = {"towers": towers, "count": len(towers)}
+        mock_get.return_value = mock_resp
+
+        app_client.post('/towers/search', json={'lat': -33.8688, 'lon': 151.2093})
+
+        cached = app_module.device_state.get_towers_cache()
+        assert [t['callsign'] for t in cached['towers']] == ['T0', 'T1', 'T2', 'T3', 'T4']
+
+    @patch('routes.towers.http_requests.get')
+    def test_search_does_not_clear_the_cache_when_nothing_survives(self, mock_get, app_client):
+        """Same rule as an empty response: a stale cache beats no cache."""
+        import app as app_module
+        app_module.device_state.save_towers_cache(0, 0, [
+            {"callsign": "KEEP", "frequency_mhz": 100.0, "latitude": 0, "longitude": 0},
+        ])
+        mock_resp = MagicMock()
+        mock_resp.raise_for_status.return_value = None
+        mock_resp.json.return_value = {"towers": [
+            {"callsign": "BAD", "frequency_mhz": 99.0, "latitude": 442.2, "longitude": 0},
+        ], "count": 1}
+        mock_get.return_value = mock_resp
+
+        app_client.post('/towers/search', json={'lat': -33.8688, 'lon': 151.2093})
+
+        cached = app_module.device_state.get_towers_cache()
+        assert [t['callsign'] for t in cached['towers']] == ['KEEP']
+
 
 class TestTowerCacheAdd:
     """Tests for POST /towers/cache/add route."""
