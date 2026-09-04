@@ -41,6 +41,12 @@ def _resource(name, url, icon):
     return {"name": name, "url": url, "icon": icon, "host": urlsplit(url).netloc}
 
 
+# Where the full, driveable primer lives. Empty until it is published: the
+# branch carrying it is unmerged, and offworldlabs.com/learn/ 404s today. A
+# dead link on an owner's node is worse than no link, so the template omits
+# the line entirely while this is blank, and turning it on is one string.
+PRIMER_URL = ""
+
 # Fixed links out, ordered by distance from the node: the company, the manual
 # for this box, then the two live views of the wider network.
 RESOURCES = (
@@ -231,6 +237,7 @@ def summary():
                            active_page="summary",
                            cards=[card_view(p) for p in discovered_nodes()],
                            resources=RESOURCES,
+                           primer_url=PRIMER_URL,
                            buy_url=BUY_URL)
 
 

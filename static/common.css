@@ -1189,3 +1189,20 @@ h1, h2, h3, h4, h5, h6 {
 }
 .link-arrow { flex: none; color: var(--ink-3); transition: transform .12s, color .12s; }
 .link-card:hover .link-arrow { color: var(--ink); transform: translate(1px, -1px); }
+
+/* Five facts about passive radar, below the links. Plain text rather than
+   cards: card-shaped things on this page are clickable, and these are not. */
+.facts-head { margin-top: 28px; }
+.facts {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(270px, 1fr));
+    gap: 20px 32px;
+}
+.fact h4 {
+    margin: 0 0 4px;
+    font-size: 13.5px; font-weight: 600; letter-spacing: -0.005em;
+    color: var(--ink);
+}
+.fact p { margin: 0; font-size: 13px; line-height: 1.6; color: var(--ink-2); }
+.facts-more { margin: 18px 0 0; font-size: 12.5px; color: var(--ink-3); }
+.facts-more a { color: var(--accent); text-decoration: none; font-weight: 500; }

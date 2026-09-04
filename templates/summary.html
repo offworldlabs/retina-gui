@@ -143,5 +143,69 @@
         </a>
         {% endfor %}
     </div>
+
+    {# Five facts about the thing the owner is looking at, lifted from the
+       passive-radar primer and cut to fit. Deliberately static markup and
+       nothing else: it ships inside a page the browser is already fetching,
+       so it costs the node no request, no disk and no work at render time.
+       The primer earns its keep by being driveable, and none of that can come
+       here — a node's compute belongs to the radar. #}
+    <div class="section-head facts-head"><h2>How your node sees</h2></div>
+
+    {# Not cards. Everything card-shaped above is a link you can click, and a
+       paragraph that is not clickable should not borrow the shape. #}
+    <div class="facts">
+        <div class="fact">
+            <h4>It never transmits</h4>
+            <p>
+                Your node sends out nothing at all. It listens to the FM and TV
+                towers already crowding the air around you, and reads the faint
+                echoes that glance off anything flying overhead.
+            </p>
+        </div>
+        <div class="fact">
+            <h4>Two antennas, two paths</h4>
+            <p>
+                One antenna points at a broadcast tower and hears it head-on.
+                The other faces the open sky and catches that same signal a beat
+                later, after it has glanced off an aircraft. The echo takes the
+                long way round, and that extra distance is the range.
+            </p>
+        </div>
+        <div class="fact">
+            <h4>Every detection is one dot</h4>
+            <p>
+                Distance comes from the delay, speed from the Doppler shift: the
+                same nudge in pitch you hear as an ambulance passes. Plot one
+                against the other and a whole aircraft, in a single instant,
+                lands as one dot.
+            </p>
+        </div>
+        <div class="fact">
+            <h4>It only hears a wedge</h4>
+            <p>
+                The surveillance antenna covers a wedge of sky rather than all of
+                it. Outside that wedge there is no echo to read: the aircraft is
+                still up there, the node simply cannot hear it. A quiet plot
+                usually means nothing flew through the beam.
+            </p>
+        </div>
+        <div class="fact">
+            <h4>One node sees an arc</h4>
+            <p>
+                A single node measures range and speed, not position, so the same
+                reading fits a whole arc of sky. A transponder report, or a second
+                node hearing the same aircraft from another angle, collapses that
+                arc to one aeroplane.
+            </p>
+        </div>
+    </div>
+
+    {% if primer_url %}
+    <p class="facts-more">
+        All of it, with the parts you can drive:
+        <a href="{{ primer_url }}" target="_blank" rel="noopener">the full primer</a>
+    </p>
+    {% endif %}
 </main>
 {% endblock %}
