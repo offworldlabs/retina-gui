@@ -5,9 +5,13 @@ through real routes rather than calling the helper directly: what matters is
 that it survives base.html inheritance and the blocks pages override.
 """
 
+from pathlib import Path
+
 import pytest
 
 from routes.fleet import RESOURCES, banner_nodes, node_url, peer_view
+
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
 
 class FakePeers:
@@ -493,7 +497,7 @@ def resource_strip(body):
 
 def help_strip(body):
     """The Help cards."""
-    return cards_between(body, "help-head", "facts-head")
+    return cards_between(body, "help-head", "sim-head")
 
 
 def test_every_resource_is_offered(app_client, fleet, telemetry):
@@ -539,59 +543,6 @@ def test_the_offer_of_a_second_node_points_at_the_store(app_client, fleet, telem
     assert 'href="https://retina.fm"' in body
 
 
-# ── How your node sees ─────────────────────────────────────────
-
-
-def facts_section(body):
-    return body.split('<div class="section-head facts-head">')[1].split("</main>")[0]
-
-
-def test_the_primer_facts_are_shown(app_client, fleet, telemetry):
-    fleet(node(SELF, is_self=True))
-    facts = facts_section(app_client.get("/summary").data.decode())
-    for heading in ("It never transmits", "Two antennas, two paths",
-                    "Every detection is one dot", "It only hears a wedge",
-                    "One node sees an arc"):
-        assert heading in facts, heading
-
-
-def test_the_facts_cost_the_node_nothing(app_client, fleet, telemetry):
-    """The primer earns its keep by being driveable, and none of that can come
-    here: a node's compute belongs to the radar. Static markup only, so no
-    script and no extra fetch rides in with it."""
-    facts = facts_section(app_client.get("/summary").data.decode())
-    assert "<script" not in facts
-    assert "<img" not in facts and "<canvas" not in facts
-
-
-def test_the_facts_are_not_dressed_as_cards(app_client, fleet, telemetry):
-    """Everything card-shaped on this page is a link. Prose that cannot be
-    clicked must not look like something that can."""
-    facts = facts_section(app_client.get("/summary").data.decode())
-    assert "node-card" not in facts and "link-card" not in facts
-
-
-def test_no_primer_link_until_there_is_somewhere_to_send_people(app_client, fleet,
-                                                               telemetry):
-    """The branch carrying the primer is unmerged and the URL 404s today. A
-    dead link on an owner's node is worse than no link at all."""
-    from routes import fleet as fleet_routes
-
-    assert fleet_routes.PRIMER_URL == "", "turn the link on in the template test too"
-    facts = facts_section(app_client.get("/summary").data.decode())
-    assert "the full primer" not in facts
-
-
-def test_the_primer_link_appears_once_it_has_a_home(app_client, fleet, telemetry,
-                                                    monkeypatch):
-    from routes import fleet as fleet_routes
-
-    monkeypatch.setattr(fleet_routes, "PRIMER_URL", "https://offworldlabs.com/learn/")
-    facts = facts_section(app_client.get("/summary").data.decode())
-    assert 'href="https://offworldlabs.com/learn/"' in facts
-    assert 'rel="noopener"' in facts
-
-
 # ── Help ───────────────────────────────────────────────────────
 
 
@@ -633,3 +584,61 @@ def test_the_discord_is_named_for_whose_it_is(app_client, fleet, telemetry):
     expecting Offworld Labs support."""
     cards = "".join(help_strip(app_client.get("/summary").data.decode()))
     assert "blah2 Discord" in cards
+
+
+# ── How your node sees ─────────────────────────────────────────
+#
+# The primer's closing simulation, cut down. It is the one piece here that
+# needs an animation loop, so what these pin down is mostly the fencing.
+
+
+def sim_section(body):
+    return body.split('<div class="section-head sim-head">')[1].split("</main>")[0]
+
+
+def test_the_simulation_is_a_still_diagram_without_any_script(app_client, fleet,
+                                                              telemetry):
+    """The served markup has to stand on its own. No JavaScript, no pointer
+    events, or a fetch that fails, and this is a picture rather than an empty
+    box, so the beam and a flight path are drawn into the page itself."""
+    sim = sim_section(app_client.get("/summary").data.decode())
+    assert 'id="fs-beam"' in sim and 'd="M212 186' in sim
+    assert 'id="fs-path"' in sim and 'd="M20.0 150.0' in sim
+
+
+def test_the_controls_are_hidden_until_something_can_drive_them(app_client, fleet,
+                                                                telemetry):
+    """A Play button that cannot play is worse than no Play button."""
+    sim = sim_section(app_client.get("/summary").data.decode())
+    controls = sim.split('id="fs-controls"')[1].split(">")[0]
+    assert "hidden" in controls
+
+
+def test_the_simulation_is_not_inlined(app_client, fleet, telemetry):
+    """A rendered template caches nothing, so an inline copy would re-send on
+    every page load. As a static file it comes down once and revalidates."""
+    body = app_client.get("/summary").data.decode()
+    assert '<script src="/static/flight-sim.js"' in body
+    assert "requestAnimationFrame" not in body
+
+
+def test_nothing_moves_until_somebody_asks(app_client, fleet, telemetry):
+    """No autoplay, and the loop is fenced besides: a hidden tab, a section
+    scrolled out of view, or a reader who has asked for reduced motion must
+    not leave an animation running on somebody's phone."""
+    js = (PROJECT_ROOT / "static" / "flight-sim.js").read_text()
+    # Nothing in the first paint starts the loop: it is entered from the Play
+    # button, from finishing a drawn path, and from nowhere else.
+    assert "play()" not in js.split("First paint")[1]
+    assert "visibilitychange" in js
+    assert "IntersectionObserver" in js
+    assert "prefers-reduced-motion" in js
+    # The only loop is entered from play(), never from first paint.
+    assert js.count("requestAnimationFrame(frame)") == 2
+
+
+def test_the_simulation_says_it_is_not_this_node(app_client, fleet, telemetry):
+    """The geometry is real but the tower, the speed and the hertz scale are
+    invented. It must not read as a view of the fleet."""
+    sim = sim_section(app_client.get("/summary").data.decode())
+    assert "would have recorded" in sim

@@ -1190,23 +1190,58 @@ h1, h2, h3, h4, h5, h6 {
 .link-arrow { flex: none; color: var(--ink-3); transition: transform .12s, color .12s; }
 .link-card:hover .link-arrow { color: var(--ink); transform: translate(1px, -1px); }
 
-/* Five facts about passive radar, below the links. Plain text rather than
-   cards: card-shaped things on this page are clickable, and these are not. */
-.facts-head { margin-top: 28px; }
-.facts {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(270px, 1fr));
-    gap: 20px 32px;
-}
-.fact h4 {
-    margin: 0 0 4px;
-    font-size: 13.5px; font-weight: 600; letter-spacing: -0.005em;
-    color: var(--ink);
-}
-.fact p { margin: 0; font-size: 13px; line-height: 1.6; color: var(--ink-2); }
-.facts-more { margin: 18px 0 0; font-size: 12.5px; color: var(--ink-3); }
-.facts-more a { color: var(--accent); text-decoration: none; font-weight: 500; }
 
 /* Help, between the links out and the reading matter. */
 .help-head { margin-top: 28px; }
 .help-lead { margin: -6px 0 12px; font-size: 13px; color: var(--ink-2); max-width: 62ch; }
+
+/* ══════════════════════════════════════════════
+   How your node sees: the flight path simulator
+   ══════════════════════════════════════════════ */
+
+.sim-head { margin-top: 28px; }
+.sim-lead { margin: -6px 0 14px; font-size: 13px; line-height: 1.6;
+            color: var(--ink-2); max-width: 64ch; }
+
+.sim { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; align-items: start; }
+@media (max-width: 760px) { .sim { grid-template-columns: 1fr; } }
+
+.sim-panel { background: var(--surface); border: 1px solid var(--line);
+             border-radius: var(--r-md); padding: 10px 10px 8px; }
+.sim-label { margin: 0 0 6px; padding-left: 2px;
+             font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.07em;
+             color: var(--ink-3); font-weight: 600; }
+
+/* touch-action stops a drag across the sky scrolling the page on a phone. */
+.sim-scene { display: block; width: 100%; height: auto; touch-action: none;
+             user-select: none; -webkit-user-select: none; }
+#fs-map { cursor: crosshair; }
+
+.sim-base { stroke: var(--line); stroke-width: 1.4; }
+.sim-beam { fill: var(--accent); opacity: 0.08; }
+.sim-beam-edge { stroke: var(--accent-edge); stroke-width: 1; fill: none; }
+.sim-flightpath { stroke: var(--ink-3); stroke-width: 1.4; fill: none;
+                  stroke-dasharray: 3 3; opacity: 0.75; }
+.sim-track { stroke: var(--accent); stroke-width: 1.8; fill: none;
+             stroke-linecap: round; stroke-linejoin: round; }
+.sim-grid { stroke: var(--line-2); stroke-width: 1; }
+.sim-axis-label { font-family: var(--font-body); font-size: 10px; fill: var(--ink-3); }
+.sim-mark { fill: var(--ink-2); }
+.sim-grab { cursor: grab; }
+.sim-grab:active { cursor: grabbing; }
+
+.sim-controls { display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+                margin-top: 12px; }
+.sim-btn { font: inherit; font-size: 12.5px; font-weight: 500; cursor: pointer;
+           padding: 5px 13px; border-radius: var(--r-sm);
+           border: 1px solid var(--line); background: var(--surface); color: var(--ink-2); }
+.sim-btn:hover { border-color: var(--accent-edge); color: var(--accent); }
+.sim-btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+.sim-btn.primary:hover { color: #fff; opacity: 0.92; }
+.sim-spacer { flex: 1; }
+.sim-readout { display: flex; gap: 16px; flex-wrap: wrap; font-size: 12px; }
+.sim-readout > span { display: flex; align-items: baseline; gap: 6px; }
+.sim-readout .k { color: var(--ink-3); }
+.sim-readout .v { font-family: var(--font-mono); font-weight: 500; color: var(--ink);
+                  font-variant-numeric: tabular-nums; }
+.sim-hint { margin: 10px 0 0; font-size: 11.5px; color: var(--ink-3); max-width: 64ch; }

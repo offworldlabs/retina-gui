@@ -175,62 +175,79 @@
         {% endfor %}
     </div>
 
-    {# Five facts about the thing the owner is looking at, lifted from the
-       passive-radar primer and cut to fit. Deliberately static markup and
-       nothing else: it ships inside a page the browser is already fetching,
-       so it costs the node no request, no disk and no work at render time.
-       The primer earns its keep by being driveable, and none of that can come
-       here — a node's compute belongs to the radar. #}
-    <div class="section-head facts-head"><h2>How your node sees</h2></div>
+    {# The primer's closing simulation, cut down to sit on a node page.
 
-    {# Not cards. Everything card-shaped above is a link you can click, and a
-       paragraph that is not clickable should not borrow the shape. #}
-    <div class="facts">
-        <div class="fact">
-            <h4>It never transmits</h4>
-            <p>
-                Your node sends out nothing at all. It listens to the FM and TV
-                towers already crowding the air around you, and reads the faint
-                echoes that glance off anything flying overhead.
-            </p>
+       Progressive on purpose: everything below is a correct still diagram on
+       its own, with the beam and a flight path already drawn into the markup.
+       /static/flight-sim.js only adds the ability to fly it. No script, no
+       pointer events, or a fetch that fails, and this is still a picture
+       rather than an empty box — which is why the controls ship hidden and
+       are revealed by the script that can drive them. #}
+    <div class="section-head sim-head"><h2>How your node sees</h2></div>
+    <p class="sim-lead">
+        Your node measures two things: how much further the echo travelled than
+        the direct signal, and how fast that distance is changing. Draw a flight
+        path and watch what your node would have recorded.
+    </p>
+
+    <div class="sim">
+        <div class="sim-panel">
+            <p class="sim-label">The sky above your node</p>
+            <svg class="sim-scene" id="fs-map" viewBox="0 0 300 220" role="img" aria-label="A tower, your node, the wedge of sky it hears, and a flight path">
+                <path id="fs-beam" class="sim-beam" d="M212 186 L38.8 86.0 A200 200 0 0 1 385.2 86.0 Z"></path>
+                <path id="fs-beam-edge" class="sim-beam-edge" d="M212 186 L38.8 86.0 A200 200 0 0 1 385.2 86.0 Z"></path>
+                <line class="sim-base" x1="34" y1="186" x2="212" y2="186" stroke-dasharray="3 3"></line>
+                <path id="fs-path" class="sim-flightpath" d="M20.0 150.0 L26.6 142.5 L33.2 135.0 L39.9 127.6 L46.5 120.3 L53.1 113.3 L59.8 106.4 L66.4 99.8 L73.0 93.6 L79.6 87.7 L86.2 82.1 L92.9 77.0 L99.5 72.3 L106.1 68.1 L112.8 64.5 L119.4 61.3 L126.0 58.7 L132.6 56.7 L139.2 55.2 L145.9 54.3 L152.5 54.0 L159.1 54.3 L165.8 55.2 L172.4 56.7 L179.0 58.7 L185.6 61.3 L192.2 64.5 L198.9 68.1 L205.5 72.3 L212.1 77.0 L218.8 82.1 L225.4 87.7 L232.0 93.6 L238.6 99.8 L245.2 106.4 L251.9 113.3 L258.5 120.3 L265.1 127.6 L271.8 135.0 L278.4 142.5 L285.0 150.0"></path>
+                <path class="sim-mark" d="M34 186 l-6 10 h12 z"></path>
+                <line class="sim-base" x1="34" y1="186" x2="34" y2="168"></line>
+                <text class="sim-axis-label" x="34" y="208" text-anchor="middle">tower</text>
+                <circle class="sim-mark" cx="212" cy="186" r="3.5"></circle>
+                <text class="sim-axis-label" x="212" y="208" text-anchor="middle">your node</text>
+                <g id="fs-aim" class="sim-grab" tabindex="0" transform="translate(212 116)">
+                    <circle r="12" fill="transparent"></circle>
+                    <circle r="5" fill="var(--surface)" stroke="var(--accent)" stroke-width="1.5"></circle>
+                </g>
+                <g id="fs-plane" transform="translate(20 150)">
+                    <circle r="8" fill="none" stroke="var(--accent-edge)" stroke-width="1"></circle>
+                    <path id="fs-plane-body" fill="var(--accent)" d="M0 -5.5 L4 3.5 L0 1.4 L-4 3.5 Z"></path>
+                </g>
+            </svg>
         </div>
-        <div class="fact">
-            <h4>Two antennas, two paths</h4>
-            <p>
-                One antenna points at a broadcast tower and hears it head-on.
-                The other faces the open sky and catches that same signal a beat
-                later, after it has glanced off an aircraft. The echo takes the
-                long way round, and that extra distance is the range.
-            </p>
-        </div>
-        <div class="fact">
-            <h4>Every detection is one dot</h4>
-            <p>
-                Distance comes from the delay, speed from the Doppler shift: the
-                same nudge in pitch you hear as an ambulance passes. Plot one
-                against the other and a whole aircraft, in a single instant,
-                lands as one dot.
-            </p>
-        </div>
-        <div class="fact">
-            <h4>It only hears a wedge</h4>
-            <p>
-                The surveillance antenna covers a wedge of sky rather than all of
-                it. Outside that wedge there is no echo to read: the aircraft is
-                still up there, the node simply cannot hear it. A quiet plot
-                usually means nothing flew through the beam.
-            </p>
-        </div>
-        <div class="fact">
-            <h4>One node sees an arc</h4>
-            <p>
-                A single node measures range and speed, not position, so the same
-                reading fits a whole arc of sky. A transponder report, or a second
-                node hearing the same aircraft from another angle, collapses that
-                arc to one aeroplane.
-            </p>
+
+        <div class="sim-panel">
+            <p class="sim-label">What your node records</p>
+            <svg class="sim-scene" id="fs-plot" viewBox="0 0 300 220" role="img" aria-label="A delay-Doppler plot: range across, Doppler up">
+                <rect x="42" y="14" width="240" height="168" fill="var(--surface-2)" stroke="var(--line)"></rect>
+                <line class="sim-grid" x1="42" y1="98" x2="282" y2="98"></line>
+                <line class="sim-grid" x1="102" y1="14" x2="102" y2="182"></line>
+                <line class="sim-grid" x1="162" y1="14" x2="162" y2="182"></line>
+                <line class="sim-grid" x1="222" y1="14" x2="222" y2="182"></line>
+                <g id="fs-track"></g>
+                <circle id="fs-live" r="3.4" fill="var(--accent)" opacity="0"></circle>
+                <text class="sim-axis-label" x="162" y="200" text-anchor="middle">range &#8594;</text>
+                <text class="sim-axis-label" x="36" y="101" text-anchor="end">0 Hz</text>
+                <text class="sim-axis-label" x="36" y="20" text-anchor="end">+</text>
+                <text class="sim-axis-label" x="36" y="180" text-anchor="end">&#8722;</text>
+            </svg>
         </div>
     </div>
+
+    <div class="sim-controls" id="fs-controls" hidden>
+        <button class="sim-btn primary" id="fs-play" type="button">Play</button>
+        <button class="sim-btn" id="fs-clear" type="button">Draw a new path</button>
+        <button class="sim-btn" id="fs-narrow" type="button">Narrow beam</button>
+        <button class="sim-btn" id="fs-wide" type="button">Widen beam</button>
+        <span class="sim-spacer"></span>
+        <span class="sim-readout">
+            <span><span class="k">range</span><span class="v" id="fs-range">&#8212;</span></span>
+            <span><span class="k">doppler</span><span class="v" id="fs-doppler">&#8212;</span></span>
+            <span><span class="k">beam</span><span class="v" id="fs-width">120&#176;</span></span>
+        </span>
+    </div>
+    <p class="sim-hint" id="fs-hint">
+        Drag across the sky to draw your own path. Drag the blue ring to steer the
+        beam. The track breaks wherever the aircraft leaves it.
+    </p>
 
     {% if primer_url %}
     <p class="facts-more">
@@ -239,4 +256,11 @@
     </p>
     {% endif %}
 </main>
+{% endblock %}
+
+{% block scripts %}
+{# Static file rather than inline: a rendered template caches nothing, so an
+   inline copy would re-send on every page load. This comes down once per
+   browser and revalidates after. #}
+<script src="/static/flight-sim.js" defer></script>
 {% endblock %}
