@@ -58,6 +58,7 @@ the full interface.
 
 import json
 import os
+import re
 import secrets
 import subprocess
 import tempfile
@@ -383,6 +384,12 @@ LAN = "lan"
 OWNER = "owner"
 
 
+#: What a node id looks like. Matched rather than trusting any non-empty string,
+#: because read_node_id() reports "Unknown" rather than failing, and that must
+#: not be mistaken for an id we could compare a hostname against.
+_NODE_ID_RE = re.compile(r"^ret[0-9a-f]{8}$")
+
+
 def classify_host(host, node_id, domain):
     """Return LAN or OWNER for the Host header of a request.
 
@@ -397,25 +404,44 @@ def classify_host(host, node_id, domain):
     why no second hostname, Cloudflare Access application or fleet-wide staff
     password is needed anywhere in this design.
 
-    Fails closed on the remote domain. Anything under it is treated as OWNER, so
-    a hostname this node does not expect (a stale DNS record, a provisioning
-    bug, a domain-wide wildcard someone added) demands a password rather than
-    being mistaken for the LAN and waved through. Only names with no
-    relationship to the remote domain are LAN.
+    OWNER is **this node's own** support hostname and nothing else. That is the
+    single name node-infra provisions, puts an Access application in front of,
+    and points at this node; it is the only name this gate has any business
+    challenging.
 
-    node_id is unused now that there is only one remote name to recognise. It
-    stays in the signature because the caller has it and a future scheme that
-    varies by node would want it back.
+    It used to be every name under the remote domain, to fail closed against a
+    stale record or a stray wildcard. That assumed the only name on the domain
+    reaching a node's port 80 would be its own. Untrue: hand-built hostnames
+    predate this feature and serve exactly that. They were swept into the remote
+    pathway, asked for a Cloudflare Access assertion no Access application
+    exists to issue, and sent to a password page that cannot be satisfied
+    because no password can be set. Locked out with no way back.
+
+    The old reasoning also overstated the danger. A name under the remote domain
+    is one *we* created, in our own zone; it is our mistake to make, not an
+    attacker's to exploit. Treating an unrecognised one as LAN restores exactly
+    the behaviour it had before this feature existed.
+
+    Still fails closed where it genuinely cannot tell: with no node_id there is
+    no way to recognise our own hostname, so the old domain-wide rule applies
+    rather than waving the real support hostname through unauthenticated.
     """
     host = (host or "").split(":")[0].strip().rstrip(".").lower()
     domain = (domain or "").strip().rstrip(".").lower()
     if not host or not domain:
         return LAN
 
-    suffix = "." + domain
-    if host == domain or host.endswith(suffix):
-        return OWNER
-    return LAN
+    # Validated by shape, not merely by being non-empty. read_node_id() returns
+    # the string "Unknown" when /data/mender cannot be read, which is truthy: a
+    # bare emptiness check would take that as a real id, fail to match the
+    # hostname, and hand the actual support hostname out as LAN, unauthenticated.
+    node_id = (node_id or "").strip().rstrip(".").lower()
+    if not _NODE_ID_RE.match(node_id):
+        # Cannot identify our own hostname, so fall back to the blunt rule
+        # rather than risk serving the support hostname to anyone who asks.
+        return OWNER if host == domain or host.endswith("." + domain) else LAN
+
+    return OWNER if host == f"{node_id}.{domain}" else LAN
 
 
 def requires_presence(path):

@@ -2,7 +2,7 @@ import os
 import subprocess
 import sys
 
-from flask import Flask, abort, g, jsonify, redirect, request, session, url_for
+from flask import Flask, abort, g, jsonify, redirect, render_template, request, session, url_for
 from flask.sessions import SecureCookieSessionInterface
 from flask_wtf.csrf import CSRFError, CSRFProtect
 
@@ -387,10 +387,24 @@ def _gate_the_remote_pathways():
 
     if not (identity or session.get('remote_authed')):
         if request.method == 'GET':
-            # full_path always appends '?', even with no query string, which
-            # would send people to '/config?' after signing in.
-            wanted = request.full_path.rstrip('?') or '/'
-            return redirect(url_for('remote_access.login', next=wanted))
+            # Only offer the password form when a password exists to give.
+            #
+            # This used to redirect unconditionally, and that turned every
+            # verification failure into a dead end: no password can be set from
+            # the support pathway, and the page offers no way to set one, so the
+            # form could only ever refuse. Somebody whose Access assertion did
+            # not verify was shown a login box instead of the reason, and had
+            # nothing to do but guess.
+            #
+            # The form still exists for the deferred owner-password design, and
+            # still works the moment a password is set. It is simply no longer
+            # where failures land.
+            if remote_access.has_password():
+                # full_path always appends '?', even with no query string, which
+                # would send people to '/config?' after signing in.
+                wanted = request.full_path.rstrip('?') or '/'
+                return redirect(url_for('remote_access.login', next=wanted))
+            return render_template('remote_denied.html'), 403
         # A POST from a page whose session expired. 403 rather than a redirect,
         # so fetch() callers get a status they can act on instead of an HTML
         # login page parsed as JSON.

@@ -1,0 +1,62 @@
+{# Shown when a request reaches this node's support hostname without an Access
+   assertion this node could verify.
+
+   Deliberately does not extend base.html, for the same reason login.html does
+   not: the fleet bar and the Home/Config tabs are links to pages this visitor
+   has not been let into, and offering them invites a click that lands straight
+   back here, which reads as the node being broken.
+
+   This page exists because the gate used to redirect here to login.html
+   instead. No password can be set from the support pathway and the page offers
+   no way to set one, so that form could only ever refuse: somebody whose
+   assertion failed to verify was shown a password box rather than the reason,
+   with nothing to do but guess. Say what happened instead. #}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <title>Not verified · {{ node_id }}</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <link rel="icon" type="image/png" href="/static/favicon.png">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+    <link href="/static/common.css" rel="stylesheet">
+    <style>
+        body{
+            min-height:100vh; margin:0; display:flex;
+            align-items:center; justify-content:center; padding:24px;
+            font-family:Inter,system-ui,sans-serif;
+        }
+        .denied{width:100%; max-width:440px;}
+        .denied h1{font-size:20px; font-weight:600; margin:0 0 4px;}
+        .denied .sub{font-size:13px; opacity:.7; margin:0 0 18px;}
+        .denied .node{font-family:"JetBrains Mono",monospace; font-size:12px; opacity:.6;}
+        .denied ul{font-size:13px; opacity:.8; line-height:1.6; padding-left:18px; margin:0 0 18px;}
+        .denied .hint{font-size:12.5px; opacity:.65; line-height:1.6;}
+        .denied code{font-family:"JetBrains Mono",monospace; font-size:12px;}
+    </style>
+</head>
+<body>
+<div class="denied">
+    <h1>This node could not verify you</h1>
+    <p class="sub">The request reached the node, but it carried no Cloudflare
+       Access assertion this node was able to check.</p>
+
+    <ul>
+        <li>If you signed in and still see this, the node may not yet have its
+            Access configuration, which arrives shortly after support access is
+            switched on.</li>
+        <li>If the node has been offline or its network is unsettled, it may not
+            have been able to fetch Cloudflare's signing keys.</li>
+        <li>Anyone on this node's own network can reach it directly, without
+            any of this.</li>
+    </ul>
+
+    <p class="hint">The node records the reason it refused. On the node:
+       <code>journalctl -u retina-gui | grep "Refusing an Access assertion"</code>
+    </p>
+
+    <p class="node">{{ node_id }}</p>
+</div>
+</body>
+</html>
