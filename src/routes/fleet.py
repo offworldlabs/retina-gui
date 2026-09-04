@@ -20,14 +20,67 @@ nice-to-have, and a nice-to-have that polls the fleet would not be worth
 having.
 """
 
+from urllib.parse import urlsplit
+
 from flask import Blueprint, jsonify, render_template
 
 bp = Blueprint("fleet", __name__)
 
-# Where "Add another node" sends an owner with only one. A stand-in: there is
-# no store URL anywhere in the codebase yet, so this goes where the banner's
-# Server button goes until the real one is known.
-BUY_URL = "https://map.retina.fm"
+# Where "Add another node" sends an owner with only one.
+BUY_URL = "https://retina.fm"
+
+
+def _resource(name, url, icon):
+    """One Resources card.
+
+    The host is derived rather than written out, so the line under the name
+    cannot drift from where the card actually goes. It is there because every
+    one of these leaves the device: an owner should be able to see they are
+    about to be sent to github.com before they click, not after.
+    """
+    return {"name": name, "url": url, "icon": icon,
+            "host": urlsplit(url).netloc, "external": True}
+
+
+def _mailto(name, address):
+    """A support address, as a card.
+
+    Not marked external: it opens a mail client rather than a page, and the
+    outbound arrow in this interface means "this leaves for another page".
+    The address itself goes where a host would, because it is the thing
+    somebody needs to read, and possibly to type somewhere else.
+    """
+    return {"name": name, "url": "mailto:" + address, "icon": "mail",
+            "host": address, "external": False}
+
+
+# Where the full, driveable primer lives. Empty until it is published: the
+# branch carrying it is unmerged, and offworldlabs.com/learn/ 404s today. A
+# dead link on an owner's node is worse than no link, so the template omits
+# the line entirely while this is blank, and turning it on is one string.
+PRIMER_URL = ""
+
+# Fixed links out, ordered by distance from the node: the company, the manual
+# for this box, then the two live views of the wider network.
+RESOURCES = (
+    _resource("Offworld Labs", "https://offworldlabs.com", "globe"),
+    _resource("Retina Wiki",
+              "https://github.com/offworldlabs/owl-os/wiki/4-Troubleshooting-and-Tuning",
+              "book"),
+    _resource("Retina Network Map", "https://map.retina.fm", "map"),
+    _resource("Retina Dashboard", "https://dash.retina.fm", "chart"),
+)
+
+# Where to go when something is wrong.
+#
+# The Discord is the blah2 project's own community server, and it is named
+# here for what it actually is. Calling it ours would send an owner with a
+# hardware or account problem into a volunteer channel expecting Offworld Labs
+# support, and land that community with questions it cannot answer.
+HELP = (
+    _resource("blah2 Discord", "https://discord.gg/ewNQbeK5Zn", "chat"),
+    _mailto("Email us", "info@offworldlabs.com"),
+)
 
 # The one telemetry state with nothing to say for itself. Everything else gets
 # a chip, including states retina-telemetry grows later: an unfamiliar state
@@ -207,6 +260,9 @@ def summary():
     return render_template("summary.html",
                            active_page="summary",
                            cards=[card_view(p) for p in discovered_nodes()],
+                           resources=RESOURCES,
+                           help_links=HELP,
+                           primer_url=PRIMER_URL,
                            buy_url=BUY_URL)
 
 

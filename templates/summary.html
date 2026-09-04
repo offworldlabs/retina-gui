@@ -8,6 +8,59 @@
 {% block subnav %}{% endblock %}
 
 {% block content %}
+{# One card for anything that leaves this node: a website, or a mail client.
+   A macro rather than two copies, so the second one cannot quietly drift from
+   the first the way duplicated markup always does. #}
+{% macro link_card(item) %}
+<a class="link-card" href="{{ item.url }}"{% if item.external %} target="_blank" rel="noopener"{% endif %}>
+    <span class="link-icon">
+        {% if item.icon == 'globe' %}
+        <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <circle cx="12" cy="12" r="9"></circle><path d="M3 12h18"></path>
+            <path d="M12 3a15 15 0 0 1 0 18a15 15 0 0 1 0-18"></path>
+        </svg>
+        {% elif item.icon == 'book' %}
+        <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M5 5a2 2 0 0 1 2-2h12v18H7a2 2 0 0 0-2 2z"></path>
+            <path d="M9 7h6"></path><path d="M9 11h6"></path>
+        </svg>
+        {% elif item.icon == 'map' %}
+        <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="m9 4 6 2 5-2v14l-5 2-6-2-5 2V6z"></path>
+            <path d="M9 4v14"></path><path d="M15 6v14"></path>
+        </svg>
+        {% elif item.icon == 'chat' %}
+        <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M20.5 11.8a8 8 0 0 1-8.6 8 8.6 8.6 0 0 1-3.2-.7L4 20.5l1.6-4.4a8 8 0 0 1-1.1-4.3 8 8 0 0 1 8-7.8 8 8 0 0 1 8 7.8z"></path>
+            <path d="M9 11h.01"></path><path d="M12.5 11h.01"></path><path d="M16 11h.01"></path>
+        </svg>
+        {% elif item.icon == 'mail' %}
+        <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <rect x="3" y="5" width="18" height="14" rx="2"></rect>
+            <path d="m3.5 7 8.5 6 8.5-6"></path>
+        </svg>
+        {% else %}
+        <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M4 20h16"></path><path d="M7 20v-6"></path>
+            <path d="M12 20V6"></path><path d="M17 20v-9"></path>
+        </svg>
+        {% endif %}
+    </span>
+    <span class="link-text">
+        <span class="link-name">{{ item.name }}</span>
+        <span class="link-host">{{ item.host }}</span>
+    </span>
+    {# The outbound arrow means "this leaves for another page", which a mail
+       client is not, so a mailto card does not wear one. #}
+    {% if item.external %}
+    <svg class="link-arrow" viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <path d="M14 3h7v7"></path><path d="M21 3l-9 9"></path>
+        <path d="M21 14v5a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5"></path>
+    </svg>
+    {% endif %}
+</a>
+{% endmacro %}
+
 <main class="main">
     <div class="section-head"><h2>Nodes on this network</h2></div>
 
@@ -98,5 +151,122 @@
         </a>
         {% endif %}
     </div>
+
+    {# Fixed links out. A separate section rather than more cards in the grid
+       above: those stand for hardware on this network and this one does not,
+       and mixing them would make the antenna mark stop meaning anything. #}
+    <div class="section-head resources-head"><h2>Resources</h2></div>
+
+    <div class="node-grid">
+        {% for resource in resources %}
+        {{ link_card(resource) }}
+        {% endfor %}
+    </div>
+
+    {# Kept apart from Resources, and above the reading matter below it: the
+       links above are things to look at, this is what to do when the node is
+       not doing what it should. #}
+    <div class="section-head help-head"><h2>Help</h2></div>
+    <p class="help-lead">If you are running into problems, please reach out.</p>
+
+    <div class="node-grid">
+        {% for item in help_links %}
+        {{ link_card(item) }}
+        {% endfor %}
+    </div>
+
+    {# The primer's closing simulation, cut down to sit on a node page.
+
+       Progressive on purpose: everything below is a correct still diagram on
+       its own, with the beam and a flight path already drawn into the markup.
+       /static/flight-sim.js only adds the ability to fly it. No script, no
+       pointer events, or a fetch that fails, and this is still a picture
+       rather than an empty box — which is why the controls ship hidden and
+       are revealed by the script that can drive them. #}
+    <div class="section-head sim-head"><h2>How your node sees</h2></div>
+    <p class="sim-lead">
+        Your node measures two things: how much further the echo travelled than
+        the direct signal, and how fast that distance is changing. Draw a flight
+        path and watch what your node would have recorded.
+    </p>
+
+    <div class="sim">
+        <div class="sim-panel">
+            <p class="sim-label">The sky above your node</p>
+            <svg class="sim-scene" id="fs-map" viewBox="0 0 300 220" role="img" aria-label="A tower, your node, the wedge of sky it hears, and a flight path">
+                <path id="fs-beam" class="sim-beam" d="M212 186 L38.8 86.0 A200 200 0 0 1 385.2 86.0 Z"></path>
+                <path id="fs-beam-edge" class="sim-beam-edge" d="M212 186 L38.8 86.0 A200 200 0 0 1 385.2 86.0 Z"></path>
+                <line class="sim-base" x1="34" y1="186" x2="212" y2="186" stroke-dasharray="3 3"></line>
+                <path id="fs-path" class="sim-flightpath" d="M20.0 150.0 L26.6 142.5 L33.2 135.0 L39.9 127.6 L46.5 120.3 L53.1 113.3 L59.8 106.4 L66.4 99.8 L73.0 93.6 L79.6 87.7 L86.2 82.1 L92.9 77.0 L99.5 72.3 L106.1 68.1 L112.8 64.5 L119.4 61.3 L126.0 58.7 L132.6 56.7 L139.2 55.2 L145.9 54.3 L152.5 54.0 L159.1 54.3 L165.8 55.2 L172.4 56.7 L179.0 58.7 L185.6 61.3 L192.2 64.5 L198.9 68.1 L205.5 72.3 L212.1 77.0 L218.8 82.1 L225.4 87.7 L232.0 93.6 L238.6 99.8 L245.2 106.4 L251.9 113.3 L258.5 120.3 L265.1 127.6 L271.8 135.0 L278.4 142.5 L285.0 150.0"></path>
+                <path class="sim-mark" d="M34 186 l-6 10 h12 z"></path>
+                <line class="sim-base" x1="34" y1="186" x2="34" y2="168"></line>
+                <text class="sim-axis-label" x="34" y="208" text-anchor="middle">tower</text>
+                <circle class="sim-mark" cx="212" cy="186" r="3.5"></circle>
+                <text class="sim-axis-label" x="212" y="208" text-anchor="middle">your node</text>
+                <g id="fs-aim" class="sim-grab" tabindex="0" transform="translate(212 116)">
+                    <circle r="12" fill="transparent"></circle>
+                    <circle r="5" fill="var(--surface)" stroke="var(--accent)" stroke-width="1.5"></circle>
+                </g>
+                <g id="fs-plane" transform="translate(20 150)">
+                    <circle r="8" fill="none" stroke="var(--accent-edge)" stroke-width="1"></circle>
+                    <path id="fs-plane-body" fill="var(--accent)" d="M0 -5.5 L4 3.5 L0 1.4 L-4 3.5 Z"></path>
+                </g>
+            </svg>
+        </div>
+
+        <div class="sim-panel">
+            <p class="sim-label">What your node records</p>
+            <svg class="sim-scene" id="fs-plot" viewBox="0 0 300 220" role="img" aria-label="A delay-Doppler plot: range across, Doppler up">
+                <rect x="46" y="14" width="240" height="168" fill="var(--surface-2)" stroke="var(--line)"></rect>
+                <line class="sim-grid" x1="46" y1="98" x2="286" y2="98"></line>
+                {# 15, 30 and 45 km. #}
+                <line class="sim-grid" x1="106" y1="14" x2="106" y2="182"></line>
+                <line class="sim-grid" x1="166" y1="14" x2="166" y2="182"></line>
+                <line class="sim-grid" x1="226" y1="14" x2="226" y2="182"></line>
+                <g id="fs-track"></g>
+                <circle id="fs-live" r="3.4" fill="var(--accent)" opacity="0"></circle>
+                {# The axes are labelled with their real limits, because a plot
+                   whose bounds are a mystery teaches the wrong lesson about
+                   where a track sits. #}
+                <text class="sim-axis-label" x="40" y="20" text-anchor="end">+300</text>
+                <text class="sim-axis-label" x="40" y="101" text-anchor="end">0 Hz</text>
+                <text class="sim-axis-label" x="40" y="180" text-anchor="end">&#8722;300</text>
+                <text class="sim-axis-label" x="46" y="198" text-anchor="start">0</text>
+                <text class="sim-axis-label" x="166" y="198" text-anchor="middle">range</text>
+                <text class="sim-axis-label" x="286" y="198" text-anchor="end">60 km</text>
+            </svg>
+        </div>
+    </div>
+
+    <div class="sim-controls" id="fs-controls" hidden>
+        <button class="sim-btn primary" id="fs-play" type="button">Play</button>
+        <button class="sim-btn" id="fs-clear" type="button">Draw a new path</button>
+        <button class="sim-btn" id="fs-narrow" type="button">Narrow beam</button>
+        <button class="sim-btn" id="fs-wide" type="button">Widen beam</button>
+        <span class="sim-spacer"></span>
+        <span class="sim-readout">
+            <span><span class="k">range</span><span class="v" id="fs-range">&#8212;</span></span>
+            <span><span class="k">doppler</span><span class="v" id="fs-doppler">&#8212;</span></span>
+            <span><span class="k">beam</span><span class="v" id="fs-width">120&#176;</span></span>
+        </span>
+    </div>
+    <p class="sim-hint" id="fs-hint">
+        Drag across the sky to draw your own path. Drag the blue ring to steer the
+        beam. The track breaks wherever the aircraft leaves it.
+    </p>
+
+    {% if primer_url %}
+    <p class="facts-more">
+        All of it, with the parts you can drive:
+        <a href="{{ primer_url }}" target="_blank" rel="noopener">the full primer</a>
+    </p>
+    {% endif %}
 </main>
+{% endblock %}
+
+{% block scripts %}
+{# Static file rather than inline: a rendered template caches nothing, so an
+   inline copy would re-send on every page load. This comes down once per
+   browser and revalidates after. #}
+<script src="/static/flight-sim.js" defer></script>
 {% endblock %}
