@@ -152,7 +152,7 @@ def test_the_summary_tab_has_no_node_mark(app_client, fleet):
 def test_the_banner_carries_both_outbound_links(app_client, fleet):
     fleet(node(SELF, is_self=True))
     body = app_client.get("/").data.decode()
-    assert "https://map.retina.fm" in body and "Server" in body
+    assert "https://map.retina.fm" in body and "Retina Network Map" in body
     assert "https://dash.retina.fm" in body and "Retina Dashboard" in body
 
 
@@ -525,3 +525,56 @@ def test_the_offer_of_a_second_node_points_at_the_store(app_client, fleet, telem
     fleet(node(SELF, is_self=True))
     body = app_client.get("/summary").data.decode()
     assert 'href="https://retina.fm"' in body
+
+
+# ── How your node sees ─────────────────────────────────────────
+
+
+def facts_section(body):
+    return body.split('<div class="section-head facts-head">')[1].split("</main>")[0]
+
+
+def test_the_primer_facts_are_shown(app_client, fleet, telemetry):
+    fleet(node(SELF, is_self=True))
+    facts = facts_section(app_client.get("/summary").data.decode())
+    for heading in ("It never transmits", "Two antennas, two paths",
+                    "Every detection is one dot", "It only hears a wedge",
+                    "One node sees an arc"):
+        assert heading in facts, heading
+
+
+def test_the_facts_cost_the_node_nothing(app_client, fleet, telemetry):
+    """The primer earns its keep by being driveable, and none of that can come
+    here: a node's compute belongs to the radar. Static markup only, so no
+    script and no extra fetch rides in with it."""
+    facts = facts_section(app_client.get("/summary").data.decode())
+    assert "<script" not in facts
+    assert "<img" not in facts and "<canvas" not in facts
+
+
+def test_the_facts_are_not_dressed_as_cards(app_client, fleet, telemetry):
+    """Everything card-shaped on this page is a link. Prose that cannot be
+    clicked must not look like something that can."""
+    facts = facts_section(app_client.get("/summary").data.decode())
+    assert "node-card" not in facts and "link-card" not in facts
+
+
+def test_no_primer_link_until_there_is_somewhere_to_send_people(app_client, fleet,
+                                                               telemetry):
+    """The branch carrying the primer is unmerged and the URL 404s today. A
+    dead link on an owner's node is worse than no link at all."""
+    from routes import fleet as fleet_routes
+
+    assert fleet_routes.PRIMER_URL == "", "turn the link on in the template test too"
+    facts = facts_section(app_client.get("/summary").data.decode())
+    assert "the full primer" not in facts
+
+
+def test_the_primer_link_appears_once_it_has_a_home(app_client, fleet, telemetry,
+                                                    monkeypatch):
+    from routes import fleet as fleet_routes
+
+    monkeypatch.setattr(fleet_routes, "PRIMER_URL", "https://offworldlabs.com/learn/")
+    facts = facts_section(app_client.get("/summary").data.decode())
+    assert 'href="https://offworldlabs.com/learn/"' in facts
+    assert 'rel="noopener"' in facts
