@@ -38,7 +38,20 @@ def _resource(name, url, icon):
     one of these leaves the device: an owner should be able to see they are
     about to be sent to github.com before they click, not after.
     """
-    return {"name": name, "url": url, "icon": icon, "host": urlsplit(url).netloc}
+    return {"name": name, "url": url, "icon": icon,
+            "host": urlsplit(url).netloc, "external": True}
+
+
+def _mailto(name, address):
+    """A support address, as a card.
+
+    Not marked external: it opens a mail client rather than a page, and the
+    outbound arrow in this interface means "this leaves for another page".
+    The address itself goes where a host would, because it is the thing
+    somebody needs to read, and possibly to type somewhere else.
+    """
+    return {"name": name, "url": "mailto:" + address, "icon": "mail",
+            "host": address, "external": False}
 
 
 # Where the full, driveable primer lives. Empty until it is published: the
@@ -56,6 +69,17 @@ RESOURCES = (
               "book"),
     _resource("Retina Network Map", "https://map.retina.fm", "map"),
     _resource("Retina Dashboard", "https://dash.retina.fm", "chart"),
+)
+
+# Where to go when something is wrong.
+#
+# The Discord is the blah2 project's own community server, and it is named
+# here for what it actually is. Calling it ours would send an owner with a
+# hardware or account problem into a volunteer channel expecting Offworld Labs
+# support, and land that community with questions it cannot answer.
+HELP = (
+    _resource("blah2 Discord", "https://discord.gg/ewNQbeK5Zn", "chat"),
+    _mailto("Email us", "info@offworldlabs.com"),
 )
 
 # The one telemetry state with nothing to say for itself. Everything else gets
@@ -237,6 +261,7 @@ def summary():
                            active_page="summary",
                            cards=[card_view(p) for p in discovered_nodes()],
                            resources=RESOURCES,
+                           help_links=HELP,
                            primer_url=PRIMER_URL,
                            buy_url=BUY_URL)
 

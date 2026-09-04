@@ -1206,3 +1206,7 @@ h1, h2, h3, h4, h5, h6 {
 .fact p { margin: 0; font-size: 13px; line-height: 1.6; color: var(--ink-2); }
 .facts-more { margin: 18px 0 0; font-size: 12.5px; color: var(--ink-3); }
 .facts-more a { color: var(--accent); text-decoration: none; font-weight: 500; }
+
+/* Help, between the links out and the reading matter. */
+.help-head { margin-top: 28px; }
+.help-lead { margin: -6px 0 12px; font-size: 13px; color: var(--ink-2); max-width: 62ch; }

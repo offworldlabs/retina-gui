@@ -478,10 +478,22 @@ def test_a_card_with_nothing_to_say_has_no_divider(app_client, fleet, telemetry)
 # ── Resources ──────────────────────────────────────────────────
 
 
+def cards_between(body, start_head, end_head):
+    """The <a> fragments of one section, bounded so a later section's cards
+    cannot be mistaken for this one's."""
+    section = body.split(f'<div class="section-head {start_head}">')[1]
+    section = section.split(f'<div class="section-head {end_head}">')[0]
+    return ["<a" + frag for frag in section.split("<a")[1:]]
+
+
 def resource_strip(body):
     """The Resources cards, as raw <a> fragments."""
-    section = body.split('<div class="section-head resources-head">')[1]
-    return ["<a" + frag for frag in section.split("<a")[1:]]
+    return cards_between(body, "resources-head", "help-head")
+
+
+def help_strip(body):
+    """The Help cards."""
+    return cards_between(body, "help-head", "facts-head")
 
 
 def test_every_resource_is_offered(app_client, fleet, telemetry):
@@ -578,3 +590,46 @@ def test_the_primer_link_appears_once_it_has_a_home(app_client, fleet, telemetry
     facts = facts_section(app_client.get("/summary").data.decode())
     assert 'href="https://offworldlabs.com/learn/"' in facts
     assert 'rel="noopener"' in facts
+
+
+# ── Help ───────────────────────────────────────────────────────
+
+
+def test_both_ways_of_reaching_us_are_offered(app_client, fleet, telemetry):
+    fleet(node(SELF, is_self=True))
+    cards = "".join(help_strip(app_client.get("/summary").data.decode()))
+    assert "https://discord.gg/ewNQbeK5Zn" in cards
+    assert "mailto:info@offworldlabs.com" in cards
+
+
+def test_the_support_address_is_readable_not_just_clickable(app_client, fleet,
+                                                            telemetry):
+    """Somebody may need to type it somewhere else, or read it down a phone."""
+    cards = "".join(help_strip(app_client.get("/summary").data.decode()))
+    assert "info@offworldlabs.com" in cards.replace("mailto:", "")
+
+
+def test_the_email_card_does_not_open_a_tab(app_client, fleet, telemetry):
+    """It hands off to a mail client. target=_blank would leave an empty tab
+    behind, and the outbound arrow would claim it goes to a page."""
+    cards = help_strip(app_client.get("/summary").data.decode())
+    mail = [c for c in cards if "mailto:" in c]
+    assert len(mail) == 1
+    assert 'target="_blank"' not in mail[0]
+    assert "link-arrow" not in mail[0]
+
+
+def test_the_discord_card_does_open_a_tab(app_client, fleet, telemetry):
+    cards = help_strip(app_client.get("/summary").data.decode())
+    discord = [c for c in cards if "discord.gg" in c]
+    assert len(discord) == 1
+    assert 'target="_blank"' in discord[0] and 'rel="noopener"' in discord[0]
+    assert "link-arrow" in discord[0]
+
+
+def test_the_discord_is_named_for_whose_it_is(app_client, fleet, telemetry):
+    """It is the blah2 project's community server, not ours. Calling it ours
+    would send an owner with a hardware problem into a volunteer channel
+    expecting Offworld Labs support."""
+    cards = "".join(help_strip(app_client.get("/summary").data.decode()))
+    assert "blah2 Discord" in cards
