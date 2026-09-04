@@ -217,28 +217,54 @@
                 <span class="desc">Receiver and transmitter coordinates used by the geometry solver.</span>
             </div>
             <div class="cfg-body" {% if not retina_installed %}style="opacity:.5;pointer-events:none;"{% endif %}>
+                {# This section is hand-built rather than rendered through the
+                   render_field macro, so every input has to look config_errors
+                   up itself. Without that the banner above claims the bad
+                   fields are highlighted and none of them are. All eight are
+                   wired, not just the five that can fail today, so a future
+                   constraint cannot reintroduce the invisibility silently. #}
+                {% set rx_name_err = config_errors.get('location.rx_name') if config_errors else none %}
+                {% set rx_lat_err  = config_errors.get('location.rx_latitude') if config_errors else none %}
+                {% set rx_lon_err  = config_errors.get('location.rx_longitude') if config_errors else none %}
+                {% set rx_alt_err  = config_errors.get('location.rx_altitude') if config_errors else none %}
+                {% set tx_name_err = config_errors.get('location.tx_name') if config_errors else none %}
+                {% set tx_lat_err  = config_errors.get('location.tx_latitude') if config_errors else none %}
+                {% set tx_lon_err  = config_errors.get('location.tx_longitude') if config_errors else none %}
+                {% set tx_alt_err  = config_errors.get('location.tx_altitude') if config_errors else none %}
                 <div class="ds-label-micro" style="margin-bottom:10px;">Receiver</div>
                 <div class="cfg-grid" style="margin-bottom:0;">
                     <div style="grid-column:1/-1;" class="cfg-row" style="padding:0;border:0;">
                         <div class="label-col"><label>Name</label><span class="help">{{ loc.rx_name.description if loc.rx_name else '' }}</span></div>
-                        <div><input type="text" name="location.rx_name" class="ds-input" value="{{ loc.rx_name.value or '' if loc.rx_name else '' }}"></div>
+                        <div>
+                            <input type="text" name="location.rx_name" class="ds-input{% if rx_name_err %} is-invalid{% endif %}" value="{{ loc.rx_name.value or '' if loc.rx_name else '' }}">
+                            {% if rx_name_err %}<div style="color:var(--danger);font-size:12px;margin-top:4px;">{{ rx_name_err }}</div>{% endif %}
+                        </div>
                     </div>
                     {% if loc.rx_latitude %}
                     <div class="cfg-row" style="padding:0;border:0;">
                         <div class="label-col"><label>Latitude</label><span class="help">{{ loc.rx_latitude.description }}</span></div>
-                        <div><input type="number" name="location.rx_latitude" class="ds-input mono" step="any" min="-90" max="90" value="{{ loc.rx_latitude.value if loc.rx_latitude.value is not none else '' }}"></div>
+                        <div>
+                            <input type="number" name="location.rx_latitude" class="ds-input mono{% if rx_lat_err %} is-invalid{% endif %}" step="any" min="-90" max="90" value="{{ loc.rx_latitude.value if loc.rx_latitude.value is not none else '' }}">
+                            {% if rx_lat_err %}<div style="color:var(--danger);font-size:12px;margin-top:4px;">{{ rx_lat_err }}</div>{% endif %}
+                        </div>
                     </div>
                     {% endif %}
                     {% if loc.rx_longitude %}
                     <div class="cfg-row" style="padding:0;border:0;">
                         <div class="label-col"><label>Longitude</label><span class="help">{{ loc.rx_longitude.description }}</span></div>
-                        <div><input type="number" name="location.rx_longitude" class="ds-input mono" step="any" min="-180" max="180" value="{{ loc.rx_longitude.value if loc.rx_longitude.value is not none else '' }}"></div>
+                        <div>
+                            <input type="number" name="location.rx_longitude" class="ds-input mono{% if rx_lon_err %} is-invalid{% endif %}" step="any" min="-180" max="180" value="{{ loc.rx_longitude.value if loc.rx_longitude.value is not none else '' }}">
+                            {% if rx_lon_err %}<div style="color:var(--danger);font-size:12px;margin-top:4px;">{{ rx_lon_err }}</div>{% endif %}
+                        </div>
                     </div>
                     {% endif %}
                     {% if loc.rx_altitude %}
                     <div class="cfg-row" style="padding:0;border:0;">
                         <div class="label-col"><label>Altitude</label><span class="help">{{ loc.rx_altitude.description }}</span></div>
-                        <div class="cfg-input-row"><input type="number" name="location.rx_altitude" class="ds-input mono" step="any" value="{{ loc.rx_altitude.value if loc.rx_altitude.value is not none else '' }}"><span class="unit">m</span></div>
+                        <div>
+                            <div class="cfg-input-row"><input type="number" name="location.rx_altitude" class="ds-input mono{% if rx_alt_err %} is-invalid{% endif %}" step="any" value="{{ loc.rx_altitude.value if loc.rx_altitude.value is not none else '' }}"><span class="unit">m</span></div>
+                            {% if rx_alt_err %}<div style="color:var(--danger);font-size:12px;margin-top:4px;">{{ rx_alt_err }}</div>{% endif %}
+                        </div>
                     </div>
                     {% endif %}
                 </div>
@@ -249,24 +275,36 @@
                 <div class="cfg-grid">
                     <div style="grid-column:1/-1;" class="cfg-row" style="padding:0;border:0;">
                         <div class="label-col"><label>Name</label><span class="help">{{ loc.tx_name.description if loc.tx_name else '' }}</span></div>
-                        <div><input type="text" name="location.tx_name" class="ds-input" maxlength="32" value="{{ loc.tx_name.value or '' if loc.tx_name else '' }}"></div>
+                        <div>
+                            <input type="text" name="location.tx_name" class="ds-input{% if tx_name_err %} is-invalid{% endif %}" maxlength="32" value="{{ loc.tx_name.value or '' if loc.tx_name else '' }}">
+                            {% if tx_name_err %}<div style="color:var(--danger);font-size:12px;margin-top:4px;">{{ tx_name_err }}</div>{% endif %}
+                        </div>
                     </div>
                     {% if loc.tx_latitude %}
                     <div class="cfg-row" style="padding:0;border:0;">
                         <div class="label-col"><label>Latitude</label><span class="help">{{ loc.tx_latitude.description }}</span></div>
-                        <div><input type="number" name="location.tx_latitude" class="ds-input mono" step="any" min="-90" max="90" value="{{ loc.tx_latitude.value if loc.tx_latitude.value is not none else '' }}"></div>
+                        <div>
+                            <input type="number" name="location.tx_latitude" class="ds-input mono{% if tx_lat_err %} is-invalid{% endif %}" step="any" min="-90" max="90" value="{{ loc.tx_latitude.value if loc.tx_latitude.value is not none else '' }}">
+                            {% if tx_lat_err %}<div style="color:var(--danger);font-size:12px;margin-top:4px;">{{ tx_lat_err }}</div>{% endif %}
+                        </div>
                     </div>
                     {% endif %}
                     {% if loc.tx_longitude %}
                     <div class="cfg-row" style="padding:0;border:0;">
                         <div class="label-col"><label>Longitude</label><span class="help">{{ loc.tx_longitude.description }}</span></div>
-                        <div><input type="number" name="location.tx_longitude" class="ds-input mono" step="any" min="-180" max="180" value="{{ loc.tx_longitude.value if loc.tx_longitude.value is not none else '' }}"></div>
+                        <div>
+                            <input type="number" name="location.tx_longitude" class="ds-input mono{% if tx_lon_err %} is-invalid{% endif %}" step="any" min="-180" max="180" value="{{ loc.tx_longitude.value if loc.tx_longitude.value is not none else '' }}">
+                            {% if tx_lon_err %}<div style="color:var(--danger);font-size:12px;margin-top:4px;">{{ tx_lon_err }}</div>{% endif %}
+                        </div>
                     </div>
                     {% endif %}
                     {% if loc.tx_altitude %}
                     <div class="cfg-row" style="padding:0;border:0;">
                         <div class="label-col"><label>Altitude</label><span class="help">{{ loc.tx_altitude.description }}</span></div>
-                        <div class="cfg-input-row"><input type="number" name="location.tx_altitude" class="ds-input mono" step="any" value="{{ loc.tx_altitude.value if loc.tx_altitude.value is not none else '' }}"><span class="unit">m</span></div>
+                        <div>
+                            <div class="cfg-input-row"><input type="number" name="location.tx_altitude" class="ds-input mono{% if tx_alt_err %} is-invalid{% endif %}" step="any" value="{{ loc.tx_altitude.value if loc.tx_altitude.value is not none else '' }}"><span class="unit">m</span></div>
+                            {% if tx_alt_err %}<div style="color:var(--danger);font-size:12px;margin-top:4px;">{{ tx_alt_err }}</div>{% endif %}
+                        </div>
                     </div>
                     {% endif %}
                 </div>

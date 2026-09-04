@@ -181,11 +181,12 @@ def _location_errors(location_flat):
     if not missing or len(missing) == len(LOCATION_COORDINATE_FIELDS):
         return {}
 
-    # Form-level rather than per-field: the location block in config.html is
-    # hand-rendered and does not look up config_errors, so per-field keys would
-    # re-render the page with nothing highlighted and no explanation. It also
-    # reads better as one sentence than as five lit-up boxes, because the rule
-    # is about the group.
+    # Form-level rather than per-field, and now a choice rather than a
+    # constraint. The location inputs do consult config_errors since the
+    # highlight fix, so per-field keys would mark the right boxes if we sent
+    # them. They are not sent because the rule is about the group: one sentence
+    # naming what is missing says it better than up to five separately lit
+    # fields each repeating the same all-or-nothing complaint.
     return {"_form": (
         "A location needs all six coordinates or none. Missing: "
         + ", ".join(f.replace("_", " ") for f in missing)
