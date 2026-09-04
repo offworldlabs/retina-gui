@@ -18,7 +18,19 @@
     var T = { x: 34, y: 186 }, N = { x: 212, y: 186 };
     var aim = -Math.PI / 2, half = Math.PI / 3;      // 120° across, pointing up
     var BASE = Math.hypot(T.x - N.x, T.y - N.y);
-    var KM = 0.18;                                    // 1 unit ≈ 0.18 km
+
+    // The scale is chosen so the picture cannot reach its own axes. Drawn into
+    // the furthest corner this scene tops out at 51 km and 242 Hz, inside a
+    // plot that goes to 60 km and 300 Hz, so a track curves away from the edge
+    // instead of flattening along it. A track pinned to a bound is a lie: it
+    // says the aircraft stopped changing when really the plot ran out.
+    var KM = 0.15;                       // 1 unit ≈ 0.15 km, baseline ≈ 27 km
+    var RANGE_MAX = 60;                  // km, the full width of the plot
+    var DOPPLER_MAX = 300;               // Hz, top and bottom of the plot
+
+    // Doppler from the real relation rather than a fudge factor, at the centre
+    // frequency this node actually tunes. 170 m/s is an unremarkable airliner.
+    var FC = 213e6, LAMBDA = 299792458 / FC, SPEED = 170;
 
     // A gentle arc past the node, so the piece says something before anyone
     // touches it. Redrawing replaces it.
@@ -65,14 +77,22 @@
 
     // The two numbers the node actually measures.
     function reading(p) {
-        var d1 = Math.hypot(p.x - T.x, p.y - T.y), d2 = Math.hypot(p.x - N.x, p.y - N.y);
-        var range = d1 + d2 - BASE;
+        // Floored, because a path drawn straight over the tower or the node
+        // gives a zero-length leg, and 0/0 makes the unit vector NaN and the
+        // whole track vanish. Both are visible targets in the middle of the
+        // scene, so somebody will fly over one.
+        var d1 = Math.max(0.5, Math.hypot(p.x - T.x, p.y - T.y));
+        var d2 = Math.max(0.5, Math.hypot(p.x - N.x, p.y - N.y));
         // Doppler follows how fast both legs together are changing, so it is
         // zero when the heading is perpendicular to the sum of the unit legs,
-        // which is not the same as perpendicular to the node.
+        // which is not the same as perpendicular to the node. That sum has a
+        // magnitude of at most 2, which is what caps the plot at 2v/lambda.
         var ux = (p.x - T.x) / d1 + (p.x - N.x) / d2;
         var uy = (p.y - T.y) / d1 + (p.y - N.y) / d2;
-        return { range: range, hz: -(p.hx * ux + p.hy * uy) * 150 };
+        return {
+            km: (d1 + d2 - BASE) * KM,
+            hz: -(p.hx * ux + p.hy * uy) * SPEED / LAMBDA
+        };
     }
 
     function drawBeam() {
@@ -100,12 +120,13 @@
         segments = []; current = null; travelled = 0;
     }
 
-    // range → x, hertz → y, inside the plot box.
-    function place(reading) {
-        return {
-            x: Math.max(44, Math.min(280, 42 + reading.range * 1.35)),
-            y: Math.max(16, Math.min(180, 98 - reading.hz * 0.52))
-        };
+    // range → x, hertz → y. The clamps are a backstop against a stray
+    // coordinate, not a working part: the scale above keeps every reachable
+    // reading well inside the box.
+    function place(r) {
+        var x = 46 + Math.max(0, Math.min(RANGE_MAX, r.km)) / RANGE_MAX * 240;
+        var hz = Math.max(-DOPPLER_MAX, Math.min(DOPPLER_MAX, r.hz));
+        return { x: x, y: 98 - hz / DOPPLER_MAX * 84 };
     }
 
     function paint(p) {
@@ -128,7 +149,7 @@
             current.setAttribute("points", segments[segments.length - 1].join(" "));
             live.setAttribute("cx", xy.x); live.setAttribute("cy", xy.y);
             live.setAttribute("opacity", "1");
-            rOut.textContent = (r.range * KM).toFixed(1) + " km";
+            rOut.textContent = r.km.toFixed(1) + " km";
             fOut.textContent = (r.hz >= 0 ? "+" : "") + r.hz.toFixed(0) + " Hz";
         } else {
             // A gap in the track is the honest record: nothing was heard, so
@@ -183,6 +204,10 @@
     }
 
     // ── Drawing a path ────────────────────────────────────────
+    function inside(p) {
+        return { x: Math.max(4, Math.min(296, p.x)), y: Math.max(4, Math.min(216, p.y)) };
+    }
+
     function svgPoint(svg, evt) {
         var pt = svg.createSVGPoint();
         pt.x = evt.clientX; pt.y = evt.clientY;
@@ -194,18 +219,17 @@
         pause(); resetTrack();
         drawing = true; path = [];
         map.setPointerCapture(evt.pointerId);
-        var p = svgPoint(map, evt);
-        path.push({ x: p.x, y: p.y });
+        path.push(inside(svgPoint(map, evt)));
         drawPath();
         hint.textContent = "Keep dragging, then let go to fly it.";
     });
 
     map.addEventListener("pointermove", function (evt) {
         if (!drawing) return;
-        var p = svgPoint(map, evt), lastPt = path[path.length - 1];
+        var p = inside(svgPoint(map, evt)), lastPt = path[path.length - 1];
         // Thin the samples: a path is a shape, not a recording of the hand.
         if (Math.hypot(p.x - lastPt.x, p.y - lastPt.y) < 4) return;
-        path.push({ x: p.x, y: p.y });
+        path.push(p);
         drawPath();
     });
 

@@ -217,17 +217,23 @@
         <div class="sim-panel">
             <p class="sim-label">What your node records</p>
             <svg class="sim-scene" id="fs-plot" viewBox="0 0 300 220" role="img" aria-label="A delay-Doppler plot: range across, Doppler up">
-                <rect x="42" y="14" width="240" height="168" fill="var(--surface-2)" stroke="var(--line)"></rect>
-                <line class="sim-grid" x1="42" y1="98" x2="282" y2="98"></line>
-                <line class="sim-grid" x1="102" y1="14" x2="102" y2="182"></line>
-                <line class="sim-grid" x1="162" y1="14" x2="162" y2="182"></line>
-                <line class="sim-grid" x1="222" y1="14" x2="222" y2="182"></line>
+                <rect x="46" y="14" width="240" height="168" fill="var(--surface-2)" stroke="var(--line)"></rect>
+                <line class="sim-grid" x1="46" y1="98" x2="286" y2="98"></line>
+                {# 15, 30 and 45 km. #}
+                <line class="sim-grid" x1="106" y1="14" x2="106" y2="182"></line>
+                <line class="sim-grid" x1="166" y1="14" x2="166" y2="182"></line>
+                <line class="sim-grid" x1="226" y1="14" x2="226" y2="182"></line>
                 <g id="fs-track"></g>
                 <circle id="fs-live" r="3.4" fill="var(--accent)" opacity="0"></circle>
-                <text class="sim-axis-label" x="162" y="200" text-anchor="middle">range &#8594;</text>
-                <text class="sim-axis-label" x="36" y="101" text-anchor="end">0 Hz</text>
-                <text class="sim-axis-label" x="36" y="20" text-anchor="end">+</text>
-                <text class="sim-axis-label" x="36" y="180" text-anchor="end">&#8722;</text>
+                {# The axes are labelled with their real limits, because a plot
+                   whose bounds are a mystery teaches the wrong lesson about
+                   where a track sits. #}
+                <text class="sim-axis-label" x="40" y="20" text-anchor="end">+300</text>
+                <text class="sim-axis-label" x="40" y="101" text-anchor="end">0 Hz</text>
+                <text class="sim-axis-label" x="40" y="180" text-anchor="end">&#8722;300</text>
+                <text class="sim-axis-label" x="46" y="198" text-anchor="start">0</text>
+                <text class="sim-axis-label" x="166" y="198" text-anchor="middle">range</text>
+                <text class="sim-axis-label" x="286" y="198" text-anchor="end">60 km</text>
             </svg>
         </div>
     </div>
