@@ -24,6 +24,8 @@ from urllib.parse import urlsplit
 
 from flask import Blueprint, jsonify, render_template
 
+from mdns_peers import sort_key
+
 bp = Blueprint("fleet", __name__)
 
 # Where "Add another node" sends an owner with only one.
@@ -118,7 +120,12 @@ def discovered_nodes():
     and it can come back empty on a network that blocks multicast. Neither is a
     reason to draw a banner with no tabs or a Summary with no cards: this node
     is self-evidently present, whatever mDNS believes. So if the peer list does
-    not already carry us, put us at the front.
+    not already carry us, add us to it.
+
+    Sorted back into place rather than prepended, because the order has to be
+    the one every other node is showing (see `mdns_peers.sort_key`). A tab that
+    sits first for the second before discovery lands and then moves is the same
+    shuffling that order exists to prevent, in miniature.
 
     Shared by the banner and the cards deliberately. Two answers to "which
     nodes are there" would disagree during exactly the seconds after boot when
@@ -131,7 +138,7 @@ def discovered_nodes():
         return nodes
 
     node_id = read_node_id()
-    return [{
+    nodes.append({
         "node_id": node_id,
         "friendly_name": "",
         "hostname": f"{node_id}.local",
@@ -139,7 +146,8 @@ def discovered_nodes():
         "port": "80",
         "healthz": None,
         "is_self": True,
-    }] + nodes
+    })
+    return sorted(nodes, key=sort_key)
 
 
 def banner_nodes():

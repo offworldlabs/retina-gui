@@ -108,7 +108,16 @@ def test_this_node_appears_even_before_discovery_has_run(app_client, fleet):
 
 def test_this_node_is_not_duplicated_once_discovery_finds_it(app_client, fleet):
     fleet(node(SELF, is_self=True), node(OTHER, "192.168.1.58"))
-    assert [n["node_id"] for n in banner_nodes()] == [SELF, OTHER]
+    assert sorted(n["node_id"] for n in banner_nodes()) == sorted([SELF, OTHER])
+
+
+def test_this_node_is_sorted_into_place_rather_than_pinned_first(app_client,
+                                                                 fleet):
+    """Every node draws its own banner, so the row has to come out in the same
+    order on all of them. OTHER sorts ahead of SELF by node_id, and it stays
+    there on the node that is serving the page."""
+    fleet(node(OTHER, "192.168.1.58"))
+    assert [n["node_id"] for n in banner_nodes()] == [OTHER, SELF]
 
 
 def test_a_friendly_name_labels_the_tab(app_client, fleet):

@@ -101,12 +101,36 @@ def test_this_node_is_marked_as_itself():
     assert d.peers()[0]["is_self"] is True
 
 
-def test_this_node_sorts_first_then_by_name():
+def test_nodes_sort_by_node_id_wherever_you_are_standing():
+    """The banner has to read the same on every node, so this one does not
+    sort itself to the front and the friendly name does not come into it."""
     d = directory()
-    d._apply(resolve("retzzz", "10.0.0.3", friendly="Zeta"))
-    d._apply(resolve("retaaa", "10.0.0.2", friendly="Alpha"))
+    d._apply(resolve("retzzz", "10.0.0.3", friendly="Alpha"))
+    d._apply(resolve("retaaa", "10.0.0.2", friendly="Zeta"))
     d._apply(resolve("retself", "10.0.0.1"))
-    assert [p["node_id"] for p in d.peers()] == ["retself", "retaaa", "retzzz"]
+    assert [p["node_id"] for p in d.peers()] == ["retaaa", "retself", "retzzz"]
+
+
+def test_renaming_a_node_does_not_move_its_tab():
+    """A rename reaches the other nodes up to BROWSE_RESTART_SECONDS late, so
+    an order that depended on the name would disagree across the fleet for as
+    long as that took."""
+    d = directory()
+    d._apply(resolve("retaaa", "10.0.0.2", friendly="Zeta"))
+    d._apply(resolve("retself", "10.0.0.1"))
+    before = [p["node_id"] for p in d.peers()]
+
+    d._apply(resolve("retaaa", "10.0.0.2", friendly="Alpha"))
+    assert [p["node_id"] for p in d.peers()] == before
+
+
+def test_an_unnamed_node_does_not_jump_to_the_front():
+    """It used to, since "" sorts ahead of every real name, and then moved
+    again the moment somebody named it."""
+    d = directory()
+    d._apply(resolve("retaaa", "10.0.0.2", friendly="Zeta"))
+    d._apply(resolve("retzzz", "10.0.0.3"))
+    assert [p["node_id"] for p in d.peers()] == ["retaaa", "retzzz"]
 
 
 def test_an_ipv4_address_is_preferred_over_ipv6():
