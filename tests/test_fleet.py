@@ -5,9 +5,13 @@ through real routes rather than calling the helper directly: what matters is
 that it survives base.html inheritance and the blocks pages override.
 """
 
+from pathlib import Path
+
 import pytest
 
-from routes.fleet import banner_nodes, node_url, peer_view
+from routes.fleet import RESOURCES, banner_nodes, node_url, peer_view
+
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
 
 class FakePeers:
@@ -152,7 +156,7 @@ def test_the_summary_tab_has_no_node_mark(app_client, fleet):
 def test_the_banner_carries_both_outbound_links(app_client, fleet):
     fleet(node(SELF, is_self=True))
     body = app_client.get("/").data.decode()
-    assert "https://map.retina.fm" in body and "Server" in body
+    assert "https://map.retina.fm" in body and "Retina Network Map" in body
     assert "https://dash.retina.fm" in body and "Retina Dashboard" in body
 
 
@@ -473,3 +477,168 @@ def test_a_card_with_nothing_to_say_has_no_divider(app_client, fleet, telemetry)
     fleet(node(SELF, is_self=True), node(OTHER, address=""))
     card = node_cards(app_client.get("/summary").data.decode())[1]
     assert "node-rows" not in card
+
+
+# ── Resources ──────────────────────────────────────────────────
+
+
+def cards_between(body, start_head, end_head):
+    """The <a> fragments of one section, bounded so a later section's cards
+    cannot be mistaken for this one's."""
+    section = body.split(f'<div class="section-head {start_head}">')[1]
+    section = section.split(f'<div class="section-head {end_head}">')[0]
+    return ["<a" + frag for frag in section.split("<a")[1:]]
+
+
+def resource_strip(body):
+    """The Resources cards, as raw <a> fragments."""
+    return cards_between(body, "resources-head", "help-head")
+
+
+def help_strip(body):
+    """The Help cards."""
+    return cards_between(body, "help-head", "sim-head")
+
+
+def test_every_resource_is_offered(app_client, fleet, telemetry):
+    fleet(node(SELF, is_self=True))
+    body = app_client.get("/summary").data.decode()
+    for resource in RESOURCES:
+        assert f'href="{resource["url"]}"' in body, resource["name"]
+
+
+def test_a_resource_says_where_it_goes(app_client, fleet, telemetry):
+    """These all leave the device, so an owner should see they are about to be
+    sent to github.com before the click rather than after."""
+    fleet(node(SELF, is_self=True))
+    cards = resource_strip(app_client.get("/summary").data.decode())
+    assert "github.com" in "".join(cards)
+
+
+def test_the_host_is_derived_from_the_url():
+    """So the line under a name cannot drift from where the card really goes."""
+    for resource in RESOURCES:
+        assert resource["host"] in resource["url"]
+
+
+def test_every_resource_opens_away_from_the_page(app_client, fleet, telemetry):
+    """A node's own page is a poor thing to lose to an outbound click, and
+    rel=noopener is the plain safety requirement for target=_blank."""
+    fleet(node(SELF, is_self=True))
+    for card in resource_strip(app_client.get("/summary").data.decode()):
+        assert 'target="_blank"' in card and 'rel="noopener"' in card
+
+
+def test_resources_are_not_mixed_in_with_the_nodes(app_client, fleet, telemetry):
+    """The antenna mark means "this is a node". It stops meaning anything if a
+    link to a website sits in the same grid wearing one."""
+    fleet(node(SELF, is_self=True))
+    for card in node_cards(app_client.get("/summary").data.decode()):
+        assert "link-card" not in card
+
+
+def test_the_offer_of_a_second_node_points_at_the_store(app_client, fleet, telemetry):
+    fleet(node(SELF, is_self=True))
+    body = app_client.get("/summary").data.decode()
+    assert 'href="https://retina.fm"' in body
+
+
+# ── Help ───────────────────────────────────────────────────────
+
+
+def test_both_ways_of_reaching_us_are_offered(app_client, fleet, telemetry):
+    fleet(node(SELF, is_self=True))
+    cards = "".join(help_strip(app_client.get("/summary").data.decode()))
+    assert "https://discord.gg/ewNQbeK5Zn" in cards
+    assert "mailto:info@offworldlabs.com" in cards
+
+
+def test_the_support_address_is_readable_not_just_clickable(app_client, fleet,
+                                                            telemetry):
+    """Somebody may need to type it somewhere else, or read it down a phone."""
+    cards = "".join(help_strip(app_client.get("/summary").data.decode()))
+    assert "info@offworldlabs.com" in cards.replace("mailto:", "")
+
+
+def test_the_email_card_does_not_open_a_tab(app_client, fleet, telemetry):
+    """It hands off to a mail client. target=_blank would leave an empty tab
+    behind, and the outbound arrow would claim it goes to a page."""
+    cards = help_strip(app_client.get("/summary").data.decode())
+    mail = [c for c in cards if "mailto:" in c]
+    assert len(mail) == 1
+    assert 'target="_blank"' not in mail[0]
+    assert "link-arrow" not in mail[0]
+
+
+def test_the_discord_card_does_open_a_tab(app_client, fleet, telemetry):
+    cards = help_strip(app_client.get("/summary").data.decode())
+    discord = [c for c in cards if "discord.gg" in c]
+    assert len(discord) == 1
+    assert 'target="_blank"' in discord[0] and 'rel="noopener"' in discord[0]
+    assert "link-arrow" in discord[0]
+
+
+def test_the_discord_is_named_for_whose_it_is(app_client, fleet, telemetry):
+    """It is the blah2 project's community server, not ours. Calling it ours
+    would send an owner with a hardware problem into a volunteer channel
+    expecting Offworld Labs support."""
+    cards = "".join(help_strip(app_client.get("/summary").data.decode()))
+    assert "blah2 Discord" in cards
+
+
+# ── How your node sees ─────────────────────────────────────────
+#
+# The primer's closing simulation, cut down. It is the one piece here that
+# needs an animation loop, so what these pin down is mostly the fencing.
+
+
+def sim_section(body):
+    return body.split('<div class="section-head sim-head">')[1].split("</main>")[0]
+
+
+def test_the_simulation_is_a_still_diagram_without_any_script(app_client, fleet,
+                                                              telemetry):
+    """The served markup has to stand on its own. No JavaScript, no pointer
+    events, or a fetch that fails, and this is a picture rather than an empty
+    box, so the beam and a flight path are drawn into the page itself."""
+    sim = sim_section(app_client.get("/summary").data.decode())
+    assert 'id="fs-beam"' in sim and 'd="M212 186' in sim
+    assert 'id="fs-path"' in sim and 'd="M20.0 150.0' in sim
+
+
+def test_the_controls_are_hidden_until_something_can_drive_them(app_client, fleet,
+                                                                telemetry):
+    """A Play button that cannot play is worse than no Play button."""
+    sim = sim_section(app_client.get("/summary").data.decode())
+    controls = sim.split('id="fs-controls"')[1].split(">")[0]
+    assert "hidden" in controls
+
+
+def test_the_simulation_is_not_inlined(app_client, fleet, telemetry):
+    """A rendered template caches nothing, so an inline copy would re-send on
+    every page load. As a static file it comes down once and revalidates."""
+    body = app_client.get("/summary").data.decode()
+    assert '<script src="/static/flight-sim.js"' in body
+    assert "requestAnimationFrame" not in body
+
+
+def test_nothing_moves_until_somebody_asks(app_client, fleet, telemetry):
+    """No autoplay, and the loop is fenced besides: a hidden tab, a section
+    scrolled out of view, or a reader who has asked for reduced motion must
+    not leave an animation running on somebody's phone."""
+    js = (PROJECT_ROOT / "static" / "flight-sim.js").read_text()
+    # Nothing in the first paint starts the loop: it is entered from the Play
+    # button, from finishing a drawn path, and from nowhere else.
+    assert "play()" not in js.split("First paint")[1]
+    assert "visibilitychange" in js
+    assert "IntersectionObserver" in js
+    assert "prefers-reduced-motion" in js
+    # The only loop is entered from play(), never from first paint.
+    assert js.count("requestAnimationFrame(frame)") == 2
+
+
+def test_the_simulation_says_it_is_not_this_node(app_client, fleet, telemetry):
+    """The geometry is real but the tower, the speed and the hertz scale are
+    invented. It must not read as a view of the fleet."""
+    sim = sim_section(app_client.get("/summary").data.decode())
+    assert "would have recorded" in sim
