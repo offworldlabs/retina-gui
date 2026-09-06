@@ -318,9 +318,15 @@
                 <span class="desc">SDR sampling and gain. Touch with care, as it affects data quality.</span>
             </div>
             <div class="cfg-body" {% if not retina_installed %}style="opacity:.5;pointer-events:none;"{% endif %}>
-                <div style="display:flex;align-items:center;gap:10px;margin-bottom:4px;">
+                {# Two run shapes, deliberately separate buttons: they answer
+                   different questions and take very different amounts of time.
+                   Quick Calibrate is the same run the setup wizard performs -
+                   see RetinaCalibrate.QUICK_RUN. #}
+                <div style="display:grid;grid-template-columns:auto 1fr;align-items:center;gap:6px 10px;margin-bottom:4px;">
                     <button type="button" class="ds-btn ghost" id="autoCalibrateBtn">Auto-Calibrate</button>
                     <span class="help" style="margin:0;">Automatically tune tower and gain until a confirmed aircraft track appears (~10 min).</span>
+                    <button type="button" class="ds-btn ghost" id="quickCalibrateBtn">Quick Calibrate</button>
+                    <span class="help" style="margin:0;">Current tower only: find the best gain, then check it holds without overloading. No aircraft needed (~4 min).</span>
                 </div>
                 <div class="divider"></div>
                 <div class="cfg-row" style="padding:6px 0 2px;">
@@ -758,7 +764,7 @@
     <div class="modal-dialog">
         <div class="modal-content">
             <div class="modal-header">
-                <h5 class="modal-title">Auto-Calibrate</h5>
+                <h5 class="modal-title" id="calModalTitle">Auto-Calibrate</h5>
             </div>
             <div class="modal-body" style="font-size:13.5px;color:var(--ink-2);">
                 <div id="calSetup">
@@ -774,6 +780,21 @@
                              see calibrator.py's module docstring. The backend also rejects
                              mode: "adsb" outright (routes/calibrate.py), so this isn't just a UI hide. -->
                     </div>
+                </div>
+                {# Quick Calibrate's prompt. No mode choice: the run never
+                   confirms anything, so "how should it decide it's calibrated"
+                   has no answer to offer. Says plainly what it does and does
+                   not do, since the tuning it persists was never checked
+                   against a real aircraft. #}
+                <div id="calQuickSetup" style="display:none;">
+                    <p style="margin:0 0 10px;">This tunes <strong>the tower you are on now</strong>. It backs the gain
+                        off until the receiver stops overloading, then watches that setting for 45 seconds to be sure
+                        it holds.</p>
+                    <p style="margin:0 0 10px;">It never waits for an aircraft, so it takes about 4 minutes instead of
+                        10 and nothing about the result depends on what was overhead. It also cannot tell you the
+                        tower is a good one, only that the radio is comfortable on it.</p>
+                    <p style="margin:0;color:var(--ink-3);">This is the same check the setup wizard runs. To search
+                        other towers and wait for a confirmed track, use Auto-Calibrate instead.</p>
                 </div>
                 <div id="calPhase" style="display:none;align-items:center;gap:8px;font-weight:600;color:var(--ink-1);margin-bottom:10px;">
                     <span class="spinner-border spinner-border-sm" id="calSpinner" style="width:.9em;height:.9em;border-width:1.5px;"></span>
@@ -1570,11 +1591,14 @@ if (discardBtn) discardBtn.addEventListener('click', () => location.reload());
 (function() {
     var csrf = document.querySelector('meta[name="csrf-token"]').content;
     var btn = document.getElementById('autoCalibrateBtn');
+    var quickBtn = document.getElementById('quickCalibrateBtn');
     if (!btn) return;
 
     var modalEl = document.getElementById('autoCalibrateModal');
     var modal = new bootstrap.Modal(modalEl);
+    var titleEl = document.getElementById('calModalTitle');
     var setupEl = document.getElementById('calSetup');
+    var quickSetupEl = document.getElementById('calQuickSetup');
     var phase = document.getElementById('calPhase');
     var spinner = document.getElementById('calSpinner');
     var phaseText = document.getElementById('calPhaseText');
@@ -1589,6 +1613,10 @@ if (discardBtn) discardBtn.addEventListener('click', () => location.reload());
     var applyBtn = document.getElementById('calApplyBtn');
     var pollTimer = null;
     var lastStatus = null;
+    // Which shape the Start button will launch. Only meaningful before a run
+    // begins — once one is going, status.skip_confirmation is the authority,
+    // since the run may have been started by another tab or by the wizard.
+    var pendingQuick = false;
     // Whether the tuning just persisted also moved the transmitter, so the
     // "saved" line can name the fields that changed.
     var movedTower = false;
@@ -1637,8 +1665,13 @@ if (discardBtn) discardBtn.addEventListener('click', () => location.reload());
             phaseText.textContent = PHASE_LABELS[status.phase] || 'Starting…';
             if (status.current) {
                 detail.style.display = '';
+                // Name the shape, not just the mode: this modal reattaches to
+                // whatever run is going, including a quick one started from
+                // the other button or by the setup wizard, and "Standard"
+                // alone would promise a track wait that is not coming.
                 document.getElementById('calModeDisplay').textContent =
-                    MODE_LABELS[status.mode] || status.mode || '-';
+                    (MODE_LABELS[status.mode] || status.mode || '-')
+                    + (status.skip_confirmation ? ' (quick check)' : '');
                 var towersTotal = (status.progress && status.progress.towers_total) || 1;
                 document.getElementById('calTower').textContent =
                     (status.current.tower_name || '-') + '  (' + ((status.current.tower_index || 0) + 1) + '/' + towersTotal + ')';
@@ -1690,9 +1723,21 @@ if (discardBtn) discardBtn.addEventListener('click', () => location.reload());
                 + preflightNotice(status);
             applyBtn.style.display = '';
         } else {
-            phaseText.textContent = status.state === 'cancelled' ? 'Cancelled' : 'No calibration found';
+            // A quick run ends in "failed" by design — there is no confirmed
+            // result because none was asked for (see calibrator.py's
+            // skip_confirmation branch). It still resolved tuning and proved
+            // it holds, so reporting it as "No calibration found" in red
+            // would call a successful run a failure. Cancelled runs keep
+            // their own wording: they have no tuning to offer either way.
+            var quickTuned = !!status.skip_confirmation && !!status.fallback
+                             && status.state !== 'cancelled';
+            phaseText.textContent = status.state === 'cancelled' ? 'Cancelled'
+                : quickTuned ? 'Tuning resolved'
+                : 'No calibration found';
             errorEl.style.display = '';
-            errorEl.innerHTML = escapeHtml(status.error || '');
+            errorEl.innerHTML = quickTuned
+                ? '<span style="color:var(--ink-2);">' + escapeHtml(status.error || '') + '</span>'
+                : escapeHtml(status.error || '');
             // The run's own message assumes the towers were actually watched.
             // When they weren't — the tuning never reached the device, the
             // operating point kept clipping, or time ran out mid-search —
@@ -1709,7 +1754,10 @@ if (discardBtn) discardBtn.addEventListener('click', () => location.reload());
                     + 'background:var(--surface-2,rgba(128,128,128,.08));border-radius:6px;'
                     + 'color:var(--ink-2);font-size:12.5px;">' + diagnosis + '</div>';
             }
-            if (status.best_attempt) {
+            // "Closest attempt ... try these as a starting point" is advice
+            // for a run that fell short. A quick run did not: the box below
+            // already names the tuning it settled on and the radar is on it.
+            if (status.best_attempt && !quickTuned) {
                 best.style.display = '';
                 best.innerHTML = 'Closest attempt: ' + mhz(status.best_attempt.fc)
                     + ', gain A ' + status.best_attempt.gain_a + ' / B ' + status.best_attempt.gain_b
@@ -1732,6 +1780,10 @@ if (discardBtn) discardBtn.addEventListener('click', () => location.reload());
                     + ' dB / B ' + status.fallback.gain_b + ' dB, LNA state '
                     + status.fallback.lna_state
                     + ' - the best operating point this run proved the device tolerates.'
+                    // What the quick run's soak actually observed. Empty for a
+                    // full run, which reaches this box by a different route
+                    // (the dwell ran and found no track) and has no soak.
+                    + (CAL.soakSummary(status) ? '<br>' + CAL.soakSummary(status) : '')
                     + '<br>This is not saved yet: a restart would go back to the previous tuning. '
                     + 'Persist it to keep it.';
                 applyBtn.style.display = '';
@@ -1751,8 +1803,11 @@ if (discardBtn) discardBtn.addEventListener('click', () => location.reload());
             .catch(function() { pollTimer = setTimeout(poll, 2000); });
     }
 
-    function resetModal() {
-        setupEl.style.display = '';
+    function resetModal(quick) {
+        pendingQuick = !!quick;
+        titleEl.textContent = pendingQuick ? 'Quick Calibrate' : 'Auto-Calibrate';
+        setupEl.style.display = pendingQuick ? 'none' : '';
+        quickSetupEl.style.display = pendingQuick ? '' : 'none';
         phase.style.display = 'none';
         startBtn.style.display = '';
         setupCancelBtn.style.display = '';
@@ -1774,6 +1829,7 @@ if (discardBtn) discardBtn.addEventListener('click', () => location.reload());
     // both when starting one and when reattaching to one already going.
     function showRunning() {
         setupEl.style.display = 'none';
+        quickSetupEl.style.display = 'none';
         startBtn.style.display = 'none';
         setupCancelBtn.style.display = 'none';
         phase.style.display = 'flex';
@@ -1781,10 +1837,30 @@ if (discardBtn) discardBtn.addEventListener('click', () => location.reload());
         cancelBtn.style.display = '';
     }
 
-    btn.addEventListener('click', function() {
-        resetModal();
-        modal.show();
-    });
+    // Opening either button's modal has to cope with a run already going —
+    // started by the other button, another tab, or the setup wizard. Offering
+    // "Start Calibration" there would only earn a 409, so attach to the run
+    // instead, exactly as a page load does.
+    function openModal(quick) {
+        function offerToStart() {
+            resetModal(quick);
+            modal.show();
+        }
+        CAL.getStatus().then(function(status) {
+            if (status.state !== 'running') { offerToStart(); return; }
+            resetModal(status.skip_confirmation);
+            showRunning();
+            render(status);
+            modal.show();
+            poll();
+        }).catch(offerToStart);  // status unreadable — let them try anyway
+    }
+
+    btn.addEventListener('click', function() { openModal(false); });
+
+    if (quickBtn) {
+        quickBtn.addEventListener('click', function() { openModal(true); });
+    }
 
     // A run outlives the page: it is a background thread on the node, not
     // something this tab owns. Without reattaching, navigating away or
@@ -1797,7 +1873,9 @@ if (discardBtn) discardBtn.addEventListener('click', () => location.reload());
             .then(function(r) { return r.json(); })
             .then(function(status) {
                 if (status.state !== 'running') return;
-                resetModal();
+                // Title it after the run that is actually going, which this
+                // tab may not have started.
+                resetModal(status.skip_confirmation);
                 showRunning();
                 render(status);
                 modal.show();
@@ -1817,11 +1895,14 @@ if (discardBtn) discardBtn.addEventListener('click', () => location.reload());
 
     startBtn.addEventListener('click', function() {
         var mode = document.querySelector('input[name="calMode"]:checked').value;
+        // CAL.QUICK_RUN rather than a body spelled out here: the setup wizard
+        // posts the same object, and the two must stay the same run.
+        var body = pendingQuick ? CAL.QUICK_RUN : { mode: mode };
         showRunning();
         fetch('/calibrate/start', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrf },
-            body: JSON.stringify({ mode: mode })
+            body: JSON.stringify(body)
         })
         .then(function(r) { return r.json().then(function(d) { return { ok: r.ok, data: d }; }); })
         .then(function(res) {

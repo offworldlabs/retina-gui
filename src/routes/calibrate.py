@@ -189,12 +189,14 @@ def start():
         return jsonify({"success": False,
                         "error": "ADS-B verified mode is not currently available"}), 409
 
-    # The setup wizard's shape: resolve the operating point, soak it long
-    # enough to prove it is stable, and stop — rather than dwelling ~700s for
-    # a confirmation the wizard does not need. It still watches for overload;
-    # only the track wait is skipped (see calibrator.SOAK_SECONDS). Opt-in per
-    # request, so the Configuration page entry point is untouched and keeps
-    # all three towers plus the full dwell. Paired there with
+    # The quick shape: resolve the operating point, soak it long enough to
+    # prove it is stable, and stop — rather than dwelling ~700s for a
+    # confirmation the caller does not need. It still watches for overload;
+    # only the track wait is skipped (see calibrator.SOAK_SECONDS). Asked for
+    # by the setup wizard step and by the Configuration page's Quick
+    # Calibrate button, which post an identical body (static/calibrate.js's
+    # QUICK_RUN). Opt-in per request, so that page's Auto-Calibrate button is
+    # untouched and keeps all three towers plus the full dwell. Paired there with
     # scope: "current_tower", but deliberately independent of it — the two
     # answer different questions (how many towers vs whether to confirm).
     skip_confirmation = bool(body.get("skip_confirmation"))

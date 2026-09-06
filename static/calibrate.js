@@ -1,12 +1,15 @@
 // Shared Auto-Calibrate driver.
 //
-// Two entry points run calibration and they must not drift: the Configuration
-// page modal (a full run — every candidate tower, dwelling on each until a
-// track confirms) and the setup wizard step (current tower, descend then soak
-// for overload, no track wait — see calibrator.py's skip_confirmation). What they share is everything except the DOM:
-// the status vocabulary, the formatting, the "what did this run actually mean"
-// interpretation, and the fetch calls. Rendering stays with each caller, since
-// one is a Bootstrap modal and the other is a full-page wizard step.
+// Three entry points run calibration and they must not drift: the
+// Configuration page's Auto-Calibrate button (a full run — every candidate
+// tower, dwelling on each until a track confirms), its Quick Calibrate button,
+// and the setup wizard step. The last two are the same run: current tower,
+// descend then soak for overload, no track wait (see QUICK_RUN and
+// calibrator.py's skip_confirmation). What they share is everything except the
+// DOM: the run shapes, the status vocabulary, the formatting, the "what did
+// this run actually mean" interpretation, and the fetch calls. Rendering stays
+// with each caller, since one is a Bootstrap modal and the other is a
+// full-page wizard step.
 //
 // Deliberately ES5-flavoured (var/function, no arrow functions) to match
 // setup.js, which is the more constrained of the two consumers.
@@ -31,6 +34,17 @@ window.RetinaCalibrate = (function() {
     };
 
     var MODE_LABELS = { track: 'Standard', adsb: 'ADS-B verified' };
+
+    // The quick run's start body, defined once because two callers post it:
+    // the setup wizard step and the Configuration page's Quick Calibrate
+    // button. Both mean the same thing — the tower is already chosen, so
+    // searching alternates would contradict that, and the run resolves the
+    // operating point and soaks it for overload rather than waiting for a
+    // track it was never asked to find. Neither caller should spell this out
+    // itself: a run shape that differs between the two is exactly the drift
+    // this module exists to prevent. See routes/calibrate.py, which treats
+    // the two flags as independent, and calibrator.SOAK_SECONDS.
+    var QUICK_RUN = { scope: 'current_tower', skip_confirmation: true };
 
     // Per-tower outcomes the engine records but the run's summary message
     // cannot express. Without these every failure reads as "probably no
@@ -121,6 +135,22 @@ window.RetinaCalibrate = (function() {
               + 'about aircraft.</strong><br>'
             : '';
         return lead + lines.join('');
+    }
+
+    // What a quick run's soak proved, in one sentence, or '' if this run
+    // never soaked. An empty dwell_backoffs means the point never clipped
+    // across the whole soak — the reassurance the soak earns and that neither
+    // caller otherwise states. A quick run only ever tries the current tower,
+    // so its soak is history[0]'s.
+    function soakSummary(status) {
+        var entry = (status.history || [])[0] || {};
+        if (!entry.soak_seconds) return '';
+        var seconds = Math.round(entry.soak_seconds);
+        var backoffs = (entry.dwell_backoffs || []).length;
+        return backoffs === 0
+            ? 'Held cleanly for ' + seconds + 's with no sign of overload.'
+            : 'Backed off ' + backoffs + ' time(s) during a ' + seconds
+              + 's check, and settled here.';
     }
 
     // The tuning a terminal run left available to persist, or null. A
@@ -214,6 +244,8 @@ window.RetinaCalibrate = (function() {
         PHASE_LABELS: PHASE_LABELS,
         MODE_LABELS: MODE_LABELS,
         OUTCOME_TEXT: OUTCOME_TEXT,
+        QUICK_RUN: QUICK_RUN,
+        soakSummary: soakSummary,
         mhz: mhz,
         fmtSeconds: fmtSeconds,
         escapeHtml: escapeHtml,
