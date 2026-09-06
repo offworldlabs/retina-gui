@@ -718,6 +718,7 @@ function initSetupWizard(resumeStep, devMode, isRerun, demoMode) {
         var scanResult = document.getElementById('scanResult');
         var rfMeasurements = [];
         var rfPhase = 'idle'; // idle | waiting | scanning | done
+        var rfPass = 0;       // sweep passes completed on this connection
 
         function normaliseBand(id) {
             if (id === 'fm') return 'FM';
@@ -726,19 +727,30 @@ function initSetupWizard(resumeStep, devMode, isRerun, demoMode) {
             return id.toUpperCase();
         }
 
+        // retina-spectrum averages each sweep step over a ring of passes and
+        // exports no channel results at all until that ring holds
+        // METRICS_MIN_ENTRIES (5) of them. That is about 3 minutes on a
+        // container this step has just started. An empty early pass is
+        // therefore normal, not a failure, and the copy has to say so rather
+        // than report it as a measurement of the sky.
+        var RF_PASSES_TO_DATA = 5;
+
         function updateRfUI() {
             var n = rfMeasurements.length;
             if (rfPhase === 'waiting') {
-                scanStatus.textContent = 'Waiting for sweep to start. This will take about 1 minute…';
+                scanStatus.textContent = rfPass === 0
+                    ? 'Waiting for the sweep to start. Each pass takes about a minute…'
+                    : 'Averaging the spectrum, pass ' + (rfPass + 1) + ' of about ' +
+                      RF_PASSES_TO_DATA + '. Channels appear after about 3 minutes…';
                 scanStatus.style.display = '';
                 scanResult.style.display = 'none';
             } else if (rfPhase === 'scanning') {
-                scanStatus.textContent = 'Scanning…' + (n > 0 ? ', ' + n + ' signal' + (n !== 1 ? 's' : '') + ' found' : '');
+                scanStatus.textContent = 'Scanning…' + (n > 0 ? ', ' + n + ' channel' + (n !== 1 ? 's' : '') + ' measured' : '');
                 scanStatus.style.display = '';
                 scanResult.style.display = 'none';
             } else if (rfPhase === 'done') {
                 scanStatus.style.display = 'none';
-                scanResult.textContent = n + ' signal' + (n !== 1 ? 's' : '') + ' detected';
+                scanResult.textContent = 'RF profile captured: ' + n + ' channel' + (n !== 1 ? 's' : '') + ' measured';
                 scanResult.style.display = '';
             }
         }
@@ -747,6 +759,7 @@ function initSetupWizard(resumeStep, devMode, isRerun, demoMode) {
         connectRfSse = function() {
             if (rfSse) return;
             rfMeasurements = [];
+            rfPass = 0;
             rfPhase = 'waiting';
             updateRfUI();
             rfSse = new EventSource('/towers/spectrum/events');
@@ -776,7 +789,13 @@ function initSetupWizard(resumeStep, devMode, isRerun, demoMode) {
                     }
                 } else if (msg.type === 'complete') {
                     if (rfPhase !== 'scanning') return;
-                    rfPhase = 'done';
+                    rfPass++;
+                    // A pass that measured nothing means the averaging ring is not
+                    // ready yet, so re-arm for the next sweep instead of freezing on
+                    // an empty profile. Find Towers is ungated either way once a full
+                    // pass is in: more passes only sharpen the profile, and the search
+                    // still works without one.
+                    rfPhase = rfMeasurements.length === 0 ? 'waiting' : 'done';
                     spectrumGating = false;
                     updateRfUI();
                     updateFindBtn();
