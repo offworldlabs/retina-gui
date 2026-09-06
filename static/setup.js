@@ -1227,11 +1227,13 @@ function initSetupWizard(resumeStep, devMode, isRerun, demoMode) {
     // Step 6: Auto-Calibrate against the tower just chosen.
     //
     // Deliberately a different run shape from the Configuration page's
-    // Auto-Calibrate: scope current_tower (the owner picked a tower one step
-    // ago; re-searching alternates contradicts that and triples the time) and
-    // skip_confirmation (descend, then soak the resolved point for overload,
-    // but never wait for a confirmed track). ~4 min instead of ~15, and
-    // nothing can be falsely confirmed because nothing is confirmed at all.
+    // Auto-Calibrate: CAL.QUICK_RUN, which is scope current_tower (the owner
+    // picked a tower one step ago; re-searching alternates contradicts that
+    // and triples the time) plus skip_confirmation (descend, then soak the
+    // resolved point for overload, but never wait for a confirmed track).
+    // ~4 min instead of ~15, and nothing can be falsely confirmed because
+    // nothing is confirmed at all. The Configuration page's Quick Calibrate
+    // button posts the same object, so keep the shape in calibrate.js.
     // The soak is not optional: descent proves a point over one second, and
     // intermittent clipping only shows when the point is sat on — see
     // calibrator.py's SOAK_SECONDS.
@@ -1299,7 +1301,6 @@ function initSetupWizard(resumeStep, devMode, isRerun, demoMode) {
 
             var tuning = CAL.tuningOf(status);
             if (tuning) {
-                var entry = (status.history || [])[0] || {};
                 var before = status.original;
                 // What the run changed, not just what it ended on: the owner
                 // has no other way to see that these settings are not the
@@ -1309,18 +1310,12 @@ function initSetupWizard(resumeStep, devMode, isRerun, demoMode) {
                       + 'Previously gain reduction A ' + before.gain_a + ' dB / B '
                       + before.gain_b + ' dB, LNA state ' + before.lna_state + '.</div>'
                     : '';
-                // An empty dwell_backoffs means the point never clipped across
-                // the whole soak. That is the reassurance the soak earns and
-                // the step otherwise never states.
-                var held = entry.soak_seconds
+                // What the soak proved. Shared with the Configuration page's
+                // Quick Calibrate, which reports the same run.
+                var soak = CAL.soakSummary(status);
+                var held = soak
                     ? '<div style="font-size:12.5px;color:var(--ink-3);margin-top:6px;">'
-                      + (((entry.dwell_backoffs || []).length === 0)
-                          ? 'Held cleanly for ' + Math.round(entry.soak_seconds)
-                            + 's with no sign of overload.'
-                          : 'Backed off ' + entry.dwell_backoffs.length
-                            + ' time(s) during a ' + Math.round(entry.soak_seconds)
-                            + 's check, and settled here.')
-                      + '</div>'
+                      + soak + '</div>'
                     : '';
                 resultEl.style.display = '';
                 resultEl.innerHTML =
@@ -1425,10 +1420,9 @@ function initSetupWizard(resumeStep, devMode, isRerun, demoMode) {
                 show(false, true);
                 setButtons('running');
                 el('calWizPhase').textContent = 'Starting…';
-                window.RetinaCalibrate.start({
-                    scope: 'current_tower',
-                    skip_confirmation: true
-                }).then(function(d) {
+                window.RetinaCalibrate.start(
+                    window.RetinaCalibrate.QUICK_RUN
+                ).then(function(d) {
                     if (!d.success) {
                         show(true, false);
                         setButtons('idle');

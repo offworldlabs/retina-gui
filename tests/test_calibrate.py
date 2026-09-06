@@ -2399,6 +2399,57 @@ class TestSharedCalibrateDriver:
             assert dupe not in cfg, f"{dupe} is defined again in config.html"
 
 
+class TestQuickCalibrateEntryPoint:
+    """The Configuration page's Quick Calibrate button and the setup wizard's
+    calibrate step are meant to be the same run. Two ways for that to rot
+    silently, neither visible without a browser: the two posting different
+    bodies, and the page reporting a quick run as a failure because the engine
+    ends one in 'failed' by design."""
+
+    @staticmethod
+    def _read(*rel):
+        with open(os.path.join(REPO_ROOT, *rel)) as f:
+            return f.read()
+
+    def test_the_quick_run_shape_is_defined_once(self):
+        import re
+        driver = self._read('static', 'calibrate.js')
+        match = re.search(r'var QUICK_RUN = \{([^}]*)\}', driver)
+        assert match, "static/calibrate.js no longer defines QUICK_RUN"
+        body = match.group(1)
+        # Current tower only, and no track wait. Either one dropped turns the
+        # quick run into a ~15 minute one without changing a word of the UI
+        # copy that promises four.
+        assert "scope: 'current_tower'" in body
+        assert 'skip_confirmation: true' in body
+
+    def test_neither_caller_spells_out_its_own_run_shape(self):
+        for rel in (('templates', 'config.html'), ('static', 'setup.js')):
+            src = self._read(*rel)
+            assert 'QUICK_RUN' in src, (
+                f"{rel[-1]} starts a quick run without the shared shape")
+            assert "'current_tower'" not in src, (
+                f"{rel[-1]} builds its own start body - the wizard and the "
+                f"Quick Calibrate button would then be free to diverge")
+
+    def test_the_config_page_offers_the_button_and_says_what_it_does(self):
+        cfg = self._read('templates', 'config.html')
+        assert 'quickCalibrateBtn' in cfg
+        # Its own prompt: the mode radios ask how a run should decide it is
+        # calibrated, which a run that never confirms anything cannot answer.
+        assert 'calQuickSetup' in cfg
+
+    def test_the_config_page_does_not_call_a_quick_run_a_failure(self):
+        """A quick run terminates in state 'failed' with a fallback and no
+        result (see calibrator._run). Rendered by the pre-existing terminal
+        branch alone, a successful one reads 'No calibration found' in red."""
+        cfg = self._read('templates', 'config.html')
+        terminal = cfg[cfg.index('// terminal states'):]
+        assert 'skip_confirmation' in terminal, (
+            "the modal's terminal branch no longer distinguishes a run that "
+            "never looked for a track from one that looked and found nothing")
+
+
 class TestPersistedTuningReachesTheForm:
     """The Configuration page fills its own fields from /calibrate/apply's
     `persisted` payload, because persisting does not reload the page.

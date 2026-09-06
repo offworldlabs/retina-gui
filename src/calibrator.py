@@ -438,8 +438,9 @@ class Calibrator:
             # None for a cancelled run — cancel restores the original
             # tuning, so there is deliberately nothing to offer.
             "fallback": None,
-            # True when the caller asked to skip track confirmation (setup
-            # wizard). Consumers need it to tell "we deliberately never looked
+            # True when the caller asked to skip track confirmation (the setup
+            # wizard step and Quick Calibrate, which run the same shape).
+            # Consumers need it to tell "we deliberately never looked
             # for a track" from "we looked and found nothing" — the two have
             # very different things to say to a user. See _run.
             "skip_confirmation": False,
