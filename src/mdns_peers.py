@@ -107,6 +107,31 @@ def parse_txt(blob):
     return pairs
 
 
+def sort_key(peer):
+    """How the fleet is ordered, identically on every node.
+
+    The node_id alone, and the point is that every node agrees. This banner is
+    drawn by each node for itself, so an order that depends on where you are
+    standing gives an operator a different row of tabs on every box. That is
+    what happened while this node sorted itself to the front, and it is what
+    makes a tab move under the cursor as you click through the fleet.
+
+    Everything else available here drifts. The friendly name arrives in a TXT
+    record that can be BROWSE_RESTART_SECONDS out of date, so during a rename
+    the nodes genuinely disagree about the value they are sorting on, and an
+    unnamed node sorts ahead of every named one until somebody names it, then
+    jumps. The node_id is derived from the board serial: unique, fixed for the
+    life of the board, and known to every node the moment it has seen the peer
+    at all.
+
+    The sequence that produces is arbitrary rather than meaningful, and that is
+    the trade. An arbitrary order that never changes can be learned; a
+    meaningful one that is different on each node cannot. Which node you are
+    looking at is answered by the active tab, not by position.
+    """
+    return peer["node_id"]
+
+
 def parse_line(line):
     """Turn one line of `avahi-browse -p` output into a dict, or None.
 
@@ -171,15 +196,14 @@ class PeerDirectory:
     # ── What the routes read ───────────────────────────────────
 
     def peers(self):
-        """Every node believed present, this one first, then by name.
+        """Every node believed present, in the fleet's shared order.
 
-        Sorted so the page does not reshuffle between refreshes.
+        See `sort_key`. Sorted so the page does not reshuffle between
+        refreshes, and so it does not reshuffle between nodes either.
         """
         with self._lock:
             live = [dict(p) for p in self._peers.values() if p["alive"]]
-        live.sort(key=lambda p: (not p["is_self"],
-                                 (p["friendly_name"] or "").lower(),
-                                 p["node_id"]))
+        live.sort(key=sort_key)
         return live
 
     def count(self):
