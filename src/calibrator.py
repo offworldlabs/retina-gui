@@ -82,14 +82,14 @@ _descend_reference/_descend_surveillance/_descend):
      already knows are worse.
 
 Track confirmation goes through the same retina-tracker sidecar container
-tracker-preview uses (github.com/offworldlabs/retina-tracker, run as its own
+the Tracker page uses (github.com/offworldlabs/retina-tracker, run as its own
 process — see retina_tracker_client.py), not a tracker built in-process here
 or blah2's own built-in tracker, which the client has found unreliable on
 real data. That sidecar's TCP server accepts one connection at a time, so
 every detection frame is pushed to it via the shared RetinaTrackerClient's
 send_frame() and confirmed-track events are received through a listener
 callback (_on_track_event) registered once with that same client — the one
-tracker-preview already tails. Because a confirmed track from one candidate
+the Tracker page already tails. Because a confirmed track from one candidate
 tower is physically meaningless at another (different fc/tx position means
 different delay/Doppler geometry), a {"type": "RESET"} message clears the
 sidecar's tracker in place (see RetinaTrackerClient.reset()) — mirroring
@@ -105,7 +105,7 @@ waiting before the dwell had observed anything at all.
 Evidence grading is coarser than an in-process tracker could offer
 (EVIDENCE_NONE/DETECTIONS/ACTIVE only, no tentative/associated distinction)
 — the sidecar's events stream only reports confirmed (ACTIVE) tracks, the
-same visibility tracker-preview itself has.
+same visibility the Tracker page itself has.
 
 Two success modes, with genuinely different dwell strategies:
   - MODE_TRACK (default): any confirmed-track event counts as success (the

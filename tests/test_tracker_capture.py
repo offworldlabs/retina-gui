@@ -1,7 +1,7 @@
-"""Tests for TrackerCaptureService's always-on capture / lazy-refresh lifecycle.
+"""Tests for TrackerCaptureService's always-on capture / delta-push lifecycle.
 
 Uses a FakeRetinaTrackerClient stand-in for the sidecar so these tests
-exercise only our own threading/history/refresh-gating logic, not
+exercise only our own threading/history/broadcast-gating logic, not
 retina-tracker's Kalman filtering (which runs out-of-process now) or the
 JS/Plotly frontend — a dependency's own internals aren't re-tested here.
 """
@@ -13,6 +13,8 @@ from unittest.mock import patch
 import pytest
 
 import tracker_capture
+
+EMPTY_COLS = {"t": [], "delay": [], "doppler": [], "snr": []}
 
 
 class FakeBlah2Client:
@@ -73,20 +75,29 @@ def make_frame(ts, delay=1.0, doppler=2.0, snr=3.0):
     return {"timestamp": ts, "delay": [delay], "doppler": [doppler], "snr": [snr]}
 
 
-def stub_refresh(monkeypatch, service, side_effect=None):
-    """Replace TrackerCaptureService._refresh_data so tests don't need to
-    build a real snapshot — just record that it ran."""
+def spy_broadcast(monkeypatch, side_effect=None):
+    """Record every _broadcast(), the capture thread's only display-side
+    work now that viewers build their own deltas on their own threads."""
     calls = []
+    real = tracker_capture.TrackerCaptureService._broadcast
 
-    def fake_refresh(self, history):
-        calls.append(history)
+    def fake(self):
+        calls.append(1)
         if side_effect:
             side_effect()
-        with self._lock:
-            self._latest_data = {"stub": True}
+        real(self)
 
-    monkeypatch.setattr(tracker_capture.TrackerCaptureService, "_refresh_data", fake_refresh)
+    monkeypatch.setattr(tracker_capture.TrackerCaptureService, "_broadcast", fake)
     return calls
+
+
+def event(track_id, ts, delay=1.0, doppler=2.0, snr=3.0, **meta):
+    return dict({
+        "track_id": track_id,
+        "timestamp": ts,
+        "length": 1,
+        "detections": [{"timestamp": ts, "delay": delay, "doppler": doppler, "snr": snr}],
+    }, **meta)
 
 
 # ── HistoryBuffer ──────────────────────────────────────────────────────────
@@ -98,6 +109,23 @@ def test_frame_to_detections_basic():
         {"delay": 1.0, "doppler": 10.0, "snr": 5.0},
         {"delay": 2.0, "doppler": -20.0, "snr": 6.0},
     ]
+
+
+def test_add_raw_rounds_to_the_measurement_precision():
+    hist = tracker_capture.HistoryBuffer()
+    hist.add_raw(1000, 123.456789, -45.678912, 12.3456)
+    assert hist.raw_points == [(1000, 123.46, -45.68, 12.3)]
+
+
+def test_write_event_rounds_the_same_way_as_add_raw():
+    """Raw and track points must round identically: the browser tells an
+    associated detection from an unassociated one by comparing them."""
+    hist = tracker_capture.HistoryBuffer()
+    hist.add_raw(1000, 123.456789, -45.678912, 12.3456)
+    hist.write_event("T1", 1000, 1, [
+        {"timestamp": 1000, "delay": 123.456789, "doppler": -45.678912, "snr": 12.3456},
+    ])
+    assert hist.tracks["T1"] == hist.raw_points
 
 
 def test_history_buffer_write_event_accumulates_without_duplicates():
@@ -119,29 +147,66 @@ def test_history_buffer_write_event_accumulates_without_duplicates():
     ]
 
 
+def test_write_event_keeps_the_five_metadata_fields():
+    hist = tracker_capture.HistoryBuffer()
+    hist.write_event(**event(
+        "T1", 1000, adsb_hex="4CA2D1", length=42, is_anomalous=True,
+        anomaly_types=["supersonic_doppler", "altitude_jump"],
+        max_velocity_ms=704.44, shadow_fraction=0.6432,
+    ))
+    assert hist.track_meta["T1"] == {
+        "adsb_hex": "4CA2D1",
+        "length": 42,
+        "max_velocity_ms": 704.4,
+        "is_anomalous": True,
+        "anomaly_types": ["altitude_jump", "supersonic_doppler"],
+        "shadow_fraction": 0.643,
+    }
+
+
+def test_write_event_ignores_fields_we_deliberately_dropped():
+    """adsb_initialized is the one event field discarded on purpose, and an
+    unknown field from a future sidecar must not raise."""
+    hist = tracker_capture.HistoryBuffer()
+    hist.write_event(**event("T1", 1000, adsb_initialized=True, something_new=7))
+    assert "adsb_initialized" not in hist.track_meta["T1"]
+    assert "something_new" not in hist.track_meta["T1"]
+
+
+def test_write_event_refreshes_metadata_on_every_update():
+    hist = tracker_capture.HistoryBuffer()
+    hist.write_event(**event("T1", 1000, length=1, is_anomalous=False))
+    hist.write_event(**event("T1", 2000, length=2, is_anomalous=True,
+                             anomaly_types=["sustained_orbit"]))
+    assert hist.track_meta["T1"]["length"] == 2
+    assert hist.track_meta["T1"]["is_anomalous"] is True
+
+
 def test_history_buffer_prune_drops_old_points_and_empty_tracks():
     hist = tracker_capture.HistoryBuffer(window_s=10)
     hist.add_raw(1000, 1.0, 2.0, 3.0)
     hist.add_raw(50000, 1.0, 2.0, 3.0)
-    hist.write_event("OLD", 1000, 1, [{"timestamp": 1000, "delay": 1.0, "doppler": 2.0, "snr": 3.0}])
-    hist.write_event("NEW", 50000, 1, [{"timestamp": 50000, "delay": 1.0, "doppler": 2.0, "snr": 3.0}])
+    hist.write_event(**event("OLD", 1000))
+    hist.write_event(**event("NEW", 50000))
 
     hist.prune(now_ms=51000)  # window_s=10 -> cutoff = 41000
 
     assert [p[0] for p in hist.raw_points] == [50000]
     assert "OLD" not in hist.tracks
+    assert "OLD" not in hist.track_meta
     assert "NEW" in hist.tracks
 
 
 def test_history_buffer_clear_resets_all_collections():
     hist = tracker_capture.HistoryBuffer()
     hist.add_raw(1000, 1.0, 2.0, 3.0)
-    hist.write_event("T1", 1000, 1, [{"timestamp": 1000, "delay": 1.0, "doppler": 2.0, "snr": 3.0}])
+    hist.write_event(**event("T1", 1000))
 
     hist.clear()
 
     assert hist.raw_points == []
     assert hist.tracks == {}
+    assert hist.track_meta == {}
     assert hist._last_track_timestamp == {}
 
 
@@ -149,34 +214,167 @@ def test_history_buffer_clear_lets_write_event_repopulate_fresh():
     # If _last_track_timestamp weren't cleared too, this would be treated
     # as an already-seen timestamp and silently dropped.
     hist = tracker_capture.HistoryBuffer()
-    hist.write_event("T1", 1000, 1, [{"timestamp": 1000, "delay": 1.0, "doppler": 2.0, "snr": 3.0}])
+    hist.write_event(**event("T1", 1000))
     hist.clear()
 
-    hist.write_event("T1", 1000, 1, [{"timestamp": 1000, "delay": 1.0, "doppler": 2.0, "snr": 3.0}])
+    hist.write_event(**event("T1", 1000))
 
     assert hist.tracks["T1"] == [(1000, 1.0, 2.0, 3.0)]
 
 
-def test_history_buffer_to_dict_empty():
+# ── Snapshots ──────────────────────────────────────────────────────────────
+
+def test_snapshot_empty():
     hist = tracker_capture.HistoryBuffer()
-    assert hist.to_dict() == {"raw": [], "tracks": {}}
+    payload, cursor = hist.snapshot()
+    assert payload == {"raw": EMPTY_COLS, "tracks": {}}
+    assert cursor == {"gen": 0, "raw": 0, "tracks": {}}
 
 
-def test_history_buffer_to_dict_shape():
+def test_snapshot_is_columnar_and_carries_track_metadata():
     hist = tracker_capture.HistoryBuffer()
     hist.add_raw(1000, 1.0, 2.0, 3.0)
-    hist.write_event("T1", 1000, 1, [{"timestamp": 1000, "delay": 1.5, "doppler": 2.5, "snr": 4.0}])
+    hist.add_raw(2000, 1.5, 2.5, 3.5)
+    hist.write_event(**event("T1", 1000, delay=9.0, adsb_hex="4CA2D1"))
 
-    assert hist.to_dict() == {
-        "raw": [{"t": 1000, "delay": 1.0, "doppler": 2.0, "snr": 3.0}],
-        "tracks": {"T1": [{"t": 1000, "delay": 1.5, "doppler": 2.5, "snr": 4.0}]},
+    payload, _ = hist.snapshot()
+
+    assert payload["raw"] == {
+        "t": [1000, 2000], "delay": [1.0, 1.5],
+        "doppler": [2.0, 2.5], "snr": [3.0, 3.5],
     }
+    assert payload["tracks"]["T1"]["t"] == [1000]
+    assert payload["tracks"]["T1"]["delay"] == [9.0]
+    assert payload["tracks"]["T1"]["meta"]["adsb_hex"] == "4CA2D1"
+
+
+def test_snapshot_window_limits_what_is_served_without_touching_the_buffer():
+    hist = tracker_capture.HistoryBuffer()
+    hist.add_raw(1000, 1.0, 2.0, 3.0)
+    hist.add_raw(100000, 1.5, 2.5, 3.5)
+    hist.write_event(**event("OLD", 1000))
+    hist.write_event(**event("NEW", 100000))
+
+    payload, _ = hist.snapshot(window_s=60, now_ms=100000)
+
+    assert payload["raw"]["t"] == [100000]
+    assert list(payload["tracks"]) == ["NEW"]
+    # Retention is untouched: the window is a display concern only.
+    assert len(hist.raw_points) == 2
+    assert set(hist.tracks) == {"OLD", "NEW"}
+
+
+def test_snapshot_cursor_covers_everything_not_just_the_window():
+    """Otherwise a windowed viewer's first delta would re-send all the
+    history the window had just excluded."""
+    hist = tracker_capture.HistoryBuffer()
+    hist.add_raw(1000, 1.0, 2.0, 3.0)
+    hist.add_raw(100000, 1.5, 2.5, 3.5)
+
+    payload, cursor = hist.snapshot(window_s=60, now_ms=100000)
+
+    assert payload["raw"]["t"] == [100000]
+    assert cursor["raw"] == 2
+
+    delta, _ = hist.since(cursor)
+    assert delta["raw"]["t"] == []
+
+
+# ── Deltas ─────────────────────────────────────────────────────────────────
+
+def test_since_returns_only_what_was_appended():
+    hist = tracker_capture.HistoryBuffer()
+    hist.add_raw(1000, 1.0, 2.0, 3.0)
+    _, cursor = hist.snapshot()
+
+    hist.add_raw(2000, 1.5, 2.5, 3.5)
+    delta, cursor2 = hist.since(cursor)
+
+    assert delta["raw"] == {"t": [2000], "delay": [1.5], "doppler": [2.5], "snr": [3.5]}
+    assert cursor2["raw"] == 2
+
+
+def test_since_is_empty_when_nothing_changed():
+    hist = tracker_capture.HistoryBuffer()
+    hist.add_raw(1000, 1.0, 2.0, 3.0)
+    _, cursor = hist.snapshot()
+
+    delta, _ = hist.since(cursor)
+
+    assert delta["raw"]["t"] == []
+    assert delta["tracks"] == {}
+
+
+def test_since_sends_a_newly_promoted_track_whole():
+    """retina-tracker backfills a track's recent history on promotion, so
+    those points are older than the viewer's cursor. A track the cursor has
+    never seen must arrive complete rather than truncated at the moment the
+    viewer happened to connect."""
+    hist = tracker_capture.HistoryBuffer()
+    _, cursor = hist.snapshot()
+
+    hist.write_event("T1", 3000, 3, [
+        {"timestamp": 1000, "delay": 1.0, "doppler": 2.0, "snr": 3.0},
+        {"timestamp": 2000, "delay": 1.1, "doppler": 2.1, "snr": 3.1},
+        {"timestamp": 3000, "delay": 1.2, "doppler": 2.2, "snr": 3.2},
+    ])
+    delta, _ = hist.since(cursor)
+
+    assert delta["tracks"]["T1"]["t"] == [1000, 2000, 3000]
+
+
+def test_since_omits_tracks_with_no_new_points():
+    hist = tracker_capture.HistoryBuffer()
+    hist.write_event(**event("T1", 1000))
+    _, cursor = hist.snapshot()
+
+    hist.write_event(**event("T2", 2000))
+    delta, _ = hist.since(cursor)
+
+    assert list(delta["tracks"]) == ["T2"]
+
+
+def test_since_survives_a_prune_that_dropped_unseen_points():
+    """A viewer's position is a monotonic count, not a list index, so
+    pruning the front of the buffer must not shift what it points at."""
+    hist = tracker_capture.HistoryBuffer(window_s=10)
+    hist.add_raw(1000, 1.0, 2.0, 3.0)
+    _, cursor = hist.snapshot()
+
+    hist.add_raw(50000, 1.5, 2.5, 3.5)
+    hist.prune(now_ms=51000)  # drops the 1000 point the cursor is past
+
+    delta, _ = hist.since(cursor)
+    assert delta["raw"]["t"] == [50000]
+
+
+def test_since_refuses_a_cursor_from_before_a_clear():
+    hist = tracker_capture.HistoryBuffer()
+    hist.add_raw(1000, 1.0, 2.0, 3.0)
+    _, cursor = hist.snapshot()
+
+    hist.clear()
+
+    delta, new_cursor = hist.since(cursor)
+    assert delta is None and new_cursor is None
+
+
+def test_since_works_again_once_the_viewer_takes_a_fresh_snapshot():
+    hist = tracker_capture.HistoryBuffer()
+    hist.add_raw(1000, 1.0, 2.0, 3.0)
+    hist.clear()
+
+    _, cursor = hist.snapshot()
+    hist.add_raw(2000, 1.5, 2.5, 3.5)
+
+    delta, _ = hist.since(cursor)
+    assert delta["raw"]["t"] == [2000]
 
 
 # ── Sidecar integration ─────────────────────────────────────────────────────
 
 def test_run_pushes_raw_frame_to_tracker_client(monkeypatch):
-    stub_refresh(monkeypatch, None)
+    spy_broadcast(monkeypatch)
     tracker_client = FakeRetinaTrackerClient()
     client = FakeBlah2Client([make_frame(1000, delay=1.5, doppler=2.5, snr=4.0)])
     service = make_service(client, tracker_client)
@@ -206,6 +404,24 @@ def test_on_track_event_writes_into_history_buffer():
     assert service.history.tracks["T1"] == [(1000, 1.5, 2.5, 4.0)]
 
 
+def test_on_track_event_accepts_the_sidecars_full_event_schema():
+    """The real writer sends ten fields; write_event must take all of them
+    even though only six are kept."""
+    tracker_client = FakeRetinaTrackerClient()
+    service = make_service(tracker_client=tracker_client)
+    service.start()
+
+    tracker_client.simulate_event({
+        "track_id": "T1", "adsb_hex": "4CA2D1", "adsb_initialized": True,
+        "timestamp": 1000, "length": 1,
+        "detections": [{"timestamp": 1000, "delay": 1.5, "doppler": 2.5, "snr": 4.0}],
+        "is_anomalous": False, "max_velocity_ms": 231.5,
+        "anomaly_types": [], "shadow_fraction": 0.0,
+    })
+
+    assert service.history.track_meta["T1"]["adsb_hex"] == "4CA2D1"
+
+
 def test_start_wires_tracker_client_tailer_to_on_track_event():
     tracker_client = FakeRetinaTrackerClient()
     service = make_service(tracker_client=tracker_client)
@@ -224,7 +440,7 @@ def test_start_runs_immediately_with_zero_viewers():
 
 
 def test_detach_does_not_stop_capture(monkeypatch):
-    stub_refresh(monkeypatch, None)
+    spy_broadcast(monkeypatch)
     client = FakeBlah2Client([])
     service = make_service(client)
     service.start()
@@ -233,22 +449,22 @@ def test_detach_does_not_stop_capture(monkeypatch):
     q = service.attach()
     service.detach(q)
     time.sleep(0.1)
-    # Unlike Phase 2, capture never stops on detach — only the data refresh does.
+    # Capture never stops on detach — only the broadcasts do.
     assert service.is_running()
 
 
-def test_no_refresh_without_viewers(monkeypatch):
-    calls = stub_refresh(monkeypatch, None)
+def test_no_broadcast_without_viewers(monkeypatch):
+    calls = spy_broadcast(monkeypatch)
     client = FakeBlah2Client([make_frame(1000), make_frame(2000), make_frame(3000)])
     service = make_service(client)
     service.start()
 
-    time.sleep(0.3)  # plenty of refresh-interval ticks with data and zero viewers
+    time.sleep(0.3)  # plenty of cadence ticks with data and zero viewers
     assert calls == []
 
 
-def test_refresh_only_after_attach(monkeypatch):
-    calls = stub_refresh(monkeypatch, None)
+def test_broadcast_only_after_attach(monkeypatch):
+    calls = spy_broadcast(monkeypatch)
     client = FakeBlah2Client([make_frame(1000)])
     service = make_service(client)
     service.start()
@@ -257,15 +473,14 @@ def test_refresh_only_after_attach(monkeypatch):
 
     q = service.attach()
     assert _wait_until(lambda: len(calls) >= 1)
-    assert service.latest_data() == {"stub": True}
     service.detach(q)
 
 
-def test_attach_requests_immediate_refresh_without_waiting_full_interval(monkeypatch):
+def test_attach_requests_immediate_broadcast_without_waiting_full_interval(monkeypatch):
     # RENDER_INTERVAL_S is patched small already, so use an artificially large
     # one here to prove attach() bypasses the wait rather than just being fast.
     monkeypatch.setattr(tracker_capture, "RENDER_INTERVAL_S", 10.0)
-    calls = stub_refresh(monkeypatch, None)
+    calls = spy_broadcast(monkeypatch)
     client = FakeBlah2Client([make_frame(1000)])
     service = make_service(client)
     service.start()
@@ -276,8 +491,20 @@ def test_attach_requests_immediate_refresh_without_waiting_full_interval(monkeyp
     service.detach(q)
 
 
+def test_attached_viewer_receives_a_tick_on_its_queue(monkeypatch):
+    client = FakeBlah2Client([make_frame(1000)])
+    service = make_service(client)
+    service.start()
+
+    q = service.attach()
+    try:
+        assert q.get(timeout=1.0) >= 1
+    finally:
+        service.detach(q)
+
+
 def test_prune_runs_independent_of_viewers(monkeypatch):
-    stub_refresh(monkeypatch, None)
+    spy_broadcast(monkeypatch)
     client = FakeBlah2Client([make_frame(1000)])
     service = make_service(client)
     service.history.window_s = 0  # anything with a timestamp is immediately "old"
@@ -292,14 +519,15 @@ class EndlessBlah2Client:
     """Never runs out of frames, each with a fresh timestamp.
 
     The draining FakeBlah2Client cannot be used for a test that waits on a
-    *second* render. `_run()` only re-renders when `new_frames_since_render >
-    0`, and the first render resets that counter. The capture thread starts on
-    service.start() and consumes frames at POLL_INTERVAL_S while the main
-    thread is still on its way to attach(), so with a fixed two-frame list
-    there is a race: if both frames are gone before a viewer is registered,
-    the first render fires on _refresh_requested, the counter resets, no frame
-    ever arrives again and the second render can never happen. The wait then
-    expires no matter how long it is.
+    *second* broadcast. `_run()` only re-broadcasts when
+    `new_frames_since_broadcast > 0`, and the first broadcast resets that
+    counter. The capture thread starts on service.start() and consumes frames
+    at POLL_INTERVAL_S while the main thread is still on its way to attach(),
+    so with a fixed two-frame list there is a race: if both frames are gone
+    before a viewer is registered, the first broadcast fires on
+    _refresh_requested, the counter resets, no frame ever arrives again and
+    the second broadcast can never happen. The wait then expires no matter
+    how long it is.
 
     That raced roughly 1 run in 20, on any machine, and a longer timeout would
     not have helped.
@@ -313,7 +541,7 @@ class EndlessBlah2Client:
         return make_frame(self._ts)
 
 
-def test_refresh_failure_does_not_kill_capture_loop(monkeypatch):
+def test_broadcast_failure_does_not_kill_capture_loop(monkeypatch):
     calls = {"n": 0}
 
     def flaky():
@@ -321,7 +549,7 @@ def test_refresh_failure_does_not_kill_capture_loop(monkeypatch):
         if calls["n"] == 1:
             raise ValueError("boom")
 
-    stub_refresh(monkeypatch, None, side_effect=flaky)
+    spy_broadcast(monkeypatch, side_effect=flaky)
     service = make_service(EndlessBlah2Client())
     service.start()
 
@@ -345,8 +573,6 @@ def _now_ms():
 
 
 def test_request_clear_wipes_history_from_capture_thread():
-    # Deliberately not stubbing _refresh_data here — the clear branch's own
-    # snapshot reset lives in _run() itself, not in _refresh_data().
     now = _now_ms()
     client = FakeBlah2Client([make_frame(now), make_frame(now + 10)])
     service = make_service(client)
@@ -357,7 +583,7 @@ def test_request_clear_wipes_history_from_capture_thread():
 
     assert _wait_until(lambda: service.history.raw_points == [], timeout=1.0)
     assert service.history.tracks == {}
-    assert service.latest_data() == {"raw": [], "tracks": {}}
+    assert service.snapshot()[0] == {"raw": EMPTY_COLS, "tracks": {}}
 
 
 def test_request_clear_runs_without_viewers():
@@ -411,26 +637,48 @@ def test_clear_requested_during_active_capture_does_not_corrupt_state():
 # ── Routes ───────────────────────────────────────────────────────────────
 
 def test_data_json_returns_empty_snapshot_before_any_capture(app_client):
-    resp = app_client.get('/tracker-preview/data.json')
+    resp = app_client.get('/tracker/data.json')
     assert resp.status_code == 200
-    assert resp.get_json() == {"raw": [], "tracks": {}}
+    assert resp.get_json() == {"raw": EMPTY_COLS, "tracks": {}}
 
 
-def test_data_json_returns_current_snapshot(app_client):
+def test_data_json_returns_columnar_snapshot(app_client):
     import app as app_module
 
     app_module.tracker_capture.history.add_raw(1000, 1.0, 2.0, 3.0)
-    app_module.tracker_capture._latest_data = app_module.tracker_capture.history.to_dict()
 
-    resp = app_client.get('/tracker-preview/data.json')
-    assert resp.get_json()["raw"] == [{"t": 1000, "delay": 1.0, "doppler": 2.0, "snr": 3.0}]
+    resp = app_client.get('/tracker/data.json')
+    assert resp.get_json()["raw"] == {
+        "t": [1000], "delay": [1.0], "doppler": [2.0], "snr": [3.0],
+    }
+
+
+def test_data_json_window_is_clamped_to_what_the_node_retains(app_client):
+    """A query string is a display preference; it must never be able to ask
+    the node to build something larger than the buffer it holds."""
+    import app as app_module
+
+    with patch.object(app_module.tracker_capture, 'snapshot',
+                      return_value=({"raw": EMPTY_COLS, "tracks": {}}, {})) as mock_snap:
+        app_client.get('/tracker/data.json?window=999999')
+    assert mock_snap.call_args.kwargs["window_s"] == tracker_capture.WINDOW_S
+
+    with patch.object(app_module.tracker_capture, 'snapshot',
+                      return_value=({"raw": EMPTY_COLS, "tracks": {}}, {})) as mock_snap:
+        app_client.get('/tracker/data.json?window=1')
+    assert mock_snap.call_args.kwargs["window_s"] == tracker_capture.MIN_VIEW_WINDOW_S
+
+    with patch.object(app_module.tracker_capture, 'snapshot',
+                      return_value=({"raw": EMPTY_COLS, "tracks": {}}, {})) as mock_snap:
+        app_client.get('/tracker/data.json?window=nonsense')
+    assert mock_snap.call_args.kwargs["window_s"] is None
 
 
 def test_clear_route_calls_request_clear(app_client):
     import app as app_module
 
     with patch.object(app_module.tracker_capture, 'request_clear') as mock_clear:
-        resp = app_client.post('/tracker-preview/clear')
+        resp = app_client.post('/tracker/clear')
 
     assert resp.status_code == 200
     assert resp.get_json() == {"success": True}
@@ -438,35 +686,105 @@ def test_clear_route_calls_request_clear(app_client):
 
 
 def test_index_page_renders(app_client):
-    resp = app_client.get('/tracker-preview')
+    resp = app_client.get('/tracker')
     assert resp.status_code == 200
-    assert b'Tracker Preview' in resp.data
+    assert b'>Tracker<' in resp.data
     assert b'clearBufferBtn' in resp.data
+    assert b'railList' in resp.data
 
 
-def test_events_route_attaches_yields_message_and_detaches_on_close(app_client):
+def test_old_preview_urls_still_work(app_client):
+    """Nodes have been in the field under the old name long enough for the
+    URL to be bookmarked. 308 rather than 301 so /clear stays a POST."""
+    resp = app_client.get('/tracker-preview')
+    assert resp.status_code == 308
+    assert resp.headers['Location'].endswith('/tracker')
+
+    resp = app_client.get('/tracker-preview/data.json?window=900')
+    assert resp.status_code == 308
+    assert resp.headers['Location'].endswith('/tracker/data.json?window=900')
+
+    resp = app_client.post('/tracker-preview/clear')
+    assert resp.status_code == 308
+    assert resp.headers['Location'].endswith('/tracker/clear')
+
+
+def test_events_route_opens_with_a_snapshot_and_detaches_on_close(app_client):
     """The SSE connection's lifetime IS the attach()/detach() lifecycle —
-    this is the contract the whole viewer-gated capture design depends on,
-    so it's worth testing at the actual route level, not just against
-    TrackerCaptureService directly."""
+    this is the contract the whole viewer-gated design depends on, so it's
+    worth testing at the actual route level. The first message being a
+    snapshot is the other half: it is what removes any race between what the
+    snapshot contained and where the delta stream started."""
     import app as app_module
 
     q = queue.Queue()
-    q.put(7)  # pre-queued so the generator's first q.get() returns immediately
 
     with patch.object(app_module.tracker_capture, 'attach', return_value=q) as mock_attach, \
          patch.object(app_module.tracker_capture, 'detach') as mock_detach:
-        resp = app_client.get('/tracker-preview/events')
+        resp = app_client.get('/tracker/events')
         assert resp.status_code == 200
         assert resp.content_type.startswith('text/event-stream')
 
         # Pull exactly one chunk — the generator pauses at its `yield` and
-        # won't attempt a second (blocking) q.get() until asked for more,
-        # so this can't hang even though the loop itself is infinite.
+        # won't attempt a (blocking) q.get() until asked for more, so this
+        # can't hang even though the loop itself is infinite.
         first_chunk = next(resp.response)
-        assert b'"seq": 7' in first_chunk
+        assert b'"type":"snapshot"' in first_chunk
+        assert b'"tracks"' in first_chunk
 
         resp.close()  # WSGI close() contract -> generator's finally -> detach()
 
     mock_attach.assert_called_once()
     mock_detach.assert_called_once_with(q)
+
+
+def test_events_stream_sends_a_delta_after_the_snapshot(app_client):
+    """The whole point of the rewrite, end to end: a tick on the viewer's
+    queue produces just the points appended since that viewer's last
+    message, not the buffer again."""
+    import app as app_module
+
+    svc = app_module.tracker_capture
+    q = queue.Queue()
+
+    with patch.object(svc, 'attach', return_value=q), patch.object(svc, 'detach'):
+        resp = app_client.get('/tracker/events')
+        assert b'"type":"snapshot"' in next(resp.response)
+
+        svc.history.add_raw(1000, 1.0, 2.0, 3.0)
+        q.put(1)
+
+        second = next(resp.response)
+        assert b'"type":"delta"' in second
+        assert b'"t":[1000]' in second
+
+        # ...and only once. A second tick with nothing behind it must not
+        # re-send the point the viewer already has.
+        svc.history.add_raw(2000, 1.5, 2.5, 3.5)
+        q.put(2)
+        third = next(resp.response)
+        assert b'"t":[2000]' in third
+        assert b'1000' not in third
+
+        resp.close()
+
+
+def test_events_stream_skips_a_broadcast_with_nothing_behind_it(app_client, monkeypatch):
+    """A tick can fire with no new points (a clear, or a viewer attaching
+    while another is mid-cadence). That must cost a heartbeat, not a message
+    the page would treat as an update."""
+    import app as app_module
+    import routes.tracker as tracker_routes
+
+    monkeypatch.setattr(tracker_routes, "HEARTBEAT_SECONDS", 0.05)
+    svc = app_module.tracker_capture
+    q = queue.Queue()
+
+    with patch.object(svc, 'attach', return_value=q), patch.object(svc, 'detach'):
+        resp = app_client.get('/tracker/events')
+        assert b'"type":"snapshot"' in next(resp.response)
+
+        q.put(1)  # broadcast, but nothing was appended
+        assert next(resp.response).startswith(b': keepalive')
+
+        resp.close()

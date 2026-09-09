@@ -20,7 +20,7 @@ class RetinaTrackerClient:
     """Best-effort TCP sender + JSONL file tailer for retina-tracker.
 
     The sidecar's TCP server accepts one connection at a time, so every
-    feature that talks to a given sidecar (tracker-preview, Auto-Calibrate)
+    feature that talks to a given sidecar (the Tracker page, Auto-Calibrate)
     must share the same client instance rather than each opening their own
     connection — see add_listener()."""
 
@@ -95,7 +95,7 @@ class RetinaTrackerClient:
     def add_listener(self, on_event):
         """Register on_event(event_dict) to be called for every new JSONL
         line tailed from the events file. Multiple listeners are supported
-        (e.g. tracker-preview and Auto-Calibrate both tailing the same
+        (e.g. the Tracker page and Auto-Calibrate both tailing the same
         sidecar's output) — the tail thread itself is started once, on the
         first call."""
         with self._listeners_lock:

@@ -319,7 +319,8 @@ from routes.network import bp as network_bp
 from routes.remote_access import bp as remote_access_bp
 from routes.setup import bp as setup_bp
 from routes.towers import bp as towers_bp
-from routes.tracker_preview import bp as tracker_preview_bp
+from routes.tracker import bp as tracker_bp
+from routes.tracker import legacy_bp as tracker_legacy_bp
 
 app.register_blueprint(home_bp)
 app.register_blueprint(config_bp)
@@ -329,7 +330,8 @@ app.register_blueprint(towers_bp)
 app.register_blueprint(mode_bp)
 app.register_blueprint(network_bp)
 app.register_blueprint(calibrate_bp)
-app.register_blueprint(tracker_preview_bp)
+app.register_blueprint(tracker_bp)
+app.register_blueprint(tracker_legacy_bp)
 app.register_blueprint(fleet_bp)
 app.register_blueprint(remote_access_bp)
 

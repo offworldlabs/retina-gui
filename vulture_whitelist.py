@@ -69,9 +69,6 @@ doppler_tolerance
 # TODO: helper function with no callers found
 #   src/config_schema.py:64  (unused function)
 get_nested_value
-# TODO: no reference found anywhere in the estate
-#   src/tracker_capture.py:80  (unused variable)
-length
 # TODO: config field: parsed but no reader found — wire it up or drop it
 #   src/config_schema.py:145  (unused variable)
 rx_altitude

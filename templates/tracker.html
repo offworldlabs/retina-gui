@@ -1,0 +1,718 @@
+{% extends "base.html" %}
+{% block title %}Tracker - OWL-OS{% endblock %}
+
+{% block style %}
+.trk-wrap { max-width: 1500px; margin: 0 auto; padding: 18px 16px 28px; }
+.trk-head { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; margin-bottom: 4px; }
+.trk-head h1 { margin: 0; font-size: 1.6rem; }
+.trk-intro { color: var(--color-muted); font-size: 13.5px; max-width: 78ch; margin: 0 0 14px; }
+
+.trk-panel { border: 1px solid var(--color-border); border-radius: var(--radius); background: var(--color-card); overflow: hidden; }
+
+.trk-bar { display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+           padding: 10px 13px; border-bottom: 1px solid var(--color-border); background: var(--color-bg-warm); }
+.trk-status { font-family: var(--font-mono, monospace); font-size: 11px; color: var(--color-muted); }
+.trk-status .dot { display: inline-block; width: 6px; height: 6px; border-radius: 50%;
+                   background: var(--color-success); margin-right: 6px; vertical-align: 1px; }
+.trk-status.stale .dot { background: var(--color-warning); }
+.trk-status.lost .dot { background: var(--color-danger); }
+.trk-spacer { flex: 1 1 auto; }
+
+.trk-ctl { display: inline-flex; align-items: center; gap: 6px; }
+.trk-lab { font-family: var(--font-mono, monospace); font-size: 10px; letter-spacing: .08em;
+           text-transform: uppercase; color: var(--color-muted); }
+
+.seg { display: inline-flex; border: 1px solid var(--color-border); border-radius: var(--radius-sm);
+       overflow: hidden; background: var(--color-card); }
+.seg button { font: inherit; font-size: 11.5px; padding: 4px 10px; border: 0;
+              border-right: 1px solid var(--color-border); background: transparent;
+              color: var(--color-muted); cursor: pointer; white-space: nowrap; }
+.seg button:last-child { border-right: 0; }
+.seg button:hover { color: var(--color-text); background: var(--color-bg-warm); }
+.seg button[aria-pressed="true"] { background: var(--color-text); color: var(--color-card); }
+
+.trk-body { display: grid; grid-template-columns: minmax(0, 1fr) 316px; height: 640px; }
+@media (max-width: 900px) {
+  .trk-body { grid-template-columns: minmax(0, 1fr); height: auto; }
+  .trk-rail { border-left: 0 !important; border-top: 1px solid var(--color-border); height: 380px; }
+  .trk-plotwrap { height: 420px; }
+}
+
+.trk-plotwrap { display: grid; grid-template-rows: minmax(0, 1fr) auto; min-width: 0; }
+#plot { width: 100%; height: 100%; min-height: 0; }
+.trk-foot { display: flex; align-items: center; gap: 10px; padding: 7px 13px 8px;
+            border-top: 1px solid var(--color-border-light); }
+.snr-key { display: flex; align-items: center; gap: 7px; }
+.snr-ramp { width: 96px; height: 8px; border-radius: 999px; border: 1px solid var(--color-border);
+            background: linear-gradient(to right, #cde2fb, #9ec5f4, #6da7ec, #3987e5, #1c5cab, #0d366b); }
+
+/* ── The rail ─────────────────────────────────────────── */
+.trk-rail { border-left: 1px solid var(--color-border); display: grid;
+            grid-template-rows: auto auto minmax(0, 1fr) auto; min-height: 0; background: var(--color-card); }
+.rail-head { display: flex; align-items: center; gap: 8px; padding: 8px 11px;
+             border-bottom: 1px solid var(--color-border-light); }
+.rail-count { font-family: var(--font-mono, monospace); font-size: 10.5px; font-weight: 600;
+              color: var(--color-text); background: var(--color-bg-warm); border-radius: 999px; padding: 1px 7px; }
+.rail-sel { font-family: var(--font-mono, monospace); font-size: 11px; color: var(--color-muted);
+            background: var(--color-card); border: 1px solid var(--color-border);
+            border-radius: var(--radius-sm); padding: 3px 5px; cursor: pointer; }
+.rail-filter { display: flex; align-items: center; gap: 5px; padding: 6px 11px;
+               border-bottom: 1px solid var(--color-border-light); background: var(--color-bg-warm); }
+.fchip { font-family: var(--font-mono, monospace); font-size: 10px; font-weight: 600; letter-spacing: .04em;
+         padding: 3px 8px; border-radius: 999px; border: 1px solid var(--color-border);
+         background: var(--color-card); color: var(--color-muted); cursor: pointer; }
+.fchip:hover { color: var(--color-text); }
+.fchip[aria-pressed="true"] { background: var(--color-text); color: var(--color-card); border-color: var(--color-text); }
+
+.rail-list { overflow-y: auto; min-height: 0; }
+.rail-empty { padding: 22px 14px; text-align: center; font-family: var(--font-mono, monospace);
+              font-size: 11px; color: var(--color-muted); line-height: 1.6; }
+
+.trk-row { display: grid; grid-template-columns: 10px minmax(0, 1fr) auto; gap: 0 9px;
+           align-items: start; padding: 8px 11px 9px; border-bottom: 1px solid var(--color-border-light);
+           cursor: pointer; }
+.trk-row:hover { background: var(--color-bg-warm); }
+.trk-row.sel { background: var(--color-primary-wash); }
+
+.trk-swatch { width: 10px; height: 10px; border-radius: 3px; margin-top: 4px; }
+.trk-main { min-width: 0; display: grid; gap: 2px; }
+.trk-id { font-family: var(--font-mono, monospace); font-size: 12px; font-weight: 600; color: var(--color-text); }
+.trk-meta { font-family: var(--font-mono, monospace); font-size: 10.5px; color: var(--color-muted);
+            white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.trk-chips { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 2px; }
+.chip { font-family: var(--font-mono, monospace); font-size: 9.5px; font-weight: 600; letter-spacing: .05em;
+        text-transform: uppercase; padding: 1.5px 6px; border-radius: 3px; border: 1px solid; white-space: nowrap; }
+.chip.ok { color: var(--color-success); background: var(--color-success-bg); border-color: var(--color-success-border); }
+
+/* Flagged tracks get a dot, not a badge: retina-tracker's anomaly detector
+   is not trusted yet, and a solid label would be read as a verdict. */
+.flagdot { display: inline-block; width: 6px; height: 6px; border-radius: 50%;
+           background: var(--color-warning); margin-left: 6px; vertical-align: 1px; }
+
+.trk-acts { display: flex; gap: 2px; opacity: .4; }
+.trk-row:hover .trk-acts, .trk-row:focus-within .trk-acts { opacity: 1; }
+.ic-btn { display: grid; place-items: center; width: 24px; height: 24px; padding: 0; border: 0;
+          border-radius: var(--radius-sm); background: transparent; color: var(--color-muted); cursor: pointer; }
+.ic-btn:hover { background: var(--color-border-light); color: var(--color-text); }
+.ic-btn.dngr:hover { color: var(--color-danger); }
+.ic-btn svg { width: 15px; height: 15px; display: block; }
+
+.trk-row.hid .trk-swatch { opacity: .3; }
+.trk-row.hid .trk-id { color: var(--color-muted); }
+.trk-row.hid .trk-meta, .trk-row.hid .trk-chips { opacity: .5; }
+.trk-row.hid .eye-on { display: none; }
+.trk-row:not(.hid) .eye-off { display: none; }
+
+/* The diagnostic tier: what the tracker thinks, one row at a time. */
+.trk-detail { grid-column: 2 / -1; margin-top: 6px; padding: 7px 9px; border-radius: var(--radius-sm);
+              background: var(--color-bg-warm); border: 1px solid var(--color-border-light);
+              display: grid; gap: 3px; }
+.trk-detail div { font-family: var(--font-mono, monospace); font-size: 10.5px; color: var(--color-muted); }
+.trk-detail b { color: var(--color-text); font-weight: 600; }
+
+.rail-foot { padding: 8px 11px; border-top: 1px solid var(--color-border-light);
+             font-family: var(--font-mono, monospace); font-size: 10.5px; color: var(--color-muted);
+             display: flex; align-items: center; gap: 8px; min-height: 36px; }
+.linkbtn { font: inherit; background: none; border: 0; padding: 0; color: var(--color-primary);
+           cursor: pointer; text-decoration: underline; text-underline-offset: 2px; }
+{% endblock %}
+
+{% block content %}
+<div class="trk-wrap">
+  <div class="trk-head"><h1>Tracker</h1></div>
+  <p class="trk-intro">
+    Live delay/Doppler plot from blah2's detections, with every confirmed track
+    retina-tracker has produced. The node collects and keeps four hours regardless of
+    this page; the view control only changes how much of it is shown.
+  </p>
+
+  <div class="trk-panel">
+    <div class="trk-bar">
+      <span class="trk-status" id="trkStatus"><span class="dot"></span>connecting&hellip;</span>
+      <span class="trk-spacer"></span>
+
+      <div class="trk-ctl">
+        <span class="trk-lab">View</span>
+        <div class="seg" role="group" aria-label="View window">
+          <button type="button" data-win="300" aria-pressed="false">5m</button>
+          <button type="button" data-win="900" aria-pressed="true">15m</button>
+          <button type="button" data-win="3600" aria-pressed="false">1h</button>
+          <button type="button" data-win="14400" aria-pressed="false">4h</button>
+        </div>
+      </div>
+
+      <div class="trk-ctl">
+        <span class="trk-lab">Detections</span>
+        <div class="seg" role="group" aria-label="Detection layer">
+          <button type="button" data-layer="all" aria-pressed="true">All</button>
+          <button type="button" data-layer="unassoc" aria-pressed="false">Unassociated</button>
+          <button type="button" data-layer="off" aria-pressed="false">Off</button>
+        </div>
+      </div>
+
+      <button type="button" id="clearBufferBtn" class="ds-btn danger-ghost sm"
+              title="Clears only what's displayed here. Tracking keeps running, so an active aircraft will reappear on its own.">
+        Clear buffer
+      </button>
+    </div>
+
+    <div class="trk-body">
+      <div class="trk-plotwrap">
+        <div id="plot"></div>
+        <div class="trk-foot">
+          <div class="snr-key">
+            <span class="trk-lab">SNR</span>
+            <span class="snr-ramp" aria-hidden="true"></span>
+            <span class="trk-lab">0 &rarr; 20 dB</span>
+          </div>
+          <span class="trk-spacer"></span>
+          <span class="trk-lab" id="detCount"></span>
+        </div>
+      </div>
+
+      <aside class="trk-rail" aria-label="Tracks">
+        <div class="rail-head">
+          <span class="trk-lab">Tracks</span>
+          <span class="rail-count" id="railCount">0</span>
+          <span class="trk-spacer"></span>
+          <label class="trk-lab" for="sortSel">Sort</label>
+          <select class="rail-sel" id="sortSel" aria-label="Sort tracks">
+            <option value="recent">newest</option>
+            <option value="longest">longest</option>
+            <option value="strongest">strongest</option>
+            <option value="points">most points</option>
+          </select>
+        </div>
+        <div class="rail-filter" role="group" aria-label="Filter tracks">
+          <button type="button" class="fchip" data-filter="all" aria-pressed="true">ALL</button>
+          <button type="button" class="fchip" data-filter="adsb" aria-pressed="false">ADS-B</button>
+          <button type="button" class="fchip" data-filter="flagged" aria-pressed="false">FLAGGED</button>
+          <button type="button" class="fchip" data-filter="unmatched" aria-pressed="false">UNMATCHED</button>
+        </div>
+        <div class="rail-list" id="railList"></div>
+        <div class="rail-foot" id="railFoot">Hover a row to isolate it.</div>
+      </aside>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="https://cdn.jsdelivr.net/npm/plotly.js-dist-min@3.7.0/plotly.min.js"></script>
+<script>
+(function () {
+    'use strict';
+
+    var plotDiv = document.getElementById('plot');
+    var statusEl = document.getElementById('trkStatus');
+    var railList = document.getElementById('railList');
+    var railFoot = document.getElementById('railFoot');
+    var railCount = document.getElementById('railCount');
+    var detCount = document.getElementById('detCount');
+    var csrf = document.querySelector('meta[name="csrf-token"]').content;
+
+    // 15 minutes rather than the full four hours. The buffer keeps all four
+    // either way; this only decides how much the node has to build and send
+    // when the page opens, which measured at 0.28 MB here against 4.50 MB.
+    var DEFAULT_WINDOW = 900;
+
+    // A twelve-hue wheel, indexed by a hash of the track id, so a track's
+    // colour is fixed on first sighting and never recomputed when an older
+    // one ages out. Collisions are expected once past twelve live tracks and
+    // are deliberately tolerated: the rail names every track and hovering a
+    // row isolates it, so colour is a pointing device rather than the thing
+    // carrying identity.
+    var HUES = [210, 145, 30, 285, 340, 175, 55, 250, 100, 315, 12, 195];
+    var SNR_COLORSCALE = [
+        [0.00, '#cde2fb'], [0.20, '#9ec5f4'], [0.40, '#6da7ec'],
+        [0.60, '#3987e5'], [0.80, '#1c5cab'], [1.00, '#0d366b']
+    ];
+
+    var hueCache = {};
+    function hueFor(id) {
+        if (!(id in hueCache)) {
+            var h = 0;
+            for (var i = 0; i < id.length; i++) h = (h * 31 + id.charCodeAt(i)) >>> 0;
+            hueCache[id] = HUES[h % HUES.length];
+        }
+        return hueCache[id];
+    }
+    function colorFor(id) { return 'hsl(' + hueFor(id) + ',58%,42%)'; }
+
+    // ── State ────────────────────────────────────────────────────────────
+
+    function emptyCols() { return { t: [], delay: [], doppler: [], snr: [] }; }
+
+    var store = { raw: emptyCols(), tracks: {} };
+    var assoc = new Set();     // "t|delay" keys claimed by some track
+    var lastTs = 0;            // newest timestamp held, used as "now"
+
+    var state = {
+        window: DEFAULT_WINDOW,
+        layer: 'all',
+        sort: 'recent',
+        filter: 'all',
+        hidden: {},
+        removed: {},
+        expanded: null,
+        hover: null
+    };
+
+    function remember(key, value) {
+        try { localStorage.setItem('tracker.' + key, String(value)); } catch (e) { /* private mode */ }
+    }
+    function recall(key, fallback) {
+        try {
+            var v = localStorage.getItem('tracker.' + key);
+            return v === null ? fallback : v;
+        } catch (e) { return fallback; }
+    }
+
+    state.window = parseInt(recall('window', DEFAULT_WINDOW), 10) || DEFAULT_WINDOW;
+    state.layer = recall('layer', 'all');
+    state.sort = recall('sort', 'recent');
+    state.filter = recall('filter', 'all');
+
+    // ── Column helpers ───────────────────────────────────────────────────
+
+    function appendCols(dst, src) {
+        for (var i = 0; i < src.t.length; i++) {
+            dst.t.push(src.t[i]);
+            dst.delay.push(src.delay[i]);
+            dst.doppler.push(src.doppler[i]);
+            dst.snr.push(src.snr[i]);
+        }
+    }
+
+    // First index at or after `cutoff`. Both raw and per-track columns
+    // arrive in timestamp order, so this is a bisect rather than a scan.
+    function firstAtOrAfter(ts, cutoff) {
+        var lo = 0, hi = ts.length;
+        while (lo < hi) {
+            var mid = (lo + hi) >> 1;
+            if (ts[mid] < cutoff) lo = mid + 1; else hi = mid;
+        }
+        return lo;
+    }
+
+    function sliceCols(cols, from) {
+        if (!from) return cols;
+        return {
+            t: cols.t.slice(from), delay: cols.delay.slice(from),
+            doppler: cols.doppler.slice(from), snr: cols.snr.slice(from)
+        };
+    }
+
+    function newestTimestamp() {
+        var newest = 0;
+        if (store.raw.t.length) newest = store.raw.t[store.raw.t.length - 1];
+        Object.keys(store.tracks).forEach(function (id) {
+            var t = store.tracks[id].t;
+            if (t.length && t[t.length - 1] > newest) newest = t[t.length - 1];
+        });
+        return newest;
+    }
+
+    // The server sends everything appended since our last message, so the
+    // browser is what ages points out of the view window. Node time, not
+    // browser time: the newest point we hold is "now", which keeps this
+    // correct even if the two clocks disagree.
+    function pruneToWindow() {
+        lastTs = newestTimestamp();
+        if (!lastTs) return;
+        var cutoff = lastTs - state.window * 1000;
+        store.raw = sliceCols(store.raw, firstAtOrAfter(store.raw.t, cutoff));
+        Object.keys(store.tracks).forEach(function (id) {
+            var trk = store.tracks[id];
+            var from = firstAtOrAfter(trk.t, cutoff);
+            if (from >= trk.t.length) {
+                delete store.tracks[id];
+                return;
+            }
+            if (from) {
+                var kept = sliceCols(trk, from);
+                kept.meta = trk.meta;
+                store.tracks[id] = kept;
+            }
+        });
+    }
+
+    // Which raw detections a track has claimed. The tracker echoes the
+    // measurements it consumed verbatim and both sides are rounded to the
+    // same precision on the way into the buffer, so timestamp and delay
+    // identify a point exactly. Done here rather than on the node because
+    // association happens *after* a detection is sent — a point arrives
+    // unclaimed and is claimed seconds later when the track confirms — so
+    // classifying at send time would need a reclassification protocol,
+    // whereas rebuilding here self-corrects as track points arrive.
+    function rebuildAssoc() {
+        assoc = new Set();
+        Object.keys(store.tracks).forEach(function (id) {
+            var trk = store.tracks[id];
+            for (var i = 0; i < trk.t.length; i++) assoc.add(trk.t[i] + '|' + trk.delay[i]);
+        });
+    }
+
+    function unassociated() {
+        var out = emptyCols();
+        var raw = store.raw;
+        for (var i = 0; i < raw.t.length; i++) {
+            if (assoc.has(raw.t[i] + '|' + raw.delay[i])) continue;
+            out.t.push(raw.t[i]); out.delay.push(raw.delay[i]);
+            out.doppler.push(raw.doppler[i]); out.snr.push(raw.snr[i]);
+        }
+        return out;
+    }
+
+    // ── Track summaries for the rail ─────────────────────────────────────
+
+    function summarise() {
+        return Object.keys(store.tracks).map(function (id) {
+            var trk = store.tracks[id];
+            var meta = trk.meta || {};
+            var peak = 0;
+            for (var i = 0; i < trk.snr.length; i++) if (trk.snr[i] > peak) peak = trk.snr[i];
+            return {
+                id: id,
+                meta: meta,
+                n: trk.t.length,
+                peak: peak,
+                first: trk.t.length ? trk.t[0] : 0,
+                last: trk.t.length ? trk.t[trk.t.length - 1] : 0,
+                dur: trk.t.length ? (trk.t[trk.t.length - 1] - trk.t[0]) / 1000 : 0
+            };
+        });
+    }
+
+    function ordered(rows) {
+        var kept = rows.filter(function (r) {
+            if (state.removed[r.id]) return false;
+            if (state.filter === 'adsb') return !!r.meta.adsb_hex;
+            if (state.filter === 'flagged') return !!r.meta.is_anomalous;
+            if (state.filter === 'unmatched') return !r.meta.adsb_hex;
+            return true;
+        });
+        var by = {
+            recent: function (a, b) { return b.last - a.last; },
+            longest: function (a, b) { return b.dur - a.dur; },
+            strongest: function (a, b) { return b.peak - a.peak; },
+            points: function (a, b) { return b.n - a.n; }
+        };
+        return kept.sort(by[state.sort] || by.recent);
+    }
+
+    // ── Formatting ───────────────────────────────────────────────────────
+
+    function fmtDur(s) {
+        var m = Math.floor(s / 60), r = Math.round(s % 60);
+        return m ? m + 'm ' + (r < 10 ? '0' : '') + r + 's' : r + 's';
+    }
+    function fmtAgo(ms) {
+        var s = (lastTs - ms) / 1000;
+        if (s < 15) return 'live';
+        if (s < 60) return Math.round(s) + 's ago';
+        if (s < 5400) return Math.round(s / 60) + 'm ago';
+        return (s / 3600).toFixed(1) + 'h ago';
+    }
+    function clockOf(ms) { return new Date(ms).toLocaleTimeString(); }
+
+    // ── The rail ─────────────────────────────────────────────────────────
+
+    var EYE_ON = '<svg class="eye-on" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3.6-6.5 10-6.5S22 12 22 12s-3.6 6.5-10 6.5S2 12 2 12z"/><circle cx="12" cy="12" r="2.6"/></svg>';
+    var EYE_OFF = '<svg class="eye-off" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4l16 16"/><path d="M9.6 6.1A9.7 9.7 0 0 1 12 5.5c6.4 0 10 6.5 10 6.5a17 17 0 0 1-3.3 4"/><path d="M6.4 8.3A16.6 16.6 0 0 0 2 12s3.6 6.5 10 6.5a10 10 0 0 0 3.6-.66"/></svg>';
+    var BIN = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6.5h16M9.5 6.5V4.5h5v2M6.5 6.5l1 13h9l1-13"/><path d="M10.5 10v6M13.5 10v6"/></svg>';
+
+    function esc(s) {
+        return String(s).replace(/[&<>"]/g, function (c) {
+            return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c];
+        });
+    }
+
+    function detailHtml(r) {
+        var m = r.meta;
+        var out = '<div class="trk-detail">';
+        out += '<div>first <b>' + clockOf(r.first) + '</b> &middot; last <b>' + clockOf(r.last) + '</b></div>';
+        out += '<div>length <b>' + (m.length != null ? m.length : r.n) + '</b>'
+             + ' &middot; peak velocity <b>' + (m.max_velocity_ms || 0).toFixed(0) + ' m/s</b></div>';
+        out += '<div>shadow fraction <b>' + (m.shadow_fraction || 0).toFixed(2) + '</b></div>';
+        if (m.anomaly_types && m.anomaly_types.length) {
+            out += '<div>flagged <b>' + esc(m.anomaly_types.join(', ')) + '</b> (provisional)</div>';
+        }
+        out += '</div>';
+        return out;
+    }
+
+    function rowHtml(r) {
+        var cls = 'trk-row' + (state.hidden[r.id] ? ' hid' : '') + (state.expanded === r.id ? ' sel' : '');
+        var html = '<div class="' + cls + '" data-id="' + esc(r.id) + '">'
+            + '<span class="trk-swatch" style="background:' + colorFor(r.id) + '"></span>'
+            + '<div class="trk-main">'
+            + '<div class="trk-id">' + esc(r.id)
+            + (r.meta.is_anomalous ? '<span class="flagdot" title="Flagged by the tracker. Provisional: open the row for reasons."></span>' : '')
+            + '</div>'
+            + '<div class="trk-meta">' + fmtDur(r.dur) + ' &middot; ' + r.n + ' pts &middot; '
+            + r.peak.toFixed(1) + ' dB &middot; ' + fmtAgo(r.last) + '</div>'
+            + (r.meta.adsb_hex ? '<div class="trk-chips"><span class="chip ok">ADS-B ' + esc(r.meta.adsb_hex) + '</span></div>' : '')
+            + '</div>'
+            + '<div class="trk-acts">'
+            + '<button type="button" class="ic-btn" data-act="vis" aria-label="'
+            + (state.hidden[r.id] ? 'Show' : 'Hide') + ' track ' + esc(r.id) + '">' + EYE_ON + EYE_OFF + '</button>'
+            + '<button type="button" class="ic-btn dngr" data-act="del" aria-label="Remove track ' + esc(r.id) + '">' + BIN + '</button>'
+            + '</div>';
+        if (state.expanded === r.id) html += detailHtml(r);
+        return html + '</div>';
+    }
+
+    function renderRail(rows) {
+        var scroll = railList.scrollTop;
+        railList.innerHTML = rows.length
+            ? rows.map(rowHtml).join('')
+            : '<div class="rail-empty">No tracks match this filter<br>inside the current view window.</div>';
+        railList.scrollTop = scroll;
+        railCount.textContent = String(rows.length);
+
+        var gone = Object.keys(state.removed).length;
+        if (gone) {
+            railFoot.innerHTML = gone + ' removed on this browser &middot; '
+                + '<button type="button" class="linkbtn" id="restoreBtn">Restore</button>';
+            document.getElementById('restoreBtn').addEventListener('click', function () {
+                state.removed = {};
+                render();
+            });
+        } else {
+            railFoot.textContent = 'Hover a row to isolate it.';
+        }
+    }
+
+    // ── The scope ────────────────────────────────────────────────────────
+
+    var traceIds = [];   // trace index -> track id, for hover isolation
+
+    function render() {
+        var rows = ordered(summarise());
+        renderRail(rows);
+
+        var traces = [];
+        traceIds = [];
+
+        var dets = state.layer === 'unassoc' ? unassociated()
+                 : state.layer === 'all' ? store.raw : null;
+        if (dets && dets.t.length) {
+            traces.push({
+                type: 'scattergl', mode: 'markers', name: 'Detections',
+                x: dets.delay, y: dets.doppler,
+                marker: {
+                    color: dets.snr, colorscale: SNR_COLORSCALE, cmin: 0, cmax: 20,
+                    size: 4, opacity: 0.4, showscale: false
+                },
+                customdata: dets.snr,
+                hovertemplate: 'Delay: %{x:.2f}<br>Doppler: %{y:.2f} Hz<br>SNR: %{customdata:.1f} dB<extra></extra>',
+                showlegend: false
+            });
+            traceIds.push(null);
+        }
+
+        rows.forEach(function (r) {
+            if (state.hidden[r.id]) return;
+            var trk = store.tracks[r.id];
+            traces.push({
+                type: 'scattergl', mode: 'lines+markers', name: r.id,
+                x: trk.delay, y: trk.doppler,
+                line: { color: 'rgba(0,0,0,0.25)', width: 1 },
+                marker: { color: colorFor(r.id), size: 7, line: { color: '#ffffff', width: 1.2 } },
+                customdata: trk.snr,
+                hovertemplate: r.id + '<br>Delay: %{x:.2f}<br>Doppler: %{y:.2f} Hz<br>'
+                             + 'SNR: %{customdata:.1f} dB<extra></extra>',
+                showlegend: false
+            });
+            traceIds.push(r.id);
+        });
+
+        // react (not newPlot) with a stable uirevision so zoom, pan and the
+        // viewer's axis ranges survive every update. The legend is off: the
+        // rail owns identity now, which is what lets the plot keep its full
+        // height and the SNR scale sit under it instead of fighting for the
+        // right-hand strip.
+        Plotly.react(plotDiv, traces, {
+            uirevision: 'tracker',
+            showlegend: false,
+            margin: { t: 12, r: 14, b: 44, l: 58 },
+            xaxis: { title: { text: 'Bistatic range (km)' } },
+            yaxis: { title: { text: 'Doppler (Hz)' } }
+        }, { displayModeBar: false, responsive: true });
+
+        applyHover();
+
+        var shown = dets ? dets.t.length : 0;
+        detCount.textContent = shown.toLocaleString() + ' detections shown';
+    }
+
+    var hoverPending = false;
+    function applyHover() {
+        if (!traceIds.length) return;
+        var opacities = traceIds.map(function (id) {
+            if (state.hover === null) return id === null ? 0.4 : 1;
+            if (id === null) return 0.12;
+            return id === state.hover ? 1 : 0.09;
+        });
+        Plotly.restyle(plotDiv, { opacity: opacities });
+    }
+    function setHover(id) {
+        if (id === state.hover) return;
+        state.hover = id;
+        if (hoverPending) return;
+        hoverPending = true;
+        requestAnimationFrame(function () { hoverPending = false; applyHover(); });
+    }
+
+    // ── Interaction ──────────────────────────────────────────────────────
+
+    railList.addEventListener('click', function (e) {
+        var row = e.target.closest('.trk-row');
+        if (!row) return;
+        var id = row.getAttribute('data-id');
+        var btn = e.target.closest('[data-act]');
+        if (!btn) {
+            state.expanded = state.expanded === id ? null : id;
+            render();
+            return;
+        }
+        if (btn.getAttribute('data-act') === 'vis') {
+            state.hidden[id] = !state.hidden[id];
+        } else {
+            state.removed[id] = true;
+            if (state.expanded === id) state.expanded = null;
+            if (state.hover === id) state.hover = null;
+        }
+        render();
+    });
+
+    railList.addEventListener('pointerover', function (e) {
+        var row = e.target.closest('.trk-row');
+        setHover(row ? row.getAttribute('data-id') : null);
+    });
+    railList.addEventListener('pointerleave', function () { setHover(null); });
+
+    function wireSeg(attr, apply) {
+        document.querySelectorAll('.seg [data-' + attr + ']').forEach(function (b) {
+            b.addEventListener('click', function () {
+                b.parentNode.querySelectorAll('[data-' + attr + ']').forEach(function (o) {
+                    o.setAttribute('aria-pressed', String(o === b));
+                });
+                apply(b.getAttribute('data-' + attr));
+            });
+        });
+    }
+
+    wireSeg('win', function (v) {
+        state.window = parseInt(v, 10);
+        remember('window', state.window);
+        // Reconnect rather than filter locally: narrowing could be done here,
+        // but widening needs history this browser never received, and one
+        // path for both means there is never a stale-cursor case to reason
+        // about. The stream re-seeds itself with a snapshot at the new window.
+        connect();
+    });
+
+    wireSeg('layer', function (v) {
+        state.layer = v;
+        remember('layer', v);
+        render();
+    });
+
+    document.querySelectorAll('.fchip').forEach(function (b) {
+        b.addEventListener('click', function () {
+            document.querySelectorAll('.fchip').forEach(function (o) {
+                o.setAttribute('aria-pressed', String(o === b));
+            });
+            state.filter = b.getAttribute('data-filter');
+            remember('filter', state.filter);
+            render();
+        });
+    });
+
+    document.getElementById('sortSel').addEventListener('change', function (e) {
+        state.sort = e.target.value;
+        remember('sort', state.sort);
+        render();
+    });
+
+    document.getElementById('clearBufferBtn').addEventListener('click', function () {
+        var btn = this;
+        btn.disabled = true;
+        fetch('/tracker/clear', { method: 'POST', headers: { 'X-CSRFToken': csrf } })
+            .then(function (r) { return r.json(); })
+            .catch(function () { return { success: false }; })
+            .finally(function () { btn.disabled = false; });
+        // No local reset needed: clearing invalidates every cursor on the
+        // node, so the stream's next message is a fresh empty snapshot.
+    });
+
+    // ── The stream ───────────────────────────────────────────────────────
+
+    var source = null;
+
+    function setStatus(text, cls) {
+        statusEl.className = 'trk-status' + (cls ? ' ' + cls : '');
+        statusEl.innerHTML = '<span class="dot"></span>' + text;
+    }
+
+    function onMessage(ev) {
+        var msg;
+        try { msg = JSON.parse(ev.data); } catch (e) { return; }
+
+        if (msg.type === 'snapshot') {
+            store = { raw: msg.raw, tracks: msg.tracks };
+        } else {
+            appendCols(store.raw, msg.raw);
+            Object.keys(msg.tracks).forEach(function (id) {
+                var incoming = msg.tracks[id];
+                var held = store.tracks[id];
+                if (!held) {
+                    store.tracks[id] = incoming;
+                } else {
+                    appendCols(held, incoming);
+                    held.meta = incoming.meta;
+                }
+            });
+        }
+
+        pruneToWindow();
+        rebuildAssoc();
+        render();
+
+        var n = Object.keys(store.tracks).length;
+        setStatus('capturing &middot; ' + n + (n === 1 ? ' track' : ' tracks'));
+    }
+
+    function connect() {
+        if (source) source.close();
+        store = { raw: emptyCols(), tracks: {} };
+        assoc = new Set();
+        setStatus('connecting&hellip;', 'stale');
+        source = new EventSource('/tracker/events?window=' + state.window);
+        source.onmessage = onMessage;
+        source.onerror = function () {
+            setStatus('connection lost, retrying&hellip;', 'lost');
+        };
+    }
+
+    window.addEventListener('beforeunload', function () { if (source) source.close(); });
+
+    // Reflect restored preferences in the controls before connecting.
+    document.querySelectorAll('.seg [data-win]').forEach(function (b) {
+        b.setAttribute('aria-pressed', String(parseInt(b.getAttribute('data-win'), 10) === state.window));
+    });
+    document.querySelectorAll('.seg [data-layer]').forEach(function (b) {
+        b.setAttribute('aria-pressed', String(b.getAttribute('data-layer') === state.layer));
+    });
+    document.querySelectorAll('.fchip').forEach(function (b) {
+        b.setAttribute('aria-pressed', String(b.getAttribute('data-filter') === state.filter));
+    });
+    document.getElementById('sortSel').value = state.sort;
+
+    render();
+    connect();
+})();
+</script>
+{% endblock %}
