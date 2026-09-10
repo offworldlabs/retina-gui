@@ -2,10 +2,12 @@
 {% block title %}Tracker - OWL-OS{% endblock %}
 
 {% block style %}
-.trk-wrap { max-width: 1500px; margin: 0 auto; padding: 18px 16px 28px; }
-.trk-head { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; margin-bottom: 4px; }
+/* Full width. This page is a plot with a list beside it, and both want every
+   pixel: a delay axis spanning 320 km and a rail whose rows truncate. Nothing
+   in base.html constrains the content block, so the cap was only ever here. */
+.trk-wrap { max-width: none; margin: 0; padding: 18px 20px 28px; }
+.trk-head { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; margin-bottom: 14px; }
 .trk-head h1 { margin: 0; font-size: 1.6rem; }
-.trk-intro { color: var(--color-muted); font-size: 13.5px; max-width: 78ch; margin: 0 0 14px; }
 
 .trk-panel { border: 1px solid var(--color-border); border-radius: var(--radius); background: var(--color-card); overflow: hidden; }
 
@@ -31,7 +33,11 @@
 .seg button:hover { color: var(--color-text); background: var(--color-bg-warm); }
 .seg button[aria-pressed="true"] { background: var(--color-text); color: var(--color-card); }
 
-.trk-body { display: grid; grid-template-columns: minmax(0, 1fr) 316px; height: 640px; }
+/* Height follows the viewport now that width is not the limit: a fixed 640px
+   left most of a large screen empty below the panel. Clamped so it stays
+   usable on a laptop and does not become a letterbox on a monitor. */
+.trk-body { display: grid; grid-template-columns: minmax(0, 1fr) 340px;
+            height: clamp(520px, 72vh, 980px); }
 @media (max-width: 900px) {
   .trk-body { grid-template-columns: minmax(0, 1fr); height: auto; }
   .trk-rail { border-left: 0 !important; border-top: 1px solid var(--color-border); height: 380px; }
@@ -120,12 +126,6 @@
 {% block content %}
 <div class="trk-wrap">
   <div class="trk-head"><h1>Tracker</h1></div>
-  <p class="trk-intro">
-    Everything retina-tracker has been given, and what became of it: claimed by a confirmed
-    track, considered and not claimed, or dropped at the SNR gate before it was considered.
-    The node keeps four hours regardless of this page; the view control only changes how much
-    of it is shown.
-  </p>
 
   <div class="trk-panel">
     <div class="trk-bar">
