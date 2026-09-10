@@ -74,18 +74,6 @@ class RetinaTrackerClient:
         except (requests.RequestException, ValueError):
             return False
 
-    def health(self):
-        """Frames the sidecar has seen and tracks it is holding, or None if
-        it is unreachable. The one question worth asking when detections
-        appear to have stopped: whether they are reaching the tracker at
-        all."""
-        try:
-            response = requests.get(f"{self._control_url}/health", timeout=self._timeout)
-            response.raise_for_status()
-            return response.json()
-        except (requests.RequestException, ValueError):
-            return None
-
     # ── Tailing track events ───────────────────────────────────
 
     def start(self, on_event):
