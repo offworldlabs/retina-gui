@@ -1,9 +1,20 @@
+"""The Tracker page and its feed.
+
+retina-gui holds no tracker data. The record of what a node has seen lives in
+retina-tracker, which serves it over a loopback SSE endpoint, and this module
+is the door onto it: the page's HTML, and a proxy for the stream.
+
+Proxying rather than linking to the sidecar directly is what keeps the page
+behind the same session and Cloudflare Access checks as everything else, and
+what makes it work over the support tunnel, which routes paths on this
+hostname and not arbitrary ports. It is also nearly free: bytes are passed
+through without being parsed, buffered or re-serialised.
+"""
+
 import json
-import queue
 
+import requests
 from flask import Blueprint, Response, jsonify, redirect, render_template, request, stream_with_context
-
-from tracker_capture import MIN_VIEW_WINDOW_S, WINDOW_S
 
 bp = Blueprint('tracker', __name__, url_prefix='/tracker')
 
@@ -13,30 +24,25 @@ bp = Blueprint('tracker', __name__, url_prefix='/tracker')
 # a GET.
 legacy_bp = Blueprint('tracker_preview', __name__, url_prefix='/tracker-preview')
 
-# How often to send an SSE heartbeat when there's nothing new to report.
-# Without this, q.get() would block forever whenever no capture happens (node
-# unreachable, or simply no detections yet) — the generator would never get
-# a chance to notice a closed connection, so a viewer could never be detached
-# and the broadcast loop would keep considering it attached indefinitely.
-HEARTBEAT_SECONDS = 15
+# The sidecar's own bounds, mirrored rather than imported because they belong
+# to another repo's release: a mismatch clamps to something sane here and the
+# sidecar clamps again on its side.
+MIN_VIEW_WINDOW_S = 60
+MAX_VIEW_WINDOW_S = 4 * 3600
 
-# Compact separators, as Flask itself uses outside debug mode. Whitespace
-# costs about 7 bytes per point, which is 3 MB across a full buffer.
-_JSON = {"separators": (",", ":")}
+CONNECT_TIMEOUT_S = 5
+CONTROL_TIMEOUT_S = 5
 
 
-def _message(payload, kind):
-    """One SSE data frame. `kind` is what tells the page whether to replace
-    what it holds or append to it."""
-    payload["type"] = kind
-    return "data: " + json.dumps(payload, **_JSON) + "\n\n"
+def _tracker_url(path):
+    from app import RETINA_TRACKER_CONTROL_URL
+    return f"{RETINA_TRACKER_CONTROL_URL.rstrip('/')}{path}"
 
 
 def _view_window():
-    """The ?window= a viewer is asking for, in seconds, or None for
-    everything retained. Clamped rather than rejected: the query string is
-    a display preference, and it must never be able to ask the node to
-    build something larger than it holds."""
+    """The ?window= a viewer is asking for, in seconds, or None for whatever
+    the sidecar holds. Clamped rather than rejected: it is a display
+    preference, not an assertion."""
     raw = request.args.get("window")
     if raw is None:
         return None
@@ -46,13 +52,13 @@ def _view_window():
         return None
     if seconds <= 0:
         return None
-    return max(MIN_VIEW_WINDOW_S, min(seconds, WINDOW_S))
+    return max(MIN_VIEW_WINDOW_S, min(seconds, MAX_VIEW_WINDOW_S))
 
 
-# strict_slashes=False so /tracker-preview and /tracker-preview/ both land
-# here directly. Registering a separate "/" rule instead makes Werkzeug send
-# its own canonical-slash redirect first, costing a round trip and turning a
-# bookmarked POST into two hops.
+def _sse_error(message):
+    return "event: error\ndata: " + json.dumps({"error": message}) + "\n\n"
+
+
 @legacy_bp.route("", defaults={"path": ""}, strict_slashes=False,
                  methods=["GET", "POST"])
 @legacy_bp.route("/<path:path>", methods=["GET", "POST"])
@@ -65,59 +71,40 @@ def moved(path):
 
 @bp.route("")
 def index():
-    """Live Tracker page — see src/tracker_capture.py for the always-on
-    capture and the delta stream this page consumes."""
+    """The Tracker page. Everything it draws arrives on /tracker/events."""
     return render_template("tracker.html")
 
 
 @bp.route("/events")
 def events():
-    """SSE stream, and the only path the live page uses.
+    """Proxy the sidecar's stream, byte for byte.
 
-    The first message is a full snapshot for the requested view window; every
-    message after it carries just what has been appended since this
-    connection's own last message. Sending the snapshot down the same stream
-    rather than having the page fetch it separately is what removes the race
-    between "what the snapshot contained" and "where the delta stream
-    started": there is one ordering, and this generator owns it.
+    Nothing is parsed on the way through. The sidecar frames the messages,
+    owns the cursor for this connection and decides what a snapshot contains;
+    this only carries them, so there is no second copy of the record here and
+    no format knowledge to drift out of step.
 
-    The connection's lifetime IS the viewer session: attach() on connect,
-    detach() in finally (tab close / network drop)."""
-    from app import tracker_capture
-
+    A viewer's connection maps to its own upstream connection. On loopback
+    with one or two viewers that is cheaper than holding a shared mirror and
+    fanning it out, and it means each viewer's window is honoured by the
+    sidecar rather than filtered a second time here.
+    """
     window_s = _view_window()
+    url = _tracker_url("/events")
+    params = {"window": window_s} if window_s else None
 
     def generate():
-        q = tracker_capture.attach()
         try:
-            payload, cursor = tracker_capture.snapshot(window_s=window_s)
-            yield _message(payload, "snapshot")
-
-            while True:
-                try:
-                    q.get(timeout=HEARTBEAT_SECONDS)
-                except queue.Empty:
-                    # SSE comment line — not a "message", just keeps the
-                    # connection alive and gives this generator a chance to
-                    # notice (via the next write failing) that the client
-                    # already disconnected.
-                    yield ": keepalive\n\n"
-                    continue
-
-                delta, new_cursor = tracker_capture.since(cursor)
-                if delta is None:
-                    # clear() ran, so every outstanding cursor is void.
-                    # Re-seed this viewer rather than trying to reconcile.
-                    payload, cursor = tracker_capture.snapshot(window_s=window_s)
-                    yield _message(payload, "snapshot")
-                    continue
-
-                cursor = new_cursor
-                if not delta["raw"]["t"] and not delta["tracks"]:
-                    continue  # broadcast with nothing behind it
-                yield _message(delta, "delta")
-        finally:
-            tracker_capture.detach(q)
+            # No read timeout: a quiet sky is a silent stream, and the
+            # sidecar's own keepalive is what proves the link is alive.
+            with requests.get(url, params=params, stream=True,
+                              timeout=(CONNECT_TIMEOUT_S, None)) as upstream:
+                upstream.raise_for_status()
+                for chunk in upstream.iter_content(chunk_size=None):
+                    if chunk:
+                        yield chunk
+        except requests.RequestException as e:
+            yield _sse_error(f"tracker unreachable: {e.__class__.__name__}")
 
     return Response(
         stream_with_context(generate()),
@@ -128,23 +115,35 @@ def events():
 
 @bp.route("/data.json")
 def data():
-    """Full snapshot for the requested view window, as columnar arrays.
-
-    Not on the live path any more — the page is fed by /events — but kept
-    because it is the one place the wire format can be inspected without
-    holding an SSE connection open. Always 200: even before the first
-    capture this is a well-shaped empty snapshot."""
-    from app import tracker_capture
-
-    payload, _cursor = tracker_capture.snapshot(window_s=_view_window())
-    return jsonify(payload)
+    """One snapshot, for looking at the wire format without holding a stream
+    open. Not on the page's path: it opens the stream, takes the first
+    message and hangs up."""
+    window_s = _view_window()
+    params = {"window": window_s} if window_s else None
+    try:
+        with requests.get(_tracker_url("/events"), params=params, stream=True,
+                          timeout=(CONNECT_TIMEOUT_S, CONTROL_TIMEOUT_S)) as upstream:
+            upstream.raise_for_status()
+            for line in upstream.iter_lines(decode_unicode=True):
+                if line and line.startswith("data: "):
+                    return Response(line[6:], content_type="application/json")
+    except requests.RequestException as e:
+        return jsonify({"error": f"tracker unreachable: {e.__class__.__name__}"}), 502
+    return jsonify({"error": "no snapshot"}), 502
 
 
 @bp.route("/clear", methods=["POST"])
 def clear():
-    """Wipe the display buffer only — the underlying retina-tracker Tracker
-    keeps running unmodified; see TrackerCaptureService.request_clear."""
-    from app import tracker_capture
+    """Wipe the record the page is drawn from, without touching the tracker.
 
-    tracker_capture.request_clear()
-    return jsonify({"success": True})
+    The same distinction the button always carried: tracking keeps running,
+    so an aircraft still overhead reappears on its own within a few events.
+    It lives in the sidecar now because the record does.
+    """
+    try:
+        response = requests.post(_tracker_url("/history/clear"),
+                                 timeout=CONTROL_TIMEOUT_S)
+        response.raise_for_status()
+        return jsonify({"success": bool(response.json().get("ok"))})
+    except (requests.RequestException, ValueError):
+        return jsonify({"success": False, "error": "tracker unreachable"}), 502

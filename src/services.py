@@ -18,7 +18,7 @@ accepted and served while the other sat unread in the kernel's backlog
 forever. Which instance won was a startup race. When the calibrator held the
 losing one, its detection frames and its tracker RESET went into a socket
 nobody was reading -- silently, because confirmed-track events arrive over a
-*file* tail that kept working, fed by tracker_capture's always-on capture.
+*file* tail that kept working regardless of that socket.
 Auto-Calibrate appeared to work while its own feed reached nothing, and
 credited tracks it had never observed.
 
@@ -44,7 +44,6 @@ from remote_access import RemoteAccess
 from retina_tracker_client import RetinaTrackerClient
 from ssh_keys import SSHKeyManager
 from telemetry_status import TelemetryStatus
-from tracker_capture import TrackerCaptureService
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -243,7 +242,6 @@ retina_tracker_client = RetinaTrackerClient(
 # above; its own guard resolves `calibrator` lazily, so the cycle is fine.
 calibrator = Calibrator(blah2_client, retina_tracker_client,
                         config_mgr=config_mgr, apply_service=apply_service)
-tracker_capture = TrackerCaptureService(blah2_client, retina_tracker_client)
 
 
 def _on_calibration_complete(status):

@@ -312,7 +312,7 @@ MAX_DWELL_BACKOFFS = 2
 # MODE_TRACK's retina-tracker feed loop polls faster than blah2's own CPI
 # cadence (measured ~0.9-1s on the desk node) so a new detection frame is
 # never missed — same cadence retina-tracker's own always-on capture uses
-# (tracker_capture.py's POLL_INTERVAL_S). Frames are de-duplicated by
+# blah2's own CPI cadence. Frames are de-duplicated by
 # timestamp, so polling faster than the CPI rate is free, not wasteful.
 TRACKER_FEED_POLL_SECONDS = 0.2
 
@@ -413,7 +413,7 @@ class Calibrator:
         # Deferred to start() rather than done here: __init__ runs at app
         # boot regardless of whether a run ever happens, and registering
         # eagerly would start retina_tracker_client's tail thread that early
-        # too (see app.py's own tracker_capture.start() pytest-leak note).
+        # too (see app.py's own peers.start() pytest-leak note).
         self._listener_registered = False
         # Called with the final status dict when a run reaches a terminal
         # state. Exceptions are swallowed.
@@ -1187,7 +1187,7 @@ class Calibrator:
         self._update(phase="soaking" if watch_only else "dwelling")
         # Start from a genuinely empty tracker — see _reset_tracker. Skipped
         # for a watch_only soak: it never reads the tracker, so resetting it
-        # would only disturb tracker_capture's always-on feed for no gain.
+        # would only disturb the sidecar's continuous feed for no gain.
         if not watch_only:
             self._reset_tracker()
         max_evidence = EVIDENCE_NONE

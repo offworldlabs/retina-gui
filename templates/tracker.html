@@ -121,9 +121,10 @@
 <div class="trk-wrap">
   <div class="trk-head"><h1>Tracker</h1></div>
   <p class="trk-intro">
-    Live delay/Doppler plot from blah2's detections, with every confirmed track
-    retina-tracker has produced. The node collects and keeps four hours regardless of
-    this page; the view control only changes how much of it is shown.
+    Everything retina-tracker has been given, and what became of it: claimed by a confirmed
+    track, considered and not claimed, or dropped at the SNR gate before it was considered.
+    The node keeps four hours regardless of this page; the view control only changes how much
+    of it is shown.
   </p>
 
   <div class="trk-panel">
@@ -145,7 +146,10 @@
         <span class="trk-lab">Detections</span>
         <div class="seg" role="group" aria-label="Detection layer">
           <button type="button" data-layer="all" aria-pressed="true">All</button>
-          <button type="button" data-layer="unassoc" aria-pressed="false">Unassociated</button>
+          <button type="button" data-layer="unassociated" aria-pressed="false"
+                  title="Considered by the tracker, and no confirmed track claimed it. Its miss list.">Unassoc</button>
+          <button type="button" data-layer="below_snr" aria-pressed="false"
+                  title="Dropped at the SNR gate before the tracker considered it at all.">Below SNR</button>
           <button type="button" data-layer="off" aria-pressed="false">Off</button>
         </div>
       </div>
@@ -243,8 +247,20 @@
 
     function emptyCols() { return { t: [], delay: [], doppler: [], snr: [] }; }
 
-    var store = { raw: emptyCols(), tracks: {} };
-    var assoc = new Set();     // "t|delay" keys claimed by some track
+    // The three classes retina-tracker reports. It knows which detections a
+    // confirmed track claimed and which it dropped at the SNR gate, so the
+    // page no longer has to infer any of it: an earlier version compared
+    // timestamps and delays to guess, which could only ever approximate an
+    // answer the tracker already had.
+    var CLASSES = ['associated', 'unassociated', 'below_snr'];
+
+    function emptyStore() {
+        var det = {};
+        CLASSES.forEach(function (c) { det[c] = emptyCols(); });
+        return { det: det, tracks: {} };
+    }
+
+    var store = emptyStore();
     var lastTs = 0;            // newest timestamp held, used as "now"
 
     var state = {
@@ -305,7 +321,10 @@
 
     function newestTimestamp() {
         var newest = 0;
-        if (store.raw.t.length) newest = store.raw.t[store.raw.t.length - 1];
+        CLASSES.forEach(function (c) {
+            var t = store.det[c].t;
+            if (t.length && t[t.length - 1] > newest) newest = t[t.length - 1];
+        });
         Object.keys(store.tracks).forEach(function (id) {
             var t = store.tracks[id].t;
             if (t.length && t[t.length - 1] > newest) newest = t[t.length - 1];
@@ -321,7 +340,9 @@
         lastTs = newestTimestamp();
         if (!lastTs) return;
         var cutoff = lastTs - state.window * 1000;
-        store.raw = sliceCols(store.raw, firstAtOrAfter(store.raw.t, cutoff));
+        CLASSES.forEach(function (c) {
+            store.det[c] = sliceCols(store.det[c], firstAtOrAfter(store.det[c].t, cutoff));
+        });
         Object.keys(store.tracks).forEach(function (id) {
             var trk = store.tracks[id];
             var from = firstAtOrAfter(trk.t, cutoff);
@@ -337,30 +358,14 @@
         });
     }
 
-    // Which raw detections a track has claimed. The tracker echoes the
-    // measurements it consumed verbatim and both sides are rounded to the
-    // same precision on the way into the buffer, so timestamp and delay
-    // identify a point exactly. Done here rather than on the node because
-    // association happens *after* a detection is sent — a point arrives
-    // unclaimed and is claimed seconds later when the track confirms — so
-    // classifying at send time would need a reclassification protocol,
-    // whereas rebuilding here self-corrects as track points arrive.
-    function rebuildAssoc() {
-        assoc = new Set();
-        Object.keys(store.tracks).forEach(function (id) {
-            var trk = store.tracks[id];
-            for (var i = 0; i < trk.t.length; i++) assoc.add(trk.t[i] + '|' + trk.delay[i]);
-        });
-    }
-
-    function unassociated() {
+    // What the layer control is asking for. "all" is the three classes
+    // concatenated; the rest are a class each, which is what makes the miss
+    // list and the SNR gate's rejects separately visible.
+    function layerPoints() {
+        if (state.layer === 'off') return null;
+        if (state.layer !== 'all') return store.det[state.layer] || emptyCols();
         var out = emptyCols();
-        var raw = store.raw;
-        for (var i = 0; i < raw.t.length; i++) {
-            if (assoc.has(raw.t[i] + '|' + raw.delay[i])) continue;
-            out.t.push(raw.t[i]); out.delay.push(raw.delay[i]);
-            out.doppler.push(raw.doppler[i]); out.snr.push(raw.snr[i]);
-        }
+        CLASSES.forEach(function (c) { appendCols(out, store.det[c]); });
         return out;
     }
 
@@ -495,8 +500,7 @@
         var traces = [];
         traceIds = [];
 
-        var dets = state.layer === 'unassoc' ? unassociated()
-                 : state.layer === 'all' ? store.raw : null;
+        var dets = layerPoints();
         if (dets && dets.t.length) {
             traces.push({
                 type: 'scattergl', mode: 'markers', name: 'Detections',
@@ -657,41 +661,59 @@
         statusEl.innerHTML = '<span class="dot"></span>' + text;
     }
 
-    function onMessage(ev) {
-        var msg;
-        try { msg = JSON.parse(ev.data); } catch (e) { return; }
-
-        if (msg.type === 'snapshot') {
-            store = { raw: msg.raw, tracks: msg.tracks };
-        } else {
-            appendCols(store.raw, msg.raw);
-            Object.keys(msg.tracks).forEach(function (id) {
-                var incoming = msg.tracks[id];
-                var held = store.tracks[id];
-                if (!held) {
-                    store.tracks[id] = incoming;
-                } else {
-                    appendCols(held, incoming);
-                    held.meta = incoming.meta;
-                }
-            });
+    function applyMessage(msg, replace) {
+        if (replace) {
+            store = emptyStore();
         }
+        CLASSES.forEach(function (c) {
+            var incoming = msg.detections && msg.detections[c];
+            if (incoming) appendCols(store.det[c], incoming);
+        });
+        Object.keys(msg.tracks || {}).forEach(function (id) {
+            var incoming = msg.tracks[id];
+            var held = store.tracks[id];
+            if (!held) {
+                store.tracks[id] = incoming;
+            } else {
+                appendCols(held, incoming);
+                held.meta = incoming.meta;
+            }
+        });
 
         pruneToWindow();
-        rebuildAssoc();
         render();
 
         var n = Object.keys(store.tracks).length;
-        setStatus('capturing &middot; ' + n + (n === 1 ? ' track' : ' tracks'));
+        var shown = CLASSES.reduce(function (a, c) { return a + store.det[c].t.length; }, 0);
+        setStatus('capturing &middot; ' + n + (n === 1 ? ' track' : ' tracks')
+                  + ' &middot; ' + shown.toLocaleString() + ' detections');
+    }
+
+    function onEvent(replace) {
+        return function (ev) {
+            var msg;
+            try { msg = JSON.parse(ev.data); } catch (e) { return; }
+            applyMessage(msg, replace);
+        };
     }
 
     function connect() {
         if (source) source.close();
-        store = { raw: emptyCols(), tracks: {} };
-        assoc = new Set();
+        store = emptyStore();
         setStatus('connecting&hellip;', 'stale');
         source = new EventSource('/tracker/events?window=' + state.window);
-        source.onmessage = onMessage;
+        // Named events, not onmessage: the tracker distinguishes a snapshot
+        // (replace what you hold) from a delta (append to it), and a
+        // snapshot can arrive mid-stream when the record is cleared under us.
+        source.addEventListener('snapshot', onEvent(true));
+        source.addEventListener('delta', onEvent(false));
+        source.addEventListener('error', function (ev) {
+            // The proxy emits this when the sidecar is unreachable, which is
+            // a different thing from the browser losing the proxy.
+            var detail = '';
+            try { detail = JSON.parse(ev.data).error; } catch (e) { /* not ours */ }
+            if (detail) setStatus(esc(detail), 'lost');
+        });
         source.onerror = function () {
             setStatus('connection lost, retrying&hellip;', 'lost');
         };

@@ -44,7 +44,6 @@ from services import (  # noqa: F401  (re-exported for routes)
     secret_key,
     ssh_keys,
     telemetry_status,
-    tracker_capture,
 )
 
 app = Flask(__name__,
@@ -244,9 +243,8 @@ except Exception:
     pass
 
 
-# apply_service, blah2_client, retina_tracker_client, calibrator and
-# tracker_capture are constructed in services.py and imported at the top of
-# this file — they must exist once per process, and this module body runs
+# apply_service, blah2_client, retina_tracker_client and calibrator are
+# constructed in services.py and imported at the top of this file — they must exist once per process, and this module body runs
 # twice. See services.py.
 
 # Never auto-start under pytest: conftest.py's app_client fixture reloads this
@@ -255,9 +253,8 @@ except Exception:
 # real requests.get() calls that can race with any test mocking requests
 # globally).
 if "pytest" not in sys.modules:
-    tracker_capture.start()
-    # Same reasoning: the peer directory owns a browse thread and a probe
-    # thread, and the probe thread makes real HTTP requests to other nodes.
+    # The peer directory owns a browse thread and a probe thread, and the
+    # probe thread makes real HTTP requests to other nodes.
     peers.start()
 
 
