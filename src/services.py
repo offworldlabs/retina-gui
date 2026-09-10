@@ -68,9 +68,12 @@ TOWER_FINDER_URL = os.environ.get('TOWER_FINDER_URL', 'https://tower-finder.reti
 # blah2_api runs with network_mode: host and listens directly on this port —
 # NOT the :8080 blah2_host nginx proxy, which doesn't forward /capture/* at all.
 BLAH2_API_URL = os.environ.get('BLAH2_API_URL', 'http://localhost:3000')
-# retina-tracker sidecar (network_mode: host, see retina-node's docker-compose.yml)
-RETINA_TRACKER_HOST = os.environ.get('RETINA_TRACKER_HOST', 'localhost')
-RETINA_TRACKER_PORT = int(os.environ.get('RETINA_TRACKER_PORT', '30100'))
+# retina-tracker sidecar (network_mode: host, see retina-node's docker-compose.yml).
+# Its ingest socket is deliberately absent here: blah2_api forwards detections
+# to it directly now, and it accepts one connection at a time. This is the
+# control surface only.
+RETINA_TRACKER_CONTROL_URL = os.environ.get(
+    'RETINA_TRACKER_CONTROL_URL', 'http://localhost:30101')
 # Path the sidecar streams JSONL track events to (-s flag, see its compose
 # command) — tailed rather than read over the TCP socket, since retina-tracker's
 # --tcp mode is input-only (see retina_tracker_client.py's module docstring).
@@ -230,11 +233,9 @@ def config_change_guard():
 apply_service = ApplyService(RETINA_NODE_PATH, dev_mode=DEV_MODE,
                              guard=config_change_guard)
 blah2_client = Blah2Client(BLAH2_API_URL)
-# One client per sidecar, shared by every feature that talks to it — its TCP
-# server accepts a single connection at a time, so a second instance does not
-# get a second conversation, it gets a socket nobody ever reads from.
+# One client per sidecar, shared by every feature that consumes its events.
 retina_tracker_client = RetinaTrackerClient(
-    RETINA_TRACKER_HOST, RETINA_TRACKER_PORT, RETINA_TRACKER_EVENTS_PATH)
+    RETINA_TRACKER_EVENTS_PATH, RETINA_TRACKER_CONTROL_URL)
 # config_mgr/apply_service are only reached by the preflight's recovery
 # branch — writing the safe corner to user.yml and restarting the stack when
 # the radio has stopped accepting retunes (see calibrator._preflight). The

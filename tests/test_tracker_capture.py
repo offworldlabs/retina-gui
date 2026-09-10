@@ -30,16 +30,16 @@ class FakeBlah2Client:
 
 
 class FakeRetinaTrackerClient:
-    """Stand-in for RetinaTrackerClient: records send_frame calls, and
-    lets tests simulate the tailer thread's on_event callback synchronously
-    via simulate_event() instead of touching a real socket/file."""
+    """Stand-in for RetinaTrackerClient: lets tests simulate the tailer
+    thread's on_event callback synchronously via simulate_event() instead of
+    touching a real file.
+
+    Deliberately has no send_frame. retina-gui does not feed the sidecar any
+    more, and a fake that accepted frames would let a regression put one back
+    without any test noticing."""
 
     def __init__(self):
-        self.sent_frames = []
         self._on_event = None
-
-    def send_frame(self, frame):
-        self.sent_frames.append(frame)
 
     def start(self, on_event):
         self._on_event = on_event
@@ -373,20 +373,21 @@ def test_since_works_again_once_the_viewer_takes_a_fresh_snapshot():
 
 # ── Sidecar integration ─────────────────────────────────────────────────────
 
-def test_run_pushes_raw_frame_to_tracker_client(monkeypatch):
+def test_run_captures_frames_without_forwarding_them(monkeypatch):
+    """retina-gui is off the ingest path. blah2_api feeds the sidecar
+    directly (network.tracker_forward), and that socket accepts one
+    connection at a time, so a frame pushed from here would either duplicate
+    one the tracker already has or take the connection blah2_api needs."""
     spy_broadcast(monkeypatch)
     tracker_client = FakeRetinaTrackerClient()
     client = FakeBlah2Client([make_frame(1000, delay=1.5, doppler=2.5, snr=4.0)])
     service = make_service(client, tracker_client)
     service.start()
 
-    assert _wait_until(lambda: len(tracker_client.sent_frames) == 1)
-    # The raw frame is pushed, not the per-detection dicts frame_to_detections()
-    # builds for add_raw() — retina-tracker's wire format wants the parallel
-    # arrays, not per-detection dicts.
-    assert tracker_client.sent_frames[0] == {
-        "timestamp": 1000, "delay": [1.5], "doppler": [2.5], "snr": [4.0],
-    }
+    # The frame still lands in our own display buffer...
+    assert _wait_until(lambda: service.history.raw_points == [(1000, 1.5, 2.5, 4.0)])
+    # ...and there is no route by which it could have gone anywhere else.
+    assert not hasattr(tracker_client, "send_frame")
 
 
 def test_on_track_event_writes_into_history_buffer():

@@ -71,6 +71,11 @@ class FakeBlah2Client:
         # cleanly reporting overload — see calibrator.py's _probe/_safe_revert.
         self.retune_fail_rule = retune_fail_rule or (lambda fc, ga, gb, lna: False)
         self.overload_status_fail_rule = overload_status_fail_rule or (lambda fc, ga, gb, lna: False)
+        # Stands in for blah2_api's network.tracker_forward: every frame it
+        # publishes goes straight to the tracker. Set by make_calibrator().
+        # The calibrator no longer forwards anything itself, so this is the
+        # only thing that puts a frame in front of the tracker.
+        self.forward_to = None
 
     def _now(self):
         self.clock_ms += 10
@@ -131,20 +136,27 @@ class FakeBlah2Client:
                 "overloadCountB": self.overload_counts[1]}
 
     def get_detection(self):
-        return self.detection(self)
+        frame = self.detection(self)
+        if frame is not None and self.forward_to is not None:
+            self.forward_to.on_frame(frame)
+        return frame
 
     def get_adsb_tracks(self):
         return self.adsb_tracks(self)
 
 
 class FakeRetinaTrackerClient:
-    """Stand-in for RetinaTrackerClient — no real socket or background tail
+    """Stand-in for RetinaTrackerClient — no real HTTP or background tail
     thread. Doesn't reimplement retina-tracker's Kalman/GNN association:
-    send_frame() just records the frame and, once confirm_after frames have
-    been sent since the last reset, synchronously calls every registered
-    listener with a confirmed-track event (mirroring what the real sidecar
-    would eventually emit via its JSONL stream). confirm_after of None
-    means "never confirms" — for tests exercising the no-track path.
+    on_frame() records the frame and, once confirm_after frames have arrived
+    since the last reset, synchronously calls every registered listener with
+    a confirmed-track event (mirroring what the real sidecar would eventually
+    emit via its JSONL stream). confirm_after of None means "never confirms"
+    — for tests exercising the no-track path.
+
+    on_frame is deliberately not a method the calibrator can reach. Frames
+    arrive from FakeBlah2Client, standing in for blah2_api's forwarding,
+    because that is now the only path a detection takes to the tracker.
     """
 
     def __init__(self, confirm_after=None, adsb_hex=None, confirm_from_reset=0):
@@ -162,7 +174,7 @@ class FakeRetinaTrackerClient:
         # existing call site.
         self._confirm_from_reset = confirm_from_reset
 
-    def send_frame(self, frame):
+    def on_frame(self, frame):
         self.sent_frames.append(frame)
         self._frame_count += 1
         if (self._confirm_after is not None
@@ -178,6 +190,10 @@ class FakeRetinaTrackerClient:
     def reset(self):
         self.reset_calls += 1
         self._frame_count = 0
+        # The real client returns whether the sidecar confirmed the reset;
+        # the calibrator records a failure in its status, so a fake that
+        # returned None would flag every reset as failed.
+        return True
 
     def add_listener(self, on_event):
         self._listeners.append(on_event)
@@ -185,6 +201,19 @@ class FakeRetinaTrackerClient:
     def _emit(self, event):
         for listener in list(self._listeners):
             listener(event)
+
+
+def make_calibrator(client, tracker_client, **kwargs):
+    """A Calibrator with the two fakes wired the way a node wires the real
+    things: blah2_api forwards each published frame to the tracker, and the
+    calibrator is connected to neither end of that.
+
+    Every construction goes through here rather than calling Calibrator
+    directly, because the link is no longer something the calibrator makes
+    for itself — which is the change these tests cover.
+    """
+    client.forward_to = tracker_client
+    return Calibrator(client, tracker_client, **kwargs)
 
 
 ORIGINAL = {"fc": 98_000_000, "gain_a": 40, "gain_b": 41, "lna_state": 4}
@@ -200,14 +229,22 @@ TOWER_THREE = {"name": "Tower Three", "fc": 213_000_000}
 
 
 def moving_track_detections(delay=10.0, doppler=50.0, snr=15.0, step_ms=500):
-    """A single simulated target, one detection per call, with its own
-    timestamp counter advancing step_ms per call — just needs to produce
-    real, distinct-timestamp frames for _dwell/_dwell_adsb to forward via
-    send_frame(); confirmation itself is scripted separately via
-    FakeRetinaTrackerClient's confirm_after."""
+    """A single simulated target, one detection per call, advancing step_ms
+    per call but never behind the client's own clock — just needs to produce
+    real, distinct-timestamp frames for _dwell/_dwell_adsb to count as
+    detection evidence, and for FakeBlah2Client to pass to the tracker the
+    way blah2_api does; confirmation itself is scripted separately via
+    FakeRetinaTrackerClient's confirm_after.
+
+    The clock floor matters now that the tracker sees every frame blah2_api
+    publishes. A bare counter starting at zero spends its first frames stale
+    relative to applied_at, and a confirmation scripted off one of those is
+    rejected by the dwell's freshness guard and never offered again. That
+    used to be invisible: the calibrator filtered stale frames out before
+    forwarding them, so they never reached the tracker to be counted."""
     state = {"t": 0}
     def make(client):
-        state["t"] += step_ms
+        state["t"] = max(state["t"] + step_ms, client._now())
         return {"timestamp": state["t"], "delay": [delay],
                 "doppler": [doppler], "snr": [snr]}
     return make
@@ -285,7 +322,7 @@ class TestDescent:
         # stopping early anywhere.
         client = FakeBlah2Client(detection=moving_track_detections())
         tracker_client = FakeRetinaTrackerClient(confirm_after=1)
-        status = run_to_completion(Calibrator(client, tracker_client), [TOWER])
+        status = run_to_completion(make_calibrator(client, tracker_client), [TOWER])
         assert status["state"] == "done"
         assert status["result"]["gain_a"] == GAIN_REDUCTION_MIN
         assert status["result"]["gain_b"] == GAIN_REDUCTION_MIN
@@ -311,7 +348,7 @@ class TestDescent:
             overload_rule=lambda fc, ga, gb, lna: (ga < 30, False),
             detection=moving_track_detections())
         tracker_client = FakeRetinaTrackerClient(confirm_after=1)
-        status = run_to_completion(Calibrator(client, tracker_client), [TOWER])
+        status = run_to_completion(make_calibrator(client, tracker_client), [TOWER])
         assert status["state"] == "done"
         # 59 -> 49 -> 39 clean, 29 overloads -> reverts to 39
         assert status["result"]["gain_a"] == 39
@@ -325,7 +362,7 @@ class TestDescent:
             overload_rule=lambda fc, ga, gb, lna: (False, gb < 32),
             detection=moving_track_detections())
         tracker_client = FakeRetinaTrackerClient(confirm_after=1)
-        status = run_to_completion(Calibrator(client, tracker_client), [TOWER])
+        status = run_to_completion(make_calibrator(client, tracker_client), [TOWER])
         assert status["state"] == "done"
         assert status["result"]["gain_b"] == 34
 
@@ -338,7 +375,7 @@ class TestDescent:
             overload_rule=lambda fc, ga, gb, lna: (False, gb < 37),
             detection=moving_track_detections())
         tracker_client = FakeRetinaTrackerClient(confirm_after=1)
-        status = run_to_completion(Calibrator(client, tracker_client), [TOWER])
+        status = run_to_completion(make_calibrator(client, tracker_client), [TOWER])
         assert status["state"] == "done"
         assert status["result"]["gain_b"] == 39
 
@@ -355,7 +392,7 @@ class TestDescent:
             overload_rule=lambda fc, ga, gb, lna: (False, True),
             detection=moving_track_detections())
         tracker_client = FakeRetinaTrackerClient(confirm_after=1)
-        status = run_to_completion(Calibrator(client, tracker_client), [TOWER], dwell=5)
+        status = run_to_completion(make_calibrator(client, tracker_client), [TOWER], dwell=5)
         assert status["state"] == "done"
         assert status["result"]["gain_b"] == GAIN_REDUCTION_MAX
         assert status["result"]["lna_state"] == LNA_STATE_MAX
@@ -368,7 +405,7 @@ class TestDescent:
         import time
         client = FakeBlah2Client(
             overload_rule=lambda fc, ga, gb, lna: (ga < 40, False))
-        cal = Calibrator(client, FakeRetinaTrackerClient())
+        cal = make_calibrator(client, FakeRetinaTrackerClient())
         gain_a, gain_b, lna_state, applied_at = cal._descend(
             TOWER["fc"], [], deadline=time.monotonic() - 1)
         # Reference's first (safe-corner) probe at 59dB, lna_state=9
@@ -389,7 +426,7 @@ class TestDescent:
         more sensitive, even for the very first retune of a run."""
         client = FakeBlah2Client(detection=moving_track_detections())
         tracker_client = FakeRetinaTrackerClient(confirm_after=1)
-        status = run_to_completion(Calibrator(client, tracker_client), [TOWER])
+        status = run_to_completion(make_calibrator(client, tracker_client), [TOWER])
         assert status["state"] == "done"
         first = client.applied[0]
         assert (first["fc"], first["gain_a"], first["gain_b"], first["lna_state"]) == (
@@ -412,7 +449,7 @@ class TestLnaDescent:
             overload_rule=lambda fc, ga, gb, lna: (lna < 3, False),
             detection=moving_track_detections())
         tracker_client = FakeRetinaTrackerClient(confirm_after=1)
-        status = run_to_completion(Calibrator(client, tracker_client), [TOWER])
+        status = run_to_completion(make_calibrator(client, tracker_client), [TOWER])
         assert status["state"] == "done"
         assert status["result"]["gain_a"] == GAIN_REDUCTION_MIN  # clean once lna=3, walks to floor
         assert status["result"]["gain_b"] == GAIN_REDUCTION_MIN
@@ -444,7 +481,7 @@ class TestLnaDescent:
             overload_rule=lambda fc, ga, gb, lna: (True, False),
             detection=moving_track_detections())
         tracker_client = FakeRetinaTrackerClient(confirm_after=1)
-        status = run_to_completion(Calibrator(client, tracker_client), [TOWER], dwell=5)
+        status = run_to_completion(make_calibrator(client, tracker_client), [TOWER], dwell=5)
         assert status["state"] == "done"
         assert status["result"]["gain_a"] == GAIN_REDUCTION_MAX
         assert status["result"]["lna_state"] == LNA_STATE_MAX
@@ -461,7 +498,7 @@ class TestLnaDescent:
             overload_rule=lambda fc, ga, gb, lna: (False, lna < 6),
             detection=moving_track_detections())
         tracker_client = FakeRetinaTrackerClient(confirm_after=1)
-        status = run_to_completion(Calibrator(client, tracker_client), [TOWER])
+        status = run_to_completion(make_calibrator(client, tracker_client), [TOWER])
         assert status["state"] == "done"
         assert status["result"]["gain_a"] == GAIN_REDUCTION_MIN
         assert status["result"]["gain_b"] == GAIN_REDUCTION_MIN
@@ -487,7 +524,7 @@ class TestLnaDescent:
             overload_rule=lambda fc, ga, gb, lna: (False, lna < 4),
             detection=moving_track_detections())
         tracker_client = FakeRetinaTrackerClient(confirm_after=1)
-        status = run_to_completion(Calibrator(client, tracker_client), [TOWER])
+        status = run_to_completion(make_calibrator(client, tracker_client), [TOWER])
         assert status["state"] == "done"
         assert status["result"]["gain_a"] == GAIN_REDUCTION_MIN
         assert status["result"]["gain_b"] == GAIN_REDUCTION_MIN
@@ -523,7 +560,7 @@ class TestDeviceCrashHandling:
             retune_fail_rule=lambda fc, ga, gb, lna: ga == 39,
             detection=moving_track_detections())
         tracker_client = FakeRetinaTrackerClient(confirm_after=1)
-        status = run_to_completion(Calibrator(client, tracker_client), [TOWER])
+        status = run_to_completion(make_calibrator(client, tracker_client), [TOWER])
         assert status["state"] == "done"
         assert status["result"]["gain_a"] == 49
 
@@ -540,7 +577,7 @@ class TestDeviceCrashHandling:
             overload_status_fail_rule=lambda fc, ga, gb, lna: ga == 39,
             detection=moving_track_detections())
         tracker_client = FakeRetinaTrackerClient(confirm_after=1)
-        status = run_to_completion(Calibrator(client, tracker_client), [TOWER])
+        status = run_to_completion(make_calibrator(client, tracker_client), [TOWER])
         assert status["state"] == "done"
         assert status["result"]["gain_a"] == 49
 
@@ -561,7 +598,7 @@ class TestDeviceCrashHandling:
             return wedged["on"]
         client = FakeBlah2Client(retune_fail_rule=retune_fail_rule)
         tracker_client = FakeRetinaTrackerClient()  # never confirms
-        status = run_to_completion(Calibrator(client, tracker_client), [TOWER])
+        status = run_to_completion(make_calibrator(client, tracker_client), [TOWER])
         assert status["state"] == "failed"
         assert "Retune failed" not in status["error"]
         assert status["history"][0]["device_error"] is True
@@ -587,7 +624,7 @@ class TestDeviceCrashHandling:
         # A device that cannot be tuned even where it already sits is a
         # different fault, and _preflight ends the run on it deliberately —
         # see TestPreflight.
-        status = run_to_completion(Calibrator(client, tracker_client),
+        status = run_to_completion(make_calibrator(client, tracker_client),
                                    [TOWER, TOWER_TWO], original=ORIGINAL_ELSEWHERE)
         assert status["state"] == "done"
         assert status["result"]["tower_name"] == "Tower Two"
@@ -607,7 +644,7 @@ class TestDeviceCrashHandling:
             retune_fail_rule=lambda fc, ga, gb, lna: lna == 7,
             detection=moving_track_detections())
         tracker_client = FakeRetinaTrackerClient(confirm_after=1)
-        status = run_to_completion(Calibrator(client, tracker_client), [TOWER])
+        status = run_to_completion(make_calibrator(client, tracker_client), [TOWER])
         assert status["state"] == "done"
         assert status["result"]["gain_a"] == GAIN_REDUCTION_MIN
         assert status["result"]["gain_b"] == GAIN_REDUCTION_MIN
@@ -627,7 +664,7 @@ class TestDwell:
     def test_success_leaves_blah2_on_winner(self, fast):
         client = FakeBlah2Client(detection=moving_track_detections())
         tracker_client = FakeRetinaTrackerClient(confirm_after=1)
-        status = run_to_completion(Calibrator(client, tracker_client), [TOWER])
+        status = run_to_completion(make_calibrator(client, tracker_client), [TOWER])
         assert status["state"] == "done"
         assert status["result"]["track_id"] is not None
         assert status["result"]["tower_name"] == "Tower One"
@@ -644,7 +681,7 @@ class TestDwell:
         "safe corner" — proving the fallback reuses the real resolved
         value rather than a separately-hardcoded one."""
         client = FakeBlah2Client()  # no detections at all — never confirms
-        status = run_to_completion(Calibrator(client, FakeRetinaTrackerClient()), [TOWER])
+        status = run_to_completion(make_calibrator(client, FakeRetinaTrackerClient()), [TOWER])
         assert status["state"] == "failed"
         assert "No confirmed track" in status["error"]
         assert client.current["fc"] == TOWER["fc"]
@@ -661,7 +698,7 @@ class TestDwell:
     def test_cancel_restores_original(self, fast):
         import time
         client = FakeBlah2Client()
-        cal = Calibrator(client, FakeRetinaTrackerClient())
+        cal = make_calibrator(client, FakeRetinaTrackerClient())
         started, _ = cal.start([TOWER], ORIGINAL, budget_seconds=30,
                                dwell_seconds=30)
         assert started
@@ -685,13 +722,13 @@ class TestDwell:
             return {"timestamp": 1, "delay": [10.0], "doppler": [50.0], "snr": [15.0]}
         client = FakeBlah2Client(detection=stale_detection)
         status = run_to_completion(
-            Calibrator(client, FakeRetinaTrackerClient(confirm_after=1)), [TOWER])
+            make_calibrator(client, FakeRetinaTrackerClient(confirm_after=1)), [TOWER])
         assert status["state"] == "failed"
 
     def test_best_attempt_records_detection_evidence(self, fast):
         client = FakeBlah2Client(detection=scattered_detections())
         status = run_to_completion(
-            Calibrator(client, FakeRetinaTrackerClient()), [TOWER])
+            make_calibrator(client, FakeRetinaTrackerClient()), [TOWER])
         assert status["state"] == "failed"
         best = status["best_attempt"]
         assert best["evidence"] >= EVIDENCE_DETECTIONS
@@ -705,7 +742,7 @@ class TestDwell:
             overload_rule=lambda fc, ga, gb, lna: (lna < 2, False),
             detection=scattered_detections())
         status = run_to_completion(
-            Calibrator(client, FakeRetinaTrackerClient()), [TOWER])
+            make_calibrator(client, FakeRetinaTrackerClient()), [TOWER])
         assert status["state"] == "failed"
         assert status["best_attempt"]["lna_state"] == 2
 
@@ -720,7 +757,7 @@ class TestMultiTower:
             return None
         client = FakeBlah2Client(detection=detection)
         tracker_client = FakeRetinaTrackerClient(confirm_after=1)
-        status = run_to_completion(Calibrator(client, tracker_client), [TOWER, TOWER_TWO])
+        status = run_to_completion(make_calibrator(client, tracker_client), [TOWER, TOWER_TWO])
         assert status["state"] == "done"
         assert status["result"]["tower_name"] == "Tower Two"
         assert len(status["history"]) == 2
@@ -735,7 +772,7 @@ class TestMultiTower:
         remaining towers — no fixed-per-tower window that could overrun,
         and no tower silently starved to zero."""
         client = FakeBlah2Client()
-        cal = Calibrator(client, FakeRetinaTrackerClient())
+        cal = make_calibrator(client, FakeRetinaTrackerClient())
         # A default-clean descent now walks the whole LNA ladder to the
         # floor (~90 retune+settle cycles across all 9 lna_states, not
         # ~10 at one) before any dwelling happens — comfortably more
@@ -766,7 +803,7 @@ class TestMultiTower:
         # descent walks the entire LNA ladder (9 states, both tuners each).
         monkeypatch.setattr(calmod, "OVERLOAD_SETTLE_SECONDS", 0.02)
         client = FakeBlah2Client()
-        cal = Calibrator(client, FakeRetinaTrackerClient())
+        cal = make_calibrator(client, FakeRetinaTrackerClient())
         started, error = cal.start([TOWER, TOWER_TWO], ORIGINAL, budget_seconds=6.0)
         assert started, error
         cal._thread.join(timeout=20)
@@ -791,7 +828,7 @@ class TestMultiTower:
         """
         monkeypatch.setattr(calmod, "OVERLOAD_SETTLE_SECONDS", 0.02)
         client = FakeBlah2Client()
-        cal = Calibrator(client, FakeRetinaTrackerClient())
+        cal = make_calibrator(client, FakeRetinaTrackerClient())
         # Deliberately tight: a full clean descent wants more than any one
         # tower's slice here, so every tower's descent gets cut short.
         started, error = cal.start([TOWER, TOWER_TWO, TOWER_THREE], ORIGINAL,
@@ -814,7 +851,7 @@ class TestMultiTower:
         monkeypatch.setattr(calmod, "OVERLOAD_SETTLE_SECONDS", 0.02)
         monkeypatch.setattr(calmod, "DESCENT_BACKSTOP_SECONDS", 0.05)
         client = FakeBlah2Client()
-        cal = Calibrator(client, FakeRetinaTrackerClient())
+        cal = make_calibrator(client, FakeRetinaTrackerClient())
         started, error = cal.start([TOWER], ORIGINAL, budget_seconds=5.0)
         assert started, error
         cal._thread.join(timeout=20)
@@ -834,7 +871,7 @@ class TestMultiTower:
         # Every candidate overloads on A, forcing repeated backoff — with a
         # tiny total budget the first tower's descent alone exceeds its share.
         client = FakeBlah2Client(overload_rule=lambda fc, ga, gb, lna: (True, False))
-        cal = Calibrator(client, FakeRetinaTrackerClient())
+        cal = make_calibrator(client, FakeRetinaTrackerClient())
         started, error = cal.start([TOWER, TOWER_TWO], ORIGINAL, budget_seconds=0.015)
         assert started, error
         cal._thread.join(timeout=10)
@@ -860,7 +897,7 @@ class TestTuningVerifiedBeforeDwell:
         client = FakeBlah2Client(
             retune_fail_rule=lambda fc, ga, gb, lna: fc == TOWER_TWO["fc"])
         tracker_client = FakeRetinaTrackerClient(confirm_after=1)
-        cal = Calibrator(client, tracker_client)
+        cal = make_calibrator(client, tracker_client)
         status = run_to_completion(cal, [TOWER, TOWER_TWO], dwell=0.3)
 
         second = status["history"][1]
@@ -871,7 +908,7 @@ class TestTuningVerifiedBeforeDwell:
 
     def test_verified_tuning_still_dwells_normally(self, fast):
         client = FakeBlah2Client(detection=moving_track_detections())
-        cal = Calibrator(client, FakeRetinaTrackerClient(confirm_after=1))
+        cal = make_calibrator(client, FakeRetinaTrackerClient(confirm_after=1))
         status = run_to_completion(cal, [TOWER], dwell=1.0)
         assert status["state"] == "done"
         assert status["history"][0]["outcome"] == "confirmed_track"
@@ -893,7 +930,7 @@ class TestDwellOverloadBackoff:
             return (state["dwelling"] and gb < GAIN_REDUCTION_MAX, False)
 
         client = FakeBlah2Client(overload_rule=overload_rule)
-        cal = Calibrator(client, FakeRetinaTrackerClient())
+        cal = make_calibrator(client, FakeRetinaTrackerClient())
         original_dwell = cal._dwell
 
         def dwell(*a, **kw):
@@ -917,7 +954,7 @@ class TestDwellOverloadBackoff:
         # Overloads at every setting once dwelling — no retreat can help.
         client = FakeBlah2Client(
             overload_rule=lambda fc, ga, gb, lna: (state["dwelling"], False))
-        cal = Calibrator(client, FakeRetinaTrackerClient())
+        cal = make_calibrator(client, FakeRetinaTrackerClient())
         original_dwell = cal._dwell
 
         def dwell(*a, **kw):
@@ -947,7 +984,7 @@ class TestDwellOverloadBackoff:
         client = FakeBlah2Client(
             overload_rule=lambda fc, ga, gb, lna: (state["dwelling"], False),
             transient_overload=True)
-        cal = Calibrator(client, FakeRetinaTrackerClient())
+        cal = make_calibrator(client, FakeRetinaTrackerClient())
         original_dwell = cal._dwell
 
         def dwell(*a, **kw):
@@ -966,7 +1003,7 @@ class TestDwellOverloadBackoff:
     def test_stable_dwell_never_backs_off(self, fast, monkeypatch):
         monkeypatch.setattr(calmod, "DWELL_OVERLOAD_CHECK_SECONDS", 0.02)
         client = FakeBlah2Client()  # never overloads
-        cal = Calibrator(client, FakeRetinaTrackerClient())
+        cal = make_calibrator(client, FakeRetinaTrackerClient())
         status = run_to_completion(cal, [TOWER], dwell=1.0)
         entry = status["history"][0]
         assert entry["outcome"] == "no_confirmed_track"
@@ -984,7 +1021,7 @@ class TestSafeFrequencyHandover:
 
     def test_frequency_change_is_preceded_by_the_safe_corner(self, fast):
         client = FakeBlah2Client()
-        cal = Calibrator(client, FakeRetinaTrackerClient())
+        cal = make_calibrator(client, FakeRetinaTrackerClient())
         run_to_completion(cal, [TOWER, TOWER_TWO], dwell=0.05)
 
         # Every retune that changed fc must be immediately preceded by one
@@ -1014,7 +1051,7 @@ class TestSafeFrequencyHandover:
         client = FakeBlah2Client()
         # The radio is genuinely somewhere else — as after an unpersisted run.
         client.retune(TOWER_TWO["fc"], 59, 44, 5)
-        cal = Calibrator(client, FakeRetinaTrackerClient())
+        cal = make_calibrator(client, FakeRetinaTrackerClient())
         drifted = len(client.applied)
 
         # `original` reports the *config* frequency, which equals the first
@@ -1033,7 +1070,7 @@ class TestSafeFrequencyHandover:
         """The handover is for frequency changes only — a descent's own
         gain steps share one fc and must not pay for an extra retune each."""
         client = FakeBlah2Client()
-        cal = Calibrator(client, FakeRetinaTrackerClient())
+        cal = make_calibrator(client, FakeRetinaTrackerClient())
         run_to_completion(cal, [TOWER], dwell=0.05)
 
         # applied[0] is the preflight's own safe-corner probe, which lands on
@@ -1062,7 +1099,7 @@ class TestSafeFrequencyHandover:
                     == (GAIN_REDUCTION_MAX, GAIN_REDUCTION_MAX, LNA_STATE_MAX))
 
         client = FakeBlah2Client(retune_fail_rule=fail_handover)
-        cal = Calibrator(client, FakeRetinaTrackerClient())
+        cal = make_calibrator(client, FakeRetinaTrackerClient())
         # Elsewhere to start with, so the failure scripted above is the
         # handover into TOWER and not the preflight probe — see
         # ORIGINAL_ELSEWHERE.
@@ -1081,7 +1118,7 @@ class TestNoTrackFallback:
 
     def test_no_track_fallback_lands_on_top_tower_not_last_tried(self, fast):
         client = FakeBlah2Client()  # never overloads, never confirms
-        status = run_to_completion(Calibrator(client, FakeRetinaTrackerClient()),
+        status = run_to_completion(make_calibrator(client, FakeRetinaTrackerClient()),
                                    [TOWER, TOWER_TWO])
         assert status["state"] == "failed"
         assert client.current["fc"] == TOWER["fc"]
@@ -1094,7 +1131,7 @@ class TestNoTrackFallback:
         separately-hardcoded safe corner."""
         client = FakeBlah2Client(
             overload_rule=lambda fc, ga, gb, lna: (False, gb < 37))
-        status = run_to_completion(Calibrator(client, FakeRetinaTrackerClient()), [TOWER])
+        status = run_to_completion(make_calibrator(client, FakeRetinaTrackerClient()), [TOWER])
         assert status["state"] == "failed"
         assert client.current["fc"] == TOWER["fc"]
         assert client.current["gain_a"] == GAIN_REDUCTION_MIN
@@ -1109,7 +1146,7 @@ class TestNoTrackFallback:
         durable output survives."""
         client = FakeBlah2Client(
             overload_rule=lambda fc, ga, gb, lna: (False, gb < 37))
-        status = run_to_completion(Calibrator(client, FakeRetinaTrackerClient()), [TOWER])
+        status = run_to_completion(make_calibrator(client, FakeRetinaTrackerClient()), [TOWER])
         assert status["state"] == "failed"
         assert status["result"] is None
         fallback = status["fallback"]
@@ -1129,7 +1166,7 @@ class TestNoTrackFallback:
         client = FakeBlah2Client()
         tower = dict(TOWER, tx={"latitude": 37.75, "longitude": -122.45,
                                 "altitude": 310.0})
-        status = run_to_completion(Calibrator(client, FakeRetinaTrackerClient()),
+        status = run_to_completion(make_calibrator(client, FakeRetinaTrackerClient()),
                                    [tower])
         assert status["fallback"]["tx"] == tower["tx"]
 
@@ -1137,7 +1174,7 @@ class TestNoTrackFallback:
         """The currently-configured tower is passed without one, and that
         absence is what stops a run that stays put rewriting location.tx."""
         client = FakeBlah2Client()
-        status = run_to_completion(Calibrator(client, FakeRetinaTrackerClient()),
+        status = run_to_completion(make_calibrator(client, FakeRetinaTrackerClient()),
                                    [TOWER])
         assert status["fallback"]["tx"] is None
 
@@ -1146,7 +1183,7 @@ class TestNoTrackFallback:
         is the tower the user just chose, and persisting a different one
         would silently overrule that choice."""
         client = FakeBlah2Client()
-        status = run_to_completion(Calibrator(client, FakeRetinaTrackerClient()),
+        status = run_to_completion(make_calibrator(client, FakeRetinaTrackerClient()),
                                    [TOWER, TOWER_TWO])
         assert status["fallback"]["fc"] == TOWER["fc"]
         assert status["fallback"]["fc"] != TOWER_TWO["fc"]
@@ -1157,7 +1194,7 @@ class TestNoTrackFallback:
         back", not "keep whatever it had reached"."""
         import time
         client = FakeBlah2Client()
-        cal = Calibrator(client, FakeRetinaTrackerClient())
+        cal = make_calibrator(client, FakeRetinaTrackerClient())
         started, _ = cal.start([TOWER], ORIGINAL, budget_seconds=30,
                                dwell_seconds=30)
         assert started
@@ -1176,7 +1213,7 @@ class TestNoTrackFallback:
         """Otherwise a stale fallback from an earlier run stays persistable
         while a fresh run is still going."""
         client = FakeBlah2Client()
-        cal = Calibrator(client, FakeRetinaTrackerClient())
+        cal = make_calibrator(client, FakeRetinaTrackerClient())
         assert run_to_completion(cal, [TOWER])["fallback"] is not None
         started, _ = cal.start([TOWER], ORIGINAL, budget_seconds=30,
                                dwell_seconds=30)
@@ -1196,7 +1233,7 @@ class TestSkipConfirmation:
     def test_skip_confirmation_never_confirms_but_still_persists_tuning(self, fast):
         client = FakeBlah2Client()
         tracker_client = FakeRetinaTrackerClient(confirm_after=1)
-        cal = Calibrator(client, tracker_client)
+        cal = make_calibrator(client, tracker_client)
         started, error = cal.start([TOWER], ORIGINAL, budget_seconds=10,
                                    skip_confirmation=True)
         assert started, error
@@ -1224,7 +1261,7 @@ class TestSkipConfirmation:
         clipping = {"on": False}
         client = FakeBlah2Client(
             overload_rule=lambda fc, ga, gb, lna: (False, clipping["on"]))
-        cal = Calibrator(client, FakeRetinaTrackerClient())
+        cal = make_calibrator(client, FakeRetinaTrackerClient())
         started, _ = cal.start([TOWER], ORIGINAL, budget_seconds=30,
                                skip_confirmation=True)
         assert started
@@ -1258,7 +1295,7 @@ class TestSkipConfirmation:
         displayed "Watching for aircraft…" for its whole 45s."""
         seen = []
         client = FakeBlah2Client()
-        cal = Calibrator(client, FakeRetinaTrackerClient())
+        cal = make_calibrator(client, FakeRetinaTrackerClient())
         real_update = cal._update
 
         def spy(**kwargs):
@@ -1279,7 +1316,7 @@ class TestSkipConfirmation:
         keep saying so."""
         seen = []
         client = FakeBlah2Client()
-        cal = Calibrator(client, FakeRetinaTrackerClient())
+        cal = make_calibrator(client, FakeRetinaTrackerClient())
         real_update = cal._update
 
         def spy(**kwargs):
@@ -1296,7 +1333,7 @@ class TestSkipConfirmation:
         """A point that holds for the whole soak is the success case, and
         must not be reported as any kind of shortfall."""
         client = FakeBlah2Client()
-        cal = Calibrator(client, FakeRetinaTrackerClient())
+        cal = make_calibrator(client, FakeRetinaTrackerClient())
         started, _ = cal.start([TOWER], ORIGINAL, budget_seconds=30,
                                skip_confirmation=True)
         assert started
@@ -1311,7 +1348,7 @@ class TestSkipConfirmation:
         skipped_no_time, telling the user time ran out when nothing of the
         sort happened."""
         client = FakeBlah2Client()
-        cal = Calibrator(client, FakeRetinaTrackerClient())
+        cal = make_calibrator(client, FakeRetinaTrackerClient())
         started, _ = cal.start([TOWER], ORIGINAL, budget_seconds=10,
                                skip_confirmation=True)
         assert started
@@ -1326,7 +1363,7 @@ class TestSkipConfirmation:
         anything if the tuning it lands on is the one the descent proved."""
         client = FakeBlah2Client(
             overload_rule=lambda fc, ga, gb, lna: (False, gb < 37))
-        cal = Calibrator(client, FakeRetinaTrackerClient())
+        cal = make_calibrator(client, FakeRetinaTrackerClient())
         started, _ = cal.start([TOWER], ORIGINAL, budget_seconds=10,
                                skip_confirmation=True)
         assert started
@@ -1341,7 +1378,7 @@ class TestSkipConfirmation:
         confirming — skip_confirmation defaults off."""
         client = FakeBlah2Client(detection=moving_track_detections())
         tracker_client = FakeRetinaTrackerClient(confirm_after=1)
-        status = run_to_completion(Calibrator(client, tracker_client), [TOWER])
+        status = run_to_completion(make_calibrator(client, tracker_client), [TOWER])
         assert status["state"] == "done"
         assert status["result"] is not None
         assert status["skip_confirmation"] is False
@@ -1355,7 +1392,7 @@ class TestTrackerSidecarIntegration:
     def test_resets_tracker_at_the_start_of_every_dwell(self, fast):
         client = FakeBlah2Client()
         tracker_client = FakeRetinaTrackerClient()
-        cal = Calibrator(client, tracker_client)
+        cal = make_calibrator(client, tracker_client)
         run_to_completion(cal, [TOWER, TOWER_TWO], dwell=0.2)
         # One per dwell — the scope that matters, since the sidecar is fed by
         # tracker_capture throughout the descent too (see _reset_tracker).
@@ -1377,7 +1414,7 @@ class TestTrackerSidecarIntegration:
         # Never confirms from this dwell's own frames, so a success here
         # could only have come from the pre-planted event below.
         tracker_client = FakeRetinaTrackerClient()
-        cal = Calibrator(client, tracker_client)
+        cal = make_calibrator(client, tracker_client)
         original_dwell = cal._dwell
 
         def dwell(*args, **kwargs):
@@ -1399,7 +1436,7 @@ class TestTrackerSidecarIntegration:
         # A confirmed event generated before this candidate's applied_at —
         # e.g. still in flight from a previous, now-irrelevant tower — must
         # not be mistaken for confirmation at the new geometry.
-        cal = Calibrator(FakeBlah2Client(), FakeRetinaTrackerClient())
+        cal = make_calibrator(FakeBlah2Client(), FakeRetinaTrackerClient())
         cal._on_track_event({"track_id": "stale", "timestamp": 100})
         assert cal._take_confirmed_event(min_timestamp=200) is None
         assert cal._take_confirmed_event(min_timestamp=100) is not None
@@ -1424,7 +1461,7 @@ class TestAdsbMode:
             detection=scattered_detections(),
             adsb_tracks=adsb_aircraft_at(delay=10.5, doppler=51.0))
         tracker_client = FakeRetinaTrackerClient(confirm_after=1, adsb_hex="ABC123")
-        cal = Calibrator(client, tracker_client)
+        cal = make_calibrator(client, tracker_client)
         started, error = cal.start([TOWER], ORIGINAL, mode=calmod.MODE_ADSB)
         assert started, error
         cal._thread.join(timeout=10)
@@ -1437,7 +1474,7 @@ class TestAdsbMode:
             detection=scattered_detections(),
             adsb_tracks=adsb_aircraft_at(delay=10.5, doppler=51.0))
         tracker_client = FakeRetinaTrackerClient(confirm_after=1, adsb_hex="ABC123")
-        cal = Calibrator(client, tracker_client)
+        cal = make_calibrator(client, tracker_client)
         started, error = cal.start([TOWER], ORIGINAL, mode=calmod.MODE_ADSB)
         assert started, error
         cal._thread.join(timeout=10)
@@ -1457,7 +1494,7 @@ class TestAdsbMode:
             adsb_tracks=adsb_aircraft_appears_then_leaves(
                 delay=200.0, doppler=-300.0, present_polls=3))
         tracker_client = FakeRetinaTrackerClient(confirm_after=1, adsb_hex=None)
-        cal = Calibrator(client, tracker_client)
+        cal = make_calibrator(client, tracker_client)
         started, error = cal.start([TOWER], ORIGINAL, mode=calmod.MODE_ADSB)
         assert started, error
         cal._thread.join(timeout=10)
@@ -1486,7 +1523,7 @@ class TestAdsbMode:
             adsb_tracks=adsb_aircraft_appears_then_leaves(
                 delay=200.0, doppler=-300.0, present_polls=3))
         tracker_client = FakeRetinaTrackerClient(confirm_after=1, adsb_hex=None)
-        cal = Calibrator(client, tracker_client)
+        cal = make_calibrator(client, tracker_client)
         started, error = cal.start([TOWER], ORIGINAL, mode=calmod.MODE_ADSB)
         assert started, error
         cal._thread.join(timeout=10)
@@ -1503,7 +1540,7 @@ class TestAdsbMode:
         that cancelling it still restores the original tuning."""
         import time as time_module
         client = FakeBlah2Client()
-        cal = Calibrator(client, FakeRetinaTrackerClient())
+        cal = make_calibrator(client, FakeRetinaTrackerClient())
         started, error = cal.start([TOWER], ORIGINAL, mode=calmod.MODE_ADSB)
         assert started, error
 
@@ -1527,12 +1564,12 @@ class TestAdsbMode:
         # whether ADS-B truth would have matched, and keeps its time budget
         client = FakeBlah2Client(detection=moving_track_detections())
         tracker_client = FakeRetinaTrackerClient(confirm_after=1)
-        status = run_to_completion(Calibrator(client, tracker_client), [TOWER])
+        status = run_to_completion(make_calibrator(client, tracker_client), [TOWER])
         assert status["state"] == "done"
         assert status["progress"]["budget_seconds"] is not None
 
     def test_invalid_mode_rejected(self, fast):
-        cal = Calibrator(FakeBlah2Client(), FakeRetinaTrackerClient())
+        cal = make_calibrator(FakeBlah2Client(), FakeRetinaTrackerClient())
         started, error = cal.start([TOWER], ORIGINAL, mode="bogus")
         assert not started
         assert "Invalid mode" in error
@@ -1607,7 +1644,7 @@ class TestPreflight:
         client = FakeBlah2Client()
         config_mgr = FakeConfigManager()
         apply_service = FakeApplyService()
-        cal = Calibrator(client, FakeRetinaTrackerClient(),
+        cal = make_calibrator(client, FakeRetinaTrackerClient(),
                          config_mgr=config_mgr, apply_service=apply_service)
         status = run_to_completion(cal, [TOWER], dwell=0.05)
 
@@ -1630,7 +1667,7 @@ class TestPreflight:
         client.applied.append({
             "fc": TOWER_THREE["fc"], "gain_a": 30, "gain_b": 30, "lna_state": 2,
             "generation": 7, "applied_at": 500})
-        cal = Calibrator(client, FakeRetinaTrackerClient(),
+        cal = make_calibrator(client, FakeRetinaTrackerClient(),
                          config_mgr=FakeConfigManager(),
                          apply_service=FakeApplyService())
         run_to_completion(cal, [TOWER], dwell=0.05)
@@ -1648,7 +1685,7 @@ class TestPreflight:
             {"capture": {"device": {"gainReduction": [30, 30], "lnaState": 2},
                          "fc": ORIGINAL["fc"]}})
         apply_service = FakeApplyService(on_request=clear)
-        cal = Calibrator(client, FakeRetinaTrackerClient(confirm_after=1),
+        cal = make_calibrator(client, FakeRetinaTrackerClient(confirm_after=1),
                          config_mgr=config_mgr, apply_service=apply_service)
         status = run_to_completion(cal, [TOWER], dwell=3.0)
 
@@ -1670,7 +1707,7 @@ class TestPreflight:
         client = FakeBlah2Client(retune_fail_rule=lambda fc, ga, gb, lna: True)
         config_mgr = FakeConfigManager()
         apply_service = FakeApplyService()
-        cal = Calibrator(client, FakeRetinaTrackerClient(),
+        cal = make_calibrator(client, FakeRetinaTrackerClient(),
                          config_mgr=config_mgr, apply_service=apply_service)
         status = run_to_completion(cal, [TOWER, TOWER_TWO], dwell=0.05)
 
@@ -1691,7 +1728,7 @@ class TestPreflight:
         client = FakeBlah2Client(retune_fail_rule=lambda fc, ga, gb, lna: True)
         apply_service = FakeApplyService(outcome="failed",
                                          error="Command timed out")
-        cal = Calibrator(client, FakeRetinaTrackerClient(),
+        cal = make_calibrator(client, FakeRetinaTrackerClient(),
                          config_mgr=FakeConfigManager(),
                          apply_service=apply_service)
         status = run_to_completion(cal, [TOWER], dwell=0.05)
@@ -1704,7 +1741,7 @@ class TestPreflight:
         client = FakeBlah2Client(retune_fail_rule=lambda fc, ga, gb, lna: True)
         # Never leaves 'running' — a restart that hung rather than failed.
         apply_service = FakeApplyService(outcome="running")
-        cal = Calibrator(client, FakeRetinaTrackerClient(),
+        cal = make_calibrator(client, FakeRetinaTrackerClient(),
                          config_mgr=FakeConfigManager(),
                          apply_service=apply_service)
         status = run_to_completion(cal, [TOWER], dwell=0.05)
@@ -1718,7 +1755,7 @@ class TestPreflight:
         # there is just no restart to attempt.
         client = FakeBlah2Client()
         client.ack_enabled = False
-        status = run_to_completion(Calibrator(client, FakeRetinaTrackerClient()),
+        status = run_to_completion(make_calibrator(client, FakeRetinaTrackerClient()),
                                    [TOWER], dwell=0.05)
 
         assert status["state"] == "failed"
@@ -1733,7 +1770,7 @@ class TestPreflight:
         import time as _time
         rule, clear = wedged_until_restart()
         client = FakeBlah2Client(retune_fail_rule=rule)
-        cal = Calibrator(client, FakeRetinaTrackerClient(),
+        cal = make_calibrator(client, FakeRetinaTrackerClient(),
                          config_mgr=FakeConfigManager(),
                          apply_service=FakeApplyService(on_request=clear))
         started, error = cal.start([TOWER], ORIGINAL, budget_seconds=30,
@@ -1777,7 +1814,7 @@ class TestPreflight:
             return real_get_status()
         apply_service.get_status = slow_get_status
 
-        cal = Calibrator(client, FakeRetinaTrackerClient(),
+        cal = make_calibrator(client, FakeRetinaTrackerClient(),
                          config_mgr=FakeConfigManager(),
                          apply_service=apply_service)
         status = run_to_completion(cal, [TOWER, TOWER_TWO], budget=1.5,
@@ -1803,7 +1840,7 @@ class TestFailureModes:
         # nothing to report about it.
         client = FakeBlah2Client()
         client.retune_error = "connection refused"
-        status = run_to_completion(Calibrator(client, FakeRetinaTrackerClient()), [TOWER])
+        status = run_to_completion(make_calibrator(client, FakeRetinaTrackerClient()), [TOWER])
         assert status["state"] == "failed"
         assert status["history"] == []
         assert "not accepting tuning commands" in status["error"]
@@ -1811,7 +1848,7 @@ class TestFailureModes:
     def test_missing_ack_fails_the_run(self, fast):
         client = FakeBlah2Client()
         client.ack_enabled = False
-        status = run_to_completion(Calibrator(client, FakeRetinaTrackerClient()), [TOWER])
+        status = run_to_completion(make_calibrator(client, FakeRetinaTrackerClient()), [TOWER])
         assert status["state"] == "failed"
         assert status["history"] == []
         assert "not accepting tuning commands" in status["error"]
@@ -1819,7 +1856,7 @@ class TestFailureModes:
     def test_missing_rf_status_fails_the_run(self, fast):
         client = FakeBlah2Client(detection=moving_track_detections())
         client.rf_enabled = False
-        status = run_to_completion(Calibrator(client, FakeRetinaTrackerClient()), [TOWER])
+        status = run_to_completion(make_calibrator(client, FakeRetinaTrackerClient()), [TOWER])
         assert status["state"] == "failed"
         assert status["history"][0]["device_error"] is True
 
@@ -1828,7 +1865,7 @@ class TestFailureModes:
         cancel arriving while it's in flight — otherwise blah2 could be left
         tuned to the last failed candidate instead of the original setting."""
         client = FakeBlah2Client()
-        cal = Calibrator(client, FakeRetinaTrackerClient())
+        cal = make_calibrator(client, FakeRetinaTrackerClient())
         cal._cancel.set()  # simulates a cancel already pending/re-arriving
         applied_at = cal._apply(ORIGINAL["fc"], ORIGINAL["gain_a"],
                                 ORIGINAL["gain_b"], ORIGINAL["lna_state"],
@@ -1842,7 +1879,7 @@ class TestFailureModes:
 
     def test_cannot_start_twice(self, fast):
         client = FakeBlah2Client()
-        cal = Calibrator(client, FakeRetinaTrackerClient())
+        cal = make_calibrator(client, FakeRetinaTrackerClient())
         started, _ = cal.start([TOWER], ORIGINAL, budget_seconds=30,
                                dwell_seconds=30)
         assert started
@@ -1854,7 +1891,7 @@ class TestFailureModes:
 
     def test_on_complete_fires_with_terminal_status(self, fast):
         client = FakeBlah2Client(detection=moving_track_detections())
-        cal = Calibrator(client, FakeRetinaTrackerClient(confirm_after=1))
+        cal = make_calibrator(client, FakeRetinaTrackerClient(confirm_after=1))
         seen = []
         cal.on_complete = seen.append
         run_to_completion(cal, [TOWER])

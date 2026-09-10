@@ -420,7 +420,6 @@ class TrackerCaptureService:
                 detections = frame_to_detections(frame)
                 for det in detections:
                     self.history.add_raw(ts, det["delay"], det["doppler"], det.get("snr", 0.0))
-                self._tracker_client.send_frame(frame)
                 new_frames_since_broadcast += 1
 
             now = time.monotonic()
