@@ -17,35 +17,38 @@ class TestSharedServiceSingletons:
     `app`. Anything constructed at app.py's module level therefore exists
     twice in a single process.
 
-    That was not academic. retina-tracker's sidecar accepts one TCP
-    connection at a time, so two RetinaTrackerClient instances produced two
-    connections, one served and one left unread in the kernel backlog
-    forever. Which one won was a startup race, and when the calibrator held
-    the loser its detection frames and tracker RESET went nowhere — silently,
-    since confirmed-track events arrive over a file tail that kept working on
-    tracker_capture's feed. Auto-Calibrate looked healthy while its own feed
-    reached nothing.
+    That was not academic. When retina-gui still fed the sidecar, two
+    RetinaTrackerClient instances produced two connections to a socket that
+    accepted one at a time: one served, one left unread in the kernel backlog
+    forever. Which won was a startup race, and when the calibrator held the
+    loser its frames and its RESET went nowhere, silently, because
+    confirmed-track events arrived over a file tail that kept working
+    regardless.
 
-    Constructing them in services.py fixes it, because that module is only
-    reachable under one name. These assertions fail if one migrates back.
+    retina-gui no longer feeds that socket, so that particular failure is
+    gone, but the rule it taught is not: a second instance is a second tail
+    thread over the same file and a second set of listeners, and the
+    calibrator holding one while the page holds another is the same class of
+    bug. Constructing them in services.py fixes it, because that module is
+    only reachable under one name. These assertions fail if one migrates
+    back.
     """
 
     def test_services_are_shared_not_reconstructed_by_app(self):
         import app
         import services
 
-        for name in ("retina_tracker_client", "calibrator", "tracker_capture",
+        for name in ("retina_tracker_client", "calibrator",
                      "blah2_client", "apply_service", "device_state",
                      "config_mgr"):
             assert getattr(app, name) is getattr(services, name), (
                 f"app.{name} is a second instance — it must be imported from "
                 "services, not constructed in app.py, which runs twice")
 
-    def test_calibrator_and_tracker_capture_share_one_sidecar_client(self):
+    def test_the_calibrator_uses_the_shared_sidecar_client(self):
         import services
 
         assert services.calibrator._tracker_client is services.retina_tracker_client
-        assert services.tracker_capture._tracker_client is services.retina_tracker_client
 
 
 class TestIndexRoute:

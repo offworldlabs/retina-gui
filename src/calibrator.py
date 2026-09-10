@@ -82,30 +82,33 @@ _descend_reference/_descend_surveillance/_descend):
      already knows are worse.
 
 Track confirmation goes through the same retina-tracker sidecar container
-tracker-preview uses (github.com/offworldlabs/retina-tracker, run as its own
+the Tracker page uses (github.com/offworldlabs/retina-tracker, run as its own
 process — see retina_tracker_client.py), not a tracker built in-process here
 or blah2's own built-in tracker, which the client has found unreliable on
-real data. That sidecar's TCP server accepts one connection at a time, so
-every detection frame is pushed to it via the shared RetinaTrackerClient's
-send_frame() and confirmed-track events are received through a listener
-callback (_on_track_event) registered once with that same client — the one
-tracker-preview already tails. Because a confirmed track from one candidate
-tower is physically meaningless at another (different fc/tx position means
-different delay/Doppler geometry), a {"type": "RESET"} message clears the
-sidecar's tracker in place (see RetinaTrackerClient.reset()) — mirroring
-blah2's own fc-triggered tracker reset. That reset happens at the start of
-every *dwell*, and again after a mid-dwell backoff, so a confirmation can
-only be earned from frames observed at the tuning it is reported against
-(see _reset_tracker). It used to be per-tower, on the reasoning that any
-confirmed track ends the search immediately so finer scope could not matter.
-That assumed this calibration is the sidecar's only source, which it is not:
-tracker_capture's always-on capture shares the same client, so the tracker is
-fed throughout the descent too, and a per-tower reset left a confirmed track
-waiting before the dwell had observed anything at all.
+real data. Detections reach that sidecar from blah2_api directly
+(network.tracker_forward), so this calibration neither feeds it nor can:
+its ingest socket accepts one connection at a time and blah2_api owns it.
+Confirmed-track events arrive through a listener callback (_on_track_event)
+registered with the shared RetinaTrackerClient — the same events the Tracker
+page consumes.
+
+Because a confirmed track from one candidate tower is physically meaningless
+at another (different fc/tx position means different delay/Doppler geometry),
+RetinaTrackerClient.reset() clears the sidecar's tracker in place over its
+control surface — mirroring blah2's own fc-triggered tracker reset. That
+reset happens at the start of every *dwell*, and again after a mid-dwell
+backoff, so a confirmation can only be earned from frames observed at the
+tuning it is reported against (see _reset_tracker). It used to be per-tower,
+on the reasoning that any confirmed track ends the search immediately so
+finer scope could not matter. That assumed this calibration is the sidecar's
+only source, which it never was and now definitively is not: blah2_api feeds
+it continuously, so the tracker runs through the descent too, and a per-tower
+reset left a confirmed track waiting before the dwell had observed anything
+at all.
 Evidence grading is coarser than an in-process tracker could offer
 (EVIDENCE_NONE/DETECTIONS/ACTIVE only, no tentative/associated distinction)
 — the sidecar's events stream only reports confirmed (ACTIVE) tracks, the
-same visibility tracker-preview itself has.
+same visibility the Tracker page itself has.
 
 Two success modes, with genuinely different dwell strategies:
   - MODE_TRACK (default): any confirmed-track event counts as success (the
@@ -309,7 +312,7 @@ MAX_DWELL_BACKOFFS = 2
 # MODE_TRACK's retina-tracker feed loop polls faster than blah2's own CPI
 # cadence (measured ~0.9-1s on the desk node) so a new detection frame is
 # never missed — same cadence retina-tracker's own always-on capture uses
-# (tracker_capture.py's POLL_INTERVAL_S). Frames are de-duplicated by
+# blah2's own CPI cadence. Frames are de-duplicated by
 # timestamp, so polling faster than the CPI rate is free, not wasteful.
 TRACKER_FEED_POLL_SECONDS = 0.2
 
@@ -410,7 +413,7 @@ class Calibrator:
         # Deferred to start() rather than done here: __init__ runs at app
         # boot regardless of whether a run ever happens, and registering
         # eagerly would start retina_tracker_client's tail thread that early
-        # too (see app.py's own tracker_capture.start() pytest-leak note).
+        # too (see app.py's own peers.start() pytest-leak note).
         self._listener_registered = False
         # Called with the final status dict when a run reaches a terminal
         # state. Exceptions are swallowed.
@@ -1184,7 +1187,7 @@ class Calibrator:
         self._update(phase="soaking" if watch_only else "dwelling")
         # Start from a genuinely empty tracker — see _reset_tracker. Skipped
         # for a watch_only soak: it never reads the tracker, so resetting it
-        # would only disturb tracker_capture's always-on feed for no gain.
+        # would only disturb the sidecar's continuous feed for no gain.
         if not watch_only:
             self._reset_tracker()
         max_evidence = EVIDENCE_NONE
@@ -1245,8 +1248,6 @@ class Calibrator:
             if (detection and timestamp != last_timestamp
                     and timestamp is not None and timestamp >= applied_at):
                 last_timestamp = timestamp
-                self._tracker_client.send_frame(detection)
-
                 delays = detection.get("delay") or []
                 if delays:
                     max_evidence = max(max_evidence, EVIDENCE_DETECTIONS)
@@ -1298,8 +1299,7 @@ class Calibrator:
 
         Per-tower reset is not sufficient, and the reasoning that said it was
         assumed this calibration is the sidecar's only source. It isn't:
-        tracker_capture's always-on capture shares this same client, because
-        the sidecar accepts one connection at a time. So the tracker is fed
+        blah2_api feeds the sidecar directly, so the tracker is fed
         continuously whether or not a dwell is running, and a tower-start
         reset leaves the whole descent — 150s on a live node — for a track to
         accumulate and confirm before the dwell starts. The dwell's first
@@ -1311,7 +1311,13 @@ class Calibrator:
         event's *latest* detection to post-date the retune, which a track
         built across the descent still satisfies.
         """
-        self._tracker_client.reset()
+        # Over HTTP now, so unlike the old message down the detection socket
+        # a failure is visible. Recorded rather than raised: a dwell that
+        # cannot clear the tracker is still worth running, it is just no
+        # longer able to promise the confirmation was earned at this tuning,
+        # and the status is where that belongs.
+        if not self._tracker_client.reset():
+            self._update(tracker_reset_failed=True)
         with self._lock:
             self._last_confirmed_event = None
 
@@ -1465,7 +1471,6 @@ class Calibrator:
                 if (detection and timestamp != last_timestamp
                         and timestamp is not None and timestamp >= applied_at):
                     last_timestamp = timestamp
-                    self._tracker_client.send_frame(detection)
                     delays = detection.get("delay") or []
                     if delays:
                         max_evidence = max(max_evidence, EVIDENCE_DETECTIONS)
@@ -1623,8 +1628,7 @@ class Calibrator:
                                   gain_b=GAIN_REDUCTION_MAX, lna_state=LNA_STATE_MAX)
                 # The sidecar is reset at the start of each *dwell*, not here
                 # — see _reset_tracker. Resetting per tower is not enough:
-                # this client is shared with tracker_capture's always-on feed
-                # (the sidecar accepts one connection), so between a
+                # blah2_api feeds the sidecar continuously, so between a
                 # tower-start reset and the dwell the tracker keeps being fed
                 # for the whole descent and can confirm a track before the
                 # dwell begins.

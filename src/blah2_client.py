@@ -1,7 +1,7 @@
 """HTTP client for the blah2_api service.
 
-Isolates all blah2_api HTTP calls so the calibrator's and tracker_capture's
-logic can each be tested against a fake client. All getters return parsed
+Isolates all blah2_api HTTP calls so the calibrator's logic can be tested
+against a fake client. All getters return parsed
 JSON dicts or None on any transport/parse failure — callers treat None as
 "no data yet".
 """

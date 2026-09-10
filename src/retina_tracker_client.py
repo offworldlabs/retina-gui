@@ -1,90 +1,78 @@
 """Client for the retina-tracker sidecar container.
 
-Talks directly to retina-tracker's own --tcp server mode — no intermediary
-supervisor process. Its --tcp mode is input-only over the socket (see
+Two one-way channels, neither of which carries detections any more.
+
+*Track events in*, by tailing the JSONL file the sidecar streams to. Its
+`--tcp` mode is input-only over the socket (see
 retina_tracker/server.py::run_tcp_server — it never writes back on the
-accepted connection); track events always go through -s/--stream-output,
-which the sidecar is configured to point at a file instead of stdout. So
-this client has two independent halves: push detection frames over TCP,
-and tail that output file for track events.
+accepted connection), so results come back through the filesystem rather
+than the connection that fed it.
+
+*Control out*, over HTTP to the sidecar's loopback control surface. That is
+new, and it is what let retina-gui stop being the transport between blah2
+and the tracker. Detections now travel blah2 -> blah2_api -> retina-tracker
+directly (blah2_api's `network.tracker_forward`), so this process no longer
+opens the sidecar's ingest socket at all. It could not have kept doing so:
+that socket accepts one connection at a time, and blah2_api now owns it.
+
+Sending frames used to live here too. It does not, because retina-gui is
+not on that path any more.
 """
 
 import json
 import os
-import socket
 import threading
 import time
 
+import requests
+
 
 class RetinaTrackerClient:
-    """Best-effort TCP sender + JSONL file tailer for retina-tracker.
+    """JSONL file tailer plus an HTTP control client for retina-tracker.
 
-    The sidecar's TCP server accepts one connection at a time, so every
-    feature that talks to a given sidecar (tracker-preview, Auto-Calibrate)
-    must share the same client instance rather than each opening their own
-    connection — see add_listener()."""
+    Several features consume the sidecar's track events (the Tracker page
+    and Auto-Calibrate), so they share one instance and one tail thread via
+    add_listener(). That sharing is no longer forced by the sidecar's
+    single-connection ingest, since nothing here connects to it; it is just
+    that one thread tailing one file is enough.
+    """
 
-    def __init__(self, host, port, events_path, poll_interval=0.2, connect_timeout=3):
-        self._host = host
-        self._port = port
+    def __init__(self, events_path, control_url, poll_interval=0.2, timeout=3):
         self._events_path = events_path
+        self._control_url = control_url.rstrip('/')
         self._poll_interval = poll_interval
-        self._connect_timeout = connect_timeout
-        self._send_lock = threading.Lock()
-        self._sock = None
+        self._timeout = timeout
         self._tail_thread = None
         self._stop = threading.Event()
         self._listeners = []
         self._listeners_lock = threading.Lock()
 
-    # ── Sending frames ─────────────────────────────────────────
-
-    def send_frame(self, frame):
-        """Best-effort push of one raw blah2 detection frame ({timestamp,
-        delay[], doppler[], snr[]}) to retina-tracker's TCP ingest port.
-        Swallows connection errors — same posture as Blah2Client toward
-        blah2 itself; a sidecar outage degrades to "no track evidence",
-        not a crash. Lazily (re)connects on failure."""
-        line = (json.dumps(frame) + "\n").encode()
-        with self._send_lock:
-            if self._sock is None and not self._connect():
-                return
-            try:
-                self._sock.sendall(line)
-                return
-            except OSError:
-                self._close_sock()
-            if self._connect():
-                try:
-                    self._sock.sendall(line)
-                except OSError:
-                    self._close_sock()
+    # ── Control ────────────────────────────────────────────────
 
     def reset(self):
-        """Tell the sidecar to clear its Tracker's in-progress and completed
-        state in place (see retina_tracker/tracker.py::Tracker.reset()) —
-        used by Auto-Calibrate between candidate towers, since a confirmed
-        track only means something at the geometry (fc/tx position) it was
-        seen at. A real detection frame never carries a "type" key, so this
-        can never be mistaken for one."""
-        self.send_frame({"type": "RESET"})
+        """Clear the sidecar's Tracker state in place (see
+        retina_tracker/tracker.py::Tracker.reset()).
 
-    def _connect(self):
+        Used by Auto-Calibrate between candidate towers and at the start of
+        every dwell, since a confirmed track only means something at the
+        geometry (fc/tx position) it was seen at.
+
+        The sidecar holds its lock for the whole reset, so a 200 means the
+        tracker is already clear rather than scheduled to be — which is what
+        the caller needs, because the next frame it waits on must not be
+        able to associate into pre-reset state.
+
+        Returns True if the sidecar confirmed it. Unlike the old
+        fire-and-forget message down the detection socket, a failure here is
+        visible; callers that care whether the tracker really is clear can
+        now tell.
+        """
         try:
-            self._sock = socket.create_connection(
-                (self._host, self._port), timeout=self._connect_timeout)
-            return True
-        except OSError:
-            self._sock = None
+            response = requests.post(f"{self._control_url}/reset", timeout=self._timeout)
+            response.raise_for_status()
+            return bool(response.json().get("ok"))
+        except (requests.RequestException, ValueError):
             return False
-
-    def _close_sock(self):
-        if self._sock is not None:
-            try:
-                self._sock.close()
-            except OSError:
-                pass
-            self._sock = None
 
     # ── Tailing track events ───────────────────────────────────
 
@@ -95,9 +83,9 @@ class RetinaTrackerClient:
     def add_listener(self, on_event):
         """Register on_event(event_dict) to be called for every new JSONL
         line tailed from the events file. Multiple listeners are supported
-        (e.g. tracker-preview and Auto-Calibrate both tailing the same
-        sidecar's output) — the tail thread itself is started once, on the
-        first call."""
+        (the Tracker page and Auto-Calibrate both consume the same sidecar's
+        output) — the tail thread itself is started once, on the first
+        call."""
         with self._listeners_lock:
             self._listeners.append(on_event)
         if self._tail_thread is not None and self._tail_thread.is_alive():
@@ -109,8 +97,6 @@ class RetinaTrackerClient:
 
     def stop(self):
         self._stop.set()
-        with self._send_lock:
-            self._close_sock()
 
     def _tail_loop(self):
         # Start from current EOF, not 0 — a fresh attach shouldn't replay

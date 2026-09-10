@@ -22,9 +22,8 @@ from services import (  # noqa: F401  (re-exported for routes)
     REMOTE_ACCESS_DOMAIN,
     RETINA_NODE_PATH,
     RETINA_SPECTRUM_URL,
+    RETINA_TRACKER_CONTROL_URL,
     RETINA_TRACKER_EVENTS_PATH,
-    RETINA_TRACKER_HOST,
-    RETINA_TRACKER_PORT,
     TELEMETRY_STATUS_PATH,
     TOWER_FINDER_URL,
     USER_CONFIG_PATH,
@@ -45,7 +44,6 @@ from services import (  # noqa: F401  (re-exported for routes)
     secret_key,
     ssh_keys,
     telemetry_status,
-    tracker_capture,
 )
 
 app = Flask(__name__,
@@ -245,9 +243,8 @@ except Exception:
     pass
 
 
-# apply_service, blah2_client, retina_tracker_client, calibrator and
-# tracker_capture are constructed in services.py and imported at the top of
-# this file — they must exist once per process, and this module body runs
+# apply_service, blah2_client, retina_tracker_client and calibrator are
+# constructed in services.py and imported at the top of this file — they must exist once per process, and this module body runs
 # twice. See services.py.
 
 # Never auto-start under pytest: conftest.py's app_client fixture reloads this
@@ -256,9 +253,8 @@ except Exception:
 # real requests.get() calls that can race with any test mocking requests
 # globally).
 if "pytest" not in sys.modules:
-    tracker_capture.start()
-    # Same reasoning: the peer directory owns a browse thread and a probe
-    # thread, and the probe thread makes real HTTP requests to other nodes.
+    # The peer directory owns a browse thread and a probe thread, and the
+    # probe thread makes real HTTP requests to other nodes.
     peers.start()
 
 
@@ -319,7 +315,8 @@ from routes.network import bp as network_bp
 from routes.remote_access import bp as remote_access_bp
 from routes.setup import bp as setup_bp
 from routes.towers import bp as towers_bp
-from routes.tracker_preview import bp as tracker_preview_bp
+from routes.tracker import bp as tracker_bp
+from routes.tracker import legacy_bp as tracker_legacy_bp
 
 app.register_blueprint(home_bp)
 app.register_blueprint(config_bp)
@@ -329,7 +326,8 @@ app.register_blueprint(towers_bp)
 app.register_blueprint(mode_bp)
 app.register_blueprint(network_bp)
 app.register_blueprint(calibrate_bp)
-app.register_blueprint(tracker_preview_bp)
+app.register_blueprint(tracker_bp)
+app.register_blueprint(tracker_legacy_bp)
 app.register_blueprint(fleet_bp)
 app.register_blueprint(remote_access_bp)
 
