@@ -226,6 +226,19 @@ class TestTheAxesComeFromTheNode:
         config = {"process": {"ambiguity": {"dopplerMin": -300}}}
         assert self._bounds(config)["doppler"] is None
 
+    @pytest.mark.parametrize("lo,hi", [(-1000, 1000), (-300, 300), (-200, 200), (-15, 15), (-1, 1)])
+    def test_every_span_across_the_range_is_carried_through(self, lo, hi):
+        config = {"process": {"ambiguity": {"dopplerMin": lo, "dopplerMax": hi}}}
+        assert self._bounds(config)["doppler"] == [lo, hi]
+
+    @pytest.mark.parametrize("lo,hi", [(300, -300), (0, 0), (5, 5)])
+    def test_a_pair_that_is_not_an_axis_is_not_drawn(self, lo, hi):
+        """Transposed would draw the axis backwards and zero-width would
+        collapse it. Either way a viewer gets a confident picture of nothing,
+        where autoscaling at least shows the data."""
+        config = {"process": {"ambiguity": {"dopplerMin": lo, "dopplerMax": hi}}}
+        assert self._bounds(config)["doppler"] is None
+
     def test_an_unreadable_config_still_renders_the_page(self):
         """The axes are a nicety. Losing them must not lose the plot."""
         merged = MagicMock()

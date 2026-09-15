@@ -69,15 +69,27 @@ def _axis_bounds():
 
     bounds = dict(blank)
     lo, hi = ambiguity.get("dopplerMin"), ambiguity.get("dopplerMax")
-    if lo is not None and hi is not None:
+    if _drawable(lo, hi):
         bounds["doppler"] = [lo, hi]
 
     lo, hi = ambiguity.get("delayMin"), ambiguity.get("delayMax")
-    if lo is not None and hi is not None and fs:
+    if _drawable(lo, hi) and fs:
         cell_km = SPEED_OF_LIGHT / float(fs) / 1000.0
         bounds["delay"] = [lo * cell_km, hi * cell_km]
 
     return bounds
+
+
+def _drawable(lo, hi):
+    """Whether a pair is an axis rather than a typo.
+
+    Both halves have to be there, and the high one has to be above the low
+    one. A transposed pair would draw the axis backwards and a zero-width one
+    would collapse it, and in both cases a viewer would be looking at a
+    confident picture of nothing. Falling back to autoscale shows the data,
+    which is the honest answer when the node has not described itself.
+    """
+    return lo is not None and hi is not None and hi > lo
 
 
 def _tracker_url(path):
