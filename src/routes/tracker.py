@@ -33,6 +33,52 @@ MAX_VIEW_WINDOW_S = 4 * 3600
 CONNECT_TIMEOUT_S = 5
 CONTROL_TIMEOUT_S = 5
 
+# For turning blah2's delay bins into kilometres. Mirrored rather than imported
+# for the same reason as the window bounds above: it belongs to another repo.
+SPEED_OF_LIGHT = 299792458.0
+
+
+def _axis_bounds():
+    """What the node can see, from its own blah2 config.
+
+    A plot scaled to its own data cannot tell a quiet sky from a narrow one.
+    On a node where nearly every detection is one interfering tone, an
+    autoscaled Doppler axis collapses to a sliver around that tone and the
+    picture looks full; two nodes, or the same node an hour apart, are drawn
+    at different scales and cannot be compared. The ambiguity bounds are the
+    only honest range to draw over, and they are the node's own numbers rather
+    than anything chosen here.
+
+    blah2 states delay in bins, which are kilometres only once the sample rate
+    says how wide a bin is.
+
+    None for anything the config does not state, which leaves that axis to
+    autoscale exactly as it does today. A guessed range misrepresents the node
+    just as autoscaling does, only less visibly.
+    """
+    from app import config_mgr
+
+    blank = {"doppler": None, "delay": None}
+    try:
+        config = config_mgr.load_merged_config() or {}
+    except Exception:
+        return blank
+
+    ambiguity = (config.get("process", {}) or {}).get("ambiguity", {}) or {}
+    fs = (config.get("capture", {}) or {}).get("fs")
+
+    bounds = dict(blank)
+    lo, hi = ambiguity.get("dopplerMin"), ambiguity.get("dopplerMax")
+    if lo is not None and hi is not None:
+        bounds["doppler"] = [lo, hi]
+
+    lo, hi = ambiguity.get("delayMin"), ambiguity.get("delayMax")
+    if lo is not None and hi is not None and fs:
+        cell_km = SPEED_OF_LIGHT / float(fs) / 1000.0
+        bounds["delay"] = [lo * cell_km, hi * cell_km]
+
+    return bounds
+
 
 def _tracker_url(path):
     from app import RETINA_TRACKER_CONTROL_URL
@@ -71,8 +117,12 @@ def moved(path):
 
 @bp.route("")
 def index():
-    """The Tracker page. Everything it draws arrives on /tracker/events."""
-    return render_template("tracker.html")
+    """The Tracker page. Everything it draws arrives on /tracker/events.
+
+    The axis bounds are the exception, and they cannot: they say what the node
+    can see, which is not knowable from what it happened to see.
+    """
+    return render_template("tracker.html", axes=_axis_bounds())
 
 
 @bp.route("/events")

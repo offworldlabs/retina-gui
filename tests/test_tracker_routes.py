@@ -6,6 +6,8 @@ plainly when the sidecar is unreachable rather than serving an empty page, and
 the URL nodes were bookmarked under keeps working.
 """
 
+import json
+import re
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -176,3 +178,73 @@ def test_old_preview_urls_still_work(app_client):
     response = app_client.post('/tracker-preview/clear')
     assert response.status_code == 308
     assert response.headers['Location'].endswith('/tracker/clear')
+
+
+# ── the axes ────────────────────────────────────────────────────────────────
+
+class TestTheAxesComeFromTheNode:
+    """A plot scaled to its own data cannot tell a quiet sky from a narrow one.
+    On a node where nearly every detection is one interfering tone, an
+    autoscaled Doppler axis collapses around that tone and the picture looks
+    full; two nodes are then drawn at different scales and cannot be compared.
+    The node's own ambiguity bounds are the only honest range."""
+
+    def _bounds(self, config):
+        merged = MagicMock()
+        merged.load_merged_config.return_value = config
+        with patch.dict('sys.modules', {'app': MagicMock(config_mgr=merged)}):
+            return tracker_routes._axis_bounds()
+
+    def test_the_doppler_span_is_the_nodes_own(self):
+        config = {"process": {"ambiguity": {"dopplerMin": -300, "dopplerMax": 300}}}
+        assert self._bounds(config)["doppler"] == [-300, 300]
+
+    def test_a_wider_span_is_carried_through_unchanged(self):
+        """+/-1000 Hz is deployed today. Nothing here may assume a value."""
+        config = {"process": {"ambiguity": {"dopplerMin": -1000, "dopplerMax": 1000}}}
+        assert self._bounds(config)["doppler"] == [-1000, 1000]
+
+    def test_delay_bins_become_kilometres_through_the_sample_rate(self):
+        config = {
+            "capture": {"fs": 2000000},
+            "process": {"ambiguity": {"delayMin": -10, "delayMax": 400}},
+        }
+        low, high = self._bounds(config)["delay"]
+        assert high == pytest.approx(59.96, abs=0.01)
+        assert low == pytest.approx(-1.5, abs=0.01)
+
+    def test_delay_without_a_sample_rate_is_not_guessed(self):
+        """The bins are meaningless without it, and a guessed cell width would
+        draw a confident axis over the wrong range."""
+        config = {"process": {"ambiguity": {"delayMin": -10, "delayMax": 400}}}
+        assert self._bounds(config)["delay"] is None
+
+    def test_a_config_without_bounds_leaves_the_axes_alone(self):
+        assert self._bounds({"capture": {"fs": 2000000}}) == {"doppler": None, "delay": None}
+
+    def test_half_a_span_is_not_half_an_axis(self):
+        config = {"process": {"ambiguity": {"dopplerMin": -300}}}
+        assert self._bounds(config)["doppler"] is None
+
+    def test_an_unreadable_config_still_renders_the_page(self):
+        """The axes are a nicety. Losing them must not lose the plot."""
+        merged = MagicMock()
+        merged.load_merged_config.side_effect = OSError("no config")
+        with patch.dict('sys.modules', {'app': MagicMock(config_mgr=merged)}):
+            assert tracker_routes._axis_bounds() == {"doppler": None, "delay": None}
+
+    def test_the_page_carries_them_to_the_browser(self, app_client):
+        config = {
+            "capture": {"fs": 2000000},
+            "process": {"ambiguity": {"dopplerMin": -300, "dopplerMax": 300,
+                                      "delayMin": -10, "delayMax": 400}},
+        }
+        merged = MagicMock()
+        merged.load_merged_config.return_value = config
+        with patch.dict('sys.modules', {'app': MagicMock(config_mgr=merged)}):
+            body = app_client.get('/tracker').get_data(as_text=True)
+
+        rendered = re.search(r'var AXES = (.+?);\n', body).group(1)
+        axes = json.loads(rendered)
+        assert axes["doppler"] == [-300, 300]
+        assert axes["delay"][1] == pytest.approx(59.96, abs=0.01)

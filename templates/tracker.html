@@ -213,6 +213,12 @@
     var railFoot = document.getElementById('railFoot');
     var railCount = document.getElementById('railCount');
     var detCount = document.getElementById('detCount');
+
+    // What the node can see, from its own blah2 ambiguity bounds. Null for an
+    // axis the node has not stated, which leaves that axis to autoscale.
+    // Drawing a guessed range would misrepresent the node as badly as
+    // autoscaling does, and less visibly.
+    var AXES = {{ (axes or {}) | tojson }};
     var csrf = document.querySelector('meta[name="csrf-token"]').content;
 
     // 15 minutes rather than the full four hours. The buffer keeps all four
@@ -541,14 +547,45 @@
             uirevision: 'tracker',
             showlegend: false,
             margin: { t: 12, r: 14, b: 44, l: 58 },
-            xaxis: { title: { text: 'Bistatic range (km)' } },
-            yaxis: { title: { text: 'Doppler (Hz)' } }
+            xaxis: axis('Bistatic range (km)', AXES.delay),
+            yaxis: axis('Doppler (Hz)', AXES.doppler)
         }, { displayModeBar: false, responsive: true });
 
         applyHover();
 
         var shown = dets ? dets.t.length : 0;
-        detCount.textContent = shown.toLocaleString() + ' detections shown';
+        detCount.textContent = shown.toLocaleString() + ' detections shown' + heldNote();
+    }
+
+    // uirevision keeps a viewer's own zoom across updates, so the node's range
+    // is where the axis starts rather than somewhere it is dragged back to.
+    function axis(title, range) {
+        var spec = { title: { text: title } };
+        if (range) spec.range = range.slice();
+        return spec;
+    }
+
+    // The window a viewer asked for is what they get only if the node has that
+    // much history to give. It will not after a restart, and it will not once
+    // the sidecar's point ceiling starts ageing the oldest points out, which a
+    // wider Doppler span reaches sooner. Saying so is the difference between a
+    // short record and a quiet sky.
+    function heldNote() {
+        var oldest = null;
+        CLASSES.forEach(function (c) {
+            var t = store.det[c].t;
+            if (t.length && (oldest === null || t[0] < oldest)) oldest = t[0];
+        });
+        if (oldest === null || !lastTs) return '';
+        var held = (lastTs - oldest) / 1000;
+        if (held >= state.window * 0.9) return '';
+        return ' \u00b7 ' + fmtSpan(held) + ' of ' + fmtSpan(state.window) + ' held';
+    }
+
+    function fmtSpan(s) {
+        if (s < 90) return Math.round(s) + 's';
+        if (s < 5400) return Math.round(s / 60) + 'm';
+        return (s / 3600).toFixed(1) + 'h';
     }
 
     var hoverPending = false;
