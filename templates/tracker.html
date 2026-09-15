@@ -523,7 +523,7 @@
                 type: 'scattergl', mode: 'lines+markers', name: r.id,
                 x: trk.delay, y: trk.doppler,
                 line: { color: 'rgba(0,0,0,0.25)', width: 1 },
-                marker: { color: colorFor(r.id), size: 7, line: { color: '#ffffff', width: 1.2 } },
+                marker: { color: colorFor(r.id), size: 7, line: { color: '#ffffff', width: 0.5 } },
                 customdata: trk.snr,
                 hovertemplate: r.id + '<br>Delay: %{x:.2f}<br>Doppler: %{y:.2f} Hz<br>'
                              + 'SNR: %{customdata:.1f} dB<extra></extra>',
