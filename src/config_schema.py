@@ -183,6 +183,66 @@ class LocationFormConfig(BaseModel):
 
 
 # ============================================================================
+# Owner Contact Details
+# ============================================================================
+#: Caps copied from the node-ingest spec's `NodeContact`, for the same reason
+#: TX_NAME_MAX_LENGTH is copied: a value past one of these means
+#: retina-telemetry cannot build the payload, so the whole document is refused
+#: and the owner is never reachable. These are contract limits rather than
+#: display preferences, and they move only when the spec does.
+CONTACT_NAME_MAX_LENGTH = 64
+CONTACT_EMAIL_MAX_LENGTH = 255
+CONTACT_PHONE_MAX_LENGTH = 32
+
+#: ISO 3166-1 alpha-2, and it belongs to the *phone number* rather than to the
+#: owner: the server added it as "record which country a contact's phone number
+#: is in". Asking it as "where do you live" would put a wrong answer against a
+#: real person.
+#:
+#: Checked in routes/setup.py rather than here. `regex=` is pydantic v1 and
+#: `pattern=` is v2, nodes run v1 and this environment has v2, so a constraint
+#: spelled either way breaks on one of them. The length cap below is portable,
+#: and the shape check joins the other rules the routes already own.
+CONTACT_COUNTRY_PATTERN = r"^[A-Za-z]{2}$"
+
+CONTACT_FIELDS = ("first_name", "last_name", "email", "phone", "country")
+
+
+class ContactFormConfig(BaseModel):
+    """Whom to contact about this node, as its owner gave them.
+
+    Every field is optional and nullable, and that is the steady state: the
+    spec is explicit that a node with nothing to report never calls the
+    endpoint at all. Nothing here is verified, none of it identifies anyone to
+    the server, and it grants no account or login. It is carried so that a
+    fault we can see and the owner cannot has somewhere to go.
+
+    Not part of the three agreement records, and deliberately not in the same
+    file. Those are versioned acceptances neither end may ever invent, and
+    retina-telemetry refuses to register without all three: putting a mutable
+    optional document beside them would let a malformed contact stop a node
+    registering.
+    """
+    first_name: str | None = Field(None, max_length=CONTACT_NAME_MAX_LENGTH, title="First Name")
+    last_name: str | None = Field(None, max_length=CONTACT_NAME_MAX_LENGTH, title="Last Name")
+    email: str | None = Field(None, max_length=CONTACT_EMAIL_MAX_LENGTH, title="Email")
+    phone: str | None = Field(None, max_length=CONTACT_PHONE_MAX_LENGTH, title="Phone")
+    country: str | None = Field(
+        None, max_length=2, title="Country",
+        description="two-letter country the phone number belongs to",
+    )
+
+    @property
+    def is_empty(self) -> bool:
+        """Whether there is anything at all to report.
+
+        An owner who skips the step, and one who clears every box, arrive here
+        the same way and mean the same thing: nothing to send.
+        """
+        return all(getattr(self, f) is None for f in CONTACT_FIELDS)
+
+
+# ============================================================================
 # ADS-B Truth Settings
 # ============================================================================
 

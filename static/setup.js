@@ -14,6 +14,7 @@ function initSetupWizard(resumeStep, devMode, isRerun, demoMode) {
 
     var stepNames = {
         agreements: 'Agreements',
+        contact: 'Contact details',
         system: 'System Update',
         radar: 'Packages',
         location: 'Where is your receiver?',
@@ -305,6 +306,73 @@ function initSetupWizard(resumeStep, devMode, isRerun, demoMode) {
                 btn.textContent = 'Continue';
             });
         });
+    };
+
+    // Step 2: Contact details — optional, and skipping writes nothing at all
+    enterHooks.contact = function() {
+        var fields = {
+            first_name: 'contactFirstName',
+            last_name:  'contactLastName',
+            email:      'contactEmail',
+            phone:      'contactPhone',
+            country:    'contactCountry'
+        };
+        var saveBtn = document.getElementById('contactSaveBtn');
+        var skipBtn = document.getElementById('contactSkipBtn');
+        var msg = document.getElementById('contactMsg');
+
+        function collect() {
+            var out = {};
+            Object.keys(fields).forEach(function(key) {
+                out[key] = document.getElementById(fields[key]).value;
+            });
+            return out;
+        }
+
+        function say(text, danger) {
+            msg.textContent = text;
+            msg.style.color = danger ? 'var(--danger)' : 'var(--ink-3)';
+            msg.style.display = text ? '' : 'none';
+        }
+
+        // The boxes are prefilled server-side from what is already stored, so a
+        // wizard re-run shows the owner their details rather than empty boxes
+        // that would read as "we hold nothing". See routes/setup.py.
+        say('');
+        saveBtn.disabled = false;
+        saveBtn.textContent = 'Save and continue';
+
+        if (hookInitialized.contact) return;
+        hookInitialized.contact = true;
+
+        saveBtn.addEventListener('click', function() {
+            saveBtn.disabled = true;
+            saveBtn.textContent = 'Saving...';
+            say('');
+            postJSON('/set-up/contact', collect())
+            .then(function(r) { return r.json(); })
+            .then(function(data) {
+                if (!data.success) {
+                    var errors = data.errors || {};
+                    var first = Object.keys(errors)[0];
+                    say(first ? errors[first] : (data.error || 'Could not save.'), true);
+                    saveBtn.disabled = false;
+                    saveBtn.textContent = 'Save and continue';
+                    return;
+                }
+                advance();
+            })
+            .catch(function() {
+                say('Could not save. Check the connection and try again.', true);
+                saveBtn.disabled = false;
+                saveBtn.textContent = 'Save and continue';
+            });
+        });
+
+        // Skipping is an answer, not an abandonment, so it writes nothing and
+        // moves on. Anything already stored is deliberately left alone: an
+        // owner skipping past details they gave earlier has not withdrawn them.
+        skipBtn.addEventListener('click', function() { advance(); });
     };
 
     // Step 2: System Update — fully automatic (server-pushed deployment +

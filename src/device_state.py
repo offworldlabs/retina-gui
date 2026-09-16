@@ -75,6 +75,10 @@ class DeviceState:
         # without it. The path is a cross-repo contract, not an internal
         # detail — see save_telemetry_consent.
         self.telemetry_consent_file = os.path.join(data_dir, "telemetry-consent.json")
+        # Also read by retina-telemetry, and also a cross-repo contract. A
+        # separate file from the consent records on purpose: see
+        # save_telemetry_contact.
+        self.telemetry_contact_file = os.path.join(data_dir, "telemetry-contact.json")
         self.dev_mode = dev_mode
 
     # ── State Queries ──────────────────────────────────────────
@@ -450,6 +454,54 @@ class DeviceState:
             "remote_management": dict(record),
             "publication": {**record, "choice": TELEMETRY_PUBLICATION_CHOICE},
         })
+
+    # ── Owner contact details ──────────────────────────────────
+
+    def get_telemetry_contact(self) -> dict:
+        """Read the stored contact details, or an empty dict if there are none.
+
+        Empty rather than None, because "nothing recorded" and "recorded, then
+        cleared" mean the same thing to everyone downstream: there is nothing
+        to send. Only the consent records need to tell those apart.
+        """
+        if not os.path.exists(self.telemetry_contact_file):
+            return {}
+        try:
+            with open(self.telemetry_contact_file) as f:
+                contact = json.load(f)
+        except (OSError, ValueError):
+            return {}
+        return contact if isinstance(contact, dict) else {}
+
+    def save_telemetry_contact(self, contact: dict):
+        """Record whom to contact about this node, or remove the record.
+
+        Kept out of telemetry-consent.json deliberately. Those are versioned
+        acceptances that neither end may invent, and retina-telemetry refuses
+        to register without all three; a mutable optional document sharing that
+        file would let a malformed contact stop a node registering. The wire
+        treats them as separate endpoints too.
+
+        Shape mirrors the wire's `NodeContact` one-for-one, the same discipline
+        as save_telemetry_consent, so nothing has to be translated between what
+        the owner typed and what the server is told.
+
+        Empty values are dropped rather than written as null, and a document
+        with nothing left in it removes the file. The spec is explicit that a
+        node with nothing to report never calls the endpoint, so "no file" is
+        the honest way to say that, and it is what an owner who skipped the
+        step and an owner who cleared every box both mean.
+        """
+        populated = {k: v for k, v in contact.items() if v not in (None, "")}
+        if not populated:
+            # Clearing is a real outcome, not a no-op: an owner who empties
+            # every box wants the details gone rather than left behind.
+            try:
+                os.remove(self.telemetry_contact_file)
+            except OSError:
+                pass
+            return
+        self._write_json_atomically(self.telemetry_contact_file, populated)
 
     def _write_json_atomically(self, path, payload):
         """Write JSON via a temp file and a rename.

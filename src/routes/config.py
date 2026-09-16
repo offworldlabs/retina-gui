@@ -52,11 +52,16 @@ def _remote_access_context():
     of node_id and the zone, so the page can name the address before anything
     has provisioned it.
     """
-    from app import REMOTE_ACCESS_DOMAIN, mender_connect, read_node_id, remote_access
+    from app import REMOTE_ACCESS_DOMAIN, device_state, mender_connect, read_node_id, remote_access
     from remote_access import tunnel_status
 
     return {
         'remote_access': remote_access.status(),
+        # Whom to contact about this node, shown in the same section for the
+        # same reason: it is the other half of how support reaches a problem,
+        # the settings above being how they reach the node. Empty when nothing
+        # was ever given, which is the ordinary case.
+        'contact': device_state.get_telemetry_contact(),
         # The *enforced* shell state, read back from mender-connect's own config
         # rather than from what we recorded. They can disagree: an enforcement
         # that failed, or a hand-edited config, would otherwise leave this page

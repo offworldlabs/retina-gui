@@ -64,6 +64,7 @@
         <div class="wiz-body-inner setup-card">
 
             {% include "setup/_agreements.html" %}
+            {% include "setup/_contact.html" %}
             {% include "setup/_system.html" %}
             {% include "setup/_packages.html" %}
             {% include "setup/_location.html" %}
@@ -82,6 +83,13 @@
             {# Agreements #}
             <div id="stepBtns-agreements" class="step-foot-btns">
                 <button type="button" class="ds-btn primary" id="agreementsContinueBtn" disabled>Continue</button>
+            </div>
+
+            {# Contact — optional, so Skip is a first-class answer rather than
+               an escape hatch. See templates/setup/_contact.html. #}
+            <div id="stepBtns-contact" class="step-foot-btns" style="display:none;">
+                <button type="button" class="ds-btn ghost"   id="contactSkipBtn">Skip</button>
+                <button type="button" class="ds-btn primary" id="contactSaveBtn">Save and continue</button>
             </div>
 
             {# System update — fully automatic, this page only reports progress #}

@@ -20,6 +20,15 @@ starts catching NEW dead code immediately; working through them is separate.
 _ = type("_", (), {})()
 
 # ── Contracts: referenced by something vulture cannot see ─────────────────────
+# ContactFormConfig fields. Read by name through CONTACT_FIELDS in
+# routes/setup.py, and they are also the wire's own field names: the shape
+# mirrors the node-ingest spec's NodeContact one-for-one so nothing has to be
+# translated between what the owner typed and what the server is told. `email`
+# and `country` are not listed only because those names occur elsewhere.
+#   src/config_schema.py
+first_name
+last_name
+phone
 # CSRFProtect(app) registers on construction; the name is conventional
 #   src/app.py:44
 csrf
