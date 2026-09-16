@@ -573,6 +573,54 @@
 
                 <div id="remoteMsg" style="font-size:12.5px;margin-top:14px;display:none;"></div>
 
+                {# The other half of Remote support: the settings above are how support
+                   reaches the node, this is how they reach you. Optional throughout, and
+                   an empty document means the node never calls the contact endpoint at
+                   all. See routes/setup.py. #}
+                <div style="margin-top:16px;padding-top:16px;border-top:1px solid var(--line);">
+                    <div class="name" style="margin-bottom:2px;">How we reach you</div>
+                    <div class="desc" style="margin-bottom:14px;">
+                        If we can see a problem with your node and you cannot, this is where we
+                        get in touch. Only used to support you with your device, and never published.
+                    </div>
+
+                    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+                        <div class="ds-field">
+                            <label class="ds-field-label" for="contactFirstName">First name</label>
+                            <input type="text" class="ds-input" id="contactFirstName" value="{{ contact.get('first_name', '') }}" maxlength="64" autocomplete="given-name">
+                        </div>
+                        <div class="ds-field">
+                            <label class="ds-field-label" for="contactLastName">Last name</label>
+                            <input type="text" class="ds-input" id="contactLastName" value="{{ contact.get('last_name', '') }}" maxlength="64" autocomplete="family-name">
+                        </div>
+                    </div>
+
+                    <div class="ds-field" style="margin-top:12px;">
+                        <label class="ds-field-label" for="contactEmail">Email</label>
+                        <input type="email" class="ds-input" id="contactEmail" value="{{ contact.get('email', '') }}" maxlength="255" autocomplete="email">
+                    </div>
+
+                    <div style="display:grid;grid-template-columns:2fr 1fr;gap:12px;margin-top:12px;">
+                        <div class="ds-field">
+                            <label class="ds-field-label" for="contactPhone">Phone</label>
+                            <input type="tel" class="ds-input" id="contactPhone" value="{{ contact.get('phone', '') }}" maxlength="32" autocomplete="tel">
+                        </div>
+                        <div class="ds-field">
+                            <label class="ds-field-label" for="contactCountry">Country</label>
+                            <input type="text" class="ds-input mono" id="contactCountry" value="{{ contact.get('country', '') }}" maxlength="2" placeholder="GB" autocomplete="country" style="text-transform:uppercase;">
+                        </div>
+                    </div>
+                    <div class="help" style="margin-top:6px;">
+                        The two-letter country the phone number belongs to, for example GB or US.
+                        Clearing a box and saving removes that detail.
+                    </div>
+
+                    <div style="display:flex;align-items:center;gap:12px;margin-top:14px;">
+                        <button type="button" class="ds-btn" id="contactSaveBtn">Save</button>
+                        <span id="contactMsg" style="font-size:12.5px;display:none;"></span>
+                    </div>
+                </div>
+
                 <div class="help" style="margin-top:16px;padding-top:14px;border-top:1px solid var(--line);">
                     Software updates and registration continue whichever way these are set. What
                     you are choosing here is whether a person can reach the node, not whether it
@@ -2171,6 +2219,64 @@ if (discardBtn) discardBtn.addEventListener('click', () => location.reload());
             .then(function() { setTimeout(pollCapturePeak, 1000); });
     }
     pollCapturePeak();
+})();
+</script>
+
+{# ── Remote support: contact details ── #}
+<script>
+(function () {
+    var saveBtn = document.getElementById('contactSaveBtn');
+    if (!saveBtn) return;
+
+    var msg  = document.getElementById('contactMsg');
+    var csrf = document.querySelector('meta[name="csrf-token"]').content;
+    var fields = {
+        first_name: 'contactFirstName',
+        last_name:  'contactLastName',
+        email:      'contactEmail',
+        phone:      'contactPhone',
+        country:    'contactCountry'
+    };
+
+    function say(text, bad) {
+        msg.textContent = text;
+        msg.style.color = bad ? 'var(--danger)' : 'var(--ink-3)';
+        msg.style.display = text ? 'inline' : 'none';
+    }
+
+    saveBtn.addEventListener('click', function () {
+        var payload = {};
+        Object.keys(fields).forEach(function (key) {
+            payload[key] = document.getElementById(fields[key]).value;
+        });
+
+        saveBtn.disabled = true;
+        say('');
+        fetch('/set-up/contact', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json', 'X-CSRFToken': csrf},
+            body: JSON.stringify(payload)
+        })
+        .then(function (r) { return r.json(); })
+        .then(function (data) {
+            saveBtn.disabled = false;
+            if (!data.success) {
+                var errors = data.errors || {};
+                var first = Object.keys(errors)[0];
+                say(first ? errors[first] : (data.error || 'Could not save.'), true);
+                return;
+            }
+            // `stored` is false when every box was empty, which removes the
+            // record rather than saving one. Saying "Saved" there would claim
+            // we are holding details we have just deleted.
+            say(data.stored ? 'Saved' : 'Details removed');
+            setTimeout(function () { say(''); }, 3000);
+        })
+        .catch(function () {
+            saveBtn.disabled = false;
+            say('Could not save. Check the connection and try again.', true);
+        });
+    });
 })();
 </script>
 

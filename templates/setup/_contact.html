@@ -1,0 +1,52 @@
+<!-- Step 2: Contact details -->
+{# Optional and skippable, and placed straight after the agreements step so it
+   is asked while the owner is still answering questions about themselves
+   rather than about the radar. Nothing downstream blocks on it: the node-ingest
+   spec says a node with nothing to report never calls the contact endpoint, so
+   skipping is a legitimate answer rather than an unfinished step. #}
+<div data-step="contact" class="step-panel" style="display:none;">
+    <div class="wiz-title-row">
+        <h1>How can we reach you?</h1>
+        <p>If something goes wrong with your node that we can see and you cannot, this is how we get in touch. It is only used to support you with your device.</p>
+    </div>
+    <div class="step-stack">
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;">
+            <div class="ds-field">
+                <label class="ds-field-label" for="contactFirstName">First name</label>
+                <input type="text" class="ds-input" id="contactFirstName" value="{{ contact.get('first_name', '') }}" maxlength="64" autocomplete="given-name">
+            </div>
+            <div class="ds-field">
+                <label class="ds-field-label" for="contactLastName">Last name</label>
+                <input type="text" class="ds-input" id="contactLastName" value="{{ contact.get('last_name', '') }}" maxlength="64" autocomplete="family-name">
+            </div>
+        </div>
+
+        <div class="ds-field">
+            <label class="ds-field-label" for="contactEmail">Email</label>
+            <input type="email" class="ds-input" id="contactEmail" value="{{ contact.get('email', '') }}" maxlength="255" autocomplete="email">
+        </div>
+
+        <div style="display:grid;grid-template-columns:2fr 1fr;gap:14px;">
+            <div class="ds-field">
+                <label class="ds-field-label" for="contactPhone">Phone</label>
+                <input type="tel" class="ds-input" id="contactPhone" value="{{ contact.get('phone', '') }}" maxlength="32" autocomplete="tel">
+            </div>
+            <div class="ds-field">
+                <label class="ds-field-label" for="contactCountry">Country</label>
+                <input type="text" class="ds-input mono" id="contactCountry" value="{{ contact.get('country', '') }}" maxlength="2" placeholder="GB" autocomplete="country" style="text-transform:uppercase;">
+            </div>
+        </div>
+        <p style="font-size:12.5px;color:var(--ink-3);margin:-4px 0 0;">
+            The two-letter country the phone number belongs to, for example GB or US.
+        </p>
+
+        <p style="font-size:12.5px;color:var(--ink-3);margin:10px 0 0;">
+            Every box is optional, and you can skip this step. Nothing here is published,
+            none of it is checked, and it gives you no account or login. You can add or
+            change it later under Remote support on the Configuration page.
+        </p>
+
+        <p id="contactMsg" style="display:none;font-size:13px;margin:8px 0 0;"></p>
+    </div>
+
+</div>
