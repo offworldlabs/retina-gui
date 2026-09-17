@@ -154,6 +154,15 @@
         </div>
       </div>
 
+      <div class="trk-ctl">
+        <span class="trk-lab">Tracks</span>
+        <div class="seg" role="group" aria-label="Track overlay">
+          <button type="button" data-tracks="on" aria-pressed="true">On</button>
+          <button type="button" data-tracks="off" aria-pressed="false"
+                  title="Leaves the detections alone on the scope, as the node recorded them.">Off</button>
+        </div>
+      </div>
+
       <button type="button" id="clearBufferBtn" class="ds-btn danger-ghost sm"
               title="Clears only what's displayed here. Tracking keeps running, so an active aircraft will reappear on its own.">
         Clear buffer
@@ -272,6 +281,7 @@
     var state = {
         window: DEFAULT_WINDOW,
         layer: 'all',
+        tracks: 'on',
         sort: 'recent',
         filter: 'all',
         hidden: {},
@@ -292,6 +302,7 @@
 
     state.window = parseInt(recall('window', DEFAULT_WINDOW), 10) || DEFAULT_WINDOW;
     state.layer = recall('layer', 'all');
+    state.tracks = recall('tracks', 'on');
     state.sort = recall('sort', 'recent');
     state.filter = recall('filter', 'all');
 
@@ -362,17 +373,98 @@
                 store.tracks[id] = kept;
             }
         });
+        capUntracked();
     }
 
-    // What the layer control is asking for. "all" is the three classes
-    // concatenated; the rest are a class each, which is what makes the miss
-    // list and the SNR gate's rejects separately visible.
-    function layerPoints() {
-        if (state.layer === 'off') return null;
-        if (state.layer !== 'all') return store.det[state.layer] || emptyCols();
-        var out = emptyCols();
-        CLASSES.forEach(function (c) { appendCols(out, store.det[c]); });
-        return out;
+    // A ring over the detections that no track claimed. How many of those a
+    // node makes is a property of its sky and its interference, and on a bad
+    // one it runs away: the scope's cost is very nearly linear in points, so
+    // an unbounded backdrop is what stops the page drawing at all. Holding the
+    // newest MAX_UNTRACKED and ageing out the oldest keeps the cost fixed
+    // while the feed stays live, which is the point of a ring rather than a
+    // stride: what you are looking at is always the most recent truth.
+    //
+    // 'associated' is deliberately exempt. Those detections are the evidence a
+    // track is built on, and dropping them would leave a track drawn over a
+    // backdrop that no longer contains what produced it.
+    var UNTRACKED = ['unassociated', 'below_snr'];
+    var MAX_UNTRACKED = 25000;
+    var untrackedCapped = false;
+
+    function capUntracked() {
+        var total = 0;
+        UNTRACKED.forEach(function (c) { total += store.det[c].t.length; });
+        var drop = total - MAX_UNTRACKED;
+        untrackedCapped = drop > 0;
+        if (!untrackedCapped) return;
+
+        // Both columns are in timestamp order, so walking their heads and
+        // taking whichever is older drops exactly the oldest points across the
+        // pair, without merging or sorting anything.
+        var from = {};
+        UNTRACKED.forEach(function (c) { from[c] = 0; });
+        while (drop > 0) {
+            var oldest = null;
+            UNTRACKED.forEach(function (c) {
+                if (from[c] >= store.det[c].t.length) return;
+                if (oldest === null ||
+                    store.det[c].t[from[c]] < store.det[oldest].t[from[oldest]]) oldest = c;
+            });
+            if (oldest === null) break;
+            from[oldest]++;
+            drop--;
+        }
+        UNTRACKED.forEach(function (c) { store.det[c] = sliceCols(store.det[c], from[c]); });
+    }
+
+    // What the layer control is asking for, as one column set per trace. "all"
+    // is the three classes drawn as three traces rather than one concatenation
+    // of them: the marker spec is shared and the SNR scale is pinned to 0-20,
+    // so the picture is the same, and the page stops rebuilding a copy of every
+    // point it holds on every frame. The rest are a class each, which is what
+    // makes the miss list and the SNR gate's rejects separately visible.
+    function layerCols() {
+        if (state.layer === 'off') return [];
+        if (state.layer !== 'all') return [store.det[state.layer] || emptyCols()];
+        return CLASSES.map(function (c) { return store.det[c]; });
+    }
+
+    // Tracks are drawn one trace per hue, not one trace per track. Every Plotly
+    // call redraws the whole scene and its cost grows with the number of traces
+    // in it, so a scope that gave each track its own trace got slower as the sky
+    // filled and stopped drawing entirely on a node whose interference minted
+    // thousands of them. There are only twelve hues, so twelve traces carry any
+    // number of tracks at a fixed price: measured flat at ~300 ms from 133
+    // tracks to 2000, against 398 ms and 934 ms for a trace apiece. Nothing is
+    // thinned or dropped to achieve it; every point the node sent is still
+    // drawn.
+    //
+    // A null between tracks is what keeps their lines from joining up, and the
+    // track id rides along in customdata so the hover still names the track it
+    // is over.
+    function emptyBin() { return { x: [], y: [], cd: [] }; }
+
+    function pushTrack(bin, id, trk) {
+        if (bin.x.length) { bin.x.push(null); bin.y.push(null); bin.cd.push(null); }
+        for (var i = 0; i < trk.delay.length; i++) {
+            bin.x.push(trk.delay[i]);
+            bin.y.push(trk.doppler[i]);
+            bin.cd.push([id, trk.snr[i]]);
+        }
+    }
+
+    function trackTrace(bin, color, opacity) {
+        return {
+            type: 'scattergl', mode: 'lines+markers',
+            x: bin.x, y: bin.y,
+            line: { color: 'rgba(0,0,0,0.25)', width: 1 },
+            marker: { color: color, size: 7, line: { color: '#ffffff', width: 0.5 } },
+            customdata: bin.cd,
+            hovertemplate: '%{customdata[0]}<br>Delay: %{x:.2f}<br>Doppler: %{y:.2f} Hz<br>'
+                         + 'SNR: %{customdata[1]:.1f} dB<extra></extra>',
+            opacity: opacity,
+            showlegend: false
+        };
     }
 
     // ── Track summaries for the rail ─────────────────────────────────────
@@ -488,7 +580,7 @@
                 + '<button type="button" class="linkbtn" id="restoreBtn">Restore</button>';
             document.getElementById('restoreBtn').addEventListener('click', function () {
                 state.removed = {};
-                render();
+                scheduleRender();
             });
         } else {
             railFoot.textContent = 'Hover a row to isolate it.';
@@ -497,46 +589,70 @@
 
     // ── The scope ────────────────────────────────────────────────────────
 
-    var traceIds = [];   // trace index -> track id, for hover isolation
+    // At most one draw per frame. Messages land about once a second and a draw
+    // over a wide window can take longer than that, so without this each
+    // message queues a full redraw of its own and the page falls permanently
+    // behind instead of simply drawing less often. Coalescing turns "frozen"
+    // into "a frame or two late", which is the difference between a page that
+    // is slow and a page that is gone.
+    var renderQueued = false;
+    function scheduleRender() {
+        if (renderQueued) return;
+        renderQueued = true;
+        requestAnimationFrame(function () {
+            renderQueued = false;
+            render();
+        });
+    }
 
     function render() {
         var rows = ordered(summarise());
         renderRail(rows);
 
         var traces = [];
-        traceIds = [];
 
-        var dets = layerPoints();
-        if (dets && dets.t.length) {
+        var shown = 0;
+        layerCols().forEach(function (cols) {
+            if (!cols.t.length) return;
             traces.push({
                 type: 'scattergl', mode: 'markers', name: 'Detections',
-                x: dets.delay, y: dets.doppler,
+                x: cols.delay, y: cols.doppler,
                 marker: {
-                    color: dets.snr, colorscale: SNR_COLORSCALE, cmin: 0, cmax: 20,
+                    color: cols.snr, colorscale: SNR_COLORSCALE, cmin: 0, cmax: 20,
                     size: 4, opacity: 0.4, showscale: false
                 },
-                customdata: dets.snr,
+                customdata: cols.snr,
                 hovertemplate: 'Delay: %{x:.2f}<br>Doppler: %{y:.2f} Hz<br>SNR: %{customdata:.1f} dB<extra></extra>',
+                opacity: detectionOpacity(),
                 showlegend: false
             });
-            traceIds.push(null);
-        }
-
-        rows.forEach(function (r) {
-            if (state.hidden[r.id]) return;
-            var trk = store.tracks[r.id];
-            traces.push({
-                type: 'scattergl', mode: 'lines+markers', name: r.id,
-                x: trk.delay, y: trk.doppler,
-                line: { color: 'rgba(0,0,0,0.25)', width: 1 },
-                marker: { color: colorFor(r.id), size: 7, line: { color: '#ffffff', width: 0.5 } },
-                customdata: trk.snr,
-                hovertemplate: r.id + '<br>Delay: %{x:.2f}<br>Doppler: %{y:.2f} Hz<br>'
-                             + 'SNR: %{customdata:.1f} dB<extra></extra>',
-                showlegend: false
-            });
-            traceIds.push(r.id);
+            shown += cols.t.length;
         });
+
+        // With the overlay off the scope is the detections alone, which is what
+        // the node actually recorded before anything decided what it meant. The
+        // rail still lists the tracks: turning the overlay off is about the
+        // picture, not about forgetting they exist.
+        if (tracksShown()) {
+            var bins = {};
+            var hovered = null;
+            rows.forEach(function (r) {
+                if (state.hidden[r.id]) return;
+                if (r.id === state.hover) { hovered = r; return; }
+                var hue = hueFor(r.id);
+                pushTrack(bins[hue] || (bins[hue] = emptyBin()), r.id, store.tracks[r.id]);
+            });
+            Object.keys(bins).forEach(function (hue) {
+                traces.push(trackTrace(bins[hue], 'hsl(' + hue + ',58%,42%)', trackOpacity()));
+            });
+            // Last, so it draws over its neighbours: the hovered track is the
+            // one thing a shared trace cannot single out, so it gets its own.
+            if (hovered) {
+                var solo = emptyBin();
+                pushTrack(solo, hovered.id, store.tracks[hovered.id]);
+                traces.push(trackTrace(solo, colorFor(hovered.id), 1));
+            }
+        }
 
         // react (not newPlot) with a stable uirevision so zoom, pan and the
         // viewer's axis ranges survive every update. The legend is off: the
@@ -551,10 +667,15 @@
             yaxis: axis('Doppler (Hz)', AXES.doppler)
         }, { displayModeBar: false, responsive: true });
 
-        applyHover();
+        detCount.textContent = shown.toLocaleString() + ' detections shown'
+            + cappedNote() + heldNote();
+    }
 
-        var shown = dets ? dets.t.length : 0;
-        detCount.textContent = shown.toLocaleString() + ' detections shown' + heldNote();
+    // Said out loud, because a backdrop that quietly stops going back as far as
+    // the window claims is indistinguishable from a sky that went quiet.
+    function cappedNote() {
+        if (!untrackedCapped) return '';
+        return ' \u00b7 untracked capped at ' + MAX_UNTRACKED.toLocaleString();
     }
 
     // uirevision keeps a viewer's own zoom across updates, so the node's range
@@ -588,22 +709,19 @@
         return (s / 3600).toFixed(1) + 'h';
     }
 
-    var hoverPending = false;
-    function applyHover() {
-        if (!traceIds.length) return;
-        var opacities = traceIds.map(function (id) {
-            if (state.hover === null) return id === null ? 0.4 : 1;
-            if (id === null) return 0.12;
-            return id === state.hover ? 1 : 0.09;
-        });
-        Plotly.restyle(plotDiv, { opacity: opacities });
-    }
+    // What a trace fades to while a row is hovered. These are carried in the
+    // trace specs render() builds, not restyled on afterwards: a restyle is a
+    // whole redraw of its own, so doing it after every react cost two draws to
+    // put on values one draw could have carried.
+    function tracksShown() { return state.tracks !== 'off'; }
+    function isolating() { return tracksShown() && state.hover !== null; }
+    function detectionOpacity() { return isolating() ? 0.12 : 0.4; }
+    function trackOpacity() { return isolating() ? 0.09 : 1; }
+
     function setHover(id) {
         if (id === state.hover) return;
         state.hover = id;
-        if (hoverPending) return;
-        hoverPending = true;
-        requestAnimationFrame(function () { hoverPending = false; applyHover(); });
+        scheduleRender();
     }
 
     // ── Interaction ──────────────────────────────────────────────────────
@@ -615,7 +733,7 @@
         var btn = e.target.closest('[data-act]');
         if (!btn) {
             state.expanded = state.expanded === id ? null : id;
-            render();
+            scheduleRender();
             return;
         }
         if (btn.getAttribute('data-act') === 'vis') {
@@ -625,7 +743,7 @@
             if (state.expanded === id) state.expanded = null;
             if (state.hover === id) state.hover = null;
         }
-        render();
+        scheduleRender();
     });
 
     railList.addEventListener('pointerover', function (e) {
@@ -658,7 +776,13 @@
     wireSeg('layer', function (v) {
         state.layer = v;
         remember('layer', v);
-        render();
+        scheduleRender();
+    });
+
+    wireSeg('tracks', function (v) {
+        state.tracks = v;
+        remember('tracks', v);
+        scheduleRender();
     });
 
     document.querySelectorAll('.fchip').forEach(function (b) {
@@ -668,14 +792,14 @@
             });
             state.filter = b.getAttribute('data-filter');
             remember('filter', state.filter);
-            render();
+            scheduleRender();
         });
     });
 
     document.getElementById('sortSel').addEventListener('change', function (e) {
         state.sort = e.target.value;
         remember('sort', state.sort);
-        render();
+        scheduleRender();
     });
 
     document.getElementById('clearBufferBtn').addEventListener('click', function () {
@@ -718,12 +842,17 @@
         });
 
         pruneToWindow();
-        render();
 
+        // Said before the draw, not after it. The status describes what has
+        // arrived, which is known here; leaving it until the draw returned is
+        // why a page that was struggling to draw reported "connecting" rather
+        // than what it was struggling with.
         var n = Object.keys(store.tracks).length;
         var shown = CLASSES.reduce(function (a, c) { return a + store.det[c].t.length; }, 0);
         setStatus('capturing &middot; ' + n + (n === 1 ? ' track' : ' tracks')
                   + ' &middot; ' + shown.toLocaleString() + ' detections');
+
+        scheduleRender();
     }
 
     function onEvent(replace) {
@@ -764,6 +893,9 @@
     });
     document.querySelectorAll('.seg [data-layer]').forEach(function (b) {
         b.setAttribute('aria-pressed', String(b.getAttribute('data-layer') === state.layer));
+    });
+    document.querySelectorAll('.seg [data-tracks]').forEach(function (b) {
+        b.setAttribute('aria-pressed', String(b.getAttribute('data-tracks') === state.tracks));
     });
     document.querySelectorAll('.fchip').forEach(function (b) {
         b.setAttribute('aria-pressed', String(b.getAttribute('data-filter') === state.filter));
