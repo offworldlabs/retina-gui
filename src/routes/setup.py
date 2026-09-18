@@ -88,8 +88,8 @@ def consent():
 def contact():
     """Record whom to contact about this node, from the wizard or Settings.
 
-    One route for both surfaces, so the wizard step and the Remote support
-    block on the configuration page cannot drift into storing different shapes.
+    One route for both surfaces, so the wizard step and the How we reach you
+    section on the configuration page cannot drift into storing different shapes.
 
     Every field is optional and skipping writes nothing at all. That is not a
     convenience: the spec says a node with nothing to report never calls the
@@ -113,7 +113,7 @@ def contact():
     country = submitted["country"]
     if country is not None and not re.match(CONTACT_COUNTRY_PATTERN, country):
         return jsonify({"success": False, "errors": {
-            "country": "Use the two-letter country code for the phone number, such as GB or US.",
+            "country": "Use the two-letter country code for the phone number, such as US or GB.",
         }}), 400
     if country is not None:
         submitted["country"] = country.upper()
