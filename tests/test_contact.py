@@ -206,11 +206,14 @@ class TestBothSurfacesRender:
         assert 'value="Ada"' in page
         assert 'value="ada@example.com"' in page
 
-    def test_the_config_page_shows_it_under_remote_support(self, app_client):
+    def test_the_config_page_gives_it_a_section_of_its_own(self, app_client):
         page = app_client.get('/config').data.decode()
 
-        assert 'How we reach you' in page
+        assert 'id="contact" class="cfg-section"' in page
+        assert '<h2>How we reach you</h2>' in page
         assert 'contactSaveBtn' in page
+        assert '<a href="#contact">How we reach you</a>' in page, \
+            "a section nobody can navigate to is only half a section"
 
     def test_the_config_page_prefills_what_is_stored(self, app_client):
         post(app_client, FULL)

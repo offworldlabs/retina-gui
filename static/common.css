@@ -868,6 +868,9 @@ h1, h2, h3, h4, h5, h6 {
 .cfg-row .label-col { display: flex; flex-direction: column; gap: 2px; }
 .cfg-row .label-col label { font-size: 13px; font-weight: 500; color: var(--ink); }
 .cfg-row .label-col .help { font-size: 12px; color: var(--ink-3); }
+/* The same help voice for notes that stand outside a label-col: under a toggle,
+   or under a block of fields. Without this they render as unstyled body text. */
+.cfg-body .help { font-size: 12px; color: var(--ink-3); }
 
 /* Input with unit suffix */
 .cfg-input-row { display: flex; align-items: center; gap: 10px; }
