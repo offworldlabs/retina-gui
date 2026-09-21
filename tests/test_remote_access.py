@@ -369,6 +369,38 @@ def test_only_our_own_hostname_is_the_remote_pathway():
     assert classify_host(f"{NODE_ID}.{DOMAIN}", NODE_ID, DOMAIN) == OWNER
 
 
+CURRENT_ID = "retgec420d03ea4b064"
+
+
+def test_a_migrated_node_is_classified_on_its_own_name():
+    """A node only ever judges its own id, which is what lets the fleet carry
+    both formats while it is migrated one node at a time."""
+    assert classify_host(f"{CURRENT_ID}.{DOMAIN}", CURRENT_ID, DOMAIN) == OWNER
+    assert classify_host(f"{CURRENT_ID}.local", CURRENT_ID, DOMAIN) == LAN
+
+
+def test_a_legacy_neighbour_is_still_not_us():
+    """Both formats are live at once, so a sibling's name can be in either."""
+    assert classify_host(f"{NODE_ID}.{DOMAIN}", CURRENT_ID, DOMAIN) == LAN
+    assert classify_host(f"{CURRENT_ID}.{DOMAIN}", NODE_ID, DOMAIN) == LAN
+
+
+def test_a_half_migrated_node_does_not_fall_back_to_the_blunt_rule():
+    """The migration window, pinned so the behaviour is a decision rather than a
+    surprise. The node holds its new id while requests still arrive on the old
+    hostname: that is LAN, not OWNER, because the name is no longer ours to
+    challenge. Access still gates it. The fix is operational — repoint the
+    hostname in the same step as the rename — so this test exists to record the
+    exposure, not to bless it."""
+    assert classify_host(f"{NODE_ID}.{DOMAIN}", CURRENT_ID, DOMAIN) == LAN
+
+
+def test_an_id_between_the_two_formats_is_not_an_id():
+    """Falls back to the blunt domain-wide rule rather than matching a name."""
+    assert classify_host(f"{NODE_ID}.{DOMAIN}", "ret1a2b3c4d5", DOMAIN) == OWNER
+    assert classify_host(f"{NODE_ID}.{DOMAIN}", "retgec420d03ea4b06", DOMAIN) == OWNER
+
+
 def test_an_unreadable_node_id_does_not_open_the_owner_path():
     """read_node_id() returns 'Unknown' when /data/mender is missing. That must
     not turn the tunnel hostname into an unauthenticated one."""

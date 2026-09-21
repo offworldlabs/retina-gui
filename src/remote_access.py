@@ -387,7 +387,21 @@ OWNER = "owner"
 #: What a node id looks like. Matched rather than trusting any non-empty string,
 #: because read_node_id() reports "Unknown" rather than failing, and that must
 #: not be mistaken for an id we could compare a hostname against.
-_NODE_ID_RE = re.compile(r"^ret[0-9a-f]{8}$")
+#:
+#: Both formats: ret<8 hex> is the legacy one, retg<15 hex> the current. Nodes
+#: are migrated one at a time, and a node only ever judges its own id, so a
+#: node on either format is served correctly by the same rule.
+#:
+#: **During a migration there is a window this cannot close.** Between a node
+#: taking its new id and its Cloudflare hostname being repointed, requests still
+#: arrive on the *old* hostname, which no longer matches this node's own name
+#: and is therefore classified LAN: the unauthenticated pathway that assumes
+#: physical presence. Access still gates the hostname throughout, so it is lost
+#: defence in depth rather than an open door, and closing it here would mean
+#: knowing the node's previous id — a mapping table, which is the thing the
+#: whole identity design refuses to have. It is closed operationally instead, by
+#: repointing the hostname in the same step as the rename.
+_NODE_ID_RE = re.compile(r"^ret(?:[0-9a-f]{8}|g[0-9a-f]{15})$")
 
 
 def classify_host(host, node_id, domain):
