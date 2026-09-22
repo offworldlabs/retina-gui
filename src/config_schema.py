@@ -242,6 +242,39 @@ class ContactFormConfig(BaseModel):
         return all(getattr(self, f) is None for f in CONTACT_FIELDS)
 
 
+#: The cap the node-ingest spec puts on `NodeClaimRequest.email`, copied for
+#: the same reason as the contact caps above: past it retina-telemetry cannot
+#: build the payload, so the claim never leaves the node.
+CLAIM_EMAIL_MAX_LENGTH = 255
+
+#: Deliberately thin, and no thinner than what the server itself enforces: one
+#: `@`, something either side of it, no whitespace. Nothing here verifies the
+#: address exists and nothing can, since until the link is clicked it grants
+#: nothing. The point of checking at all is that an owner who mistypes finds
+#: out in the box rather than by waiting for a link that never arrives.
+#:
+#: Checked in routes/setup.py rather than here, for the pydantic v1/v2 reason
+#: CONTACT_COUNTRY_PATTERN gives above.
+CLAIM_EMAIL_PATTERN = r"^[^@\s]+@[^@\s]+$"
+
+
+class ClaimFormConfig(BaseModel):
+    """The address that owns this node.
+
+    **Not the contact email**, however alike the two boxes look. That one
+    answers "whom do we ring about this node", is optional throughout and
+    grants nothing. This one answers "who owns it": the server mails it a link,
+    and clicking that link binds the node to the account behind the address. A
+    wrong value here mails a stranger a link that hands them somebody's node.
+
+    Kept in a file of its own for that reason, and nothing anywhere copies one
+    into the other. An owner may well give the same address twice, but that is
+    their answer to two questions rather than our licence to infer the second
+    from the first.
+    """
+    email: str | None = Field(None, max_length=CLAIM_EMAIL_MAX_LENGTH, title="Email")
+
+
 # ============================================================================
 # ADS-B Truth Settings
 # ============================================================================

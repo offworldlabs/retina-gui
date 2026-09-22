@@ -52,8 +52,21 @@ def _remote_access_context():
     of node_id and the zone, so the page can name the address before anything
     has provisioned it.
     """
-    from app import REMOTE_ACCESS_DOMAIN, device_state, mender_connect, read_node_id, remote_access
+    from app import (
+        REMOTE_ACCESS_DOMAIN,
+        device_state,
+        mender_connect,
+        read_node_id,
+        remote_access,
+        telemetry_status,
+    )
     from remote_access import tunnel_status
+
+    # Where the claim stands, which only retina-telemetry knows: it is the only
+    # thing here that talks to the server. None when that service is not
+    # running or predates the claim, and the section says so rather than
+    # guessing. Read through the same status document the home page uses.
+    telemetry = telemetry_status.read()
 
     return {
         'remote_access': remote_access.status(),
@@ -62,6 +75,13 @@ def _remote_access_context():
         # the settings above being how they reach the node. Empty when nothing
         # was ever given, which is the ordinary case.
         'contact': device_state.get_telemetry_contact(),
+        # The address this node has been told to claim with, as stored here.
+        # Distinct from `claim_state` below, which is what the server has
+        # actually done with it, and the two disagree for as long as it takes
+        # retina-telemetry to notice a change and be answered.
+        'claim': device_state.get_telemetry_claim(),
+        'claim_state': (telemetry or {}).get('claim'),
+        'claim_reported': telemetry is not None and not (telemetry or {}).get('stale'),
         # The *enforced* shell state, read back from mender-connect's own config
         # rather than from what we recorded. They can disagree: an enforcement
         # that failed, or a hand-edited config, would otherwise leave this page
