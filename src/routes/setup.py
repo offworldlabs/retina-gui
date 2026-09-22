@@ -4,7 +4,13 @@ from flask import Blueprint, jsonify, render_template, request
 from pydantic import ValidationError
 
 from config_manager import ConfigManager
-from config_schema import CONTACT_COUNTRY_PATTERN, CONTACT_FIELDS, ContactFormConfig
+from config_schema import (
+    CLAIM_EMAIL_PATTERN,
+    CONTACT_COUNTRY_PATTERN,
+    CONTACT_FIELDS,
+    ClaimFormConfig,
+    ContactFormConfig,
+)
 
 bp = Blueprint('setup', __name__)
 
@@ -129,6 +135,59 @@ def contact():
     # to validate, and the two carry identical values by construction.
     device_state.save_telemetry_contact(submitted)
     return jsonify({"success": True, "stored": not validated.is_empty})
+
+
+@bp.route("/set-up/claim", methods=["POST"])
+def claim():
+    """Record the address that owns this node, and optionally ask for a link.
+
+    One route for both surfaces, as with the contact details, so the two cannot
+    drift into storing different shapes.
+
+    This is the only box on the page whose value reaches a stranger if it is
+    wrong. The server mails the address a link, and clicking it binds this node
+    to the account behind it, so the shape is checked here rather than left for
+    the server to refuse thirty seconds later with nothing on screen to explain
+    it. Nothing verifies that the address exists, and nothing can.
+
+    `resend` is the owner pressing send again rather than a second way of
+    saving. It matters because re-offering an address the node already holds
+    changes nothing and mails nothing, so after a declined link the node sits
+    unclaimed with the address still on file and saving will never move it.
+    See device_state.save_telemetry_claim.
+
+    retina-telemetry re-reads the file rather than caching it, so this reaches
+    the server without a restart or any ordering between the two containers.
+    """
+    from app import device_state
+
+    data = request.get_json(silent=True)
+    if data is None:
+        return jsonify({"success": False, "error": "Missing JSON body"}), 400
+
+    email = _blank_to_none(data.get("email"))
+    resend = bool(data.get("resend"))
+
+    if email is None and resend:
+        # Nothing to send to. Answered against the box rather than the form so
+        # the page marks the input the owner has to fill in.
+        return jsonify({"success": False, "errors": {
+            "email": "Enter the address the link should go to.",
+        }}), 400
+
+    if email is not None and not re.match(CLAIM_EMAIL_PATTERN, email):
+        return jsonify({"success": False, "errors": {
+            "email": "That does not look like an email address.",
+        }}), 400
+
+    try:
+        ClaimFormConfig(email=email)
+    except ValidationError as e:
+        return jsonify({"success": False,
+                        "errors": ConfigManager.format_validation_errors(e, "claim")}), 400
+
+    stored = device_state.save_telemetry_claim(email, request_send=resend)
+    return jsonify({"success": True, "stored": bool(stored), "requested": resend})
 
 
 def _blank_to_none(value):

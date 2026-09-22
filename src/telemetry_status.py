@@ -131,6 +131,8 @@ class TelemetryStatus:
                         the container is not running
             last_report: how long ago it last wrote, in words, or None if the
                         timestamp was missing or unreadable
+            claim:      where the node's claim stands, as {state, email,
+                        undeliverable}, or None
         """
         document = self._load()
         if document is None:
@@ -156,6 +158,14 @@ class TelemetryStatus:
             # document we understand.
             "stale": written is None or datetime.now(timezone.utc) - written > STALE_AFTER,
             "last_report": _in_words(written),
+            # Where the claim stands, restated on every heartbeat, so this is
+            # never more than a beat behind. None on a node whose telemetry
+            # predates the claim (spec 1.4.0) and on one that has not yet had a
+            # response carrying it, which mean the same thing to a reader:
+            # nothing to show yet. Not defaulted to "unclaimed", because
+            # telling an owner nobody owns their node is a claim in itself and
+            # this document has not made it.
+            "claim": document.get("claim"),
         }
 
     # ── The document ───────────────────────────────────────────

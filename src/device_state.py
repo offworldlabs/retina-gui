@@ -79,6 +79,10 @@ class DeviceState:
         # separate file from the consent records on purpose: see
         # save_telemetry_contact.
         self.telemetry_contact_file = os.path.join(data_dir, "telemetry-contact.json")
+        # The address that owns the node. Separate from the contact document
+        # because they answer different questions with different consequences;
+        # see save_telemetry_claim.
+        self.telemetry_claim_file = os.path.join(data_dir, "telemetry-claim.json")
         self.dev_mode = dev_mode
 
     # ── State Queries ──────────────────────────────────────────
@@ -502,6 +506,77 @@ class DeviceState:
                 pass
             return
         self._write_json_atomically(self.telemetry_contact_file, populated)
+
+    # ── The address that owns the node ─────────────────────────
+
+    def get_telemetry_claim(self) -> dict:
+        """Read the stored claim document, or an empty dict if there is none.
+
+        Empty for the same reason as the contact details: "never given" and
+        "given, then cleared" mean the same thing to everyone downstream.
+        """
+        if not os.path.exists(self.telemetry_claim_file):
+            return {}
+        try:
+            with open(self.telemetry_claim_file) as f:
+                claim = json.load(f)
+        except (OSError, ValueError):
+            return {}
+        return claim if isinstance(claim, dict) else {}
+
+    def save_telemetry_claim(self, email, *, request_send=False) -> dict:
+        """Record the address that owns this node, or remove the record.
+
+        Kept apart from telemetry-contact.json on purpose, and nothing copies
+        between them. The contact email answers "whom do we ring"; this one
+        answers "who owns this node", and a wrong value here mails a stranger a
+        link that hands them somebody's node. See ClaimFormConfig.
+
+        ## What the two keys mean to retina-telemetry
+
+        `email` is state and `send_requested_at` is an event, and the split is
+        what lets this side stay ignorant of the wire.
+
+        A **changed** address is a local change, so retina-telemetry offers it
+        with `PUT /nodes/claim`, which is the call that mails a link. Nothing
+        here has to ask for that.
+
+        `send_requested_at` is bumped only when the owner presses send again.
+        It exists because re-offering an address the node already holds is
+        accepted, changes nothing and mails nothing, so after a declined link
+        the node sits at `unclaimed` with the address still on file and no
+        `PUT` will ever move it. `POST /nodes/claim/resend` is the only way
+        out, and this timestamp is how that ask reaches a service that binds no
+        ports and cannot be called.
+
+        Which of the two calls to make is deliberately not decided here.
+        retina-telemetry is the only side that knows where the claim actually
+        stands, and putting the rule in both places is how they drift.
+        """
+        email = (email or "").strip()
+        if not email:
+            # Clearing is a real outcome: an owner who empties the box wants
+            # the address gone rather than left behind. It does not unclaim the
+            # node, which only its owner can do from the dashboard.
+            try:
+                os.remove(self.telemetry_claim_file)
+            except OSError:
+                pass
+            return {}
+
+        document = {"email": email}
+        # Preserved rather than refreshed on an ordinary save, so that saving a
+        # typo fix does not read as "send it again".
+        previous = self.get_telemetry_claim().get("send_requested_at")
+        if request_send:
+            document["send_requested_at"] = datetime.now(timezone.utc).strftime(
+                "%Y-%m-%dT%H:%M:%SZ"
+            )
+        elif previous:
+            document["send_requested_at"] = previous
+
+        self._write_json_atomically(self.telemetry_claim_file, document)
+        return document
 
     def _write_json_atomically(self, path, payload):
         """Write JSON via a temp file and a rename.

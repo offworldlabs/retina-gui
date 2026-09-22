@@ -98,6 +98,7 @@
         <a href="#ssh">SSH access</a>
         <a href="#remote">Remote access</a>
         <a href="#contact">How we reach you</a>
+        <a href="#claim">Node claim</a>
         <a href="#cloud">Cloud services</a>
         <a href="#wizard">Setup wizard</a>
         <a href="#network">Network</a>
@@ -660,6 +661,100 @@
                     <div style="display:flex;align-items:center;gap:12px;">
                         <button type="button" class="ds-btn primary" id="contactSaveBtn">Save</button>
                         <span id="contactMsg" style="font-size:12.5px;display:none;"></span>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        {# ── Node claim ──
+           Who owns this node, which is a different question from How we reach you
+           above and carries a worse failure: the server mails this address a link,
+           and opening it binds the node to the account behind that address. Nothing
+           copies the contact email in here for exactly that reason.
+
+           The state is retina-telemetry's, because it is the only thing on the node
+           that talks to the server. Saving a changed address is what makes it offer
+           one; Send again exists because re-offering an address the node already
+           holds is accepted, changes nothing and mails nothing, which is the state a
+           declined link leaves behind. See device_state.save_telemetry_claim. #}
+        <section id="claim" class="cfg-section" style="margin-top:12px;">
+            <div class="cfg-section-head">
+                <h2>Node claim</h2>
+                <span class="desc">Links this node to your account, so it appears as yours.</span>
+            </div>
+            <div class="cfg-body">
+                <p style="font-size:13px;color:var(--ink-2);margin:0 0 16px;max-width:70ch;">
+                    We email the address below a link. Opening it claims this node for whoever
+                    owns that address, so use one you own. Nothing here changes how the node
+                    runs: an unclaimed node records and reports exactly as a claimed one does.
+                </p>
+
+                <div class="cfg-row">
+                    <div class="label-col">
+                        <label>Status</label>
+                        <span class="help">Reported by the node itself, about once a minute.</span>
+                    </div>
+                    <div>
+                        {% if not claim_reported %}
+                            <span style="color:var(--ink-3);">
+                                The telemetry service is not reporting, so we cannot say.
+                            </span>
+                        {% elif not claim_state %}
+                            <span style="color:var(--ink-3);">Not reported yet.</span>
+                        {% elif claim_state.state == 'owned' %}
+                            <span style="color:var(--ok);font-weight:600;">Claimed</span>
+                            <div class="help">
+                                Owned by {{ claim_state.email }}. To hand it to somebody else,
+                                release it from your dashboard: it cannot be done from here.
+                            </div>
+                        {% elif claim_state.state == 'pending' %}
+                            <span style="color:var(--warn);font-weight:600;">Link sent</span>
+                            <div class="help">Waiting for {{ claim_state.email }} to open it.</div>
+                        {% elif claim_state.state == 'unclaimed' %}
+                            <span style="color:var(--ink-3);font-weight:600;">Not claimed</span>
+                            {% if claim_state.email %}
+                            {# The state a declined or expired link leaves: the address is
+                               still on file, so saving it again does nothing at all and
+                               Send again is the only thing that produces another link. #}
+                            <div class="help">
+                                No link is waiting. Use Send again for another one to
+                                {{ claim_state.email }}.
+                            </div>
+                            {% endif %}
+                        {% else %}
+                            <span style="font-weight:600;">{{ claim_state.state }}</span>
+                        {% endif %}
+
+                        {% if claim_state and claim_state.undeliverable %}
+                        <div style="color:var(--danger);font-size:12.5px;margin-top:6px;max-width:60ch;">
+                            The last email bounced, so that address cannot be reached. Correct it
+                            below and save. Sending again will not help until it changes.
+                        </div>
+                        {% endif %}
+                    </div>
+                </div>
+
+                <div class="cfg-row">
+                    <div class="label-col">
+                        <label for="claimEmail">Email</label>
+                        <span class="help">The address that will own this node.</span>
+                    </div>
+                    <div>
+                        <input type="email" class="ds-input" id="claimEmail" value="{{ claim.get('email', '') }}" maxlength="255" autocomplete="email" style="width:100%;">
+                    </div>
+                </div>
+
+                <div class="cfg-row">
+                    <div class="label-col">
+                        <span class="help">
+                            Saving a new address sends a link to it. Send again is for a link
+                            that never arrived, or one that was turned down.
+                        </span>
+                    </div>
+                    <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
+                        <button type="button" class="ds-btn primary" id="claimSaveBtn">Save</button>
+                        <button type="button" class="ds-btn" id="claimResendBtn">Send again</button>
+                        <span id="claimMsg" style="font-size:12.5px;display:none;"></span>
                     </div>
                 </div>
             </div>
@@ -2312,6 +2407,70 @@ if (discardBtn) discardBtn.addEventListener('click', () => location.reload());
             saveBtn.disabled = false;
             say('Could not save. Check the connection and try again.', true);
         });
+    });
+})();
+</script>
+
+{# ── Node claim ── #}
+<script>
+(function () {
+    var saveBtn   = document.getElementById('claimSaveBtn');
+    var resendBtn = document.getElementById('claimResendBtn');
+    if (!saveBtn || !resendBtn) return;
+
+    var box  = document.getElementById('claimEmail');
+    var msg  = document.getElementById('claimMsg');
+    var csrf = document.querySelector('meta[name="csrf-token"]').content;
+
+    function say(text, bad) {
+        msg.textContent = text;
+        msg.style.color = bad ? 'var(--danger)' : 'var(--ink-3)';
+        msg.style.display = text ? 'inline' : 'none';
+    }
+
+    // `resend` is the whole difference between the two buttons. Saving a
+    // changed address is what sends the first link; sending again is a
+    // separate ask because re-offering an address the node already holds
+    // mails nothing, which is the state a declined link leaves behind.
+    function submit(button, resend, done) {
+        saveBtn.disabled = true;
+        resendBtn.disabled = true;
+        say('');
+        fetch('/set-up/claim', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json', 'X-CSRFToken': csrf},
+            body: JSON.stringify({email: box.value, resend: resend})
+        })
+        .then(function (r) { return r.json(); })
+        .then(function (data) {
+            saveBtn.disabled = false;
+            resendBtn.disabled = false;
+            if (!data.success) {
+                var errors = data.errors || {};
+                var first = Object.keys(errors)[0];
+                say(first ? errors[first] : (data.error || 'Could not save.'), true);
+                return;
+            }
+            say(done(data));
+            setTimeout(function () { say(''); }, 6000);
+        })
+        .catch(function () {
+            saveBtn.disabled = false;
+            resendBtn.disabled = false;
+            say('Could not save. Check the connection and try again.', true);
+        });
+    }
+
+    saveBtn.addEventListener('click', function () {
+        submit(saveBtn, false, function (data) {
+            // Nothing is claimed from here: this records the address, and the
+            // node offers it to the server on its next pass, within a minute.
+            return data.stored ? 'Saved. The link is on its way.' : 'Address removed';
+        });
+    });
+
+    resendBtn.addEventListener('click', function () {
+        submit(resendBtn, true, function () { return 'Asked for another link.'; });
     });
 })();
 </script>
