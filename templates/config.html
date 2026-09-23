@@ -673,10 +673,11 @@
            copies the contact email in here for exactly that reason.
 
            The state is retina-telemetry's, because it is the only thing on the node
-           that talks to the server. Saving a changed address is what makes it offer
-           one; Send again exists because re-offering an address the node already
-           holds is accepted, changes nothing and mails nothing, which is the state a
-           declined link leaves behind. See device_state.save_telemetry_claim. #}
+           that talks to the server. One button, and every press is an ask for a
+           link: retina-telemetry decides whether that is an offer or a resend. A
+           separate Save could store an address the node already held without
+           anyone seeing the press, which after a release mailed nothing. See
+           device_state.save_telemetry_claim. #}
         <section id="claim" class="cfg-section" style="margin-top:12px;">
             <div class="cfg-section-head">
                 <h2>Node claim</h2>
@@ -714,10 +715,9 @@
                             <span style="color:var(--ink-3);font-weight:600;">Not claimed</span>
                             {% if claim_state.email %}
                             {# The state a declined or expired link leaves: the address is
-                               still on file, so saving it again does nothing at all and
-                               Send again is the only thing that produces another link. #}
+                               still on file and nothing more will arrive unless asked. #}
                             <div class="help">
-                                No link is waiting. Use Send again for another one to
+                                No link is waiting. Press Send link for another one to
                                 {{ claim_state.email }}.
                             </div>
                             {% endif %}
@@ -728,7 +728,7 @@
                         {% if claim_state and claim_state.undeliverable %}
                         <div style="color:var(--danger);font-size:12.5px;margin-top:6px;max-width:60ch;">
                             The last email bounced, so that address cannot be reached. Correct it
-                            below and save. Sending again will not help until it changes.
+                            below and send. Sending to the same address again will not help.
                         </div>
                         {% endif %}
                     </div>
@@ -747,13 +747,19 @@
                 <div class="cfg-row">
                     <div class="label-col">
                         <span class="help">
-                            Saving a new address sends a link to it. Send again is for a link
-                            that never arrived, or one that was turned down.
+                            {% if claim_state and claim_state.state == 'owned' %}
+                            This node is claimed. Release it from your dashboard first.
+                            {% else %}
+                            Emails a link to the address above. Press it again if a link never
+                            arrived or was turned down. Empty the box and send to remove the address.
+                            {% endif %}
                         </span>
                     </div>
                     <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
-                        <button type="button" class="ds-btn primary" id="claimSaveBtn">Save</button>
-                        <button type="button" class="ds-btn" id="claimResendBtn">Send again</button>
+                        {# Disabled while owned: a resend is refused there, and a new
+                           address would be offering somebody else's node. #}
+                        <button type="button" class="ds-btn primary" id="claimSendBtn"
+                                {% if claim_state and claim_state.state == 'owned' %}disabled{% endif %}>Send link</button>
                         <span id="claimMsg" style="font-size:12.5px;display:none;"></span>
                     </div>
                 </div>
@@ -2414,9 +2420,8 @@ if (discardBtn) discardBtn.addEventListener('click', () => location.reload());
 {# ── Node claim ── #}
 <script>
 (function () {
-    var saveBtn   = document.getElementById('claimSaveBtn');
-    var resendBtn = document.getElementById('claimResendBtn');
-    if (!saveBtn || !resendBtn) return;
+    var sendBtn = document.getElementById('claimSendBtn');
+    if (!sendBtn) return;
 
     var box  = document.getElementById('claimEmail');
     var msg  = document.getElementById('claimMsg');
@@ -2428,49 +2433,33 @@ if (discardBtn) discardBtn.addEventListener('click', () => location.reload());
         msg.style.display = text ? 'inline' : 'none';
     }
 
-    // `resend` is the whole difference between the two buttons. Saving a
-    // changed address is what sends the first link; sending again is a
-    // separate ask because re-offering an address the node already holds
-    // mails nothing, which is the state a declined link leaves behind.
-    function submit(button, resend, done) {
-        saveBtn.disabled = true;
-        resendBtn.disabled = true;
+    // Every press is an ask for a link. Nothing is claimed from here: the
+    // node reads the file and asks the server on its next pass, within a
+    // minute, choosing between an offer and a resend itself.
+    sendBtn.addEventListener('click', function () {
+        sendBtn.disabled = true;
         say('');
         fetch('/set-up/claim', {
             method: 'POST',
             headers: {'Content-Type': 'application/json', 'X-CSRFToken': csrf},
-            body: JSON.stringify({email: box.value, resend: resend})
+            body: JSON.stringify({email: box.value})
         })
         .then(function (r) { return r.json(); })
         .then(function (data) {
-            saveBtn.disabled = false;
-            resendBtn.disabled = false;
+            sendBtn.disabled = false;
             if (!data.success) {
                 var errors = data.errors || {};
                 var first = Object.keys(errors)[0];
-                say(first ? errors[first] : (data.error || 'Could not save.'), true);
+                say(first ? errors[first] : (data.error || 'Could not send.'), true);
                 return;
             }
-            say(done(data));
+            say(data.stored ? 'The link is on its way.' : 'Address removed');
             setTimeout(function () { say(''); }, 6000);
         })
         .catch(function () {
-            saveBtn.disabled = false;
-            resendBtn.disabled = false;
-            say('Could not save. Check the connection and try again.', true);
+            sendBtn.disabled = false;
+            say('Could not send. Check the connection and try again.', true);
         });
-    }
-
-    saveBtn.addEventListener('click', function () {
-        submit(saveBtn, false, function (data) {
-            // Nothing is claimed from here: this records the address, and the
-            // node offers it to the server on its next pass, within a minute.
-            return data.stored ? 'Saved. The link is on its way.' : 'Address removed';
-        });
-    });
-
-    resendBtn.addEventListener('click', function () {
-        submit(resendBtn, true, function () { return 'Asked for another link.'; });
     });
 })();
 </script>

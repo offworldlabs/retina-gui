@@ -5,11 +5,10 @@ details and carries a worse failure: the server mails this address a link, and
 opening it binds the node to the account behind it. A wrong value here mails a
 stranger a link that hands them somebody's node.
 
-Most of what is worth pinning is the difference between saving an address and
-asking for another link, because the two are not interchangeable and the reason
-is not obvious. Re-offering an address the node already holds is accepted,
-changes nothing and mails nothing, so after a declined link the node sits
-unclaimed with the address still on file and no amount of saving will move it.
+Most of what is worth pinning is that every submission is an ask for a link.
+There used to be a Save beside Send again, and it was a trap: saving an address
+the node already held wrote an identical file, so retina-telemetry could not see
+the press and nothing was mailed. A released node showed its owner exactly that.
 """
 import json
 
@@ -37,13 +36,13 @@ class TestStoringTheAddress:
         assert json.loads(post(app_client, {"email": ADDRESS}).data)['success'] is True
         assert stored(app_module)['email'] == ADDRESS
 
-    def test_saving_does_not_ask_for_a_link(self, app_client):
-        """A changed address is what makes retina-telemetry offer it, and that
-        offer is the call that mails. Saving is not a second way to ask."""
+    def test_sending_asks_for_a_link(self, app_client):
+        """The timestamp is how the ask reaches a service that binds no ports
+        and cannot be called."""
         import app as app_module
         post(app_client, {"email": ADDRESS})
 
-        assert 'send_requested_at' not in stored(app_module)
+        assert stored(app_module)['send_requested_at'].endswith('Z')
 
     def test_the_address_is_trimmed(self, app_client):
         import app as app_module
@@ -74,35 +73,20 @@ class TestStoringTheAddress:
 
 class TestAskingForAnotherLink:
 
-    def test_a_resend_stamps_the_document(self, app_client):
-        """The timestamp is how the ask reaches a service that binds no ports
-        and cannot be called."""
+    def test_the_same_address_again_is_a_fresh_ask(self, app_client):
+        """The case the old Save could not express. Unchanged address, and the
+        press still has to reach the node, so the stamp moves and the file is
+        no longer identical to the one before it."""
         import app as app_module
         post(app_client, {"email": ADDRESS})
-
-        assert json.loads(post(app_client, {"email": ADDRESS, "resend": True}).data)['requested']
-        assert stored(app_module)['send_requested_at'].endswith('Z')
-
-    def test_an_ordinary_save_keeps_the_last_ask(self, app_client):
-        """Saving a typo fix must not read as a fresh ask, and must not lose
-        the record of the one before it either."""
-        import app as app_module
-        post(app_client, {"email": ADDRESS, "resend": True})
-        asked = stored(app_module)['send_requested_at']
+        path = app_module.device_state.telemetry_claim_file
+        with open(path, 'w') as f:
+            json.dump({"email": ADDRESS, "send_requested_at": "2026-01-01T00:00:00Z"}, f)
 
         post(app_client, {"email": ADDRESS})
 
-        assert stored(app_module)['send_requested_at'] == asked
-
-    def test_a_resend_with_no_address_is_refused(self, app_client):
-        """There is nothing to send to, and the complaint is attached to the
-        box so the page can mark it."""
-        response = post(app_client, {"email": "", "resend": True})
-        body = json.loads(response.data)
-
-        assert response.status_code == 400
-        assert body['success'] is False
-        assert 'email' in body['errors']
+        assert stored(app_module)['send_requested_at'] != "2026-01-01T00:00:00Z"
+        assert stored(app_module)['email'] == ADDRESS
 
 
 class TestRefusingABadAddress:
@@ -170,15 +154,34 @@ class TestWhatTheSectionShows:
         assert 'Claimed' in page
         assert ADDRESS in page
 
-    def test_a_declined_link_points_at_send_again(self, app_client, monkeypatch):
-        """The trap the live run found. A decline leaves the address on file,
-        so saving it again is a no-op that mails nothing, and Send again is the
-        only thing that produces another link. The page has to say so."""
+    def test_a_declined_link_says_how_to_get_another(self, app_client, monkeypatch):
+        """A decline leaves the address on file and nothing more arrives
+        unless asked, so the page has to say which button asks."""
         page = self._with_claim(
             app_client, monkeypatch,
             {'state': 'unclaimed', 'email': ADDRESS, 'undeliverable': False})
 
         assert 'No link is waiting' in page
+        assert 'Send link' in page
+
+    def test_an_owned_node_cannot_be_sent_a_link(self, app_client, monkeypatch):
+        """A resend is refused on an owned node, and a new address would be
+        offering somebody else's node. Releasing is the dashboard's."""
+        page = self._with_claim(
+            app_client, monkeypatch,
+            {'state': 'owned', 'email': ADDRESS, 'undeliverable': False})
+
+        button = page[page.index('id="claimSendBtn"'):]
+        assert button[:button.index('>')].rstrip().endswith('disabled')
+        assert 'Release it from your dashboard' in page
+
+    def test_an_unclaimed_node_can_be_sent_a_link(self, app_client, monkeypatch):
+        page = self._with_claim(
+            app_client, monkeypatch,
+            {'state': 'unclaimed', 'email': None, 'undeliverable': False})
+
+        button = page[page.index('id="claimSendBtn"'):]
+        assert 'disabled' not in button[:button.index('>')]
 
     def test_a_bounced_address_is_called_out(self, app_client, monkeypatch):
         """Sending again cannot help until the address changes, so an owner
