@@ -515,6 +515,26 @@ h1, h2, h3, h4, h5, h6 {
 .ds-pill-dot { width: 8px; height: 8px; border-radius: 999px; }
 
 /* ══════════════════════════════════════════════
+   BETA MARKERS
+   ══════════════════════════════════════════════
+   The tracker ships before it is finished. A scope full of coloured tracks
+   reads as a finished instrument unless something says otherwise, so the
+   chip rides both the page heading and the link that leads there. Amber,
+   not red: unfinished is not broken. */
+.beta-chip {
+    display: inline-block;
+    padding: 1px 7px;
+    border-radius: var(--r-pill);
+    font-family: var(--font-mono);
+    font-size: 9.5px; font-weight: 600;
+    letter-spacing: 0.08em; text-transform: uppercase;
+    white-space: nowrap;
+    background: var(--warn-soft);
+    color: oklch(0.50 0.11 75);
+    border: 1px solid oklch(0.87 0.06 75);
+}
+
+/* ══════════════════════════════════════════════
    STEP INDICATOR (wizard)
    ══════════════════════════════════════════════ */
 .ds-steps { display: inline-flex; align-items: center; gap: 6px; }

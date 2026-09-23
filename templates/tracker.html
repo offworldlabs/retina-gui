@@ -6,7 +6,9 @@
    pixel: a delay axis spanning 320 km and a rail whose rows truncate. Nothing
    in base.html constrains the content block, so the cap was only ever here. */
 .trk-wrap { max-width: none; margin: 0; padding: 18px 20px 28px; }
-.trk-head { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; margin-bottom: 14px; }
+/* Centred, not baseline-aligned: a 9.5px chip sitting on a 25.6px baseline
+   hangs below the middle of the word beside it. */
+.trk-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 14px; }
 .trk-head h1 { margin: 0; font-size: 1.6rem; }
 
 .trk-panel { border: 1px solid var(--color-border); border-radius: var(--radius); background: var(--color-card); overflow: hidden; }
@@ -125,7 +127,10 @@
 
 {% block content %}
 <div class="trk-wrap">
-  <div class="trk-head"><h1>Tracker</h1></div>
+  <div class="trk-head">
+    <h1>Tracker</h1>
+    <span class="beta-chip">Beta</span>
+  </div>
 
   <div class="trk-panel">
     <div class="trk-bar">
