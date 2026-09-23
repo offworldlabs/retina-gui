@@ -524,34 +524,36 @@ class DeviceState:
             return {}
         return claim if isinstance(claim, dict) else {}
 
-    def save_telemetry_claim(self, email, *, request_send=False) -> dict:
-        """Record the address that owns this node, or remove the record.
+    def save_telemetry_claim(self, email) -> dict:
+        """Ask for a claim link to be sent to this address, or remove the record.
 
         Kept apart from telemetry-contact.json on purpose, and nothing copies
         between them. The contact email answers "whom do we ring"; this one
         answers "who owns this node", and a wrong value here mails a stranger a
         link that hands them somebody's node. See ClaimFormConfig.
 
-        ## What the two keys mean to retina-telemetry
+        ## Every write is an ask
 
-        `email` is state and `send_requested_at` is an event, and the split is
-        what lets this side stay ignorant of the wire.
+        The page has one button, and pressing it means "send a link to this
+        address". So every write stamps `send_requested_at` as well as storing
+        `email`, and one press produces one email, whatever state the claim is
+        in. There used to be a separate Save, and it was a trap: saving an
+        address the node already held wrote an identical file, so the press
+        could not be seen and nothing was mailed. That is what a released node
+        showed its owner.
 
-        A **changed** address is a local change, so retina-telemetry offers it
-        with `PUT /nodes/claim`, which is the call that mails a link. Nothing
-        here has to ask for that.
+        `email` is state and `send_requested_at` is the event, because
+        retina-telemetry needs both to choose its call. A changed address is
+        `PUT /nodes/claim`, which mails, and the stamp beside it counts as
+        answered by it. The same address is `POST /nodes/claim/resend`, which
+        is the only way out after a declined link, since re-offering an address
+        the node already holds mails nothing. The same address on a node whose
+        owner released it is a `PUT` again, because a release clears the
+        address and a resend would have nothing on file to mail.
 
-        `send_requested_at` is bumped only when the owner presses send again.
-        It exists because re-offering an address the node already holds is
-        accepted, changes nothing and mails nothing, so after a declined link
-        the node sits at `unclaimed` with the address still on file and no
-        `PUT` will ever move it. `POST /nodes/claim/resend` is the only way
-        out, and this timestamp is how that ask reaches a service that binds no
-        ports and cannot be called.
-
-        Which of the two calls to make is deliberately not decided here.
-        retina-telemetry is the only side that knows where the claim actually
-        stands, and putting the rule in both places is how they drift.
+        Which call to make is deliberately not decided here. retina-telemetry
+        is the only side that knows where the claim actually stands, and
+        putting the rule in both places is how they drift.
         """
         email = (email or "").strip()
         if not email:
@@ -564,17 +566,10 @@ class DeviceState:
                 pass
             return {}
 
-        document = {"email": email}
-        # Preserved rather than refreshed on an ordinary save, so that saving a
-        # typo fix does not read as "send it again".
-        previous = self.get_telemetry_claim().get("send_requested_at")
-        if request_send:
-            document["send_requested_at"] = datetime.now(timezone.utc).strftime(
-                "%Y-%m-%dT%H:%M:%SZ"
-            )
-        elif previous:
-            document["send_requested_at"] = previous
-
+        document = {
+            "email": email,
+            "send_requested_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        }
         self._write_json_atomically(self.telemetry_claim_file, document)
         return document
 
