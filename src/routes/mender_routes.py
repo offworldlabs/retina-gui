@@ -163,22 +163,22 @@ def install():
 
         def _recover():
             # The new artifact failed to apply. If something was already
-            # running, bring the previous (still-on-disk) compose stack back
+            # running, make sure the previous (still-on-disk) compose stack is
             # up rather than leaving the device with no radar containers at
-            # all — the failed install never committed, so RETINA_NODE_PATH
-            # still points at the old manifests.
-            #
-            # Mode stays 'spectrum' (watchdog silenced) until the containers
-            # are actually back up — flipping to 'radar' first would let the
-            # cron watchdog's own docker compose calls race these ones.
+            # all. The Update Module's rollback normally does this already;
+            # enforce_radar_mode is idempotent and takes the restart lock.
             if already_installed:
                 enforce_radar_mode(RETINA_NODE_PATH)
             _write_mode('radar')
 
+        # The Update Module owns stopping the running stack. owl-os's fork of
+        # it loads the new images first, stops the stack only for the ~11 s
+        # swap, and holds the restart lock throughout, which keeps the RSPduo
+        # watchdog out. This used to `docker compose down` first and set mode
+        # to spectrum to silence the watchdog, which made every GUI install a
+        # full outage for the whole image load. retina-gui ships inside the
+        # owl-os image, so this never runs alongside the unforked module.
         try:
-            # Silence the watchdog before touching containers so it cannot see
-            # blah2 go down and trigger a spurious radar stack restart mid-install.
-            _write_mode('spectrum')
             try:
                 subprocess.run(
                     ["mender-update", "rollback"],
@@ -186,24 +186,6 @@ def install():
                 )
             except Exception:
                 pass
-            if already_installed:
-                # The lock is taken around this `down` only, not the whole
-                # install: an install runs for minutes and _recover() below
-                # calls enforce_radar_mode, which takes the lock itself —
-                # holding it across all of that would deadlock against
-                # ourselves, since flock is not re-entrant (see restart_lock).
-                # Long timeout because abandoning the down and installing on
-                # top of running containers is worse than waiting.
-                from app import DATA_DIR
-                from restart_lock import BACKGROUND_TIMEOUT_SECONDS, restart_lock
-                try:
-                    with restart_lock(DATA_DIR, timeout=BACKGROUND_TIMEOUT_SECONDS):
-                        subprocess.run(
-                            ["docker", "compose", "-p", "retina-node", "down"],
-                            capture_output=True, timeout=60
-                        )
-                except Exception as e:
-                    app.logger.warning(f"Pre-install docker down failed (continuing): {e}")
             success, error = mender.install_from_url(download_url)
             if not success:
                 app.logger.error(f"Background install failed: {error}")
@@ -213,7 +195,7 @@ def install():
                 deadline = time.time() + 120
                 while time.time() < deadline:
                     if get_retina_node_version_from_docker():
-                        _write_mode('radar')  # re-enable watchdog now that containers are confirmed up
+                        _write_mode('radar')
                         break
                     time.sleep(3)
                 else:
