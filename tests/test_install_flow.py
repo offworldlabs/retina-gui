@@ -268,3 +268,60 @@ class TestInstallBlockedDuringCalibration:
                                        content_type='application/json')
         assert response.status_code == 409
         assert 'calibrat' in json.loads(response.data)['error'].lower()
+
+
+class TestGuiInstallLeavesTheStackToTheUpdateModule:
+    """The GUI install used to `docker compose down` the running stack and set
+    mode to spectrum before handing over to mender-update. owl-os's fork of the
+    docker-compose Update Module loads the new images first, stops the stack
+    only for the swap, and holds the restart lock itself, so the old pre-install
+    `down` only turned every GUI install into a full outage for the whole image
+    load."""
+
+    def _install(self, app_client, installed_version):
+        import app as app_module
+        import mender as mender_module
+        import routes.mender_routes as routes_module
+        import routes.mode as mode_module
+
+        class InlineThread:
+            def __init__(self, target, args=(), daemon=None):
+                self.target, self.args = target, args
+
+            def start(self):
+                self.target(*self.args)
+
+        modes = []
+        run = MagicMock()
+        ds = app_module.device_state
+        with patch.object(app_module, 'DEV_MODE', False), \
+                patch.object(ds, 'ensure_cloud_services_enabled', return_value=(True, None)), \
+                patch.object(ds, 'can_start_install', return_value=(True, None)), \
+                patch.object(ds, 'acquire_install_lock', return_value=True), \
+                patch.object(ds, 'release_install_lock'), \
+                patch.object(ds, 'update_install_stage'), \
+                patch.object(app_module.mender, 'list_artifacts', return_value=([{'id': 'a1'}], None)), \
+                patch.object(app_module.mender, 'get_download_url', return_value=('https://r2/a1', None)), \
+                patch.object(app_module.mender, 'install_from_url', return_value=(True, None)), \
+                patch.object(mender_module, 'get_retina_node_version_from_docker', return_value=installed_version), \
+                patch.object(mode_module, '_write_mode', side_effect=modes.append), \
+                patch.object(routes_module.threading, 'Thread', InlineThread), \
+                patch.object(routes_module.subprocess, 'run', run):
+            response = app_client.post('/mender/install', data=json.dumps({'version': 'v0.4.6.0'}),
+                                       content_type='application/json')
+        return response, run, modes
+
+    def test_an_installed_node_is_not_taken_down_before_the_install(self, app_client):
+        response, run, modes = self._install(app_client, installed_version='v0.4.5.0')
+
+        assert json.loads(response.data)['success'] is True
+        commands = [c.args[0] for c in run.call_args_list]
+        assert not any(cmd[:2] == ['docker', 'compose'] and 'down' in cmd for cmd in commands)
+        assert 'spectrum' not in modes
+        assert modes[-1] == 'radar'
+
+    def test_a_first_install_does_not_switch_to_spectrum(self, app_client):
+        response, run, modes = self._install(app_client, installed_version=None)
+
+        assert json.loads(response.data)['success'] is True
+        assert 'spectrum' not in modes
