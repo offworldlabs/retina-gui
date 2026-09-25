@@ -1,3 +1,4 @@
+{% from "setup/_while_you_wait.html" import while_you_wait %}
 <!-- Step 3: Packages -->
 <div data-step="radar" class="step-panel" style="display:none;">
     <div class="wiz-title-row">
@@ -32,4 +33,10 @@
     </div>
 
     <p id="radarStatus" style="color:var(--ink-3);font-size:13.5px;margin:16px 0 0;"></p>
+
+    {# Same checklist as the OS update step. No duration passed: the package
+       card above already carries one ("~600 MB · 5–10 minutes") from
+       formatSize, and a second figure a few lines below it is the kind of
+       thing that later disagrees with the first. #}
+    {{ while_you_wait('radarInstallWait', none) }}
 </div>

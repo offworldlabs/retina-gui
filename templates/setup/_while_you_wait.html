@@ -1,0 +1,28 @@
+{# The wait shown on any wizard step that makes the owner sit and watch a
+   progress bar: the OS update and the RETINA package install.
+
+   One copy, two callers. The checklist is the same physical check in both
+   places, and holding it twice would let a reworded bullet drift between the
+   step that gets it and the step that does not.
+
+   `block_id` is what setup.js reveals and hides. Both blocks ship hidden and
+   are shown only once that step knows a wait is actually coming, so a node
+   with nothing to do is never told to set aside half an hour. #}
+{% macro while_you_wait(block_id, duration) %}
+<div id="{{ block_id }}" style="display:none;">
+    {% if duration %}
+    <p style="color:var(--ink-2);font-size:13.5px;margin:10px 0 0;">{{ duration }}</p>
+    {% endif %}
+
+    <div style="margin-top:16px;padding:14px 16px;border:1px solid var(--line);border-radius:var(--r-md);">
+        <div style="font-weight:600;font-size:14px;">While You Wait</div>
+        <p style="font-size:13px;color:var(--ink-2);margin:8px 0 6px;">Reconfirm:</p>
+        <ul style="font-size:13px;color:var(--ink-2);margin:0;padding-left:20px;line-height:1.7;">
+            <li>Reference antenna is connected to input 1</li>
+            <li>Surveillance antenna is connected to input 2</li>
+            <li>Your antenna cables are &lt;70ft (will confirm with testing a recommended maximum distance)</li>
+            <li>Your system has been properly grounded in case of lightning strike per local AHJ requirements</li>
+        </ul>
+    </div>
+</div>
+{% endmacro %}
