@@ -544,3 +544,286 @@ class TestSetupWizardLocationStep:
         html = resp.data.decode()
         assert 'leaflet.css' in html
         assert 'leaflet.js' in html
+
+
+SAMPLE_GEOCODE_RESPONSE = {
+    "query": "1600 Pennsylvania Ave NW, Washington, DC",
+    "latitude": 38.898699,
+    "longitude": -77.035188,
+    "matched_address": "1600 PENNSYLVANIA AVE NW, WASHINGTON, DC, 20500",
+    "provider": "census",
+    "precision": "street",
+}
+
+
+def _upstream(status, payload):
+    """A stand-in for the tower-finder response, honest about raise_for_status."""
+    import requests
+
+    resp = MagicMock()
+    resp.status_code = status
+    resp.json.return_value = payload
+    if status >= 400:
+        resp.raise_for_status.side_effect = requests.HTTPError(response=resp)
+    else:
+        resp.raise_for_status.return_value = None
+    return resp
+
+
+class TestGeocode:
+    """Tests for POST /towers/geocode, the address lookup proxy."""
+
+    @patch('routes.towers.http_requests.post')
+    def test_geocode_passes_through_match(self, mock_post, app_client):
+        """A match is handed to the page as the service spelled it."""
+        mock_post.return_value = _upstream(200, SAMPLE_GEOCODE_RESPONSE)
+
+        resp = app_client.post('/towers/geocode',
+                               json={'query': '1600 Pennsylvania Ave NW'})
+        assert resp.status_code == 200
+        data = json.loads(resp.data)
+        assert data['latitude'] == 38.898699
+        assert data['longitude'] == -77.035188
+        assert data['precision'] == 'street'
+        assert data['matched_address'].startswith('1600 PENNSYLVANIA AVE NW')
+
+    @patch('routes.towers.http_requests.post')
+    def test_geocode_strips_before_forwarding(self, mock_post, app_client):
+        """Padding is the caller's, not the geocoder's problem."""
+        mock_post.return_value = _upstream(200, SAMPLE_GEOCODE_RESPONSE)
+
+        app_client.post('/towers/geocode', json={'query': '  Seattle, WA  '})
+        assert mock_post.call_args.kwargs['json'] == {'query': 'Seattle, WA'}
+
+    @patch('routes.towers.http_requests.post')
+    def test_geocode_rejects_empty_query_without_asking_upstream(self, mock_post, app_client):
+        """Whitespace is empty, and empty never leaves the node."""
+        resp = app_client.post('/towers/geocode', json={'query': '   '})
+        assert resp.status_code == 400
+        mock_post.assert_not_called()
+
+    @patch('routes.towers.http_requests.post')
+    def test_geocode_rejects_over_long_query_without_asking_upstream(self, mock_post, app_client):
+        """Refused here with a sentence rather than upstream with a 422."""
+        resp = app_client.post('/towers/geocode', json={'query': 'x' * 201})
+        assert resp.status_code == 400
+        assert 'too long' in json.loads(resp.data)['error'].lower()
+        mock_post.assert_not_called()
+
+    @patch('routes.towers.http_requests.post')
+    def test_geocode_no_match_stays_404(self, mock_post, app_client):
+        """"Nobody knows that address" must not arrive as "try again"."""
+        mock_post.return_value = _upstream(404, {'detail': 'No match for that address'})
+
+        resp = app_client.post('/towers/geocode', json={'query': 'qqqzzz'})
+        assert resp.status_code == 404
+        assert json.loads(resp.data)['error'] == 'No match for that address'
+
+    @patch('routes.towers.http_requests.post')
+    def test_geocode_unavailable_stays_503(self, mock_post, app_client):
+        """A provider outage is retryable, and says so with its own status."""
+        mock_post.return_value = _upstream(
+            503, {'detail': 'Address lookup is unavailable right now'})
+
+        resp = app_client.post('/towers/geocode', json={'query': 'Seattle, WA'})
+        assert resp.status_code == 503
+        assert 'unavailable' in json.loads(resp.data)['error'].lower()
+
+    @patch('routes.towers.http_requests.post')
+    def test_geocode_ignores_non_string_detail(self, mock_post, app_client):
+        """FastAPI puts a list of field errors in `detail` for a 422-shaped
+        failure. That is not a sentence to show an owner."""
+        mock_post.return_value = _upstream(
+            404, {'detail': [{'loc': ['body', 'query'], 'msg': 'too short'}]})
+
+        resp = app_client.post('/towers/geocode', json={'query': 'x'})
+        assert resp.status_code == 404
+        assert json.loads(resp.data)['error'] == 'No match for that address'
+
+    @patch('routes.towers.http_requests.post')
+    def test_geocode_timeout(self, mock_post, app_client):
+        """Returns 504 on timeout."""
+        import requests
+        mock_post.side_effect = requests.Timeout()
+
+        resp = app_client.post('/towers/geocode', json={'query': 'Seattle, WA'})
+        assert resp.status_code == 504
+        assert 'timed out' in json.loads(resp.data)['error'].lower()
+
+    @patch('routes.towers.http_requests.post')
+    def test_geocode_unreachable(self, mock_post, app_client):
+        """Returns 502 when the service cannot be reached at all."""
+        import requests
+        mock_post.side_effect = requests.ConnectionError()
+
+        resp = app_client.post('/towers/geocode', json={'query': 'Seattle, WA'})
+        assert resp.status_code == 502
+
+    @patch('routes.towers.http_requests.post')
+    def test_geocode_never_logs_the_address(self, mock_post, app_client, caplog):
+        """An address typed into this box is the most personal thing the route
+        handles. The upstream keeps it out of its logs; so must we."""
+        import logging
+
+        import requests
+        mock_post.side_effect = requests.ConnectionError()
+
+        secret = '221B Baker Street, Marylebone'
+        with caplog.at_level(logging.DEBUG):
+            app_client.post('/towers/geocode', json={'query': secret})
+        assert secret not in caplog.text
+        assert 'Baker Street' not in caplog.text
+
+
+class TestElevation:
+    """Tests for GET /towers/elevation, the altitude prefill proxy."""
+
+    @patch('routes.towers.http_requests.get')
+    def test_elevation_passes_through(self, mock_get, app_client):
+        """The page reads elevation_m straight off this."""
+        mock_get.return_value = _upstream(
+            200, {'latitude': 38.8977, 'longitude': -77.0365, 'elevation_m': 20.0})
+
+        resp = app_client.get('/towers/elevation?lat=38.8977&lon=-77.0365')
+        assert resp.status_code == 200
+        assert json.loads(resp.data)['elevation_m'] == 20.0
+
+    @patch('routes.towers.http_requests.get')
+    def test_elevation_requires_coordinates(self, mock_get, app_client):
+        """Nothing to look up without both."""
+        assert app_client.get('/towers/elevation?lat=38.8977').status_code == 400
+        assert app_client.get('/towers/elevation').status_code == 400
+        mock_get.assert_not_called()
+
+    @patch('routes.towers.http_requests.get')
+    def test_elevation_rejects_out_of_range(self, mock_get, app_client):
+        """Refused here rather than spent on a 422 upstream."""
+        assert app_client.get('/towers/elevation?lat=999&lon=0').status_code == 400
+        assert app_client.get('/towers/elevation?lat=0&lon=999').status_code == 400
+        mock_get.assert_not_called()
+
+    @patch('routes.towers.http_requests.get')
+    def test_elevation_rejects_non_numeric(self, mock_get, app_client):
+        """Returns 400, not a 500, for a coordinate that is not a number."""
+        assert app_client.get('/towers/elevation?lat=abc&lon=0').status_code == 400
+        mock_get.assert_not_called()
+
+    @patch('routes.towers.http_requests.get')
+    def test_elevation_unreachable_is_502(self, mock_get, app_client):
+        """The page swallows this; it must still be a clean answer."""
+        import requests
+        mock_get.side_effect = requests.ConnectionError()
+
+        resp = app_client.get('/towers/elevation?lat=38.8977&lon=-77.0365')
+        assert resp.status_code == 502
+
+
+class TestSetupWizardAddressLookup:
+    """The address row on the Location step, and the promises it must keep."""
+
+    @staticmethod
+    def _setup_js():
+        with open(os.path.join(os.path.dirname(__file__), '..',
+                               'static', 'setup.js')) as f:
+            return f.read()
+
+    @staticmethod
+    def _location_panel(app_client):
+        html = app_client.get('/set-up').data.decode()
+        start = html.index('data-step="location"')
+        return html[start:html.index('data-step="towers"')]
+
+    def test_address_row_is_wired(self, app_client):
+        """The three ids setup.js reaches for."""
+        panel = self._location_panel(app_client)
+        assert 'id="rxAddress"' in panel
+        assert 'id="rxAddressBtn"' in panel
+        assert 'id="rxAddressMsg"' in panel
+
+    def test_address_sits_above_the_coordinates(self, app_client):
+        """Reading order is the point: type an address, watch the coordinates
+        appear below it. Reversed, the box looks like an afterthought to
+        fields the owner has already filled."""
+        panel = self._location_panel(app_client)
+        assert panel.index('id="rxAddress"') < panel.index('id="rxLat"')
+
+    def test_address_row_states_the_us_limit_and_the_way_round_it(self, app_client):
+        """The geocoder is US-only, so a non-US address comes back as "no
+        match" — which reads as a typo unless the box has already said
+        otherwise. Naming the manual path in the same breath is what makes
+        that an inconvenience rather than a dead end."""
+        panel = self._location_panel(app_client)
+        assert 'US addresses only' in panel
+        assert 'coordinates directly' in panel
+
+    def test_find_towers_gate_ignores_the_address(self, app_client):
+        """The load-bearing promise: an owner can always type coordinates by
+        hand. updateFindBtn must therefore read the coordinate boxes and
+        nothing else, so that no failure of the geocoder — or of the service
+        behind it — can ever hold the step shut."""
+        js = self._setup_js()
+        start = js.index('function updateFindBtn()')
+        body = js[start:js.index('}', js.index('findBtn.disabled', start))]
+        assert 'rxLat.value' in body
+        assert 'rxLon.value' in body
+        assert 'rxAddress' not in body
+        assert 'addressInput' not in body
+
+    def test_filling_coordinates_refreshes_the_gate(self, app_client):
+        """Setting .value programmatically does not fire an input event, so
+        the lookup has to poke updateFindBtn itself. Without this the owner
+        gets coordinates and a Find Towers button that stays disabled."""
+        js = self._setup_js()
+        start = js.index('function lookupAddress()')
+        body = js[start:js.index('function fetchElevation', start)]
+        assert 'rxLat.value = Number(d.latitude)' in body
+        assert 'updateFindBtn();' in body
+
+    def test_lookup_does_not_write_into_an_abandoned_step(self, app_client):
+        """The wizard runs forwards while a lookup is in flight. A late answer
+        must not fill coordinates on a step the owner has already left."""
+        js = self._setup_js()
+        start = js.index('function lookupAddress()')
+        body = js[start:js.index('function fetchElevation', start)]
+        assert 'if (!locationActive) return;' in body
+
+    def test_leaving_the_step_drops_in_flight_lookups(self, app_client):
+        """Same reasoning as the SDR release below it: leaving means leaving."""
+        js = self._setup_js()
+        leave = js[js.index('leaveHooks.location = function()'):
+                   js.index('enterHooks.location = function()')]
+        assert 'abortAddressLookups' in leave
+
+    def test_altitude_is_no_longer_the_owners_job(self, app_client):
+        """Nothing used to fill this box, so rx_altitude reached the radar
+        config as 0 for every owner who did not type a figure."""
+        panel = self._location_panel(app_client)
+        assert 'manually' not in panel.lower()
+        js = self._setup_js()
+        assert "rxAlt.value = Math.round(d.elevation_m)" in js
+
+    def test_elevation_fills_the_manual_path_too(self, app_client):
+        """Hanging elevation off a successful geocode alone would leave
+        rx_altitude at 0 for anyone typing coordinates by hand, which is the
+        path that always has to work."""
+        js = self._setup_js()
+        assert 'function scheduleElevation()' in js
+        assert "rxLat.addEventListener('input', scheduleElevation);" in js
+        assert "rxLon.addEventListener('input', scheduleElevation);" in js
+
+    def test_typed_altitude_is_never_overwritten(self, app_client):
+        """We may replace a figure we put there when the coordinates move. We
+        must never replace one the owner typed."""
+        js = self._setup_js()
+        assert "rxAlt.addEventListener('input', function() { altAutoFilled = false; });" in js
+        start = js.index('function fetchElevation(')
+        body = js[start:js.index('function scheduleElevation', start)]
+        assert "if (!force && rxAlt.value.trim() !== '' && !altAutoFilled) return;" in body
+
+    def test_precision_below_street_is_warned_about(self, app_client):
+        """A city-centre fix can sit 10 km from the real receiver, and these
+        coordinates are written to the radar config, not just searched with."""
+        js = self._setup_js()
+        assert 'PRECISION_WARNINGS' in js
+        assert 'Postcode centre only' in js
+        assert 'City centre only' in js
