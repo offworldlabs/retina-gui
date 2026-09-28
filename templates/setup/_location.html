@@ -5,6 +5,36 @@
         <p>Set the coordinates of the radar receiver site. While you do, the spectrum analyser will scan your RF environment to improve tower search results.</p>
     </div>
     <div class="step-stack">
+        {# Address first, because it is the only way to fill the coordinates
+           without reading them off a map: the node is served over plain HTTP,
+           so the browser Geolocation API behind "Use my location" below is
+           unavailable to it. The lookup runs server-side via /towers/geocode,
+           which that constraint does not reach.
+
+           Nothing is gated on this. The coordinate boxes stay editable after a
+           lookup and Find Towers reads only them, so typing coordinates by
+           hand works exactly as it did before this row existed. #}
+        <div class="ds-field">
+            <label class="ds-field-label" for="rxAddress">Address</label>
+            <div style="display:flex;gap:10px;align-items:center;">
+                <input type="text" class="ds-input" id="rxAddress" maxlength="200"
+                       placeholder="e.g. 1600 Pennsylvania Ave NW, Washington, DC"
+                       autocomplete="street-address" style="flex:1;min-width:0;">
+                <button type="button" class="ds-btn ghost" id="rxAddressBtn" disabled>Look up</button>
+            </div>
+            {# Both halves matter: the geocoder is pinned to the US, so a
+               non-US address usually comes back as "no match", which reads as
+               a typo unless the box has already said otherwise. Worse, a
+               foreign place name colliding with a US one ("Toronto, Ontario")
+               returns a confident street-level match in the wrong country.
+               That is measured, not theoretical, so the matched address still
+               has to be checked by the owner. #}
+            <p style="font-size:12.5px;color:var(--ink-3);margin:6px 0 0;">
+                US addresses only for now. You can also enter coordinates directly below.
+            </p>
+            <p id="rxAddressMsg" style="display:none;font-size:13px;margin:6px 0 0;"></p>
+        </div>
+
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;">
             <div class="ds-field">
                 <label class="ds-field-label" for="rxLat">Latitude</label>
@@ -18,7 +48,7 @@
 
         <div class="ds-field">
             <label class="ds-field-label" for="rxAlt">Altitude (m)</label>
-            <input type="number" class="ds-input mono" id="rxAlt" step="any" min="0" placeholder="Enter altitude manually">
+            <input type="number" class="ds-input mono" id="rxAlt" step="any" min="0" placeholder="Filled from your coordinates">
         </div>
 
         <!-- "Use my location" requires HTTPS (browser Geolocation API); re-enable once 20260616-location-fetch-https lands.

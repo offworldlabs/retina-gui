@@ -14,6 +14,16 @@ bp = Blueprint('towers', __name__, url_prefix='/towers')
 # best few — capping here keeps that dropdown/manage-list usable.
 MAX_CACHED_TOWERS = 5
 
+# The address geocoder allows 10s per provider across two providers, plus the
+# 1s throttle it holds Nominatim to. 30 covers a slow two-provider miss
+# without tying up a browser for the 90s a tower search is allowed.
+GEOCODE_TIMEOUT_S = 30
+# The upstream's own bound (its AddressQuery), repeated so an over-long
+# address is refused here with a sentence instead of upstream with a 422.
+GEOCODE_QUERY_MAX_LENGTH = 200
+# One cached upstream lookup, and nothing waits on the result.
+ELEVATION_TIMEOUT_S = 15
+
 
 def _cacheable_towers(towers):
     """Screen finder results before they back /config's preset picker.
@@ -130,6 +140,111 @@ def search():
     except Exception as e:
         app.logger.error(f"Tower search unexpected error: {e}")
         return jsonify({"error": "Tower search failed, check server logs"}), 500
+
+
+@bp.route("/geocode", methods=["POST"])
+def geocode():
+    """Resolve a typed address to coordinates, via the tower-finder service.
+
+    The node GUI is served over plain HTTP on a LAN, so the browser's
+    Geolocation API is unavailable to it and the "Use my location" button in
+    the wizard stays commented out. This runs server-side, so that constraint
+    never reaches it: typing an address is the one way an owner can fill the
+    coordinates without reading them off a map.
+
+    Unlike search() above, the upstream's two failure codes are passed through
+    rather than collapsed into one. 404 means neither geocoder knew the
+    address and the spelling is worth another look; 503 means one could not be
+    reached and the very same query is worth retrying. A search box has to
+    tell those apart, and flattening them here would throw away the only
+    reason the endpoint distinguishes them.
+
+    The query text is deliberately kept out of every log line, as it is
+    upstream: an address typed into this box is the most personal thing the
+    route handles, and the outcome alone is what an operator needs.
+    """
+    from app import TOWER_FINDER_URL, app
+
+    body = request.get_json(silent=True) or {}
+    query = (body.get("query") or "").strip()
+    if not query:
+        return jsonify({"error": "Enter an address to look up"}), 400
+    if len(query) > GEOCODE_QUERY_MAX_LENGTH:
+        return jsonify({"error": "That address is too long to look up"}), 400
+
+    try:
+        resp = http_requests.post(
+            f"{TOWER_FINDER_URL}/api/geocode",
+            json={"query": query},
+            timeout=GEOCODE_TIMEOUT_S,
+        )
+        if resp.status_code == 404:
+            return jsonify({"error": _upstream_detail(
+                resp, "No match for that address")}), 404
+        if resp.status_code == 503:
+            return jsonify({"error": _upstream_detail(
+                resp, "Address lookup is unavailable right now")}), 503
+        resp.raise_for_status()
+        return jsonify(resp.json())
+    except http_requests.Timeout:
+        return jsonify({"error": "Address lookup timed out, try again"}), 504
+    except http_requests.RequestException as e:
+        app.logger.warning(f"Address lookup failed: {e}")
+        return jsonify({"error": "Unable to reach the address lookup service"}), 502
+    except Exception as e:
+        app.logger.error(f"Address lookup unexpected error: {e}")
+        return jsonify({"error": "Address lookup failed, check server logs"}), 500
+
+
+@bp.route("/elevation")
+def elevation():
+    """Ground elevation at a point, for prefilling the altitude box.
+
+    Advisory in every sense. Nothing gates on altitude and the wizard leaves
+    the box blank on failure rather than reporting one, so this answers with a
+    plain error the caller is expected to swallow. It exists because the box
+    was otherwise filled by nothing at all, which left `rx_altitude` at 0 in
+    the radar config for every owner who did not happen to type a figure.
+
+    GET, matching the upstream, which also keeps it clear of CSRF entirely.
+    """
+    from app import TOWER_FINDER_URL, app
+
+    try:
+        lat = float(request.args.get("lat", ""))
+        lon = float(request.args.get("lon", ""))
+    except (TypeError, ValueError):
+        return jsonify({"error": "lat and lon are required"}), 400
+    if not (-90 <= lat <= 90) or not (-180 <= lon <= 180):
+        return jsonify({"error": "lat and lon are out of range"}), 400
+
+    try:
+        resp = http_requests.get(
+            f"{TOWER_FINDER_URL}/api/elevation",
+            params={"lat": lat, "lon": lon},
+            timeout=ELEVATION_TIMEOUT_S,
+        )
+        resp.raise_for_status()
+        return jsonify(resp.json())
+    except http_requests.RequestException as e:
+        # Info rather than warning: a missing altitude prefill is not a fault
+        # the owner or an operator needs to act on.
+        app.logger.info(f"Elevation lookup failed: {e}")
+        return jsonify({"error": "Unable to reach the elevation service"}), 502
+
+
+def _upstream_detail(resp, fallback):
+    """The upstream's own sentence, or ours when it did not send one.
+
+    FastAPI reports an HTTPException's message in `detail`, but puts a list of
+    field errors there for a validation failure. Only a plain string is
+    something to show an owner.
+    """
+    try:
+        detail = (resp.json() or {}).get("detail")
+    except ValueError:
+        return fallback
+    return detail if isinstance(detail, str) and detail.strip() else fallback
 
 
 @bp.route("/cache/add", methods=["POST"])

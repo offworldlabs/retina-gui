@@ -246,6 +246,7 @@ function initSetupWizard(resumeStep, devMode, isRerun, demoMode) {
     var locationActive = false;    // guards against dangling fetch resolving after leave
     var pendingModeSwitch = null;  // tracks in-flight /api/mode POST so the leave hook can serialise the revert
     var spectrumGating = false;    // true while scan is in progress; gates Find Towers
+    var abortAddressLookups = null; // defined inside enterHooks.location on first entry
 
     // Step 1: Agreements
     enterHooks.agreements = function() {
@@ -710,6 +711,7 @@ function initSetupWizard(resumeStep, devMode, isRerun, demoMode) {
     // Step 4: Location input
     leaveHooks.location = function() {
         locationActive = false;
+        if (abortAddressLookups) abortAddressLookups();
         clearTimeout(rfSseReconnectTimer); rfSseReconnectTimer = null;
         if (rfSse) { rfSse.close(); rfSse = null; }
         var targetMode = wizardWasMode;
@@ -883,6 +885,183 @@ function initSetupWizard(resumeStep, devMode, isRerun, demoMode) {
         }
         rxLat.addEventListener('input', updateFindBtn);
         rxLon.addEventListener('input', updateFindBtn);
+
+        // ── Address lookup and altitude prefill ──────────────
+        //
+        // Both of these do nothing but fill the coordinate boxes.
+        // updateFindBtn above reads those boxes and nothing else, so an owner
+        // can ignore this row entirely and type coordinates as before, and no
+        // failure in here can block the step.
+        var addressInput = document.getElementById('rxAddress');
+        var addressBtn = document.getElementById('rxAddressBtn');
+        var addressMsg = document.getElementById('rxAddressMsg');
+        var addressLoading = false;
+        var geocodeAbort = null;
+        var elevationAbort = null;
+        var elevationTimer = null;
+        // Whether the figure in the altitude box is ours or the owner's. We
+        // may replace our own stale value when the coordinates move; we must
+        // never replace theirs.
+        var altAutoFilled = false;
+
+        // A geocoder that could only place the postcode or the town has to say
+        // so. These coordinates are not merely a search input: /towers/select
+        // writes them to the radar config as rx_latitude/rx_longitude, and a
+        // city-centre fix can sit 10 km from the real receiver.
+        var PRECISION_WARNINGS = {
+            postcode: 'Postcode centre only. Add the street address for a precise fix.',
+            locality: 'City centre only. Add the street address for a precise fix.'
+        };
+
+        function sayAddress(text, tone) {
+            addressMsg.textContent = text || '';
+            addressMsg.style.color = tone === 'error' ? 'var(--danger)'
+                : tone === 'warn' ? 'var(--warn-ink)'
+                : 'var(--ink-3)';
+            addressMsg.style.display = text ? '' : 'none';
+        }
+
+        function updateAddressBtn() {
+            addressBtn.disabled = addressLoading || addressInput.value.trim() === '';
+        }
+
+        function lookupAddress() {
+            var query = addressInput.value.trim();
+            if (!query || addressLoading) return;
+
+            // Only reachable from the leave hook, since the button is disabled
+            // for the duration, but it is what stops a late answer writing
+            // coordinates into a step the owner has already left.
+            if (geocodeAbort) geocodeAbort.abort();
+            var controller = window.AbortController ? new AbortController() : null;
+            geocodeAbort = controller;
+
+            addressLoading = true;
+            updateAddressBtn();
+            addressBtn.textContent = 'Looking up\u2026';
+            sayAddress('');
+
+            fetch('/towers/geocode', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrfToken },
+                body: JSON.stringify({ query: query }),
+                signal: controller ? controller.signal : undefined
+            })
+            .then(function(r) {
+                // Both halves of the answer matter here, so this deliberately
+                // does not use postJSON: the route reports "no such address"
+                // and "could not ask" as different statuses, each with its own
+                // sentence, and both are shown as-is.
+                return r.json().then(
+                    function(data) { return { ok: r.ok, data: data || {} }; },
+                    function() { return { ok: false, data: {} }; });
+            })
+            .then(function(res) {
+                if (!locationActive) return;
+                if (!res.ok) {
+                    sayAddress(res.data.error || 'Address lookup failed.', 'error');
+                    return;
+                }
+                var d = res.data;
+                // Six decimals is about 0.1 m, finer than any geocoder claims
+                // to be.
+                rxLat.value = Number(d.latitude).toFixed(6);
+                rxLon.value = Number(d.longitude).toFixed(6);
+                updateFindBtn();
+
+                var warning = PRECISION_WARNINGS[d.precision];
+                sayAddress(warning || ('Matched: ' + d.matched_address),
+                           warning ? 'warn' : '');
+
+                // An explicit lookup means "the node is here", so whatever
+                // altitude went with the old coordinates is stale. Typing
+                // coordinates by hand is gentler; see scheduleElevation.
+                fetchElevation(d.latitude, d.longitude, true);
+            })
+            .catch(function(err) {
+                if (err && err.name === 'AbortError') return;
+                if (!locationActive) return;
+                sayAddress('Address lookup failed. Check the connection and try again.', 'error');
+            })
+            .then(function() {
+                // Aborted means a newer owner of this button is in charge of
+                // its label, so leave it alone.
+                if (controller && controller.signal.aborted) return;
+                addressLoading = false;
+                addressBtn.textContent = 'Look up';
+                updateAddressBtn();
+            });
+        }
+
+        // Ground elevation for the altitude box, which until now nothing ever
+        // filled — leaving rx_altitude at 0 in the radar config for every
+        // owner who did not happen to type a figure. Advisory throughout: a
+        // failure leaves the box exactly as it was and says nothing, because
+        // nothing gates on altitude and an error here would be noise on a step
+        // that already has a spectrum sweep reporting into it.
+        function fetchElevation(lat, lon, force) {
+            if (!force && rxAlt.value.trim() !== '' && !altAutoFilled) return;
+            if (elevationAbort) elevationAbort.abort();
+            var controller = window.AbortController ? new AbortController() : null;
+            elevationAbort = controller;
+            fetch('/towers/elevation?lat=' + encodeURIComponent(lat) +
+                  '&lon=' + encodeURIComponent(lon),
+                  { signal: controller ? controller.signal : undefined })
+                .then(function(r) { return r.ok ? r.json() : null; })
+                .then(function(d) {
+                    if (!d || !locationActive) return;
+                    if (controller && controller.signal.aborted) return;
+                    if (d.elevation_m == null) return;
+                    // Whole metres: this is a site altitude for the radar
+                    // config, not a survey figure.
+                    rxAlt.value = Math.round(d.elevation_m);
+                    altAutoFilled = true;
+                })
+                .catch(function() {});
+        }
+
+        // Typing coordinates by hand has to fill the altitude too, or the
+        // manual path — the one that always has to work — still leaves
+        // rx_altitude at 0. Debounced, because this fires per keystroke.
+        function scheduleElevation() {
+            clearTimeout(elevationTimer);
+            elevationTimer = setTimeout(function() {
+                var lat = parseFloat(rxLat.value);
+                var lon = parseFloat(rxLon.value);
+                if (isNaN(lat) || isNaN(lon)) return;
+                if (lat < -90 || lat > 90 || lon < -180 || lon > 180) return;
+                fetchElevation(lat, lon, false);
+            }, 800);
+        }
+
+        // An altitude the owner types is theirs from then on.
+        rxAlt.addEventListener('input', function() { altAutoFilled = false; });
+        rxLat.addEventListener('input', scheduleElevation);
+        rxLon.addEventListener('input', scheduleElevation);
+
+        addressInput.addEventListener('input', updateAddressBtn);
+        addressBtn.addEventListener('click', lookupAddress);
+        addressInput.addEventListener('keydown', function(e) {
+            // Enter in this box means "look up", not "run the step": the owner
+            // is still filling the form, and Find Towers is a deliberate
+            // second action they take once the coordinates look right.
+            if (e.key === 'Enter' || e.keyCode === 13) {
+                e.preventDefault();
+                lookupAddress();
+            }
+        });
+        updateAddressBtn();
+
+        // Published so leaveHooks.location, which lives outside this hook, can
+        // drop in-flight work when the step goes off screen.
+        abortAddressLookups = function() {
+            clearTimeout(elevationTimer);
+            if (geocodeAbort) { geocodeAbort.abort(); geocodeAbort = null; }
+            if (elevationAbort) { elevationAbort.abort(); elevationAbort = null; }
+            addressLoading = false;
+            addressBtn.textContent = 'Look up';
+            updateAddressBtn();
+        };
 
         // Use My Location (button commented out in markup until HTTPS lands; see 20260616-location-fetch-https)
         if (useMyLocBtn) useMyLocBtn.addEventListener('click', function() {

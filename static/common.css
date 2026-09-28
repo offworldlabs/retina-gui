@@ -30,6 +30,7 @@
     --ok-edge:     oklch(0.88 0.05 155);
     --warn:        oklch(0.75 0.14 75);
     --warn-soft:   oklch(0.97 0.04 75);
+    --warn-ink:    oklch(0.50 0.11 75);   /* warn as text: --warn is a fill, too light to read */
     --danger:      oklch(0.62 0.20 25);
 
     /* ── Domain: tower bands ─────── */
