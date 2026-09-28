@@ -1,0 +1,36 @@
+<!-- Step 3: Node claim -->
+{# Optional and skippable, like the contact step before it. Posts to the same
+   /set-up/claim route as the Node claim section on the configuration page, so
+   the two surfaces cannot drift. An empty box is filled with the contact email
+   from the step before as a suggestion only: the owner still has to press Send.
+   A node already claimed can only be skipped past, as on the configuration
+   page: a new address would be offering somebody else's node. #}
+<div data-step="claim" class="step-panel" style="display:none;">
+    <div class="wiz-title-row">
+        <h1>Connect your node to your account</h1>
+        <p>We will email you a link. Opening it connects this node to your account. If you do not have an account yet, that is fine: one will be made for you.</p>
+    </div>
+    <div class="step-stack">
+        <div class="ds-field">
+            <label class="ds-field-label" for="wizClaimEmail">Email</label>
+            <input type="email" class="ds-input" id="wizClaimEmail" value="{{ claim.get('email', '') }}" maxlength="255" autocomplete="email"{% if claim_owned %} readonly{% endif %}>
+        </div>
+
+        {% if claim_owned %}
+        <p style="font-size:13px;margin:4px 0 0;">
+            <span style="color:var(--ok);font-weight:600;">Already claimed.</span>
+            This node is connected to the account above, so there is nothing to do here.
+            To hand it to somebody else, release it from your dashboard first.
+        </p>
+        {% else %}
+        <p style="font-size:12.5px;color:var(--ink-3);margin:10px 0 0;">
+            Use an address you own, because whoever opens the link owns the node.
+            This step is optional. If you skip it or enter the wrong address, you can
+            do it later under Node claim on the Configuration page.
+        </p>
+        {% endif %}
+
+        <p id="wizClaimMsg" style="display:none;font-size:13px;margin:8px 0 0;"></p>
+    </div>
+
+</div>

@@ -201,3 +201,44 @@ class TestWhatTheSectionShows:
             {'state': 'disputed', 'email': ADDRESS, 'undeliverable': False})
 
         assert 'disputed' in page
+
+
+class TestTheWizardStep:
+    """The optional step after contact details, posting to the same route."""
+
+    def test_the_wizard_shows_the_claim_step_after_contact(self, app_client):
+        page = app_client.get('/set-up').data.decode()
+
+        assert 'data-step="claim"' in page
+        assert page.index('data-step="contact"') < page.index('data-step="claim"') \
+            < page.index('data-step="system"')
+        assert 'wizClaimSkipBtn' in page, "skipping must be offered, not just possible"
+        assert 'Node claim on the Configuration page' in page
+
+    def test_the_wizard_prefills_the_stored_address(self, app_client):
+        post(app_client, {"email": ADDRESS})
+
+        assert f'id="wizClaimEmail" value="{ADDRESS}"' in app_client.get('/set-up').data.decode()
+
+    def _owned(self, app_client, monkeypatch, state='owned'):
+        import app as app_module
+        monkeypatch.setattr(app_module.telemetry_status, 'read',
+                            lambda: {'stale': False, 'claim': {
+                                'state': state, 'email': ADDRESS, 'undeliverable': False}})
+        return app_client.get('/set-up').data.decode()
+
+    def test_a_claimed_node_shows_its_owner_and_can_only_be_skipped(self, app_client, monkeypatch):
+        """A wizard re-run on a claimed node. A new address would be offering
+        somebody else's node, the same rule as the configuration page."""
+        page = self._owned(app_client, monkeypatch)
+
+        assert f'id="wizClaimEmail" value="{ADDRESS}"' in page
+        assert 'Already claimed' in page
+        assert 'wizClaimSkipBtn' in page
+        assert 'wizClaimSendBtn' not in page
+
+    def test_an_unclaimed_node_can_be_sent_a_link(self, app_client, monkeypatch):
+        page = self._owned(app_client, monkeypatch, state='pending')
+
+        assert 'wizClaimSendBtn' in page
+        assert 'Already claimed' not in page

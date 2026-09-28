@@ -104,6 +104,7 @@ function initSetupWizard(resumeStep, devMode, isRerun, demoMode) {
     var stepNames = {
         agreements: 'Agreements',
         contact: 'Contact details',
+        claim: 'Connect your account',
         system: 'System Update',
         radar: 'Packages',
         location: 'Where is your receiver?',
@@ -463,6 +464,73 @@ function initSetupWizard(resumeStep, devMode, isRerun, demoMode) {
         // moves on. Anything already stored is deliberately left alone: an
         // owner skipping past details they gave earlier has not withdrawn them.
         skipBtn.addEventListener('click', function() { advance(); });
+    };
+
+    // Step 3: Node claim. Optional, and uses the same route as the Node claim
+    // section on the configuration page. Skipping writes nothing.
+    enterHooks.claim = function() {
+        var box = document.getElementById('wizClaimEmail');
+        var sendBtn = document.getElementById('wizClaimSendBtn');
+        var skipBtn = document.getElementById('wizClaimSkipBtn');
+        var msg = document.getElementById('wizClaimMsg');
+
+        function say(text, danger) {
+            msg.textContent = text;
+            msg.style.color = danger ? 'var(--danger)' : 'var(--ink-3)';
+            msg.style.display = text ? '' : 'none';
+        }
+
+        function reset() {
+            sendBtn.disabled = false;
+            sendBtn.textContent = 'Send link and continue';
+        }
+
+        say('');
+
+        // No Send button means the node is already claimed: the page shows the
+        // owner and offers only Skip. See templates/setup/_claim.html.
+        if (sendBtn) {
+            reset();
+            // Suggest the email from the contact step when nothing is stored
+            // yet. Only a suggestion: nothing is sent until Send is pressed.
+            if (!box.value.trim()) {
+                box.value = document.getElementById('contactEmail').value.trim();
+            }
+        }
+
+        if (hookInitialized.claim) return;
+        hookInitialized.claim = true;
+
+        skipBtn.addEventListener('click', function() { advance(); });
+        if (!sendBtn) return;
+
+        sendBtn.addEventListener('click', function() {
+            // An empty box would clear the stored address on this route, which
+            // is not what Send means here. Skip is the way past with nothing.
+            if (!box.value.trim()) {
+                say('Enter an email address, or skip this step.', true);
+                return;
+            }
+            sendBtn.disabled = true;
+            sendBtn.textContent = 'Sending...';
+            say('');
+            postJSON('/set-up/claim', { email: box.value })
+            .then(function(r) { return r.json(); })
+            .then(function(data) {
+                if (!data.success) {
+                    var errors = data.errors || {};
+                    var first = Object.keys(errors)[0];
+                    say(first ? errors[first] : (data.error || 'Could not send.'), true);
+                    reset();
+                    return;
+                }
+                advance();
+            })
+            .catch(function() {
+                say('Could not send. Check the connection and try again.', true);
+                reset();
+            });
+        });
     };
 
     // Step 2: System Update — fully automatic (server-pushed deployment +

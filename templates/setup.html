@@ -65,6 +65,7 @@
 
             {% include "setup/_agreements.html" %}
             {% include "setup/_contact.html" %}
+            {% include "setup/_claim.html" %}
             {% include "setup/_system.html" %}
             {% include "setup/_packages.html" %}
             {% include "setup/_location.html" %}
@@ -90,6 +91,14 @@
             <div id="stepBtns-contact" class="step-foot-btns" style="display:none;">
                 <button type="button" class="ds-btn ghost"   id="contactSkipBtn">Skip</button>
                 <button type="button" class="ds-btn primary" id="contactSaveBtn">Save and continue</button>
+            </div>
+
+            {# Claim, optional in the same way. See templates/setup/_claim.html. #}
+            <div id="stepBtns-claim" class="step-foot-btns" style="display:none;">
+                <button type="button" class="ds-btn ghost"   id="wizClaimSkipBtn">Skip</button>
+                {% if not claim_owned %}
+                <button type="button" class="ds-btn primary" id="wizClaimSendBtn">Send link and continue</button>
+                {% endif %}
             </div>
 
             {# System update — fully automatic, this page only reports progress #}
