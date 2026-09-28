@@ -18,7 +18,7 @@ bp = Blueprint('setup', __name__)
 @bp.route("/set-up")
 def wizard():
     """Setup wizard — full-page multi-step first-boot flow."""
-    from app import CARTO_API_KEY, DEV_MODE, device_state, get_node_id, mender
+    from app import CARTO_API_KEY, DEV_MODE, device_state, get_node_id, mender, telemetry_status
 
     resume_step = device_state.get_setup_wizard_step()
     owl_os_version, retina_node_version = mender.get_versions()
@@ -37,6 +37,15 @@ def wizard():
     # Prefills the contact step. Empty when nothing was ever given, which
     # is the ordinary case and renders as empty boxes.
     contact = device_state.get_telemetry_contact()
+    # Prefills the claim step. A node that is already owned (a wizard re-run)
+    # shows its owner and can only be skipped past, the same rule the Node
+    # claim section on the configuration page applies. Otherwise the stored
+    # address, or failing that setup.js offers the contact email just given.
+    claim = device_state.get_telemetry_claim()
+    claim_state = (telemetry_status.read() or {}).get('claim') or {}
+    claim_owned = claim_state.get('state') == 'owned'
+    if claim_owned and claim_state.get('email'):
+        claim = {'email': claim_state['email']}
 
     demo_mode = request.args.get('demo') == '1'
     if demo_mode:
@@ -46,6 +55,8 @@ def wizard():
                            resume_step=resume_step,
                            towers_cache=towers_cache,
                            contact=contact,
+                           claim=claim,
+                           claim_owned=claim_owned,
                            node_id=node_id,
                            owl_os_version=owl_os_version,
                            retina_node_version=retina_node_version,
