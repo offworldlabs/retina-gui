@@ -6,15 +6,26 @@ After=network.target
 Type=simple
 # Deployment values that must not live in this repository, which is public.
 # One line per variable, e.g. CARTO_API_KEY=<key> for the wizard's tower map.
+# Neither file is committed, because a key in a public repository's history
+# outlives every rotation. Same reasoning retina-server states on its droplets,
+# where every deploy appends /root/.secrets/carto.env rather than committing it.
 #
-# The leading "-" makes the file optional: a node without one still boots, and
-# the only consequence is that CARTO serves the basemap stamped "API KEY
-# REQUIRED". Same shape retina-server uses on its droplets, where every deploy
-# appends /root/.secrets/carto.env rather than committing the value, because a
-# key in a public repository's history outlives every rotation.
+# Read in this order, and the order is the point. systemd applies these in
+# sequence and a later assignment wins, so:
 #
-# /data survives an OS update, so this is set once per node and kept; it sits
-# beside secret-key, which is already root-only for the same reason.
+#   /etc  is the fleet's copy, written into the image by owl-os from a CI
+#         secret. It lives on the rootfs, which every A/B update replaces
+#         wholesale, so it reaches existing nodes and rotates with each
+#         release.
+#   /data is one node's own, and survives an OS update untouched. Listed
+#         second so a node handed a key by hand keeps it when the image
+#         brings a different one.
+#
+# The leading "-" on both makes them optional. A node with neither still boots,
+# and the only consequence is the basemap coming back stamped "API KEY
+# REQUIRED", which is the state every node is in today. A missing key must
+# never be the difference between a GUI that starts and one that does not.
+EnvironmentFile=-/etc/retina-gui/carto.env
 EnvironmentFile=-/data/retina-gui/carto.env
 ExecStart=/usr/bin/python3 /opt/retina-gui/src/app.py
 WorkingDirectory=/opt/retina-gui/src
