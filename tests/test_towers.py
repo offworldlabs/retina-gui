@@ -1058,22 +1058,34 @@ class TestCartoBasemapKey:
                 r'environ\.get\(\s*[\'"]CARTO_API_KEY[\'"]\s*,\s*[\'"][A-Za-z0-9_-]{16,}',
                 body), rel
 
-    def test_unit_reads_the_key_from_the_persistent_partition(self):
-        """/data survives an OS update, so the key is set once per node rather
-        than re-applied after every release."""
+    @staticmethod
+    def _unit():
         root = os.path.join(os.path.dirname(__file__), '..')
         with open(os.path.join(root, 'systemd', 'retina-gui.service')) as f:
-            unit = f.read()
+            return f.read()
+
+    def test_unit_reads_both_the_image_copy_and_the_node_copy(self):
+        """/etc is the fleet's, written into the image by owl-os from a CI
+        secret and replaced by every A/B update. /data is one node's own and
+        survives an update untouched. A node needs either to get a map."""
+        unit = self._unit()
+        assert 'EnvironmentFile=-/etc/retina-gui/carto.env' in unit
         assert 'EnvironmentFile=-/data/retina-gui/carto.env' in unit
+
+    def test_a_node_specific_key_beats_the_one_in_the_image(self):
+        """systemd applies these in order and a later assignment wins, so
+        /data has to come second. Reversed, an OS update carrying the fleet
+        key would silently override a key set on that node by hand."""
+        unit = self._unit()
+        assert unit.index('EnvironmentFile=-/etc/') < unit.index('EnvironmentFile=-/data/')
 
     def test_missing_key_file_does_not_stop_the_service(self):
         """The leading dash is the whole of it. Without it systemd refuses to
         start a node that has no key file, turning a watermarked map into a
         GUI that will not boot."""
-        root = os.path.join(os.path.dirname(__file__), '..')
-        with open(os.path.join(root, 'systemd', 'retina-gui.service')) as f:
-            unit = f.read()
+        unit = self._unit()
         assert 'EnvironmentFile=/data' not in unit
+        assert 'EnvironmentFile=/etc' not in unit
 
     def test_page_publishes_the_key(self, app_client):
         html = app_client.get('/set-up').data.decode()
