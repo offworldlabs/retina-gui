@@ -4,6 +4,18 @@ After=network.target
 
 [Service]
 Type=simple
+# Deployment values that must not live in this repository, which is public.
+# One line per variable, e.g. CARTO_API_KEY=<key> for the wizard's tower map.
+#
+# The leading "-" makes the file optional: a node without one still boots, and
+# the only consequence is that CARTO serves the basemap stamped "API KEY
+# REQUIRED". Same shape retina-server uses on its droplets, where every deploy
+# appends /root/.secrets/carto.env rather than committing the value, because a
+# key in a public repository's history outlives every rotation.
+#
+# /data survives an OS update, so this is set once per node and kept; it sits
+# beside secret-key, which is already root-only for the same reason.
+EnvironmentFile=-/data/retina-gui/carto.env
 ExecStart=/usr/bin/python3 /opt/retina-gui/src/app.py
 WorkingDirectory=/opt/retina-gui/src
 Restart=always

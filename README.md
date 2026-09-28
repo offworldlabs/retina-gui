@@ -22,6 +22,42 @@ Python-based web GUI baked into owl-os and deployed to every Retina node. Served
 
 Deployed as part of owl-os to `/opt/retina-gui/`. Runs as a systemd service on port 80. Mutable runtime state lives separately under `/data/retina-gui/`.
 
+### The CARTO basemap key lives on the node, not in this repo
+
+The setup wizard's tower map draws CARTO tiles, and CARTO does not refuse an
+unkeyed request: it answers `200` with every tile stamped "API KEY REQUIRED".
+The parameter is `key`, and any other name is accepted and ignored, so
+`?api_key=` looks exactly like having no key at all.
+
+`systemd/retina-gui.service` reads `/data/retina-gui/carto.env`, one line:
+
+```bash
+printf 'CARTO_API_KEY=%s\n' '<key from the CARTO dashboard>' > /data/retina-gui/carto.env
+chmod 600 /data/retina-gui/carto.env
+systemctl restart retina-gui
+```
+
+`/data` survives an OS update, so this is set once per node and kept. The
+`EnvironmentFile=` line is prefixed with `-`, so a node without the file still
+boots; its tower map just comes back watermarked.
+
+Deliberately not committed, and `CARTO_API_KEY` defaults to empty in
+`src/services.py`. This repository is public and a key in its history outlives
+every rotation. That is the same reason retina-server keeps its copy in
+`/root/.secrets/carto.env` on the droplet and appends it at deploy time rather
+than committing it, and the key itself is the same one.
+
+The value is public in the sense that matters for scoping: tile requests are
+issued by the browser, so no server sits in the path that could hold a secret,
+and anyone who loads the page can read it. Only ever put a tile-scoped key
+here.
+
+For local development, export it instead:
+
+```bash
+export CARTO_API_KEY=<key>
+```
+
 ## Development
 
 ```bash

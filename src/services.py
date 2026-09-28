@@ -64,6 +64,17 @@ RETINA_NODE_PATH = os.environ.get('RETINA_NODE_PATH', '/data/mender-docker-compo
 RETINA_SPECTRUM_URL = os.environ.get('RETINA_SPECTRUM_URL', 'http://localhost:3020')
 NODE_ID_FILE = os.environ.get('NODE_ID_FILE', '/data/mender/node_id')
 TOWER_FINDER_URL = os.environ.get('TOWER_FINDER_URL', 'https://tower-finder.retina.fm')
+
+# CARTO basemap key for the wizard's tower map. Empty by default, and an empty
+# value is a working map rather than a broken one: CARTO answers an unkeyed
+# request with HTTP 200 and a tile stamped "API KEY REQUIRED", so a node
+# without this degrades visibly instead of failing.
+#
+# Public by nature. Tile requests are issued by the browser, so no server sits
+# in the path that could hold a secret, and tower-finder bakes the same value
+# into its shipped bundle for that reason. Only ever put a tile-scoped key
+# here.
+CARTO_API_KEY = os.environ.get('CARTO_API_KEY', '')
 # blah2_api runs with network_mode: host and listens directly on this port —
 # NOT the :8080 blah2_host nginx proxy, which doesn't forward /capture/* at all.
 BLAH2_API_URL = os.environ.get('BLAH2_API_URL', 'http://localhost:3000')

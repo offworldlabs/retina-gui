@@ -3,6 +3,95 @@ function formatSize(bytes) {
     return mb + ' · 5–10 minutes';
 }
 
+// ── Tower presentation helpers ───────────────────────────────────────────
+//
+// Ports of tower-finder's frontend/src/utils/rankTier.ts and format.ts, kept
+// as close to the originals as ES5 allows. A tower has to read the same on
+// both surfaces, and these four functions are the only place that could drift.
+
+// Attaches the CARTO API key to a basemap tile URL. Port of tower-finder's
+// frontend/src/utils/basemap.ts.
+//
+// Not optional in practice. CARTO answers an unkeyed request with HTTP 200 and
+// a tile stamped "API KEY REQUIRED", so a missing key defaces the map rather
+// than breaking it, and an environment without one degrades visibly.
+//
+// The parameter is `key`, and getting that wrong fails silently: measured
+// 2026-09-25, an unkeyed tile, one with `?key=` set to a bogus value and one
+// with `?api_key=` all come back as the same watermarked PNG, byte for byte.
+//
+// Guarding on the host keeps this safe to wrap around any tile URL, so
+// swapping a layer to another provider later cannot start appending a CARTO
+// key to somebody else's CDN.
+var CARTO_HOST = 'basemaps.cartocdn.com';
+
+function withCartoKey(url) {
+    var key = window._cartoApiKey || '';
+    if (!key || url.indexOf(CARTO_HOST) === -1) return url;
+    return url + (url.indexOf('?') === -1 ? '?' : '&') + 'key=' + encodeURIComponent(key);
+}
+
+// Number.isFinite semantics without ES6: the global isFinite coerces, so
+// isFinite('5') is true and a string would sail through every guard below.
+function isNum(v) { return typeof v === 'number' && isFinite(v); }
+
+// Quintile of a tower's position in the list that came back. Derived from
+// rank, deliberately not from expected_area_km2: the finder ranks with
+// diversity folded in (query.ranking is "expected_area_mmr"), so the two
+// genuinely disagree — a tower with the larger area can sit below one with a
+// smaller one. A tier taken from rank can never contradict the # beside it.
+//
+// Relative to the returned list, not absolute, so a short list still spreads
+// across the ramp instead of every tower clustering into "Best".
+var RANK_TIERS = [
+    { tier: 1, label: 'Best',   cls: 'rank-1', color: 'var(--rank-1)' },
+    { tier: 2, label: 'Upper',  cls: 'rank-2', color: 'var(--rank-2)' },
+    { tier: 3, label: 'Middle', cls: 'rank-3', color: 'var(--rank-3)' },
+    { tier: 4, label: 'Lower',  cls: 'rank-4', color: 'var(--rank-4)' },
+    { tier: 5, label: 'Worst',  cls: 'rank-5', color: 'var(--rank-5)' }
+];
+
+function rankTier(rank, total) {
+    if (!isNum(rank) || !isNum(total) || total < 1 || rank < 1) return RANK_TIERS[0];
+    var t = Math.min(5, Math.max(1, Math.floor(((rank - 1) / total) * 5) + 1));
+    return RANK_TIERS[t - 1];
+}
+
+// 16-point compass. The finder sends a cardinal for bearing_deg but not for
+// best_azimuth_deg, so the pointing advice is named here from the same table
+// it uses server-side (bearing_to_cardinal in tower_ranking.py). Keep in step.
+var COMPASS_POINTS = [
+    'N', 'NNE', 'NE', 'ENE', 'E', 'ESE', 'SE', 'SSE',
+    'S', 'SSW', 'SW', 'WSW', 'W', 'WNW', 'NW', 'NNW'
+];
+
+function bearingCardinal(deg) {
+    if (!isNum(deg)) return '';
+    var wrapped = ((deg % 360) + 360) % 360;
+    return COMPASS_POINTS[Math.round(wrapped / 22.5) % 16];
+}
+
+var AREA_FORMAT = (typeof Intl !== 'undefined' && Intl.NumberFormat)
+    ? new Intl.NumberFormat('en-GB', { maximumFractionDigits: 0 })
+    : null;
+
+// Whole km2 with thousands separators. An absent value renders empty, never a
+// zero or a NaN: these fields are additive and an older finder simply omits
+// them, which must not read as a measured nothing.
+function formatAreaKm2(km2) {
+    if (!isNum(km2)) return '';
+    return AREA_FORMAT ? AREA_FORMAT.format(km2) : String(Math.round(km2));
+}
+
+// Past its own radio horizon. The finder penalises these heavily but still
+// returns them, so the row is muted rather than dropped: an owner who can see
+// why a transmitter they know is strong ranks low learns more than one who
+// cannot find it at all.
+function beyondHorizon(distanceKm, horizonKm) {
+    if (!isNum(horizonKm) || !isNum(distanceKm)) return false;
+    return distanceKm > horizonKm;
+}
+
 function initSetupWizard(resumeStep, devMode, isRerun, demoMode) {
     var steps = [];
     var currentIndex = 0;
@@ -1179,23 +1268,23 @@ function initSetupWizard(resumeStep, devMode, isRerun, demoMode) {
 
         // Reset UI
         selectedCard.style.display = 'none';
+        var guideEl = document.getElementById('antennaGuide');
+        if (guideEl) { guideEl.style.display = 'none'; guideEl.innerHTML = ''; }
         saveBtn.disabled = true;
         saveBtn.textContent = 'Save & Continue';
         tableBody.innerHTML = '';
         summaryEl.innerHTML = '';
         errorEl.style.display = 'none';
 
-        // Read colors from CSS custom properties (defined in common.css)
-        var cs = getComputedStyle(document.documentElement);
-        function cv(name) { return cs.getPropertyValue(name).trim(); }
+        // Chips are CSS classes now rather than colours read back out of the
+        // stylesheet: common.css already carried .tower-badge.band-*, and
+        // gained .tower-badge.rank-* when the dead --suit-* set was retired.
+        var BAND_CLASS = { FM: 'band-fm', VHF: 'band-vhf', UHF: 'band-uhf' };
 
-        var CLASS_COLORS = { Ideal: cv('--suit-ideal'), Good: cv('--suit-good'), Far: cv('--suit-far'), 'Too Close': cv('--suit-close') };
-        var CLASS_BG = { Ideal: cv('--suit-ideal-bg'), Good: cv('--suit-good-bg'), Far: cv('--suit-far-bg'), 'Too Close': cv('--suit-close-bg') };
-        var BAND_COLORS = { VHF: cv('--band-vhf'), UHF: cv('--band-uhf'), FM: cv('--band-fm') };
-        var BAND_BG = { VHF: cv('--band-vhf-bg'), UHF: cv('--band-uhf-bg'), FM: cv('--band-fm-bg') };
-
-        function makeTowerIcon(distClass, highlighted) {
-            var color = CLASS_COLORS[distClass] || '#94a3b8';
+        // Takes a colour rather than a class: this lands in an inline style
+        // attribute inside the divIcon's HTML, which is one of the few places
+        // a var() still resolves. Same approach as tower-finder's TowerMap.
+        function makeTowerIcon(color, highlighted) {
             var size = highlighted ? 16 : 11;
             var border = highlighted ? 3 : 2;
             var shadow = highlighted
@@ -1272,14 +1361,17 @@ function initSetupWizard(resumeStep, devMode, isRerun, demoMode) {
                 return;
             }
 
-            // Summary
-            var ideal = towers.filter(function(t) { return t.distance_class === 'Ideal'; }).length;
+            // Summary. The old "Ideal Range" tile counted distance_class ===
+            // 'Ideal' and has read 0 ever since the finder stopped sending that
+            // field. Replaced by the number the ranking is actually built on:
+            // the best tower's detectable area.
             var bands = [];
             towers.forEach(function(t) { if (bands.indexOf(t.band) === -1) bands.push(t.band); });
             var best = towers[0];
+            var bestArea = best ? formatAreaKm2(best.expected_area_km2) : '';
             summaryEl.innerHTML =
                 '<div class="stat-card"><span class="stat-value">' + towers.length + '</span><span class="stat-label">Towers Found</span></div>' +
-                '<div class="stat-card"><span class="stat-value">' + ideal + '</span><span class="stat-label">Ideal Range</span></div>' +
+                '<div class="stat-card"><span class="stat-value">' + (bestArea || '\u2014') + '</span><span class="stat-label">Best Detect Area (km\u00b2)</span></div>' +
                 '<div class="stat-card"><span class="stat-value">' + esc(bands.join(', ')) + '</span><span class="stat-label">Bands</span></div>' +
                 (best ? '<div class="stat-card"><span class="stat-value">' + esc(best.callsign || '\u2014') + '</span><span class="stat-label">Top Pick \u2014 ' + esc(best.distance_km) + ' km</span></div>' : '');
 
@@ -1288,7 +1380,7 @@ function initSetupWizard(resumeStep, devMode, isRerun, demoMode) {
 
             var towerMap = L.map('towerMap');
             window._towerMap = towerMap;
-            L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
+            L.tileLayer(withCartoKey('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png'), {
                 attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OSM</a> &copy; <a href="https://carto.com/">CARTO</a>'
             }).addTo(towerMap);
 
@@ -1298,16 +1390,27 @@ function initSetupWizard(resumeStep, devMode, isRerun, demoMode) {
                 points.push(userLatLng);
                 L.marker(userLatLng, { icon: userIcon }).addTo(towerMap)
                     .bindPopup('<span class="popup-callsign">Your Location</span>');
+                // From the response rather than a literal: the finder reports
+                // the radius it actually searched, and a circle that disagrees
+                // with it misrepresents the area the list covers.
                 L.circle(userLatLng, {
-                    radius: 80000,
+                    radius: (isNum(query.radius_km) ? query.radius_km : 80) * 1000,
                     color: '#3b82f6', weight: 1.5, fillOpacity: 0.04, dashArray: '6 4'
                 }).addTo(towerMap);
             }
 
             towers.forEach(function(t) {
+                var tier = rankTier(t.rank, towers.length);
                 var ll = [t.latitude, t.longitude];
                 points.push(ll);
-                var marker = L.marker(ll, { icon: makeTowerIcon(t.distance_class, false) }).addTo(towerMap);
+                var marker = L.marker(ll, {
+                    icon: makeTowerIcon(tier.color, false),
+                    // Co-located stations share a mast and so share a position.
+                    // Leaflet gives them equal z-indexes and DOM order then
+                    // decides, which would paint the worst-ranked on top.
+                    zIndexOffset: 1000 - (isNum(t.rank) ? t.rank : 0)
+                }).addTo(towerMap);
+                var area = formatAreaKm2(t.expected_area_km2);
                 marker.bindPopup(
                     '<span class="popup-callsign">' + esc(t.callsign || 'Unknown') + '</span><br>' +
                     '<span class="popup-detail">' + esc(t.name || '') + '</span><br>' +
@@ -1316,11 +1419,21 @@ function initSetupWizard(resumeStep, devMode, isRerun, demoMode) {
                     '<span class="popup-freq">' + esc(t.frequency_mhz) + ' MHz</span> (' + esc(t.band) + ')<br>' +
                     '<span class="popup-detail">' + esc(t.distance_km) + ' km ' + esc(t.bearing_cardinal) +
                     ' &middot; ' + esc(t.received_power_dbm) + ' dBm</span><br>' +
-                    '<span style="color:' + (CLASS_COLORS[t.distance_class] || '#6b7280') +
-                    ';font-weight:600;font-size:0.78rem;">' + esc(t.distance_class) + '</span>'
+                    (area
+                        ? '<span class="popup-detail">Detect area ' + esc(area) + ' km&sup2;'
+                          + (isNum(t.best_azimuth_deg)
+                              ? ' &middot; point ' + Math.round(t.best_azimuth_deg) + '\u00b0' : '')
+                          + '</span><br>'
+                        : '') +
+                    '<span style="color:' + tier.color + ';font-weight:600;font-size:0.78rem;">#' +
+                    esc(t.rank) + ' \u00b7 ' + esc(tier.label) + '</span>' +
+                    ((t.shared_callsigns && t.shared_callsigns.length)
+                        ? '<br><span class="popup-detail">Shares transmitter with '
+                          + esc(t.shared_callsigns.join(', ')) + '</span>'
+                        : '')
                 );
                 marker.on('click', function() { selectTower(t); });
-                towerMarkers.push({ marker: marker, tower: t });
+                towerMarkers.push({ marker: marker, tower: t, tier: tier });
             });
 
             if (points.length > 1) {
@@ -1332,33 +1445,56 @@ function initSetupWizard(resumeStep, devMode, isRerun, demoMode) {
             // Table
             tableBody.innerHTML = '';
             towers.forEach(function(t) {
+                var tier = rankTier(t.rank, towers.length);
                 var tr = document.createElement('tr');
-                var bandColor = BAND_COLORS[t.band] || '#6b7280';
-                var bandBg = BAND_BG[t.band] || 'rgba(107,114,128,0.08)';
-                var classColor = CLASS_COLORS[t.distance_class] || '#6b7280';
-                var classBg = CLASS_BG[t.distance_class] || 'rgba(107,114,128,0.08)';
+
+                // Listed but muted. The finder penalises a tower past its own
+                // horizon rather than dropping it, so an owner who knows a
+                // transmitter is strong can see why it ranks low.
+                if (beyondHorizon(t.distance_km, t.horizon_km)) {
+                    tr.className = 'beyond-horizon';
+                    tr.title = 'Beyond radio horizon';
+                }
+
+                var shared = (t.shared_callsigns && t.shared_callsigns.length)
+                    ? '<span class="shared-callsigns" title="Also licensed on this transmitter (channel sharing)">+ '
+                      + esc(t.shared_callsigns.join(', ')) + '</span>'
+                    : '';
+                var matched = t.frequency_matched
+                    ? '<span class="freq-match" title="Matches a frequency the spectrum sweep measured">&#10003;</span>'
+                    : '';
+                var point = isNum(t.best_azimuth_deg)
+                    ? Math.round(t.best_azimuth_deg) + '\u00b0 <span class="cardinal">'
+                      + esc(bearingCardinal(t.best_azimuth_deg)) + '</span>'
+                    : '\u2014';
 
                 tr.innerHTML =
-                    '<td class="rank">' + esc(t.rank) + '</td>' +
-                    '<td class="callsign">' + esc(t.callsign || '\u2014') + '</td>' +
+                    '<td class="rank"><span class="tower-badge rank-badge ' + tier.cls + '">' + esc(t.rank) + '</span></td>' +
+                    '<td class="mono">' + esc(formatAreaKm2(t.expected_area_km2) || '\u2014') + '</td>' +
+                    '<td>' + point + '</td>' +
+                    '<td class="callsign">' + esc(t.callsign || '\u2014') + shared + '</td>' +
+                    '<td class="hide-mobile">' + esc((t.name || '') + (t.state ? ', ' + t.state : '')) + '</td>' +
                     '<td class="mono hide-mobile">' + esc(t.latitude) + '</td>' +
                     '<td class="mono hide-mobile">' + esc(t.longitude) + '</td>' +
-                    '<td class="mono">' + esc(t.frequency_mhz) + '</td>' +
-                    '<td><span class="tower-badge" style="color:' + bandColor + ';background:' + bandBg + ';">' + esc(t.band) + '</span></td>' +
-                    '<td class="mono">' + esc(t.distance_km) + '</td>' +
-                    '<td>' + esc(t.bearing_deg) + '\u00b0 <span class="cardinal">' + esc(t.bearing_cardinal) + '</span></td>' +
-                    '<td class="mono hide-mobile">' + esc(t.received_power_dbm) + '</td>' +
-                    '<td><span class="tower-badge" style="color:' + classColor + ';background:' + classBg + ';">' + esc(t.distance_class) + '</span></td>';
+                    '<td class="mono hide-mobile">' + (t.altitude_m != null ? esc(t.altitude_m) : '\u2014') + '</td>' +
+                    '<td class="mono hide-mobile">' + (t.antenna_height_m != null ? esc(t.antenna_height_m) : '\u2014') + '</td>' +
+                    '<td class="mono">' + esc(t.frequency_mhz) + matched + '</td>' +
+                    '<td><span class="tower-badge ' + (BAND_CLASS[t.band] || '') + '">' + esc(t.band) + '</span></td>' +
+                    '<td class="mono hide-mobile">' + esc(t.eirp_dbm) + ' dBm</td>' +
+                    '<td class="mono">' + esc(t.distance_km) + ' km</td>' +
+                    '<td class="hide-mobile">' + esc(t.bearing_deg) + '\u00b0 <span class="cardinal">' + esc(t.bearing_cardinal) + '</span></td>' +
+                    '<td class="mono hide-mobile">' + esc(t.received_power_dbm) + ' dBm</td>' +
+                    '<td><span class="tower-badge ' + tier.cls + '">' + esc(tier.label) + '</span></td>';
 
                 tr._tower = t;
                 tr.addEventListener('mouseenter', function() {
                     towerMarkers.forEach(function(m) {
-                        if (m.tower === t) m.marker.setIcon(makeTowerIcon(t.distance_class, true));
+                        if (m.tower === t) m.marker.setIcon(makeTowerIcon(m.tier.color, true));
                     });
                 });
                 tr.addEventListener('mouseleave', function() {
                     towerMarkers.forEach(function(m) {
-                        if (m.tower === t) m.marker.setIcon(makeTowerIcon(t.distance_class, false));
+                        if (m.tower === t) m.marker.setIcon(makeTowerIcon(m.tier.color, false));
                     });
                 });
 
@@ -1369,12 +1505,132 @@ function initSetupWizard(resumeStep, devMode, isRerun, demoMode) {
             });
         }
 
+        // ── Antenna aiming guide ─────────────────────────────
+        //
+        // A passive radar has two antennas doing different jobs, and they do
+        // not point the same way. The reference antenna looks at the
+        // illuminator for a clean copy of what it is transmitting. The
+        // surveillance antenna looks wherever the detectable area is largest.
+        //
+        // best_azimuth_deg is the finder's own answer for that second one and
+        // is taken exactly as given, never derived from the tower bearing.
+        // Measured against live data the separation between the two runs from
+        // 58 to 180 degrees, so "point it the other way" would be wrong about
+        // a third of the time.
+
+        // Screen y grows downward, so a true-north bearing maps to
+        // (sin, -cos): 0 deg lands at the top, 90 at the right.
+        function rosePoint(deg, radius, centre) {
+            var rad = deg * Math.PI / 180;
+            return {
+                x: centre + Math.sin(rad) * radius,
+                y: centre - Math.cos(rad) * radius
+            };
+        }
+
+        function compassRose(refDeg, surDeg) {
+            var C = 56, R = 46;
+            function arm(deg, color) {
+                var p = rosePoint(deg, R - 7, C);
+                return '<line x1="' + C + '" y1="' + C + '" x2="' + p.x.toFixed(1) +
+                       '" y2="' + p.y.toFixed(1) + '" stroke="' + color +
+                       '" stroke-width="3" stroke-linecap="round"/>' +
+                       '<circle cx="' + p.x.toFixed(1) + '" cy="' + p.y.toFixed(1) +
+                       '" r="4.5" fill="' + color + '"/>';
+            }
+            var svg = '<svg class="antenna-rose" width="112" height="112" viewBox="0 0 112 112" ' +
+                      'role="img" aria-label="Antenna bearings from your site">' +
+                      '<circle cx="56" cy="56" r="46" fill="none" stroke="var(--line)" stroke-width="1"/>';
+            var marks = [['N', 56, 15], ['E', 103, 60], ['S', 56, 105], ['W', 9, 60]];
+            marks.forEach(function(m) {
+                svg += '<text x="' + m[1] + '" y="' + m[2] + '" text-anchor="middle" ' +
+                       'font-size="10" fill="var(--ink-3)">' + m[0] + '</text>';
+            });
+            // Surveillance first, so the reference arm paints on top where the
+            // two nearly coincide.
+            if (surDeg !== null) svg += arm(surDeg, 'var(--ink)');
+            if (refDeg !== null) svg += arm(refDeg, 'var(--accent)');
+            return svg + '<circle cx="56" cy="56" r="3" fill="var(--ink-3)"/></svg>';
+        }
+
+        function dirCard(role, swatch, deg, note) {
+            return '<div class="antenna-dir">' +
+                '<div class="antenna-dir-role"><span class="swatch" style="background:' + swatch + ';"></span>' +
+                esc(role) + '</div>' +
+                '<div class="antenna-dir-value">' + Math.round(deg) + '\u00b0 ' +
+                esc(bearingCardinal(deg)) + '</div>' +
+                '<div class="antenna-dir-note">' + note + '</div>' +
+            '</div>';
+        }
+
+        function renderAntennaGuide(t) {
+            var guide = document.getElementById('antennaGuide');
+            if (!guide) return;
+
+            var refDeg = isNum(t.bearing_deg) ? t.bearing_deg : null;
+            var surDeg = isNum(t.best_azimuth_deg) ? t.best_azimuth_deg : null;
+
+            // Without a bearing to the tower there is no advice to give, and a
+            // panel of dashes would read as a finding.
+            if (refDeg === null) {
+                guide.style.display = 'none';
+                guide.innerHTML = '';
+                return;
+            }
+
+            var refNote = 'Straight at the tower, ' + esc(t.distance_km) + ' km away.';
+            var surCard;
+            if (surDeg !== null) {
+                var area = formatAreaKm2(t.expected_area_km2);
+                surCard = dirCard('Surveillance antenna (input 2)', 'var(--ink)', surDeg,
+                    'Where the largest area is expected' +
+                    (area ? ', about ' + esc(area) + ' km&sup2;' : '') + '.');
+            } else {
+                // Additive field: an older finder omits it. Say so rather than
+                // inventing a bearing from the tower's.
+                surCard = '<div class="antenna-dir">' +
+                    '<div class="antenna-dir-role"><span class="swatch" style="background:var(--ink);"></span>' +
+                    'Surveillance antenna (input 2)</div>' +
+                    '<div class="antenna-dir-value">\u2014</div>' +
+                    '<div class="antenna-dir-note">No recommended azimuth was returned for this tower.</div>' +
+                '</div>';
+            }
+
+            var foot = [];
+            if (surDeg !== null) {
+                // Smallest angle between the two bearings, so 350 and 10 read
+                // as 20 apart rather than 340.
+                var sep = Math.abs((((surDeg - refDeg) % 360 + 540) % 360) - 180);
+                foot.push('The two point about ' + Math.round(sep) + '\u00b0 apart.');
+            }
+            if (beyondHorizon(t.distance_km, t.horizon_km)) {
+                foot.push('This tower is past your radio horizon of ' + esc(t.horizon_km) +
+                          ' km, so expect a weak reference signal.');
+            }
+
+            guide.innerHTML =
+                '<div class="antenna-guide-head">Aim your antennas</div>' +
+                '<div class="antenna-guide-sub">For ' + esc(t.callsign || 'this tower') + ' at ' +
+                    esc(t.frequency_mhz) + ' MHz. Bearings are degrees true, measured from your ' +
+                    'receiver site.</div>' +
+                '<div class="antenna-guide-body">' +
+                    compassRose(refDeg, surDeg) +
+                    '<div class="antenna-dirs">' +
+                        dirCard('Reference antenna (input 1)', 'var(--accent)', refDeg, refNote) +
+                        surCard +
+                    '</div>' +
+                '</div>' +
+                (foot.length ? '<p class="antenna-guide-foot">' + foot.join(' ') + '</p>' : '');
+            guide.style.display = '';
+        }
+
         function selectTower(t) {
             selectedTower = t;
             selectedCard.style.display = '';
             selectedName.textContent = (t.callsign || 'Unknown') + ' \u2014 ' + t.frequency_mhz + ' MHz ' + t.band;
             selectedDetail.textContent = t.distance_km + ' km ' + t.bearing_cardinal + ' \u00b7 ' + (t.name || '') + (t.state ? ', ' + t.state : '');
             saveBtn.disabled = false;
+            renderAntennaGuide(t);
 
             // Highlight selected row, clear others
             tableBody.querySelectorAll('tr').forEach(function(row) {
@@ -1383,7 +1639,7 @@ function initSetupWizard(resumeStep, devMode, isRerun, demoMode) {
 
             towerMarkers.forEach(function(m) {
                 var hl = (m.tower === t);
-                m.marker.setIcon(makeTowerIcon(m.tower.distance_class, hl));
+                m.marker.setIcon(makeTowerIcon(m.tier.color, hl));
                 if (hl) m.marker.openPopup();
             });
         }

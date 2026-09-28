@@ -8,3 +8,10 @@ src/dev_data/
 # time the app or the suite runs outside DEV_MODE's temp dirs. Only the
 # src/ path was ignored, so it kept turning up in commits.
 dev_data/
+
+# Local deployment values, e.g. CARTO_API_KEY for the wizard's tower map.
+# The basemap key is public by design (the browser sends it with every tile
+# request), but it is a deployment value rather than source, so it stays out
+# of the tree until we decide how it reaches a node.
+.carto.env
+*.local.env
