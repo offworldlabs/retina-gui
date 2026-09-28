@@ -25,10 +25,19 @@ SAMPLE_TOWER_RESPONSE = {
             "bearing_deg": 337.5,
             "bearing_cardinal": "NNW",
             "received_power_dbm": -7.7,
-            "distance_class": "Ideal",
             "eirp_dbm": 79.1,
             "altitude_m": 122.5,
             "antenna_height_m": 77.3,
+            "elevation_m": 45.2,
+            # The expected-area ranking fields. `distance_class` used to sit
+            # here and was removed from the finder's contract; keeping it in
+            # this fixture is what let the wizard render "undefined" in the
+            # suitability column with a green suite.
+            "expected_area_km2": 16872.0,
+            "best_azimuth_deg": 210.0,
+            "horizon_km": 73.8,
+            "frequency_matched": False,
+            "shared_callsigns": [],
         }
     ],
     "query": {
@@ -37,6 +46,7 @@ SAMPLE_TOWER_RESPONSE = {
         "altitude_m": 0,
         "radius_km": 80,
         "source": "au",
+        "ranking": "expected_area_mmr",
     },
     "count": 1,
 }
@@ -827,3 +837,183 @@ class TestSetupWizardAddressLookup:
         assert 'PRECISION_WARNINGS' in js
         assert 'Postcode centre only' in js
         assert 'City centre only' in js
+
+
+class TestTowerStepPresentation:
+    """The tower list, ported from tower-finder's own results table.
+
+    The finder dropped `distance_class` when it moved to expected-area
+    ranking. This page went on reading it, so the suitability column rendered
+    the literal string "undefined", every marker fell through to grey, and the
+    "Ideal Range" tile counted a value that could never occur again. Nothing
+    failed, because the fixture below still carried the field.
+    """
+
+    @staticmethod
+    def _setup_js():
+        with open(os.path.join(os.path.dirname(__file__), '..',
+                               'static', 'setup.js')) as f:
+            return f.read()
+
+    @staticmethod
+    def _common_css():
+        with open(os.path.join(os.path.dirname(__file__), '..',
+                               'static', 'common.css')) as f:
+            return f.read()
+
+    @staticmethod
+    def _towers_panel(app_client):
+        html = app_client.get('/set-up').data.decode()
+        start = html.index('data-step="towers"')
+        return html[start:html.index('data-step="calibrate"')]
+
+    def test_fixture_no_longer_carries_the_dropped_field(self):
+        """The fixture is the reason this went unnoticed, so it is also the
+        regression guard. Mocking a shape the server stopped sending turns a
+        green suite into evidence of nothing."""
+        assert 'distance_class' not in json.dumps(SAMPLE_TOWER_RESPONSE)
+
+    def test_renderer_reads_no_dropped_field(self, app_client):
+        """Comments may mention it; nothing may read it."""
+        js = self._setup_js()
+        code = '\n'.join(line for line in js.splitlines()
+                         if not line.strip().startswith('//'))
+        assert 'distance_class' not in code
+
+    def test_columns_match_the_ported_table(self, app_client):
+        panel = self._towers_panel(app_client)
+        for header in ['Detect Area (km&sup2;)', 'Point', 'Callsign', 'Location',
+                       'Altitude (m)', 'Ant. Height (m)', 'Freq (MHz)', 'Band',
+                       'EIRP', 'Distance', 'Bearing', 'Rx Power', 'Rank Tier']:
+            assert '<th' in panel and header in panel, header
+        assert 'Suit.' not in panel
+
+    def test_detect_area_sits_beside_the_rank(self, app_client):
+        """The ranking is built on it. At the far end of the row it reads as
+        an afterthought to the number it actually explains."""
+        panel = self._towers_panel(app_client)
+        assert panel.index('Detect Area') < panel.index('>Callsign<')
+        assert panel.index('Rank Tier') > panel.index('Rx Power')
+
+    def test_tier_is_derived_from_rank_not_from_area(self, app_client):
+        """The finder ranks with diversity folded in, so a tower with the
+        larger expected area can sit below one with a smaller one. A tier
+        taken from the area would visibly contradict the # beside it."""
+        js = self._setup_js()
+        body = js[js.index('function rankTier('):js.index('// 16-point compass')]
+        assert 'rank' in body and 'total' in body
+        assert 'expected_area' not in body
+        assert 'rankTier(t.rank, towers.length)' in js
+
+    def test_tier_labels_and_ramp_match_the_finder(self, app_client):
+        js = self._setup_js()
+        for label in ['Best', 'Upper', 'Middle', 'Lower', 'Worst']:
+            assert "label: '" + label + "'" in js
+        css = self._common_css()
+        for n in range(1, 6):
+            assert f'--rank-{n}:' in css
+            assert f'--rank-{n}-bg:' in css
+
+    def test_dead_suitability_tokens_are_gone(self):
+        """They coloured a field that no longer exists. Left in place they
+        would read as a palette someone could still reach for."""
+        css = self._common_css()
+        for dead in ['--suit-good', '--suit-far', '--suit-close']:
+            assert dead not in css
+        # The chosen row is about selection, not suitability, and kept a token
+        # under an honest name.
+        assert '--row-pick' in css
+
+    def test_beyond_horizon_rows_are_muted_not_dropped(self, app_client):
+        js = self._setup_js()
+        assert "tr.className = 'beyond-horizon'" in js
+        assert "tr.title = 'Beyond radio horizon'" in js
+        assert '.beyond-horizon' in self._common_css()
+
+    def test_shared_masts_and_measured_frequencies_are_shown(self, app_client):
+        """Both are real in live data and neither was surfaced before. The
+        frequency tick is the sweep from the previous wizard step finally
+        being shown to the owner who waited for it."""
+        js = self._setup_js()
+        assert 'shared_callsigns' in js
+        assert 'channel sharing' in js
+        assert 'frequency_matched' in js
+        assert 'spectrum sweep measured' in js
+
+    def test_best_ranked_marker_stays_on_top_at_a_shared_mast(self, app_client):
+        """Co-located stations share a position and so share a z-index, and
+        DOM order would otherwise paint the worst-ranked one over the best."""
+        assert 'zIndexOffset: 1000 - ' in self._setup_js()
+
+    def test_search_circle_follows_the_reported_radius(self, app_client):
+        """A circle that disagrees with the radius actually searched
+        misrepresents what the list covers."""
+        js = self._setup_js()
+        assert 'query.radius_km' in js
+        assert 'radius: 80000' not in js
+
+
+class TestAntennaAimingGuide:
+    """Aiming advice for the selected tower.
+
+    The two antennas do different jobs and point different ways: the reference
+    one at the illuminator, the surveillance one wherever the finder expects
+    the largest detectable area.
+    """
+
+    @staticmethod
+    def _setup_js():
+        with open(os.path.join(os.path.dirname(__file__), '..',
+                               'static', 'setup.js')) as f:
+            return f.read()
+
+    def test_guide_container_is_on_the_tower_step(self, app_client):
+        html = app_client.get('/set-up').data.decode()
+        start = html.index('data-step="towers"')
+        panel = html[start:html.index('data-step="calibrate"')]
+        assert 'id="antennaGuide"' in panel
+        pos = panel.index('id="antennaGuide"')
+        assert 'display:none' in panel[pos:pos + 120]
+
+    def test_guide_is_filled_from_the_selected_tower(self, app_client):
+        js = self._setup_js()
+        sel = js[js.index('function selectTower('):]
+        assert 'renderAntennaGuide(t);' in sel[:sel.index('\n        }')]
+
+    def test_surveillance_azimuth_is_taken_as_given(self, app_client):
+        """The single most important rule here. Measured on live data the
+        separation between the tower bearing and the recommended azimuth runs
+        from 58 to 180 degrees, so deriving one from the other would be wrong
+        about a third of the time."""
+        js = self._setup_js()
+        body = js[js.index('function renderAntennaGuide('):
+                  js.index('function selectTower(')]
+        assert 'var surDeg = isNum(t.best_azimuth_deg) ? t.best_azimuth_deg : null;' in body
+        assert 'bearing_deg + 180' not in js
+        assert 'bearing_deg - 180' not in js
+
+    def test_both_antennas_are_named_by_their_input(self, app_client):
+        """The wizard's own pre-flight checklist names input 1 and input 2, and
+        advice that does not use the same names makes the owner guess."""
+        js = self._setup_js()
+        assert 'Reference antenna (input 1)' in js
+        assert 'Surveillance antenna (input 2)' in js
+
+    def test_missing_azimuth_says_so_rather_than_inventing_one(self, app_client):
+        """`best_azimuth_deg` is additive and an older finder omits it."""
+        js = self._setup_js()
+        assert 'No recommended azimuth was returned for this tower.' in js
+
+    def test_no_guide_without_a_bearing(self, app_client):
+        """A panel of dashes would read as a finding about the tower."""
+        js = self._setup_js()
+        body = js[js.index('function renderAntennaGuide('):
+                  js.index('function selectTower(')]
+        assert 'if (refDeg === null) {' in body
+        assert "guide.style.display = 'none';" in body
+
+    def test_guide_is_cleared_when_the_step_is_re_entered(self, app_client):
+        """A fresh search must not leave the previous tower's aiming advice on
+        screen beside a list it no longer belongs to."""
+        js = self._setup_js()
+        assert "guideEl.style.display = 'none'; guideEl.innerHTML = '';" in js

@@ -39,10 +39,18 @@
     --band-uhf:    #EC4899;   --band-uhf-bg:  rgba(236,72,153,0.08);
 
     /* ── Domain: tower suitability ─ */
-    --suit-ideal:     oklch(0.65 0.14 155); --suit-ideal-bg: oklch(0.97 0.04 155);
-    --suit-good:      oklch(0.75 0.13 75);  --suit-good-bg:  oklch(0.97 0.04 75);
-    --suit-far:       oklch(0.70 0.01 260); --suit-far-bg:   oklch(0.96 0.004 260);
-    --suit-close:     oklch(0.62 0.20 25);  --suit-close-bg: oklch(0.96 0.04 25);
+    /* Rank tier ramp. Replaces the old --suit-* set, which coloured a
+       `distance_class` the tower finder no longer sends. Values are
+       tower-finder's own light ramp, so a tower reads the same colour on both
+       surfaces; the tier itself is a quintile of rank, derived client-side. */
+    --rank-1:      #10b981;  --rank-1-bg:  rgba(16, 185, 129, 0.12);
+    --rank-2:      #84cc16;  --rank-2-bg:  rgba(132, 204, 22, 0.12);
+    --rank-3:      #f59e0b;  --rank-3-bg:  rgba(245, 158, 11, 0.12);
+    --rank-4:      #f97316;  --rank-4-bg:  rgba(249, 115, 22, 0.12);
+    --rank-5:      #94a3b8;  --rank-5-bg:  rgba(148, 163, 184, 0.16);
+
+    /* The chosen row, which is about selection rather than suitability. */
+    --row-pick:    oklch(0.65 0.14 155); --row-pick-bg: oklch(0.97 0.04 155);
 
     /* ── Radii ───────────────────── */
     --r-sm:    6px;
@@ -709,7 +717,7 @@ h1, h2, h3, h4, h5, h6 {
 .tower-table td { padding: 9px 10px; border-bottom: 1px solid var(--line-2); color: var(--ink); white-space: nowrap; }
 .tower-table tbody tr { cursor: pointer; transition: background .12s; }
 .tower-table tbody tr:hover   { background: var(--surface-2); }
-.tower-table tbody tr.selected { background: var(--suit-ideal-bg); box-shadow: inset 3px 0 0 var(--suit-ideal); }
+.tower-table tbody tr.selected { background: var(--row-pick-bg); box-shadow: inset 3px 0 0 var(--row-pick); }
 @media (max-width: 800px) { .tower-table .hide-mobile { display: none; } }
 
 .selected-tower-card {
@@ -722,6 +730,47 @@ h1, h2, h3, h4, h5, h6 {
 .selected-tower-card .tower-name   { font-weight: 600; color: var(--ok); font-size: 14px; }
 .selected-tower-card .tower-detail { color: var(--ink-2); font-size: 12.5px; margin-top: 2px; }
 
+/* ── Antenna aiming guide (wizard tower step) ─────────────
+   Shown once a tower is chosen. The two antennas do different jobs and point
+   in different directions: the reference one at the illuminator, the
+   surveillance one wherever the finder says the detectable area is largest.
+   That second azimuth is the finder's own answer and is NOT derivable from
+   the tower bearing (measured separations run from 58 to 180 degrees), so the
+   two are always shown together and always labelled.
+
+   No new hues: the page already carries a band palette and a rank ramp, so
+   the two antennas are told apart by label and by the compass arrows, which
+   borrow --accent and --ink. */
+.antenna-guide {
+    margin-top: 14px; padding: 14px 16px;
+    border: 1px solid var(--line); border-radius: var(--r-md);
+    background: var(--surface-2);
+}
+.antenna-guide-head { font-weight: 600; font-size: 14px; }
+.antenna-guide-sub  { font-size: 12.5px; color: var(--ink-3); margin: 2px 0 12px; }
+.antenna-guide-body { display: flex; gap: 18px; align-items: center; flex-wrap: wrap; }
+.antenna-rose { flex-shrink: 0; }
+.antenna-dirs {
+    display: grid; grid-template-columns: 1fr 1fr; gap: 12px;
+    flex: 1; min-width: 240px;
+}
+.antenna-dir {
+    padding: 10px 12px; border: 1px solid var(--line);
+    border-radius: var(--r-sm); background: var(--surface);
+}
+.antenna-dir-role {
+    font-size: 11px; font-weight: 700; letter-spacing: 0.04em;
+    text-transform: uppercase; display: flex; align-items: center; gap: 6px;
+}
+.antenna-dir-role .swatch { width: 9px; height: 9px; border-radius: 2px; flex-shrink: 0; }
+.antenna-dir-value { font-size: 19px; font-weight: 600; margin-top: 5px; font-variant-numeric: tabular-nums; }
+.antenna-dir-note  { font-size: 12px; color: var(--ink-3); margin-top: 3px; }
+.antenna-guide-foot { font-size: 12.5px; color: var(--ink-2); margin: 12px 0 0; }
+@media (max-width: 560px) {
+    .antenna-dirs { grid-template-columns: 1fr; }
+    .antenna-guide-body { gap: 12px; }
+}
+
 /* Tower badges */
 .tower-badge {
     display: inline-block; padding: 2px 8px;
@@ -730,10 +779,26 @@ h1, h2, h3, h4, h5, h6 {
 .tower-badge.band-fm  { color: var(--band-fm);  background: var(--band-fm-bg);  }
 .tower-badge.band-vhf { color: var(--band-vhf); background: var(--band-vhf-bg); }
 .tower-badge.band-uhf { color: var(--band-uhf); background: var(--band-uhf-bg); }
-.tower-badge.suit-ideal { color: var(--suit-ideal); background: var(--suit-ideal-bg); }
-.tower-badge.suit-good  { color: var(--suit-good);  background: var(--suit-good-bg);  }
-.tower-badge.suit-far   { color: var(--suit-far);   background: var(--suit-far-bg);   }
-.tower-badge.suit-close { color: var(--suit-close); background: var(--suit-close-bg); }
+.tower-badge.rank-1 { color: var(--rank-1); background: var(--rank-1-bg); }
+.tower-badge.rank-2 { color: var(--rank-2); background: var(--rank-2-bg); }
+.tower-badge.rank-3 { color: var(--rank-3); background: var(--rank-3-bg); }
+.tower-badge.rank-4 { color: var(--rank-4); background: var(--rank-4-bg); }
+.tower-badge.rank-5 { color: var(--rank-5); background: var(--rank-5-bg); }
+
+/* The rank cell is a tier-coloured badge, so the number and the tier chip at
+   the far end of the row reinforce each other rather than being read apart. */
+.tower-table .rank-badge { min-width: 22px; padding: 2px 6px; text-align: center; font-weight: 700; }
+
+/* Past its own radio horizon. Muted rather than dropped: an owner who can see
+   why a transmitter they know is strong ranks low learns more than one who
+   cannot find it in the list at all. */
+.tower-table tbody tr.beyond-horizon td { opacity: 0.5; }
+
+/* Other stations licensed on the same transmitter (channel sharing). */
+.tower-table .shared-callsigns { color: var(--ink-3); font-weight: 400; font-size: 11px; margin-left: 4px; }
+
+/* This frequency matched the spectrum sweep run on the previous step. */
+.tower-table .freq-match { color: var(--ok); font-weight: 700; margin-left: 4px; }
 
 /* ── Wizard progress dots (setup.js compat) ─────── */
 /* setup.js appends .progress-dot elements into #progressTrack.
