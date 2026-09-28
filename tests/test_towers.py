@@ -1,6 +1,7 @@
 """Tests for tower finder proxy routes and tower selection."""
 import json
 import os
+import re
 import sys
 from unittest.mock import MagicMock, patch
 
@@ -1017,3 +1018,87 @@ class TestAntennaAimingGuide:
         screen beside a list it no longer belongs to."""
         js = self._setup_js()
         assert "guideEl.style.display = 'none'; guideEl.innerHTML = '';" in js
+
+
+class TestCartoBasemapKey:
+    """The wizard's tower map needs a CARTO key to render undefaced.
+
+    CARTO does not reject an unkeyed request. It answers HTTP 200 with a tile
+    stamped "API KEY REQUIRED" across every basemaps.cartocdn.com layer and
+    subdomain, so the failure is cosmetic and total: the map draws, and every
+    tile of it is a watermark.
+    """
+
+    @staticmethod
+    def _setup_js():
+        with open(os.path.join(os.path.dirname(__file__), '..',
+                               'static', 'setup.js')) as f:
+            return f.read()
+
+    def test_key_defaults_to_empty(self):
+        """A node without one must still get a working page. Empty means a
+        watermarked map, never a broken or missing one."""
+        import services
+        assert services.CARTO_API_KEY == ''
+
+    def test_key_is_never_committed(self):
+        """This repository is public, and a key in its history outlives every
+        rotation. retina-server keeps its copy in /root/.secrets on the droplet
+        for the same reason; the node's equivalent is /data/retina-gui."""
+        root = os.path.join(os.path.dirname(__file__), '..')
+        for rel in ['src/services.py', 'templates/setup.html',
+                    'static/setup.js', 'systemd/retina-gui.service']:
+            with open(os.path.join(root, rel)) as f:
+                body = f.read()
+            # A CARTO key is a long opaque token. Two shapes to refuse: a
+            # bare assignment, and the tempting one -- smuggling it in as the
+            # fallback of the environ.get that is supposed to keep it out.
+            assert not re.search(r'CARTO_API_KEY\s*=\s*[\'"]?[A-Za-z0-9_-]{16,}', body), rel
+            assert not re.search(
+                r'environ\.get\(\s*[\'"]CARTO_API_KEY[\'"]\s*,\s*[\'"][A-Za-z0-9_-]{16,}',
+                body), rel
+
+    def test_unit_reads_the_key_from_the_persistent_partition(self):
+        """/data survives an OS update, so the key is set once per node rather
+        than re-applied after every release."""
+        root = os.path.join(os.path.dirname(__file__), '..')
+        with open(os.path.join(root, 'systemd', 'retina-gui.service')) as f:
+            unit = f.read()
+        assert 'EnvironmentFile=-/data/retina-gui/carto.env' in unit
+
+    def test_missing_key_file_does_not_stop_the_service(self):
+        """The leading dash is the whole of it. Without it systemd refuses to
+        start a node that has no key file, turning a watermarked map into a
+        GUI that will not boot."""
+        root = os.path.join(os.path.dirname(__file__), '..')
+        with open(os.path.join(root, 'systemd', 'retina-gui.service')) as f:
+            unit = f.read()
+        assert 'EnvironmentFile=/data' not in unit
+
+    def test_page_publishes_the_key(self, app_client):
+        html = app_client.get('/set-up').data.decode()
+        assert 'window._cartoApiKey =' in html
+
+    def test_tile_url_goes_through_the_wrapper(self, app_client):
+        js = self._setup_js()
+        assert "L.tileLayer(withCartoKey(" in js
+
+    def test_parameter_is_key_not_api_key(self, app_client):
+        """Measured 2026-09-25: CARTO accepts any other parameter name and
+        ignores it, so an unkeyed tile, one with a bogus `key=` and one with
+        `api_key=` all come back byte-identical. Getting this wrong looks
+        exactly like not having a key at all."""
+        js = self._setup_js()
+        body = js[js.index('function withCartoKey('):
+                  js.index('// Number.isFinite semantics')]
+        assert "'key=' +" in body
+        assert 'api_key' not in body
+
+    def test_key_is_confined_to_cartos_host(self, app_client):
+        """Safe to wrap around any tile URL. Swapping a layer to another
+        provider later must not start handing them our key."""
+        js = self._setup_js()
+        body = js[js.index('function withCartoKey('):
+                  js.index('// Number.isFinite semantics')]
+        assert 'url.indexOf(CARTO_HOST) === -1' in body
+        assert "var CARTO_HOST = 'basemaps.cartocdn.com';" in js

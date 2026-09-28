@@ -13,6 +13,7 @@ from flask_wtf.csrf import CSRFError, CSRFProtect
 # for what that broke. Re-exported below so `from app import ...` is unchanged.
 from services import (  # noqa: F401  (re-exported for routes)
     BLAH2_API_URL,
+    CARTO_API_KEY,
     DATA_DIR,
     DEV_MODE,
     MENDER_SERVICES,

@@ -18,7 +18,7 @@ bp = Blueprint('setup', __name__)
 @bp.route("/set-up")
 def wizard():
     """Setup wizard — full-page multi-step first-boot flow."""
-    from app import DEV_MODE, device_state, get_node_id, mender
+    from app import CARTO_API_KEY, DEV_MODE, device_state, get_node_id, mender
 
     resume_step = device_state.get_setup_wizard_step()
     owl_os_version, retina_node_version = mender.get_versions()
@@ -51,6 +51,7 @@ def wizard():
                            retina_node_version=retina_node_version,
                            is_rerun=is_rerun,
                            dev_mode=DEV_MODE,
+                           carto_api_key=CARTO_API_KEY,
                            demo_mode=demo_mode)
 
 

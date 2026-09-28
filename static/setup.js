@@ -9,6 +9,28 @@ function formatSize(bytes) {
 // as close to the originals as ES5 allows. A tower has to read the same on
 // both surfaces, and these four functions are the only place that could drift.
 
+// Attaches the CARTO API key to a basemap tile URL. Port of tower-finder's
+// frontend/src/utils/basemap.ts.
+//
+// Not optional in practice. CARTO answers an unkeyed request with HTTP 200 and
+// a tile stamped "API KEY REQUIRED", so a missing key defaces the map rather
+// than breaking it, and an environment without one degrades visibly.
+//
+// The parameter is `key`, and getting that wrong fails silently: measured
+// 2026-09-25, an unkeyed tile, one with `?key=` set to a bogus value and one
+// with `?api_key=` all come back as the same watermarked PNG, byte for byte.
+//
+// Guarding on the host keeps this safe to wrap around any tile URL, so
+// swapping a layer to another provider later cannot start appending a CARTO
+// key to somebody else's CDN.
+var CARTO_HOST = 'basemaps.cartocdn.com';
+
+function withCartoKey(url) {
+    var key = window._cartoApiKey || '';
+    if (!key || url.indexOf(CARTO_HOST) === -1) return url;
+    return url + (url.indexOf('?') === -1 ? '?' : '&') + 'key=' + encodeURIComponent(key);
+}
+
 // Number.isFinite semantics without ES6: the global isFinite coerces, so
 // isFinite('5') is true and a string would sail through every guard below.
 function isNum(v) { return typeof v === 'number' && isFinite(v); }
@@ -1358,7 +1380,7 @@ function initSetupWizard(resumeStep, devMode, isRerun, demoMode) {
 
             var towerMap = L.map('towerMap');
             window._towerMap = towerMap;
-            L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
+            L.tileLayer(withCartoKey('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png'), {
                 attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OSM</a> &copy; <a href="https://carto.com/">CARTO</a>'
             }).addTo(towerMap);
 

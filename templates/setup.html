@@ -154,6 +154,10 @@
             measurements: []
         };
         {% endif %}
+        // Public by nature: tile requests come from the browser, so nothing
+        // server-side can hold this. Empty is fine and yields a watermarked
+        // map rather than a broken one. See services.py's CARTO_API_KEY.
+        window._cartoApiKey = {{ carto_api_key|default('')|tojson }};
         initSetupWizard({{ resume_step|tojson }}, {{ dev_mode|default(false)|tojson }}, {{ is_rerun|default(false)|tojson }}, {{ demo_mode|default(false)|tojson }});
     </script>
 {% endblock %}
