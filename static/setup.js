@@ -237,6 +237,9 @@ function initSetupWizard(resumeStep, devMode, isRerun, demoMode) {
         if (data && data.session_expired) showSessionExpired();
         var err = new Error((data && data.error) || ('Request failed (' + r.status + ')'));
         err.status = r.status;
+        // Per-field refusals from a 400, so a step can show the server's
+        // reason rather than a connection error.
+        err.errors = (data && data.errors) || null;
         return err;
     }
 
@@ -439,21 +442,14 @@ function initSetupWizard(resumeStep, devMode, isRerun, demoMode) {
             saveBtn.disabled = true;
             saveBtn.textContent = 'Saving...';
             say('');
+            // postJSON rejects on any refusal, carrying the server's per-field
+            // reason when there is one, such as a bad country code.
             postJSON('/set-up/contact', collect())
-            .then(function(r) { return r.json(); })
-            .then(function(data) {
-                if (!data.success) {
-                    var errors = data.errors || {};
-                    var first = Object.keys(errors)[0];
-                    say(first ? errors[first] : (data.error || 'Could not save.'), true);
-                    saveBtn.disabled = false;
-                    saveBtn.textContent = 'Save and continue';
-                    return;
-                }
-                advance();
-            })
-            .catch(function() {
-                say('Could not save. Check the connection and try again.', true);
+            .then(function() { advance(); })
+            .catch(function(err) {
+                var errors = err.errors || {};
+                var first = Object.keys(errors)[0];
+                say(first ? errors[first] : 'Could not save. Check the connection and try again.', true);
                 saveBtn.disabled = false;
                 saveBtn.textContent = 'Save and continue';
             });
