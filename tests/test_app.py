@@ -1255,6 +1255,161 @@ class TestSetupRoute:
         assert response.status_code == 200
 
 
+class TestSystemStepWhileYouWait:
+    """The duration and checklist shown on the OWL-OS update step.
+
+    Both belong to a wait that is actually going to happen. A node that needs
+    no update clicks straight past this step, so telling it to set aside half
+    an hour and go check its antenna cabling would be false.
+    """
+
+    @staticmethod
+    def _system_panel(app_client):
+        html = app_client.get('/set-up').data.decode()
+        start = html.index('data-step="system"')
+        return html[start:html.index('data-step="radar"')]
+
+    @staticmethod
+    def _setup_js():
+        with open(os.path.join(os.path.dirname(__file__), '..',
+                               'static', 'setup.js')) as f:
+            return f.read()
+
+    def test_block_is_on_the_system_step(self, app_client):
+        """And on that step alone, since setup.js reaches for it by id."""
+        panel = self._system_panel(app_client)
+        assert 'id="systemUpdateWait"' in panel
+
+    def test_hidden_until_an_update_is_known_to_be_needed(self, app_client):
+        """The step opens on "Checking for updates…", where nothing is known
+        yet. Shipping this visible would promise a 30-minute wait to every
+        node, including the ones that need nothing."""
+        panel = self._system_panel(app_client)
+        start = panel.index('id="systemUpdateWait"')
+        assert 'display:none' in panel[start:start + 120]
+
+    def test_states_the_duration(self, app_client):
+        panel = self._system_panel(app_client)
+        assert '30 minutes' in panel
+
+    def test_carries_the_full_checklist(self, app_client):
+        """Four items, and the reference/surveillance inputs are not
+        interchangeable, so the input numbers are part of the copy."""
+        panel = self._system_panel(app_client)
+        assert 'While You Wait' in panel
+        assert 'Reconfirm:' in panel
+        assert 'Reference antenna is connected to input 1' in panel
+        assert 'Surveillance antenna is connected to input 2' in panel
+        assert 'antenna cables are &lt;70ft' in panel
+        assert 'properly grounded in case of lightning strike' in panel
+        assert 'AHJ requirements' in panel
+
+    def test_less_than_sign_is_escaped(self, app_client):
+        """`<70ft` unescaped opens a tag and eats the rest of the line."""
+        panel = self._system_panel(app_client)
+        assert '<70ft' not in panel
+        assert '&lt;70ft' in panel
+
+    def test_revealed_on_both_update_paths(self, app_client):
+        """An update already downloading (showStage) and one still being
+        prepared server-side (showPreparing) are both real waits."""
+        js = self._setup_js()
+        stage = js[js.index('function showStage('):js.index('function showPreparing(')]
+        assert 'showUpdateWait(true);' in stage
+        prep = js[js.index('function showPreparing('):js.index('function clearStuckTimer(')]
+        assert 'showUpdateWait(true);' in prep
+
+    def test_taken_away_when_the_node_needs_nothing(self, app_client):
+        """Reached both by a node that was already current and by one that
+        has just finished updating and rebooted back in. Neither is waiting
+        for anything, so neither should still be reading the checklist."""
+        js = self._setup_js()
+        start = js.index("status.innerHTML = 'System is up to date")
+        assert 'showUpdateWait(false);' in js[start - 200:start]
+
+
+class TestPackagesStepWhileYouWait:
+    """The same checklist on the RETINA package install step."""
+
+    @staticmethod
+    def _radar_panel(app_client):
+        html = app_client.get('/set-up').data.decode()
+        start = html.index('data-step="radar"')
+        return html[start:html.index('data-step="location"')]
+
+    @staticmethod
+    def _setup_js():
+        with open(os.path.join(os.path.dirname(__file__), '..',
+                               'static', 'setup.js')) as f:
+            return f.read()
+
+    def test_block_is_on_the_packages_step(self, app_client):
+        panel = self._radar_panel(app_client)
+        assert 'id="radarInstallWait"' in panel
+
+    def test_hidden_until_an_install_is_known_to_be_needed(self, app_client):
+        """A node already on the latest version clicks straight past."""
+        panel = self._radar_panel(app_client)
+        start = panel.index('id="radarInstallWait"')
+        assert 'display:none' in panel[start:start + 120]
+
+    def test_carries_the_same_checklist(self, app_client):
+        panel = self._radar_panel(app_client)
+        assert 'While You Wait' in panel
+        assert 'Reference antenna is connected to input 1' in panel
+        assert 'Surveillance antenna is connected to input 2' in panel
+        assert 'antenna cables are &lt;70ft' in panel
+        assert 'AHJ requirements' in panel
+
+    def test_does_not_add_a_second_duration(self, app_client):
+        """The package card already says "~600 MB \u00b7 5\u201310 minutes".
+        A second figure below it is what later disagrees with the first, and
+        the OS step's 30 minutes is not this step's wait at all."""
+        panel = self._radar_panel(app_client)
+        assert '30 minutes' not in panel
+        assert 'usually takes' not in panel
+
+    def test_revealed_when_an_install_is_required_or_running(self, app_client):
+        """Both ways in: a fresh page that finds a newer version, and a reload
+        landing on an install already running in the background."""
+        js = self._setup_js()
+        hook = js[js.index('enterHooks.radar = function()'):
+                  js.index('leaveHooks.location = function()')]
+        assert hook.count('showRadarWait(true);') == 2
+
+    def test_taken_away_when_packages_are_current(self, app_client):
+        js = self._setup_js()
+        start = js.index("status.innerHTML = 'Packages are up to date")
+        assert 'showRadarWait(false);' in js[start - 200:start]
+
+
+class TestWhileYouWaitIsSharedByBothSteps:
+    """Two steps show this checklist. It has one source.
+
+    Held twice, a reworded bullet gets fixed on the step someone happened to
+    be looking at and left stale on the other, and nothing would fail.
+    """
+
+    def test_checklist_lives_in_exactly_one_template(self):
+        setup_dir = os.path.join(os.path.dirname(__file__), '..',
+                                 'templates', 'setup')
+        holders = []
+        for name in sorted(os.listdir(setup_dir)):
+            if not name.endswith('.html'):
+                continue
+            with open(os.path.join(setup_dir, name)) as f:
+                if 'Reference antenna is connected to input 1' in f.read():
+                    holders.append(name)
+        assert holders == ['_while_you_wait.html'], holders
+
+    def test_both_steps_render_it(self, app_client):
+        """One source, but it must actually reach both pages."""
+        html = app_client.get('/set-up').data.decode()
+        assert html.count('Reference antenna is connected to input 1') == 2
+        assert html.count('id="systemUpdateWait"') == 1
+        assert html.count('id="radarInstallWait"') == 1
+
+
 class TestMenderCheckOs:
     """Test the /mender/check-os endpoint."""
 

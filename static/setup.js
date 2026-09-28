@@ -413,6 +413,15 @@ function initSetupWizard(resumeStep, devMode, isRerun, demoMode) {
         nextBtn.addEventListener('click', advance);
         startSystemPoll();
 
+        // The duration and the "While You Wait" checklist belong to a wait
+        // that is actually going to happen. Revealed from both update paths
+        // below, and taken away again the moment the node turns out to need
+        // nothing — see templates/setup/_system.html.
+        function showUpdateWait(on) {
+            var el = document.getElementById('systemUpdateWait');
+            if (el) el.style.display = on ? '' : 'none';
+        }
+
         function showTarget(version) {
             if (!version) return;
             document.getElementById('systemVersionArrow').style.display = '';
@@ -432,6 +441,7 @@ function initSetupWizard(resumeStep, devMode, isRerun, demoMode) {
                 status.textContent = 'Updating...';
             }
             showTarget(version);
+            showUpdateWait(true);
             cardStatus.innerHTML = '<span class="spinner-border spinner-border-sm text-primary"></span>';
             installStatus.innerHTML = '<span class="text-warning">Do not power off the device.</span>';
         }
@@ -444,6 +454,7 @@ function initSetupWizard(resumeStep, devMode, isRerun, demoMode) {
         function showPreparing(version) {
             status.textContent = 'Preparing system update...';
             showTarget(version);
+            showUpdateWait(true);
             cardStatus.innerHTML = '<span class="spinner-border spinner-border-sm text-primary"></span>';
             if (!stuckTimer) {
                 stuckTimer = setTimeout(function() {
@@ -494,6 +505,7 @@ function initSetupWizard(resumeStep, devMode, isRerun, demoMode) {
                         clearInterval(pollTimer);
                         pollTimer = null;
                         clearStuckTimer();
+                        showUpdateWait(false);
                         status.innerHTML = 'System is up to date &#10003;';
                         cardStatus.innerHTML = '<span class="text-success">&#10003;</span>';
                         installStatus.innerHTML = '<span class="text-success">Complete!</span>';
@@ -563,6 +575,15 @@ function initSetupWizard(resumeStep, devMode, isRerun, demoMode) {
         }
         regionCheck.addEventListener('change', updateInstallGate);
 
+        // Mirrors the OS update step: the checklist belongs to a wait that is
+        // actually going to happen. Revealed once an install is known to be
+        // required or already running, and taken away when the node turns out
+        // to be current. See templates/setup/_while_you_wait.html.
+        function showRadarWait(on) {
+            var el = document.getElementById('radarInstallWait');
+            if (el) el.style.display = on ? '' : 'none';
+        }
+
         var latestVersion = null;
 
         // GitHub is the only source of truth for what to install on a fresh
@@ -583,6 +604,7 @@ function initSetupWizard(resumeStep, devMode, isRerun, demoMode) {
                         if (!latestVersion && data.version) {
                             latestVersion = data.version.replace(/^retina-node-/, '');
                         }
+                        showRadarWait(true);
                         status.textContent = data.reason || 'Installation in progress...';
                         installStatus.innerHTML = '<span class="text-warning">Do not power off the device.</span>';
                         packageStatus.innerHTML = '<span class="spinner-border spinner-border-sm text-primary"></span>';
@@ -595,12 +617,14 @@ function initSetupWizard(resumeStep, devMode, isRerun, demoMode) {
                         return;
                     }
                     if (data.current_version && data.current_version === data.latest_version) {
+                        showRadarWait(false);
                         status.innerHTML = 'Packages are up to date &#10003;';
                         packageStatus.innerHTML = '<span class="text-success">&#10003;</span>';
                         document.getElementById('radarLatestVersion').textContent = data.current_version;
                         document.getElementById('radarPackageSub').textContent = formatSize(data.latest_size_bytes);
                         nextBtn.style.display = '';
                     } else {
+                        showRadarWait(true);
                         latestVersion = data.latest_version;
                         document.getElementById('radarLatestVersion').textContent = data.latest_version;
                         document.getElementById('radarPackageSub').textContent = formatSize(data.latest_size_bytes);
