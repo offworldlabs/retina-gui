@@ -2432,7 +2432,7 @@ class TestSharedCalibrateDriver:
         with open(os.path.join(REPO_ROOT, 'templates', 'config.html')) as f:
             cfg = f.read()
         for dupe in ('var OUTCOME_TEXT', 'function diagnose(', 'function mhz(',
-                     'function preflightNotice(', 'function updateWarning('):
+                     'function updateWarning('):
             assert dupe not in cfg, f"{dupe} is defined again in config.html"
 
 

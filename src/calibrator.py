@@ -169,8 +169,8 @@ That user.yml write is a deliberate exception to the rule below, and it is
 unresponsive, where max attenuation is a working state rather than a
 degraded one; a run that reaches /calibrate/apply overwrites it anyway; and
 reverting it would cost a second container restart that could leave the node
-deaf if it failed in between. The run reports that it did this and what the
-previous values were, so the user can restore them deliberately. For the
+deaf if it failed in between. The run records that it did this and what the
+previous values were in status["preflight"]. For the
 same reason, a run whose preflight had to recover the device does not
 restore the original tuning on a non-success outcome (see _run) — putting a
 just-recovered radio back on the sensitive settings that wedged it is the

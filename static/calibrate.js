@@ -90,27 +90,6 @@ window.RetinaCalibrate = (function() {
             + 'has finished.');
     }
 
-    // The preflight only reports when it had to intervene. A clean probe is
-    // unremarkable; a restart is not — it persisted maximum attenuation to
-    // the config, deliberately and without reverting it (see calibrator.py's
-    // module docstring), so the user has to be told what was replaced or
-    // their gain settings appear to have changed by themselves.
-    function preflightNotice(status) {
-        var pf = status.preflight;
-        if (!pf || !pf.restarted) return '';
-        var was = pf.previous
-            ? ' Its previous setting was gain reduction A ' + pf.previous.gain_a
-              + ' dB / B ' + pf.previous.gain_b + ' dB, LNA state '
-              + pf.previous.lna_state + '.'
-            : '';
-        var lead = pf.recovered
-            ? 'The radio had stopped accepting tuning commands and was restarted.'
-            : 'The radio had stopped accepting tuning commands.';
-        return warnBox('<strong>' + lead + '</strong> It has been set to maximum '
-            + 'attenuation (gain reduction 59/59, LNA state 9) and that has '
-            + 'been saved to the configuration.' + was);
-    }
-
     function diagnose(history) {
         if (!history.length) return '';
         var watched = history.filter(function(h) {
@@ -251,7 +230,6 @@ window.RetinaCalibrate = (function() {
         escapeHtml: escapeHtml,
         warnBox: warnBox,
         updateWarning: updateWarning,
-        preflightNotice: preflightNotice,
         diagnose: diagnose,
         tuningOf: tuningOf,
         isTerminal: isTerminal,

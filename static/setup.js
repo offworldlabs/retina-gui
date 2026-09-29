@@ -1923,7 +1923,7 @@ function initSetupWizard(resumeStep, devMode, isRerun, demoMode) {
                     + CAL.escapeHtml(status.error || 'Tuning did not complete.')
                     + ' You can run this again later from Configuration.</span>';
             }
-            errorEl.innerHTML += CAL.updateWarning(status) + CAL.preflightNotice(status);
+            errorEl.innerHTML += CAL.updateWarning(status);
             if (errorEl.innerHTML) errorEl.style.display = '';
             persistThenAllowNext(status);
         }

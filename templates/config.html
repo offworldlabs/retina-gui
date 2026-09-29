@@ -1841,8 +1841,6 @@ if (discardBtn) discardBtn.addEventListener('click', () => location.reload());
 
     var updateWarning = CAL.updateWarning;
 
-    var preflightNotice = CAL.preflightNotice;
-
     function render(status) {
         lastStatus = status;
         setConfigLockedOut(status.state === 'running');
@@ -1884,7 +1882,7 @@ if (discardBtn) discardBtn.addEventListener('click', () => location.reload());
             }
             // Warn the moment a deployment starts, not once the run has
             // already died of it.
-            var warnNow = updateWarning(status) + preflightNotice(status);
+            var warnNow = updateWarning(status);
             errorEl.style.display = warnNow ? '' : 'none';
             errorEl.innerHTML = warnNow;
             return;
@@ -1904,8 +1902,7 @@ if (discardBtn) discardBtn.addEventListener('click', () => location.reload());
                 + mhz(status.result.fc) + ', gain reduction A ' + status.result.gain_a
                 + ' dB / B ' + status.result.gain_b + ' dB, LNA state ' + status.result.lna_state
                 + '.' + adsbNote
-                + '<br>The radar is running with this tuning now. Persist it to keep it after restarts.'
-                + preflightNotice(status);
+                + '<br>The radar is running with this tuning now. Persist it to keep it after restarts.';
             applyBtn.style.display = '';
         } else {
             // A quick run ends in "failed" by design — there is no confirmed
@@ -1932,7 +1929,7 @@ if (discardBtn) discardBtn.addEventListener('click', () => location.reload());
             // A deployment restarting the radar is the explanation, so lead
             // with it rather than leaving the per-tower failures to imply
             // something about the tuning or the sky.
-            errorEl.innerHTML += updateWarning(status) + preflightNotice(status);
+            errorEl.innerHTML += updateWarning(status);
             var diagnosis = diagnose(status.history || []);
             if (diagnosis) {
                 errorEl.innerHTML += '<div style="margin-top:8px;padding:8px 10px;'
