@@ -1843,10 +1843,9 @@ function initSetupWizard(resumeStep, devMode, isRerun, demoMode) {
         }
 
         // A confirmed result or the no-track fallback both carry tuning worth
-        // keeping, and the wizard persists either without asking — the
-        // Configuration page's "Persist to config" button is not reachable
-        // from here, and the stack restart at /set-up/complete would discard
-        // anything left unsaved seconds later.
+        // keeping, and the wizard persists either without asking, as the
+        // Configuration page's calibrate window does: the stack restart at
+        // /set-up/complete would discard anything left unsaved seconds later.
         function persistThenAllowNext(status) {
             var CAL = window.RetinaCalibrate;
             var tuning = CAL.tuningOf(status);
@@ -1923,7 +1922,7 @@ function initSetupWizard(resumeStep, devMode, isRerun, demoMode) {
                     + CAL.escapeHtml(status.error || 'Tuning did not complete.')
                     + ' You can run this again later from Configuration.</span>';
             }
-            errorEl.innerHTML += CAL.updateWarning(status) + CAL.preflightNotice(status);
+            errorEl.innerHTML += CAL.updateWarning(status);
             if (errorEl.innerHTML) errorEl.style.display = '';
             persistThenAllowNext(status);
         }
