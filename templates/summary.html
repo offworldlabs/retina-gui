@@ -175,14 +175,9 @@
         {% endfor %}
     </div>
 
-    {# The primer's closing simulation, cut down to sit on a node page.
-
-       Progressive on purpose: everything below is a correct still diagram on
-       its own, with the beam and a flight path already drawn into the markup.
-       /static/flight-sim.js only adds the ability to fly it. No script, no
-       pointer events, or a fetch that fails, and this is still a picture
-       rather than an empty box — which is why the controls ship hidden and
-       are revealed by the script that can drive them. #}
+    {# Progressive: the markup alone is a correct still diagram, and
+       flight-sim.js reveals the hidden controls. Keep it that way.
+       See docs/architecture.md#flight-simulator #}
     <div class="section-head sim-head"><h2>How your node sees</h2></div>
     <p class="sim-lead">
         Your node measures two things: how much further the echo travelled than
@@ -265,8 +260,6 @@
 {% endblock %}
 
 {% block scripts %}
-{# Static file rather than inline: a rendered template caches nothing, so an
-   inline copy would re-send on every page load. This comes down once per
-   browser and revalidates after. #}
+{# Static file rather than inline, so the browser caches it. #}
 <script src="/static/flight-sim.js" defer></script>
 {% endblock %}

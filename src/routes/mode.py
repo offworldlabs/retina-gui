@@ -8,22 +8,14 @@ bp = Blueprint('mode', __name__)
 
 _mode_cache = 'radar'  # default mode if file read fails (e.g. dev environment without /data OR on startup before mode is set at least once)
 
-# The sdrplay_apiService restart and the immediately-following container
-# recreate used to race with no settle time in between — diagnosed live
-# on jonathan-node-2 as a repeated cause of the SDRplay device wedging
-# outright (not just a bad gain candidate). This window gives the
-# service time to finish reinitialising the USB device before blah2
-# claims it again.
+# Gap between the sdrplay_apiService restart and the container recreate.
+# Running them back to back has repeatedly wedged the device on real hardware.
+# See docs/features/sdr-mode.md#settle-window.
 SDRPLAY_RESTART_SETTLE_SECONDS = 30
 
-# Budget for the stack recreate. Measured at 13.5s on a node under load
-# (4-core Pi at load 4.3), so this is ~20x headroom rather than a guess:
-# the old 120s was generous too, and what actually blew it was two compose
-# runs contending, not the work itself. Now that the restart lock makes that
-# contention impossible, the remaining reasons to exceed even this are a
-# genuinely stuck device or daemon — cases where killing the CLI mid-recreate
-# does real damage (see stack_reconcile), so it is worth waiting longer
-# before resorting to that.
+# Budget for the stack recreate: ~20x the measured 13.5s on a loaded Pi, since
+# killing the CLI mid-recreate does real damage (see stack_reconcile).
+# See docs/features/sdr-mode.md#recreate-timeout-and-repair.
 RECREATE_TIMEOUT_SECONDS = 300
 
 
@@ -53,26 +45,13 @@ def _write_mode(mode):
 def restart_sdrplay_service(on_phase=None):
     """Restart sdrplay_apiService, forcing it if the unit will not stop.
 
-    `systemctl restart sdrplay.service` is not reliable on the failure that
-    matters most. When the SDRplay device has wedged — the state auto-calibrate
-    exists to recover from — the unit hangs in `deactivating (stop-sigterm)`
-    because sdrplay_apiService ignores SIGTERM, and the restart never returns.
+    A plain restart hangs forever when the device has wedged, because
+    sdrplay_apiService ignores SIGTERM. The fallback SIGKILLs it, then
+    reset-fails and starts the unit.
+    See docs/features/sdr-mode.md#why-a-plain-restart-is-not-enough.
 
-    This was a bare `subprocess.run(..., timeout=30)`. Confirmed live on
-    jonathan-node-2 against a genuinely wedged RSPduo (blah2 crash-looping on
-    `MaxDevs=1023 NumDevs=0 / Error: No devices found`): the timeout fired,
-    TimeoutExpired propagated out of run_config_merger_and_restart, reached
-    ApplyService as 'Command timed out', and **the container recreate never
-    ran** — so the one path that can recover the device aborted half-way, and
-    Auto-Calibrate's preflight reported it could not restart the radio.
-
-    The fallback is the sequence that did work by hand on that node: SIGKILL
-    the service process, which releases the stuck systemd job, then clear the
-    failed state and start it again. The device stayed enumerated on USB
-    throughout, so no unbind/rebind is needed — only the API service is stuck.
-
-    Never raises: every caller here treats the restart as best-effort, and a
-    node without sdrplay.service at all (dev machines) must stay a no-op.
+    Never raises: callers treat the restart as best-effort, and a node
+    without sdrplay.service (dev machines) must stay a no-op.
     Returns None normally, or a short description of what it had to do.
     """
     if on_phase is not None:
@@ -91,14 +70,9 @@ def restart_sdrplay_service(on_phase=None):
     if on_phase is not None:
         on_phase('resetting_sdr', None)
     try:
-        # -f (full command line), not -x: the kernel truncates comm to 15
-        # chars, so the 18-char name never matches an -x pattern. That bug is
-        # why blah2-arm's own sdrplay-restart.sh is a silent no-op, while
-        # script/blah2_rspduo_restart.bash works.
-        #
-        # The pattern is bracketed so it cannot match a shell command line
-        # that merely *carries* it — running the unbracketed form over ssh
-        # matches the invoking shell and kills the session.
+        # -f, not -x: comm is truncated to 15 chars, so -x never matches.
+        # Bracketed so it cannot match (and kill) a shell carrying the pattern.
+        # See docs/features/sdr-mode.md#the-forced-reset.
         subprocess.run(['pkill', '-9', '-f', '[s]drplay_apiService'],
                        capture_output=True, timeout=15)
         # Killing the process is what releases the stuck job, but systemd
@@ -118,11 +92,8 @@ def restart_sdrplay_service(on_phase=None):
 def _settle(seconds, on_phase):
     """Sleep out the SDRplay settle window, reporting the remaining time.
 
-    Chunked rather than one flat sleep purely so callers can show a
-    countdown: this window is two thirds of a whole apply's wall time, and
-    a progress display that sits silent through it is indistinguishable
-    from a hang — which is what drove users to click Apply a second time
-    and collide two `docker compose` runs in the first place.
+    Chunked only so callers can show a countdown: a silent 30s looks like a
+    hang and drove users to click Apply twice. See docs/features/sdr-mode.md#settle-window.
     """
     deadline = time.monotonic() + seconds
     while True:
@@ -143,9 +114,8 @@ def run_config_merger_and_restart(retina_node_path: str, on_phase=None,
     against the same project.
 
     lock_timeout: how long to wait for that lock. Defaults to the short,
-    request-shaped wait, because /towers/select and /calibrate/apply still
-    call this inline on a Flask request thread and must not hang a browser
-    for minutes. ApplyService, which runs off-request, passes the long one.
+    request-shaped wait. ApplyService, the only caller, runs off-request and
+    passes the long one.
 
     on_phase: optional callback(phase, detail) for progress reporting.
     Returns an error string on failure, None on success.
@@ -192,16 +162,11 @@ def _run_config_merger_and_restart_locked(retina_node_path, on_phase):
     except Exception:
         pass
 
-    # Force a clean sdrplay_apiService restart so the USB device is properly
-    # re-initialised before blah2 claims it.  Mirrors what the watchdog does.
-    # Non-fatal: no-op on dev machines without sdrplay.service, and it forces
-    # the service down rather than timing out when the device has wedged —
-    # see restart_sdrplay_service, which reports its own phases.
+    # Re-initialise the USB device before blah2 claims it, as the watchdog
+    # does. Non-fatal; reports its own phases.
     restart_sdrplay_service(on_phase)
 
-    # See SDRPLAY_RESTART_SETTLE_SECONDS — without this, recreating the
-    # containers immediately after the restart request returns has
-    # repeatedly wedged the SDRplay device on real hardware.
+    # See SDRPLAY_RESTART_SETTLE_SECONDS: skipping this wedges the device.
     _settle(SDRPLAY_RESTART_SETTLE_SECONDS, on_phase)
 
     on_phase('recreating', None)
@@ -267,12 +232,9 @@ def set_mode():
     if mode not in ('radar', 'spectrum', 'sdrconnect'):
         return jsonify({'success': False, 'error': 'Invalid mode'}), 400
 
-    # Every branch below (including 'radar', which force-recreates the
-    # containers) stops or restarts blah2 — any of that would yank the SDR
-    # out from under an active calibration run. Checking calibrator.is_running()
-    # directly (not just the lock file) matters because MODE_ADSB has no time
-    # limit: a genuine multi-hour run would outlive the lock file's own
-    # 20-minute staleness window, but is_running() is always correct.
+    # Every branch stops or restarts blah2, which would pull the SDR from a
+    # calibration run. is_running() is checked too because an ADS-B run can
+    # outlive the lock file's staleness window. See docs/features/sdr-mode.md#switching-modes.
     if calibrator.is_running() or device_state.is_calibration_locked()[0]:
         return jsonify({'success': False,
                         'error': 'Auto-calibration is running. Cancel it before switching modes'}), 409
@@ -311,10 +273,8 @@ def set_mode():
 def _set_mode_locked(mode, current_mode, retina_node_path):
     """The Docker/systemd half of set_mode, with the restart lock held.
 
-    Split out of set_mode purely so the lock scope is the whole transition
-    and not just one command: every branch here stops or starts containers
-    that another caller (a config apply, the cron watchdog) may be
-    recreating at the same instant.
+    The lock must cover the whole transition, not just one command, because a
+    config apply or the watchdog may be recreating the same containers.
     """
     if mode == 'spectrum':
         # Write mode first so the watchdog guard fires immediately and cannot
@@ -449,17 +409,10 @@ def sdrconnect_ready():
 def enforce_radar_mode(retina_node_path: str) -> None:
     """Stop retina-spectrum/sdrconnect and bring the radar stack up unconditionally.
 
-    Called on wizard completion so the node is always left in a clean radar
-    state regardless of what happened during the wizard flow. Non-fatal: errors
-    are swallowed so callers don't need to handle them.
-
-    Takes the restart lock like every other recreate path — this one matters
-    more than its "wizard completion" description suggests, because the
-    Mender install path also calls it from a background thread to recover a
-    failed install (see mender_routes), where nothing else would be
-    coordinating it with a concurrent apply. Failing to get the lock is
-    swallowed along with everything else here: whoever holds it is already
-    performing a restart, which leaves the stack up regardless.
+    Called on wizard completion and, from a background thread, to recover a
+    failed Mender install (see mender_routes), so it must take the restart lock.
+    Never raises, including when the lock is busy: the holder is already
+    restarting the stack. See docs/features/sdr-mode.md#returning-to-radar.
     """
     from app import DATA_DIR
     from restart_lock import restart_lock

@@ -1,7 +1,7 @@
-"""
-Utilities for converting Pydantic schemas to form field dicts for Jinja rendering.
+"""Convert Pydantic schemas to form field dicts for Jinja rendering.
 
-Compatible with both Pydantic v1 (Debian Bookworm apt) and v2.
+Must work on Pydantic v1 (nodes, Debian Bookworm apt) and v2.
+See docs/features/config-editor.md#form-generation.
 """
 import types
 from typing import Literal, Union, get_args, get_origin
@@ -53,12 +53,8 @@ def get_field_readonly(field_info):
     return False
 
 
-# Optional[X] and X | None describe the same type but are not the same object:
-# get_origin returns typing.Union for the first and types.UnionType for the
-# second. Matching only the first makes a PEP 604 field quietly lose its input
-# type and render a port as a text box instead of a number one, so both forms
-# are accepted here. The repo's ruff config enforces X | None (UP045), which
-# would otherwise be the failing style.
+# Optional[X] has origin typing.Union, X | None has types.UnionType. Match
+# both, or PEP 604 fields (enforced by ruff UP045) lose their input type.
 _UNION_ORIGINS = (Union, types.UnionType)
 
 
@@ -148,7 +144,8 @@ def schema_to_form_fields(model_class, values: dict):
 
     Args:
         model_class: Pydantic model class (for field metadata)
-        values: Current values from user.yml (what to display in form)
+        values: Values to display: the merged config.yml, or the rejected
+            submission when re-rendering after a validation error
 
     Returns:
         List of field dicts for Jinja template
@@ -175,7 +172,7 @@ def schema_to_form_fields(model_class, values: dict):
                 'title': get_field_title(field_info, name),
                 'description': get_field_description(field_info),
                 'type': get_field_input_type(field_info),
-                'value': values.get(name),  # From user.yml, NOT schema default
+                'value': values.get(name),  # From `values`, NOT the schema default
                 'readonly': readonly,
                 'options': options,
                 **constraints,

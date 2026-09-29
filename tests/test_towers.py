@@ -427,7 +427,7 @@ class TestTowerSelect:
         with open(user_path) as f:
             saved = yaml.safe_load(f)
         assert saved['location']['rx']['latitude'] == -33.8688
-        assert saved['location']['rx']['name'] == 'ret7dd2cb0d'  # node_id
+        assert saved['location']['rx']['name'] == 'ret7a000001'  # node_id
         assert saved['location']['tx']['latitude'] == -33.820079
         assert saved['location']['tx']['name'] == 'ATN6'  # callsign
 
@@ -480,7 +480,7 @@ class TestTowerSelect:
         with open(user_path) as f:
             saved = yaml.safe_load(f)
         # network.node_id should be preserved
-        assert saved.get('network', {}).get('node_id') == 'ret7dd2cb0d'
+        assert saved.get('network', {}).get('node_id') == 'ret7a000001'
 
 
 class TestSetupWizardLocationStep:
@@ -1043,8 +1043,8 @@ class TestCartoBasemapKey:
 
     def test_key_is_never_committed(self):
         """This repository is public, and a key in its history outlives every
-        rotation. retina-server keeps its copy in /root/.secrets on the droplet
-        for the same reason; the node's equivalent is /data/retina-gui."""
+        rotation. retina-server keeps its copy outside its repository for the
+        same reason; the node's equivalent is /data/retina-gui."""
         root = os.path.join(os.path.dirname(__file__), '..')
         for rel in ['src/services.py', 'templates/setup.html',
                     'static/setup.js', 'systemd/retina-gui.service']:

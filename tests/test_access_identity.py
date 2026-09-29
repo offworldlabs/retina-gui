@@ -16,11 +16,11 @@ from cryptography.hazmat.primitives.asymmetric import rsa
 
 from access_identity import AccessIdentity
 
-TEAM = "offworldlab.cloudflareaccess.com"
+TEAM = "example-team.cloudflareaccess.com"
 ISSUER = f"https://{TEAM}"
-AUD = "b62aeb13c198cd2118bd5d92b350f2af5c42830c703baeab42aad5fa3e01f29a"
+AUD = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
 OTHER_AUD = "0000000000000000000000000000000000000000000000000000000000000000"
-EMAIL = "jehan@offworldlab.com"
+EMAIL = "engineer@example.com"
 
 
 @pytest.fixture(scope="module")

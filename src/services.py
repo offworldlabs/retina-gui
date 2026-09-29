@@ -1,30 +1,9 @@
 """Process-wide configuration and shared service singletons.
 
-Everything here must exist exactly once per process. It lives in its own
-module for a specific reason: `app.py` is executed *twice*.
-
-systemd starts it as `python3 src/app.py`, so its module body runs under the
-name `__main__`. Route handlers then do `from app import calibrator` at
-request time, and because `__main__` and `app` are distinct entries in
-sys.modules, Python imports the same file a second time and runs the whole
-body again. Anything constructed at app.py's module level therefore exists
-twice, in one process.
-
-For stateless helpers that is merely wasteful. For anything owning a socket,
-a thread, or in-memory run state it is a bug, and one that bit hard:
-retina-tracker's sidecar accepts a single TCP connection at a time, so two
-RetinaTrackerClient instances meant two connections, one of which was
-accepted and served while the other sat unread in the kernel's backlog
-forever. Which instance won was a startup race. When the calibrator held the
-losing one, its detection frames and its tracker RESET went into a socket
-nobody was reading -- silently, because confirmed-track events arrive over a
-*file* tail that kept working regardless of that socket.
-Auto-Calibrate appeared to work while its own feed reached nothing, and
-credited tracks it had never observed.
-
-Importing these from here fixes that: `services` is only ever reachable under
-one name, so it executes once no matter how many times app.py does. app.py
-re-exports the names, so `from app import ...` continues to work unchanged.
+Everything here must exist exactly once per process. app.py's module body runs
+twice (as __main__ and again as `app`), so singletons built there would be
+duplicated; this module is only reachable under one name, so it runs once.
+app.py re-exports these names. See docs/architecture.md#one-instance-per-process.
 """
 
 import os
@@ -65,45 +44,33 @@ RETINA_SPECTRUM_URL = os.environ.get('RETINA_SPECTRUM_URL', 'http://localhost:30
 NODE_ID_FILE = os.environ.get('NODE_ID_FILE', '/data/mender/node_id')
 TOWER_FINDER_URL = os.environ.get('TOWER_FINDER_URL', 'https://tower-finder.retina.fm')
 
-# CARTO basemap key for the wizard's tower map. Empty by default, and an empty
-# value is a working map rather than a broken one: CARTO answers an unkeyed
-# request with HTTP 200 and a tile stamped "API KEY REQUIRED", so a node
-# without this degrades visibly instead of failing.
-#
-# Public by nature. Tile requests are issued by the browser, so no server sits
-# in the path that could hold a secret, and tower-finder bakes the same value
-# into its shipped bundle for that reason. Only ever put a tile-scoped key
-# here.
+# CARTO basemap key for the wizard's tower map. Empty is a working, watermarked
+# map. Never commit a key here (public repo); only ever use a tile-scoped key.
+# See docs/operations/node-files.md#carto-basemap-key.
 CARTO_API_KEY = os.environ.get('CARTO_API_KEY', '')
-# blah2_api runs with network_mode: host and listens directly on this port —
-# NOT the :8080 blah2_host nginx proxy, which doesn't forward /capture/* at all.
+# blah2_api directly (network_mode: host), NOT the :8080 blah2_host nginx
+# proxy, which doesn't forward /capture/* at all.
 BLAH2_API_URL = os.environ.get('BLAH2_API_URL', 'http://localhost:3000')
-# retina-tracker sidecar (network_mode: host, see retina-node's docker-compose.yml).
-# Its ingest socket is deliberately absent here: blah2_api forwards detections
-# to it directly now, and it accepts one connection at a time. This is the
-# control surface only.
+# retina-tracker sidecar's control surface only. Its ingest socket accepts one
+# connection and belongs to blah2_api, which forwards detections to it.
 RETINA_TRACKER_CONTROL_URL = os.environ.get(
     'RETINA_TRACKER_CONTROL_URL', 'http://localhost:30101')
-# Path the sidecar streams JSONL track events to (-s flag, see its compose
-# command) — tailed rather than read over the TCP socket, since retina-tracker's
-# --tcp mode is input-only (see retina_tracker_client.py's module docstring).
+# JSONL track events the sidecar writes (its -s flag). Tailed, because
+# retina-tracker's --tcp mode is input-only.
 RETINA_TRACKER_EVENTS_PATH = os.environ.get('RETINA_TRACKER_EVENTS_PATH',
     os.path.join(PROJECT_ROOT, 'dev_data', 'retina-tracker-events.jsonl') if DEV_MODE
     else '/data/retina-node/retina-tracker/output/events.jsonl'
 )
-# Written by the retina-telemetry container, read-only to us. That service
-# binds no ports, so this file is the only way anything it knows reaches an
-# operator — see telemetry_status.py.
+# Written by retina-telemetry, read-only to us. That service binds no ports, so
+# this file is the only way its state reaches an operator.
 TELEMETRY_STATUS_PATH = os.environ.get('TELEMETRY_STATUS_PATH',
     os.path.join(PROJECT_ROOT, 'dev_data', 'telemetry-status.json') if DEV_MODE
     else '/data/retina-telemetry/status.json'
 )
 
 # The zone the Cloudflare tunnel publishes this node under. Deliberately not
-# retina.fm: a page served from a node can set a cookie scoped to its parent
-# domain, which the browser would then send to every other host on that domain,
-# including the ingest API. Nodes run in customers' homes on hardware they
-# control, so that separation is not theoretical.
+# the main product domain, so a node-served page cannot set cookies the
+# ingest API would receive. See docs/architecture.md#session-cookies.
 REMOTE_ACCESS_DOMAIN = os.environ.get('REMOTE_ACCESS_DOMAIN', 'retnode.com')
 
 MENDER_SERVICES = ["mender-authd", "mender-updated", "mender-connect"]
@@ -145,18 +112,14 @@ node_name = NodeName(os.path.join(DATA_DIR, "node-name"), dev_mode=DEV_MODE)
 
 remote_access = RemoteAccess(os.path.join(DATA_DIR, "remote-access.json"))
 
-# Enforces the remote shell agreement by editing mender-connect's own config.
-# Separate from RemoteAccess on purpose: that one records what the owner chose,
-# this one makes it true, and keeping them apart is what lets the recording stay
-# testable without a systemd on the other end of it.
-# Verifies Cloudflare Access assertions. Its config (team domain and this
-# node's application audience) is delivered by node-infra beside the tunnel
-# token, so until that arrives it reports "not configured" and refuses
-# everything, which is the safe state to be in while it is unwired.
+# Verifies Cloudflare Access assertions. Refuses everything until node-infra
+# delivers its config beside the tunnel token.
 access_identity = AccessIdentity(
     config_path=os.environ.get("ACCESS_CONFIG_PATH", "/data/cloudflared/access.json"),
 )
 
+# Enforces the remote shell agreement that RemoteAccess records. Kept separate
+# so the recording is testable without systemd.
 mender_connect = MenderConnect(
     conf_path=os.environ.get("MENDER_CONNECT_CONF", "/etc/mender/mender-connect.conf"),
     dev_mode=DEV_MODE,
@@ -164,16 +127,10 @@ mender_connect = MenderConnect(
 
 
 def secret_key():
-    """Flask's signing key, persisted so sessions survive a restart.
-
-    This used to be `os.urandom(32).hex()` with no fallback to disk, which was
-    harmless while nothing used the session: every restart minted a new key and
-    invalidated cookies nobody held. It stops being harmless the moment remote
-    access exists, because every GUI restart, and every OTA, would then sign the
-    owner out mid-session with no explanation.
+    """Flask's signing key, persisted so sessions survive a restart and an OTA.
 
     Mode 0600, and never logged. Anyone able to read it can forge a session
-    cookie for the owner pathway.
+    cookie for the owner pathway. See docs/architecture.md#session-cookies.
     """
     from_env = os.environ.get('SECRET_KEY')
     if from_env:
@@ -204,11 +161,9 @@ def secret_key():
 def read_node_id():
     """The Mender node_id, or 'Unknown' if it cannot be read.
 
-    Also this node's mDNS host name: owl-mdns-identity derives ret*.local from
-    exactly this value, so `f"{read_node_id()}.local"` is the address other
-    machines reach us on. app.get_node_id() wraps this to add logging; nothing
-    that runs off the request path should use that one, since it needs the
-    Flask app object.
+    Also this node's mDNS host name (owl-mdns-identity derives ret*.local from
+    it). Use this, not app.get_node_id(), off the request path: that one needs
+    the Flask app.
     """
     try:
         with open(NODE_ID_FILE) as f:
@@ -226,13 +181,10 @@ peers = peer_directory_from_env(read_node_id, DEV_MODE)
 def config_change_guard():
     """Refuse a config apply while Auto-Calibrate is using the SDR.
 
-    Both signals are needed, as elsewhere: is_running() is authoritative for
-    this process and never expires, while the lock file also covers a run
-    left behind by a crashed or restarted GUI. See ApplyService's
-    ConfigChangeRefused for why this is enforced there rather than per-route.
-
-    `calibrator` is defined below this point, which is fine: the name is
-    resolved when the guard runs, not when it is defined.
+    Both signals are needed: is_running() is authoritative for this process,
+    and the lock file also covers a run left by a crashed GUI. `calibrator` is
+    defined below; the name resolves when the guard runs.
+    See docs/architecture.md#the-calibration-guard.
     """
     if calibrator.is_running() or device_state.is_calibration_locked()[0]:
         return False, ("Auto-calibration is running. Cancel it before "
@@ -246,11 +198,9 @@ blah2_client = Blah2Client(BLAH2_API_URL)
 # One client per sidecar, shared by every feature that consumes its events.
 retina_tracker_client = RetinaTrackerClient(
     RETINA_TRACKER_EVENTS_PATH, RETINA_TRACKER_CONTROL_URL)
-# config_mgr/apply_service are only reached by the preflight's recovery
-# branch — writing the safe corner to user.yml and restarting the stack when
-# the radio has stopped accepting retunes (see calibrator._preflight). The
-# apply_service reference resolves here because ApplyService is constructed
-# above; its own guard resolves `calibrator` lazily, so the cycle is fine.
+# config_mgr/apply_service are only for the preflight's recovery branch (see
+# calibrator._preflight). The guard resolves `calibrator` lazily, so the
+# cycle is fine.
 calibrator = Calibrator(blah2_client, retina_tracker_client,
                         config_mgr=config_mgr, apply_service=apply_service)
 

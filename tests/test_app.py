@@ -64,7 +64,7 @@ class TestIndexRoute:
         """Index should display node ID from config."""
         response = app_client.get('/')
         assert response.status_code == 200
-        assert b'ret7dd2cb0d' in response.data
+        assert b'ret7a000001' in response.data
 
     def test_index_shows_node_id_unknown(self, app_client_no_node_id):
         """Index should show 'Unknown' when node_id is missing."""
@@ -182,21 +182,21 @@ class TestConfigPageRoute:
         """Location values from user.yml should appear."""
         response = app_client.get('/config')
         assert response.status_code == 200
-        assert b'37.7644' in response.data  # rx latitude
-        assert b'150 Mississippi' in response.data  # rx name
+        assert b'37.7749' in response.data  # rx latitude
+        assert b'Example RX' in response.data  # rx name
 
     def test_config_shows_truth_values(self, app_client):
         """Truth/ADS-B values from user.yml should appear."""
         response = app_client.get('/config')
         assert response.status_code == 200
-        assert b'sfo1.retnode.com' in response.data  # tar1090 server
+        assert b'tar1090.example.com' in response.data  # tar1090 server
         assert b'localhost:49155' in response.data  # adsb2dd
 
     def test_config_shows_tar1090_values_split(self, app_client):
         """tar1090 adsb_source should be split into 3 fields."""
         response = app_client.get('/config')
         assert response.status_code == 200
-        assert b'192.168.8.183' in response.data  # host
+        assert b'192.0.2.10' in response.data  # host
         assert b'30005' in response.data  # port
         assert b'beast_in' in response.data  # protocol
 
@@ -249,7 +249,7 @@ class TestConfigSaveRoute:
             'location.rx_latitude': '42.241528',
             'location.rx_longitude': '-72.648361',
             'location.rx_altitude': '619.2',
-            'location.rx_name': 'ret824685c9',
+            'location.rx_name': 'ret8a000001',
         }, follow_redirects=False)
 
         # Re-renders the form with errors rather than redirecting.
@@ -840,7 +840,7 @@ class TestWizardRedirectDoesNotStrandTheWizard:
     @bp.before_request applies it to every route in that blueprint —
     including /config/apply/status, which the wizard's own tower step polls.
 
-    Observed on jonathan-node-1: the tower step saved WGBY-TV correctly and
+    Observed on a real node: the tower step saved the tower correctly and
     the queued apply finished in 0.74s, but every poll was answered with a
     302 to /set-up. fetch() follows redirects, so the browser got the setup
     page as a 200 of text/html, .json() rejected, and the step's catch-all
@@ -890,7 +890,7 @@ class TestWizardRedirectDoesNotStrandTheWizard:
             'rx_latitude': 42.2371916, 'rx_longitude': -72.6835149,
             'rx_altitude': 16, 'tx_latitude': 42.241528,
             'tx_longitude': -72.648361, 'tx_altitude': 619.2,
-            'tx_callsign': 'WGBY-TV', 'frequency_mhz': 213.0,
+            'tx_callsign': 'KTST-TV', 'frequency_mhz': 213.0,
         })
         assert saved.status_code == 202
 
@@ -1133,16 +1133,16 @@ class TestParseFlatFormData:
         from config_manager import ConfigManager
 
         capture, location, truth, tar1090, retina_tracker = ConfigManager.parse_flat_form_data({
-            'location.rx_latitude': '37.7644',
-            'location.rx_longitude': '-122.3954',
+            'location.rx_latitude': '37.7749',
+            'location.rx_longitude': '-122.4194',
             'location.rx_altitude': '23',
-            'location.rx_name': '150 Mississippi'
+            'location.rx_name': 'Example RX'
         })
 
-        assert location['rx_latitude'] == 37.7644
-        assert location['rx_longitude'] == -122.3954
+        assert location['rx_latitude'] == 37.7749
+        assert location['rx_longitude'] == -122.4194
         assert location['rx_altitude'] == 23
-        assert location['rx_name'] == '150 Mississippi'
+        assert location['rx_name'] == 'Example RX'
 
     def test_parse_integer_conversion(self):
         """String integers should be converted to int."""
@@ -1159,9 +1159,9 @@ class TestParseFlatFormData:
         from config_manager import ConfigManager
 
         _, location, _, _, _ = ConfigManager.parse_flat_form_data({
-            'location.rx_latitude': '37.7644'
+            'location.rx_latitude': '37.7749'
         })
-        assert location['rx_latitude'] == 37.7644
+        assert location['rx_latitude'] == 37.7749
         assert isinstance(location['rx_latitude'], float)
 
     def test_parse_negative_values(self):
@@ -1170,10 +1170,10 @@ class TestParseFlatFormData:
 
         capture, location, _, _, _ = ConfigManager.parse_flat_form_data({
             'capture.device_agcSetPoint': '-50',
-            'location.rx_longitude': '-122.3954'
+            'location.rx_longitude': '-122.4194'
         })
         assert capture['device_agcSetPoint'] == -50
-        assert location['rx_longitude'] == -122.3954
+        assert location['rx_longitude'] == -122.4194
 
     def test_parse_boolean_true(self):
         """Boolean true values should be converted."""

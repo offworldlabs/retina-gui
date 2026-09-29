@@ -1,4 +1,4 @@
-<!-- Step 1: Agreements -->
+<!-- Agreements step -->
 <div data-step="agreements" class="step-panel">
     <div class="wiz-title-row">
         <h1>Let's get started</h1>
@@ -12,10 +12,10 @@
             </div>
         </label>
 
-        {# The publication disclosure lives here rather than in the EULA, so
-           this wording is part of what TELEMETRY_CONSENT_VERSION identifies —
-           changing it must bump that constant (see device_state.py). Recording
-           publication as "public" is only honest while this text says so. #}
+        {# This wording is part of what TELEMETRY_CONSENT_VERSION identifies:
+           changing it must bump that constant (device_state.py). Publication is
+           recorded as "public" only because this text says so.
+           See docs/features/setup-wizard.md#agreements #}
         <label class="step-check">
             <input type="checkbox" id="cloudCheck">
             <div>

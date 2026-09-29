@@ -6,10 +6,9 @@ import time
 
 import requests
 
-# Fake version history used by all dev-mode routes — newest first.
-# Set DEV_NODE_VERSION env var to control the simulated installed version:
-#   DEV_NODE_VERSION=v1.0.0  (default) → re-run, package already installed
-#   DEV_NODE_VERSION=                  → fresh install (no package installed)
+# Fake version history used by all dev-mode routes, newest first.
+# DEV_NODE_VERSION sets the simulated installed version (empty = fresh node).
+# See docs/features/ota-updates.md#dev-mode.
 DEV_VERSIONS = ['v1.1.0', 'v1.0.5', 'v1.0.0', 'v0.9.5', 'v0.9.0']
 
 
@@ -91,15 +90,11 @@ class MenderClient:
                 f.write(version)
 
     def get_versions(self) -> tuple[str | None, str | None]:
-        """Get owl-os and retina-node versions.
+        """Get (owl_os_version, retina_node_version) from Mender provides.
 
-        Checks mender-update show-provides first; falls back to inspecting
-        running Docker containers if mender hasn't committed provides yet
-        (e.g. when install_from_url succeeded but provides lag behind).
-
-        Returns (owl_os_version, retina_node_version) tuple.
-        On fresh bootstrap, only owl-os version exists. retina-node version
-        appears after the first app OTA update.
+        Falls back to the running blah2 image tag for retina-node when
+        provides are missing. Either value may be None.
+        See docs/features/ota-updates.md#installed-versions.
         """
         if self.dev_mode:
             return ('2.4.1-dev', self.dev_get_node_version())
@@ -186,8 +181,8 @@ class MenderClient:
     def install_from_url(self, url: str, timeout: int = 600) -> tuple[bool, str | None]:
         """Install artifact from URL via mender-update (standalone).
 
-        Used for app updates only (no reboot needed). OS updates use managed
-        mode via the mender-updated daemon, driven by server-side deployments.
+        Used for retina-node stack updates only. OS updates run in managed
+        mode. See docs/features/ota-updates.md#two-kinds-of-update.
 
         Returns (success, error) tuple.
         """
@@ -218,12 +213,8 @@ class MenderClient:
 def get_retina_node_version_from_docker() -> str | None:
     """Get retina-node version from running blah2 Docker containers.
 
-    Inspects 'docker ps' output for any offworldlabs/blah2 image and extracts
-    the image tag. Used as a fallback when mender-update show-provides has not
-    yet committed the artifact provides.
-
-    Returns the image tag string (e.g. 'v0.3.10'), or None if no blah2
-    containers are running or docker is unavailable.
+    Returns the image tag (e.g. 'v0.3.10'), or None if no blah2 container
+    is running or docker is unavailable.
     """
     try:
         result = subprocess.run(
@@ -254,10 +245,8 @@ def parse_version(artifact_name: str) -> tuple[int, ...] | None:
     return None
 
 
-# Polled every 5s while the wizard's Packages step is open on a fresh node
-# (no skip available, so a failure here keeps retrying), so this needs a
-# cache or it blows through GitHub's 60-req/hour unauthenticated rate limit
-# — see _OWL_OS_RELEASE_CACHE_TTL above for the same reasoning.
+# The wizard polls this every 5s, so it is cached to stay inside GitHub's
+# unauthenticated rate limit. See docs/features/ota-updates.md#github-release-lookups.
 _STABLE_RELEASE_CACHE_TTL = 60  # seconds
 _stable_release_cache: dict[str, tuple[float, tuple[list[dict], str | None]]] = {}
 
@@ -268,12 +257,10 @@ def get_all_stable_versions_from_github(
 ) -> tuple[list[dict], str | None]:
     """Get all stable version tags from GitHub releases, newest first.
 
-    Queries GitHub releases API, filters to stable versions (excludes rc, dev, beta),
-    and returns all matching entries sorted by semver descending.
     Result (including errors) is cached for _STABLE_RELEASE_CACHE_TTL seconds.
 
-    Returns (versions, error) tuple. Each entry is {"version": "v0.3.5", "size_bytes": 628000000}.
-    size_bytes is the size of the .mender artifact asset, or None if no assets are present.
+    Returns (versions, error). Each entry is {"version": "v0.3.5", "size_bytes": 628000000};
+    size_bytes is the .mender asset's size, else the largest asset's, else None.
     """
     cached = _stable_release_cache.get(repo)
     if cached and time.monotonic() - cached[0] < _STABLE_RELEASE_CACHE_TTL:
@@ -316,9 +303,6 @@ def get_latest_stable_from_github(
 ) -> tuple[str | None, str | None]:
     """Get latest stable version tag from GitHub releases.
 
-    Queries GitHub releases API, filters to stable versions (excludes rc, dev, beta),
-    and returns the highest semver version.
-
     Returns (version_tag, error) tuple. version_tag is like "v0.3.5".
     """
     try:
@@ -331,11 +315,9 @@ def get_latest_stable_from_github(
             return None, f"GitHub API error: {resp.status_code}"
 
         releases = resp.json()
-        # Filter to stable versions using existing parse_version logic
         stable = []
         for release in releases:
             tag = release.get("tag_name", "")
-            # Construct artifact name format for parsing
             artifact_name = f"retina-node-{tag}"
             version = parse_version(artifact_name)
             if version:
@@ -344,7 +326,6 @@ def get_latest_stable_from_github(
         if not stable:
             return None, "No stable releases found"
 
-        # Sort by version tuple, highest first
         stable.sort(key=lambda x: x[1], reverse=True)
         return stable[0][0], None
     except requests.RequestException as e:
@@ -364,8 +345,8 @@ def parse_os_version(tag: str) -> tuple[int, ...] | None:
     return None
 
 
-# Polled every 5s while the wizard's System step is open, so this needs a
-# cache or it blows through GitHub's 60-req/hour unauthenticated rate limit.
+# Polled every 5s by the wizard's System step, so cached to stay inside
+# GitHub's 60 requests/hour unauthenticated limit.
 _OWL_OS_RELEASE_CACHE_TTL = 300  # seconds
 _owl_os_release_cache: dict[str, tuple[float, tuple[str | None, str | None]]] = {}
 
@@ -375,11 +356,9 @@ def get_latest_owl_os_from_github(
 ) -> tuple[str | None, str | None]:
     """Get latest stable owl-os version tag from GitHub releases.
 
-    Queries GitHub releases API, filters to stable versions
-    (tags matching os-v*.*.*), and returns the highest semver version.
-    Pre-releases are excluded: a device offered an -rc or -dev image as its
-    "latest" would be updated onto an untested build.
+    Only os-vX.Y.Z tags count: pre-releases must never be offered as "latest".
     Result (including errors) is cached for _OWL_OS_RELEASE_CACHE_TTL seconds.
+    See docs/features/ota-updates.md#version-parsing.
 
     Returns (version_tag, error) tuple. version_tag is like 'os-v0.2.0'.
     """

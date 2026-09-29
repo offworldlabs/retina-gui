@@ -25,9 +25,7 @@ def check():
             })
         current = mender.dev_get_node_version()
         if current and device_state.has_completed_setup_wizard():
-            # Once any package is installed and the wizard has completed at
-            # least once, updates are handled by the server — no need to
-            # show what's available.
+            # Installed and wizard completed once: updates are the server's job.
             return jsonify({"installing": False, "current_version": current})
         return jsonify({
             "installing": False,
@@ -56,14 +54,12 @@ def check():
         })
 
     if current and device_state.has_completed_setup_wizard():
-        # Already have a package installed and the wizard has completed at
-        # least once — updates from here on are handled by the server, so
-        # there's nothing to check on GitHub for.
+        # Installed and wizard completed once: updates are the server's job.
+        # See docs/features/ota-updates.md#mendercheck-responses.
         return jsonify({"installing": False, "current_version": current})
 
-    # Either nothing is installed yet, or this is the first time the wizard
-    # is running on a node that shipped with retina-node pre-installed — in
-    # both cases the user should be able to see/install the latest version.
+    # Nothing installed yet, or first wizard run on a node that shipped with
+    # retina-node: offer the latest version.
     all_versions, error = get_all_stable_versions_from_github()
     if error:
         return jsonify({"error": error})
@@ -93,11 +89,8 @@ def install():
     body = request.get_json() or {}
     requested_version = body.get("version")
 
-    # calibrator.is_running() is checked directly (not just
-    # device_state.can_start_install()'s lock-file check) because MODE_ADSB
-    # has no time limit: a genuine multi-hour run would outlive the lock
-    # file's own 20-minute staleness window, but is_running() is always
-    # correct regardless of how long the run has been going.
+    # Checked directly, not only via can_start_install()'s lock file: an
+    # ADS-B run has no time limit and can outlive the lock's staleness window.
     if calibrator.is_running():
         return jsonify({"success": False,
                         "error": "Auto-calibration is running. Cancel it before installing an update"}), 409
@@ -162,22 +155,16 @@ def install():
         from routes.mode import _write_mode, enforce_radar_mode
 
         def _recover():
-            # The new artifact failed to apply. If something was already
-            # running, make sure the previous (still-on-disk) compose stack is
-            # up rather than leaving the device with no radar containers at
-            # all. The Update Module's rollback normally does this already;
-            # enforce_radar_mode is idempotent and takes the restart lock.
+            # Backstop to the Update Module's own rollback: bring the previous
+            # stack back up. enforce_radar_mode is idempotent and takes the
+            # restart lock. See docs/features/ota-updates.md#recovery-after-a-failed-install.
             if already_installed:
                 enforce_radar_mode(RETINA_NODE_PATH)
             _write_mode('radar')
 
-        # The Update Module owns stopping the running stack. owl-os's fork of
-        # it loads the new images first, stops the stack only for the ~11 s
-        # swap, and holds the restart lock throughout, which keeps the RSPduo
-        # watchdog out. This used to `docker compose down` first and set mode
-        # to spectrum to silence the watchdog, which made every GUI install a
-        # full outage for the whole image load. retina-gui ships inside the
-        # owl-os image, so this never runs alongside the unforked module.
+        # Do not stop the stack here: owl-os's forked Update Module does the
+        # swap under the restart lock. Relies on retina-gui shipping inside
+        # owl-os. See docs/features/ota-updates.md#the-update-module-owns-the-stack-swap.
         try:
             try:
                 subprocess.run(

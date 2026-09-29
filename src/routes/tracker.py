@@ -1,14 +1,7 @@
-"""The Tracker page and its feed.
+"""The Tracker page and a byte-for-byte proxy for retina-tracker's SSE feed.
 
-retina-gui holds no tracker data. The record of what a node has seen lives in
-retina-tracker, which serves it over a loopback SSE endpoint, and this module
-is the door onto it: the page's HTML, and a proxy for the stream.
-
-Proxying rather than linking to the sidecar directly is what keeps the page
-behind the same session and Cloudflare Access checks as everything else, and
-what makes it work over the support tunnel, which routes paths on this
-hostname and not arbitrary ports. It is also nearly free: bytes are passed
-through without being parsed, buffered or re-serialised.
+retina-gui holds no tracker data; the sidecar does.
+See docs/features/tracker.md#why-the-page-is-proxied.
 """
 
 import json
@@ -18,43 +11,27 @@ from flask import Blueprint, Response, jsonify, redirect, render_template, reque
 
 bp = Blueprint('tracker', __name__, url_prefix='/tracker')
 
-# Nodes have been in the field under the old name long enough for the URL to
-# be bookmarked, so /tracker-preview keeps working permanently. 308 rather
-# than 301 because /clear is a POST and 301 would let a browser turn it into
-# a GET.
+# /tracker-preview is bookmarked in the field, so it redirects permanently.
+# 308, not 301: /clear is a POST and 301 lets a browser turn it into a GET.
 legacy_bp = Blueprint('tracker_preview', __name__, url_prefix='/tracker-preview')
 
-# The sidecar's own bounds, mirrored rather than imported because they belong
-# to another repo's release: a mismatch clamps to something sane here and the
-# sidecar clamps again on its side.
+# Mirrors the sidecar's own bounds (another repo); it clamps again on its side.
 MIN_VIEW_WINDOW_S = 60
 MAX_VIEW_WINDOW_S = 4 * 3600
 
 CONNECT_TIMEOUT_S = 5
 CONTROL_TIMEOUT_S = 5
 
-# For turning blah2's delay bins into kilometres. Mirrored rather than imported
-# for the same reason as the window bounds above: it belongs to another repo.
+# For turning blah2's delay bins into kilometres.
 SPEED_OF_LIGHT = 299792458.0
 
 
 def _axis_bounds():
-    """What the node can see, from its own blah2 config.
+    """The plot's axis ranges, from the node's blah2 ambiguity bounds.
 
-    A plot scaled to its own data cannot tell a quiet sky from a narrow one.
-    On a node where nearly every detection is one interfering tone, an
-    autoscaled Doppler axis collapses to a sliver around that tone and the
-    picture looks full; two nodes, or the same node an hour apart, are drawn
-    at different scales and cannot be compared. The ambiguity bounds are the
-    only honest range to draw over, and they are the node's own numbers rather
-    than anything chosen here.
-
-    blah2 states delay in bins, which are kilometres only once the sample rate
-    says how wide a bin is.
-
-    None for anything the config does not state, which leaves that axis to
-    autoscale exactly as it does today. A guessed range misrepresents the node
-    just as autoscaling does, only less visibly.
+    Returns {"doppler": [lo, hi] Hz, "delay": [lo, hi] km}, with None for an
+    axis the config does not state (it then autoscales). Never guess a range.
+    See docs/features/tracker.md#axis-bounds.
     """
     from app import config_mgr
 
@@ -81,14 +58,7 @@ def _axis_bounds():
 
 
 def _drawable(lo, hi):
-    """Whether a pair is an axis rather than a typo.
-
-    Both halves have to be there, and the high one has to be above the low
-    one. A transposed pair would draw the axis backwards and a zero-width one
-    would collapse it, and in both cases a viewer would be looking at a
-    confident picture of nothing. Falling back to autoscale shows the data,
-    which is the honest answer when the node has not described itself.
-    """
+    """Whether a pair is an axis rather than a typo: both present, hi > lo."""
     return lo is not None and hi is not None and hi > lo
 
 
@@ -100,7 +70,7 @@ def _tracker_url(path):
 def _view_window():
     """The ?window= a viewer is asking for, in seconds, or None for whatever
     the sidecar holds. Clamped rather than rejected: it is a display
-    preference, not an assertion."""
+    preference."""
     raw = request.args.get("window")
     if raw is None:
         return None
@@ -129,27 +99,17 @@ def moved(path):
 
 @bp.route("")
 def index():
-    """The Tracker page. Everything it draws arrives on /tracker/events.
-
-    The axis bounds are the exception, and they cannot: they say what the node
-    can see, which is not knowable from what it happened to see.
-    """
+    """The Tracker page. Everything it draws arrives on /tracker/events,
+    except the axis bounds, which come from config."""
     return render_template("tracker.html", axes=_axis_bounds())
 
 
 @bp.route("/events")
 def events():
-    """Proxy the sidecar's stream, byte for byte.
+    """Proxy the sidecar's stream, byte for byte, one upstream per viewer.
 
-    Nothing is parsed on the way through. The sidecar frames the messages,
-    owns the cursor for this connection and decides what a snapshot contains;
-    this only carries them, so there is no second copy of the record here and
-    no format knowledge to drift out of step.
-
-    A viewer's connection maps to its own upstream connection. On loopback
-    with one or two viewers that is cheaper than holding a shared mirror and
-    fanning it out, and it means each viewer's window is honoured by the
-    sidecar rather than filtered a second time here.
+    Nothing is parsed: the sidecar owns framing, cursors and snapshots.
+    See docs/features/tracker.md#the-stream-proxy.
     """
     window_s = _view_window()
     url = _tracker_url("/events")
@@ -196,11 +156,9 @@ def data():
 
 @bp.route("/clear", methods=["POST"])
 def clear():
-    """Wipe the record the page is drawn from, without touching the tracker.
+    """Wipe the sidecar's record the page is drawn from; tracking keeps running.
 
-    The same distinction the button always carried: tracking keeps running,
-    so an aircraft still overhead reappears on its own within a few events.
-    It lives in the sidecar now because the record does.
+    See docs/features/tracker.md#clearing-the-buffer.
     """
     try:
         response = requests.post(_tracker_url("/history/clear"),

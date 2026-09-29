@@ -1,39 +1,8 @@
 """Enforcing the remote shell agreement, by editing what mender-connect will do.
 
-The owner can decline interactive access without declining anything else. That
-is enforced here, on the node, by turning off two of mender-connect's features
-and restarting it:
-
-    Terminal      the remote shell Mender's dashboard offers
-    PortForward   forwarding a local port to one on the node
-
-Both have to go. Disabling only the terminal leaves `port-forward 2222:localhost:22`
-reaching sshd directly, and a port-forward also arrives at this GUI with a Host
-of `localhost`, which classifies as the local network and so bypasses the
-restrictions that stop the support pathway granting SSH keys.
-
-## What is deliberately left alone
-
-`FileTransfer` stays enabled. It is how node-infra delivers and clears the
-Cloudflare tunnel token, so gating it here would make the two agreements
-dependent on each other: a node whose owner had declined the shell could never
-receive a support tunnel. It cannot be used to obtain a shell, because sshd
-trusts only /data/retina-gui/authorized_keys, which is root-owned and outside
-the chroot Mender file transfer writes into.
-
-`MenderClient` stays enabled, and mender-authd and mender-updated are untouched
-entirely. Enrolment, OTA updates and inventory reporting continue whatever the
-owner decides. They live in different daemons that share no process or
-dependency with mender-connect, which is what makes that promise structural
-rather than a matter of care.
-
-## Why this refuses rather than repairs
-
-A missing or unparseable config is not rewritten from defaults. The file
-carries file-transfer limits, the shell user and session caps that are not ours
-to reconstruct, and writing a plausible-looking replacement could silently widen
-what a session may do. Refusing leaves the node exactly as it was, which is the
-safer failure.
+Turns mender-connect's Terminal and PortForward features off or on and restarts
+it. FileTransfer and the other Mender daemons are deliberately left alone.
+See docs/features/remote-access.md#remote-shell-agreement.
 """
 
 import json
@@ -49,8 +18,9 @@ SERVICE = "mender-connect"
 #: happens. Matches what the OS image ships.
 DEFAULT_CONF_MODE = 0o644
 
-#: The two features the agreement governs. Order is not significant; both are
-#: written together so the file can never describe a half-applied state.
+#: The two features the agreement governs. Security invariant: both must go,
+#: because a port-forward alone reaches sshd and arrives here as LAN.
+#: See docs/features/remote-access.md#enforcement.
 GATED_FEATURES = ("Terminal", "PortForward")
 
 
@@ -76,9 +46,7 @@ class MenderConnect:
     def is_shell_enabled(self):
         """True, False, or None when the config cannot be read.
 
-        None is a distinct answer on purpose. "We cannot tell" and "the owner
-        declined" look the same to a boolean and mean very different things to
-        anyone deciding whether the agreement is being honoured.
+        None ("cannot tell") is deliberately distinct from False ("declined").
         """
         conf = self._read()
         if conf is None:
@@ -93,8 +61,9 @@ class MenderConnect:
     def set_shell_enabled(self, enabled):
         """Apply the agreement. Returns (ok, error).
 
-        Writes both features together and restarts the service, so the running
-        daemon and the file on disk always agree.
+        Writes both features together and restarts the service. Refuses, rather
+        than rebuilding from defaults, when the config is missing or unreadable.
+        See docs/features/remote-access.md#refuse-rather-than-repair.
         """
         enabled = bool(enabled)
 
@@ -119,9 +88,7 @@ class MenderConnect:
             return False, error
 
         try:
-            # Restarted rather than reloaded: mender-connect reads its config at
-            # startup only, so a reload would leave the daemon serving the
-            # previous answer while the file claimed otherwise.
+            # Restart, not reload: mender-connect reads its config only at startup.
             result = subprocess.run(["systemctl", "restart", self.service],
                                     capture_output=True, timeout=30)
         except subprocess.TimeoutExpired:
@@ -137,10 +104,7 @@ class MenderConnect:
     def _write(self, conf):
         """Replace the config atomically, keeping the mode it already had.
 
-        Carried over rather than chosen: the image ships this file 0644 root,
-        and tightening it here would be an unrelated change smuggled in behind
-        a setting the owner toggled. DEFAULT_CONF_MODE only applies when there
-        is no existing file to copy, which off-device is the normal case.
+        DEFAULT_CONF_MODE applies only when no file exists (normally off-device).
         """
         directory = os.path.dirname(self.conf_path) or "."
         try:

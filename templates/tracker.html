@@ -228,24 +228,17 @@
     var railCount = document.getElementById('railCount');
     var detCount = document.getElementById('detCount');
 
-    // What the node can see, from its own blah2 ambiguity bounds. Null for an
-    // axis the node has not stated, which leaves that axis to autoscale.
-    // Drawing a guessed range would misrepresent the node as badly as
-    // autoscaling does, and less visibly.
+    // The node's own ambiguity bounds; null axes autoscale. Never guess a range.
+    // See docs/features/tracker.md#axis-bounds
     var AXES = {{ (axes or {}) | tojson }};
     var csrf = document.querySelector('meta[name="csrf-token"]').content;
 
-    // 15 minutes rather than the full four hours. The buffer keeps all four
-    // either way; this only decides how much the node has to build and send
-    // when the page opens, which measured at 0.28 MB here against 4.50 MB.
+    // 15 min, not 4 h: only sets how much the node sends on open.
+    // See docs/features/tracker.md#view-window
     var DEFAULT_WINDOW = 900;
 
-    // A twelve-hue wheel, indexed by a hash of the track id, so a track's
-    // colour is fixed on first sighting and never recomputed when an older
-    // one ages out. Collisions are expected once past twelve live tracks and
-    // are deliberately tolerated: the rail names every track and hovering a
-    // row isolates it, so colour is a pointing device rather than the thing
-    // carrying identity.
+    // Hue from a hash of the track id, so it never changes. Collisions past
+    // twelve tracks are tolerated. See docs/features/tracker.md#what-is-plotted
     var HUES = [210, 145, 30, 285, 340, 175, 55, 250, 100, 315, 12, 195];
     var SNR_COLORSCALE = [
         [0.00, '#cde2fb'], [0.20, '#9ec5f4'], [0.40, '#6da7ec'],
@@ -267,11 +260,8 @@
 
     function emptyCols() { return { t: [], delay: [], doppler: [], snr: [] }; }
 
-    // The three classes retina-tracker reports. It knows which detections a
-    // confirmed track claimed and which it dropped at the SNR gate, so the
-    // page no longer has to infer any of it: an earlier version compared
-    // timestamps and delays to guess, which could only ever approximate an
-    // answer the tracker already had.
+    // The three detection classes retina-tracker reports; the page infers none.
+    // See docs/features/tracker.md#what-is-plotted
     var CLASSES = ['associated', 'unassociated', 'below_snr'];
 
     function emptyStore() {
@@ -354,10 +344,8 @@
         return newest;
     }
 
-    // The server sends everything appended since our last message, so the
-    // browser is what ages points out of the view window. Node time, not
-    // browser time: the newest point we hold is "now", which keeps this
-    // correct even if the two clocks disagree.
+    // The browser ages points out of the window, using node time: the newest
+    // point held is "now", so clock skew does not matter.
     function pruneToWindow() {
         lastTs = newestTimestamp();
         if (!lastTs) return;
@@ -381,17 +369,9 @@
         capUntracked();
     }
 
-    // A ring over the detections that no track claimed. How many of those a
-    // node makes is a property of its sky and its interference, and on a bad
-    // one it runs away: the scope's cost is very nearly linear in points, so
-    // an unbounded backdrop is what stops the page drawing at all. Holding the
-    // newest MAX_UNTRACKED and ageing out the oldest keeps the cost fixed
-    // while the feed stays live, which is the point of a ring rather than a
-    // stride: what you are looking at is always the most recent truth.
-    //
-    // 'associated' is deliberately exempt. Those detections are the evidence a
-    // track is built on, and dropping them would leave a track drawn over a
-    // backdrop that no longer contains what produced it.
+    // Keep only the newest MAX_UNTRACKED unclaimed detections so draw cost stays
+    // bounded. 'associated' is exempt: it is the evidence tracks are drawn over.
+    // See docs/features/tracker.md#drawing-performance
     var UNTRACKED = ['unassociated', 'below_snr'];
     var MAX_UNTRACKED = 25000;
     var untrackedCapped = false;
@@ -403,9 +383,8 @@
         untrackedCapped = drop > 0;
         if (!untrackedCapped) return;
 
-        // Both columns are in timestamp order, so walking their heads and
-        // taking whichever is older drops exactly the oldest points across the
-        // pair, without merging or sorting anything.
+        // Both columns are in timestamp order, so walking their heads drops
+        // exactly the oldest points across the pair without sorting.
         var from = {};
         UNTRACKED.forEach(function (c) { from[c] = 0; });
         while (drop > 0) {
@@ -422,39 +401,17 @@
         UNTRACKED.forEach(function (c) { store.det[c] = sliceCols(store.det[c], from[c]); });
     }
 
-    // What the layer control is asking for, as one column set per trace. "all"
-    // is the three classes drawn as three traces rather than one concatenation
-    // of them: the marker spec is shared and the SNR scale is pinned to 0-20,
-    // so the picture is the same, and the page stops rebuilding a copy of every
-    // point it holds on every frame. The rest are a class each, which is what
-    // makes the miss list and the SNR gate's rejects separately visible.
+    // One column set per class shown. "all" is three sets, not a concatenation,
+    // so no copy of every point is rebuilt per frame.
     function layerCols() {
         if (state.layer === 'off') return [];
         if (state.layer !== 'all') return [store.det[state.layer] || emptyCols()];
         return CLASSES.map(function (c) { return store.det[c]; });
     }
 
-    // Tracks are drawn one trace per hue, not one trace per track. Every Plotly
-    // call redraws the whole scene and its cost grows with the number of traces
-    // in it, so a scope that gave each track its own trace got slower as the sky
-    // filled and stopped drawing entirely on a node whose interference minted
-    // thousands of them. There are only twelve hues, so twelve traces carry any
-    // number of tracks at a fixed price: measured flat at ~300 ms from 133
-    // tracks to 2000, against 398 ms and 934 ms for a trace apiece. Nothing is
-    // thinned or dropped to achieve it; every point the node sent is still
-    // drawn.
-    //
-    // A null between tracks is what keeps their lines from joining up, and the
-    // track id rides along in customdata so the hover still names the track it
-    // is over.
-    // Detections are drawn one trace per SNR band rather than one trace with a
-    // colour per point. Plotly maps a per-point colour array through the scale
-    // on every redraw, and at eighty thousand points that mapping was very
-    // nearly the whole cost of the scope: 217 ms against 19 ms for the same
-    // points wearing a flat colour. Banding pays the mapping once, here, and
-    // never again. Twenty-four bands across 0-20 dB is 0.83 dB a step, finer
-    // than an SNR figure off this radar means, so the ramp still reads as the
-    // continuous one drawn in the foot.
+    // Tracks share one trace per hue (a null separates them) and detections
+    // one trace per SNR band: trace count and per-point colour mapping are
+    // what make Plotly slow. See docs/features/tracker.md#drawing-performance
     var SNR_BANDS = 24;
 
     var BAND_COLOUR = (function () {
@@ -723,8 +680,7 @@
             + cappedNote() + heldNote();
     }
 
-    // Said out loud, because a backdrop that quietly stops going back as far as
-    // the window claims is indistinguishable from a sky that went quiet.
+    // Shown so a capped backdrop is not mistaken for a quiet sky.
     function cappedNote() {
         if (!untrackedCapped) return '';
         return ' \u00b7 untracked capped at ' + MAX_UNTRACKED.toLocaleString();
@@ -738,11 +694,8 @@
         return spec;
     }
 
-    // The window a viewer asked for is what they get only if the node has that
-    // much history to give. It will not after a restart, and it will not once
-    // the sidecar's point ceiling starts ageing the oldest points out, which a
-    // wider Doppler span reaches sooner. Saying so is the difference between a
-    // short record and a quiet sky.
+    // Says when the node holds less history than the window asks for (after a
+    // restart, or once the sidecar's point ceiling ages points out).
     function heldNote() {
         var oldest = null;
         CLASSES.forEach(function (c) {
@@ -761,10 +714,8 @@
         return (s / 3600).toFixed(1) + 'h';
     }
 
-    // What a trace fades to while a row is hovered. These are carried in the
-    // trace specs render() builds, not restyled on afterwards: a restyle is a
-    // whole redraw of its own, so doing it after every react cost two draws to
-    // put on values one draw could have carried.
+    // Hover fades are built into render()'s trace specs, never restyled on
+    // afterwards: a restyle is a second full redraw.
     function tracksShown() { return state.tracks !== 'off'; }
     function isolating() { return tracksShown() && state.hover !== null; }
     function detectionOpacity() { return isolating() ? 0.12 : 0.4; }
@@ -818,10 +769,8 @@
     wireSeg('win', function (v) {
         state.window = parseInt(v, 10);
         remember('window', state.window);
-        // Reconnect rather than filter locally: narrowing could be done here,
-        // but widening needs history this browser never received, and one
-        // path for both means there is never a stale-cursor case to reason
-        // about. The stream re-seeds itself with a snapshot at the new window.
+        // Reconnect rather than filter locally: widening needs history this
+        // browser never received. See docs/features/tracker.md#view-window
         connect();
     });
 
@@ -895,10 +844,8 @@
 
         pruneToWindow();
 
-        // Said before the draw, not after it. The status describes what has
-        // arrived, which is known here; leaving it until the draw returned is
-        // why a page that was struggling to draw reported "connecting" rather
-        // than what it was struggling with.
+        // Status before the draw, so a page struggling to draw still reports
+        // what has arrived.
         var n = Object.keys(store.tracks).length;
         var shown = CLASSES.reduce(function (a, c) { return a + store.det[c].t.length; }, 0);
         setStatus('capturing &middot; ' + n + (n === 1 ? ' track' : ' tracks')
@@ -920,9 +867,8 @@
         store = emptyStore();
         setStatus('connecting&hellip;', 'stale');
         source = new EventSource('/tracker/events?window=' + state.window);
-        // Named events, not onmessage: the tracker distinguishes a snapshot
-        // (replace what you hold) from a delta (append to it), and a
-        // snapshot can arrive mid-stream when the record is cleared under us.
+        // Named events: a snapshot replaces what is held (and can arrive
+        // mid-stream after a clear), a delta appends.
         source.addEventListener('snapshot', onEvent(true));
         source.addEventListener('delta', onEvent(false));
         source.addEventListener('error', function (ev) {

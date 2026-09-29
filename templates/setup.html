@@ -9,17 +9,9 @@
     <style>html, body { overflow: hidden; }</style>
 {% endblock %}
 
-{# The wizard has its own chrome and its own full-height layout, so it takes
-   neither of base.html's rows in their usual slots. The fleet bar is included
-   inside .wiz below instead; the child row is gone entirely and stays gone.
-
-   That split is deliberate. Home and Config must not be reachable on a node
-   that is mid-setup, and the redirects enforcing that are untouched. But being
-   unable to leave *this node* is a different thing: without the fleet bar, a
-   node part-way through setup becomes a dead end in every other node's banner,
-   and an abandoned wizard keeps it that way until the 24h timeout in
-   device_state clears it. Leaving for another node is not wandering out of
-   setup. #}
+{# Own chrome: no navbar or subnav. The fleet bar stays (inside .wiz below) so
+   a node mid-setup is not a dead end for the fleet.
+   See docs/features/setup-wizard.md#page-chrome #}
 {% block navbar %}{% endblock %}
 {% block subnav %}{% endblock %}
 {% block footer %}{% endblock %}
@@ -27,13 +19,10 @@
 {% block content %}
 <div class="wiz">
 
-    {# First child of .wiz on purpose. .wiz is a 100vh flex column and .wiz-body
-       is flex:1, so the bar takes its natural height and the body shrinks to
-       fit. Placed outside .wiz it would push a full-height element down and
-       overflow the viewport. #}
+    {# First child of .wiz on purpose: outside it, the bar would push the 100vh
+       column down and overflow the viewport. #}
     {{ fleet_bar(fleet_nodes, node_id, active_page, show_brand=false) }}
 
-    {# ── Wizard header: brand left, step indicator right ── #}
     <div class="wiz-head">
         <div class="wiz-head-inner">
             <a href="/" style="text-decoration:none;color:inherit;">
@@ -49,19 +38,18 @@
             </div>
             </a>
 
-            {# Progress indicator — JS populates dots into #progressTrack #}
             <div id="progressTrack" style="display:inline-flex;align-items:center;gap:6px;position:relative;">
                 {# JS appends .progress-dot elements here #}
                 <span id="progressLabel"></span>
             </div>
-            {# Hidden fill line (required by setup.js but not shown) #}
+            {# Hidden, but updateProgress in setup.js requires it. #}
             <div id="progressFill" style="display:none;"></div>
         </div>
     </div>
 
-    {# ── Wizard body ── #}
     <div class="wiz-body">
         <div class="wiz-body-inner setup-card">
+            {# Include order is step order. See docs/features/setup-wizard.md#step-order #}
 
             {% include "setup/_agreements.html" %}
             {% include "setup/_contact.html" %}
@@ -76,7 +64,7 @@
         </div>
     </div>
 
-    {# ── Wizard footer: per-step action buttons ── #}
+    {# Footer: one button group per step, shown by showStep in setup.js. #}
     <div class="wiz-foot">
         <div class="wiz-foot-inner">
             <div class="foot-spacer"></div>
@@ -86,14 +74,13 @@
                 <button type="button" class="ds-btn primary" id="agreementsContinueBtn" disabled>Continue</button>
             </div>
 
-            {# Contact — optional, so Skip is a first-class answer rather than
-               an escape hatch. See templates/setup/_contact.html. #}
+            {# Contact. Optional: Skip is an answer, not an escape hatch. #}
             <div id="stepBtns-contact" class="step-foot-btns" style="display:none;">
                 <button type="button" class="ds-btn ghost"   id="contactSkipBtn">Skip</button>
                 <button type="button" class="ds-btn primary" id="contactSaveBtn">Save and continue</button>
             </div>
 
-            {# Claim, optional in the same way. See templates/setup/_claim.html. #}
+            {# Claim. Optional in the same way; an owned node gets Skip only. #}
             <div id="stepBtns-claim" class="step-foot-btns" style="display:none;">
                 <button type="button" class="ds-btn ghost"   id="wizClaimSkipBtn">Skip</button>
                 {% if not claim_owned %}
@@ -101,7 +88,7 @@
                 {% endif %}
             </div>
 
-            {# System update — fully automatic, this page only reports progress #}
+            {# System update. Automatic: this page only reports progress. #}
             <div id="stepBtns-system" class="step-foot-btns" style="display:none;">
                 <span id="systemInstallStatus" style="font-size:13px;color:var(--ink-3);"></span>
                 <button type="button" class="ds-btn ghost"   id="systemNextBtn"   style="display:none;">Continue →</button>
@@ -127,7 +114,7 @@
                 <button type="button" class="ds-btn primary" id="towerSaveBtn" disabled>Save &amp; continue</button>
             </div>
 
-            {# Auto-Calibrate — optional, never blocks completion #}
+            {# Auto-Calibrate. Optional, never blocks completion. #}
             <div id="stepBtns-calibrate" class="step-foot-btns" style="display:none;">
                 <span id="calWizStatus" style="font-size:13px;color:var(--ink-3);"></span>
                 <button type="button" class="ds-btn ghost"   id="calWizSkipBtn">Skip →</button>
@@ -152,10 +139,8 @@
     <script src="/static/setup.js"></script>
     <script>
         {% if towers_cache and towers_cache.lat is not none and towers_cache.lon is not none %}
-        // Rehydrate the last search so a reload onto the tower step still has
-        // coordinates. RF measurements are not cached, so this re-runs as a
-        // location-only search, the same fallback used when the spectrum
-        // analyser is unavailable.
+        // Rehydrate the last search so a reload onto the tower step can search
+        // (location-only). See docs/features/setup-wizard.md#rehydrating-the-tower-search
         window._towerSearchParams = {
             lat: {{ towers_cache.lat|tojson }},
             lon: {{ towers_cache.lon|tojson }},
@@ -163,9 +148,8 @@
             measurements: []
         };
         {% endif %}
-        // Public by nature: tile requests come from the browser, so nothing
-        // server-side can hold this. Empty is fine and yields a watermarked
-        // map rather than a broken one. See services.py's CARTO_API_KEY.
+        // Public by nature: tile requests come from the browser. Empty yields a
+        // watermarked map. See docs/features/setup-wizard.md#basemap-key
         window._cartoApiKey = {{ carto_api_key|default('')|tojson }};
         initSetupWizard({{ resume_step|tojson }}, {{ dev_mode|default(false)|tojson }}, {{ is_rerun|default(false)|tojson }}, {{ demo_mode|default(false)|tojson }});
     </script>

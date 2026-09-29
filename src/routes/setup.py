@@ -17,30 +17,24 @@ bp = Blueprint('setup', __name__)
 
 @bp.route("/set-up")
 def wizard():
-    """Setup wizard — full-page multi-step first-boot flow."""
+    """Setup wizard: full-page multi-step first-boot flow.
+
+    See docs/features/setup-wizard.md.
+    """
     from app import CARTO_API_KEY, DEV_MODE, device_state, get_node_id, mender, telemetry_status
 
     resume_step = device_state.get_setup_wizard_step()
     owl_os_version, retina_node_version = mender.get_versions()
     node_id = get_node_id()
-    # A node can ship with retina-node pre-installed but never have had the
-    # wizard run on it — that's still a first run, so re-run status is based
-    # on wizard completion history, not on whether a package is present.
+    # From completion history, not from whether retina-node is installed.
+    # See docs/features/setup-wizard.md#first-run-or-re-run
     is_rerun = device_state.has_completed_setup_wizard()
-    # The wizard is forward-only, so a reload is the whole recovery story
-    # and it has to land somewhere usable. The tower step's search
-    # parameters otherwise live only in a page-scoped variable, so a
-    # reload onto that step had nothing to search with and no way back to
-    # the location step to get it. The cache already holds the coordinates
-    # the last search used.
+    # Lets a reload onto the tower step search again.
+    # See docs/features/setup-wizard.md#rehydrating-the-tower-search
     towers_cache = device_state.get_towers_cache()
-    # Prefills the contact step. Empty when nothing was ever given, which
-    # is the ordinary case and renders as empty boxes.
     contact = device_state.get_telemetry_contact()
-    # Prefills the claim step. A node that is already owned (a wizard re-run)
-    # shows its owner and can only be skipped past, the same rule the Node
-    # claim section on the configuration page applies. Otherwise the stored
-    # address, or failing that setup.js offers the contact email just given.
+    # An owned node shows its owner and can only be skipped past.
+    # See docs/features/setup-wizard.md#node-claim
     claim = device_state.get_telemetry_claim()
     claim_state = (telemetry_status.read() or {}).get('claim') or {}
     claim_owned = claim_state.get('state') == 'owned'
@@ -86,15 +80,8 @@ def save_step():
 def consent():
     """Record acceptance of the terms shown on the agreements step.
 
-    Deliberately posted from that step rather than at wizard completion. Every
-    node already in the field has completed the wizard and will never see it
-    again, so re-running /set-up is the re-consent path — and writing here
-    means an owner can tick, continue, and close the tab without going through
-    the location and tower steps or the docker work /set-up/complete triggers.
-
-    retina-telemetry re-reads the file on every state derivation rather than
-    caching it at startup, so this takes effect within seconds and needs no
-    restart or ordering with that container.
+    Posted from that step, not at completion, so a re-run is a re-consent
+    path. See docs/features/setup-wizard.md#agreements.
     """
     from app import device_state
 
@@ -106,16 +93,9 @@ def consent():
 def contact():
     """Record whom to contact about this node, from the wizard or Settings.
 
-    One route for both surfaces, so the wizard step and the How we reach you
-    section on the configuration page cannot drift into storing different shapes.
-
-    Every field is optional and skipping writes nothing at all. That is not a
-    convenience: the spec says a node with nothing to report never calls the
-    endpoint, so an absent file is how the node says it has nothing, and an
-    empty document would be indistinguishable from an owner who cleared theirs.
-
-    retina-telemetry re-reads the file rather than caching it, so a change here
-    reaches the server without a restart or any ordering with that container.
+    One route for both surfaces so they store the same shape. Every field is
+    optional, and all-empty removes the record.
+    See docs/features/setup-wizard.md#contact-details.
     """
     from app import device_state
 
@@ -126,8 +106,7 @@ def contact():
     submitted = {f: _blank_to_none(data.get(f)) for f in CONTACT_FIELDS}
 
     # The shape check the model cannot carry portably; see
-    # CONTACT_COUNTRY_PATTERN. Attached to its own field so the page can mark
-    # the box rather than showing a form-level complaint about one input.
+    # CONTACT_COUNTRY_PATTERN. Keyed by field so the page can mark that box.
     country = submitted["country"]
     if country is not None and not re.match(CONTACT_COUNTRY_PATTERN, country):
         return jsonify({"success": False, "errors": {
@@ -142,9 +121,7 @@ def contact():
         return jsonify({"success": False,
                         "errors": ConfigManager.format_validation_errors(e, "contact")}), 400
 
-    # `submitted` rather than the model's own dump: `.dict()` is pydantic v1
-    # and `.model_dump()` is v2, and this runs against both. The model is here
-    # to validate, and the two carry identical values by construction.
+    # `submitted`, not the model's dump: this runs on pydantic v1 and v2.
     device_state.save_telemetry_contact(submitted)
     return jsonify({"success": True, "stored": not validated.is_empty})
 
@@ -153,22 +130,10 @@ def contact():
 def claim():
     """Ask for a claim link to be sent to an address, or clear the address.
 
-    One route for both surfaces, as with the contact details, so the two cannot
-    drift into storing different shapes.
-
-    This is the only box on the page whose value reaches a stranger if it is
-    wrong. The server mails the address a link, and clicking it binds this node
-    to the account behind it, so the shape is checked here rather than left for
-    the server to refuse thirty seconds later with nothing on screen to explain
-    it. Nothing verifies that the address exists, and nothing can.
-
-    Every address submitted here is an ask for a link, and an empty box
-    removes the record. There is no way to store an address without asking,
-    because a press the node cannot see is one that mails nothing. See
-    device_state.save_telemetry_claim.
-
-    retina-telemetry re-reads the file rather than caching it, so this reaches
-    the server without a restart or any ordering between the two containers.
+    Shared by the wizard and the configuration page. Every address is an ask
+    for a link; an empty box removes the record. The shape is checked here
+    because a wrong address hands the node to a stranger.
+    See docs/features/setup-wizard.md#node-claim.
     """
     from app import device_state
 
@@ -194,11 +159,7 @@ def claim():
 
 
 def _blank_to_none(value):
-    """An empty box means "nothing here", which is also how it is cleared.
-
-    Whitespace counts as empty: a space in the email field would otherwise be
-    stored, sent, and shown back to the owner as if it were a detail.
-    """
+    """Map an empty or whitespace-only box to None ("nothing here")."""
     if isinstance(value, str):
         value = value.strip()
     return value or None
@@ -206,7 +167,10 @@ def _blank_to_none(value):
 
 @bp.route("/set-up/complete", methods=["POST"])
 def complete():
-    """Mark setup wizard as complete."""
+    """Force radar mode at the end of the wizard.
+
+    See docs/features/setup-wizard.md#completion.
+    """
     from app import RETINA_NODE_PATH, config_mgr
     from routes.mode import _write_mode, enforce_radar_mode
 

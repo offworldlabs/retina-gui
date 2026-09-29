@@ -1,19 +1,12 @@
 {# ── Fleet bar: the parent row ──────────────────────────────────────────────
    Every node on the network, always on screen, one click apart.
 
-   A macro rather than a plain include because the wizard needs it without the
-   brand block, and Jinja does not pass `{% with %}` locals into an included
-   template — they live in the compiled function, not the context dict, so the
-   include silently sees nothing. Macro parameters are explicit and cannot fail
-   that way.
+   A macro rather than an include: Jinja does not pass {% with %} locals into an
+   included template, and the wizard needs show_brand=false.
 
-   Node tabs are absolute links to each node's own ret<node_id>.local, the one
-   for this node included. Clicking any of them therefore lands on a concrete
-   node address rather than on owl.local, which is answered by whichever node
-   replies first and is not worth bookmarking.
-
-   The active tab is always this node, since the page is served by the node you
-   are looking at. Nothing to track: compare against the node_id passed in.
+   Node tabs are absolute links to each node's own ret<node_id>.local (never
+   owl.local). The active tab is always this node, since it served the page.
+   See docs/features/fleet-and-naming.md#the-fleet-bar
 #}
 {% macro fleet_bar(nodes, node_id, active_page, show_brand=true) %}
 <nav class="nav">

@@ -121,14 +121,14 @@ def sample_merged_config():
             }
         },
         'network': {
-            'node_id': 'ret7dd2cb0d'
+            'node_id': 'ret7a000001'
         },
         'location': {
             'rx': {
-                'latitude': 37.7644,
-                'longitude': -122.3954,
+                'latitude': 37.7749,
+                'longitude': -122.4194,
                 'altitude': 23,
-                'name': '150 Mississippi'
+                'name': 'Example RX'
             },
             'tx': {
                 'latitude': 37.49917,
@@ -140,14 +140,14 @@ def sample_merged_config():
         'truth': {
             'adsb': {
                 'enabled': True,
-                'tar1090': 'sfo1.retnode.com',
+                'tar1090': 'tar1090.example.com',
                 'adsb2dd': 'localhost:49155',
                 'delay_tolerance': 2.0,
                 'doppler_tolerance': 5.0
             }
         },
         'tar1090': {
-            'adsb_source': '192.168.8.183,30005,beast_in',
+            'adsb_source': '192.0.2.10,30005,beast_in',
             'adsblol_fallback': True,
             'adsblol_radius': 40
         },
@@ -166,14 +166,14 @@ def sample_user_config():
     """
     return {
         'network': {
-            'node_id': 'ret7dd2cb0d'
+            'node_id': 'ret7a000001'
         },
         'location': {
             'rx': {
-                'latitude': 37.7644,
-                'longitude': -122.3954,
+                'latitude': 37.7749,
+                'longitude': -122.4194,
                 'altitude': 23,
-                'name': '150 Mississippi'
+                'name': 'Example RX'
             },
             'tx': {
                 'latitude': 37.49917,
@@ -183,11 +183,11 @@ def sample_user_config():
             }
         },
         'tar1090': {
-            'adsb_source': '192.168.8.183,30005,beast_in'
+            'adsb_source': '192.0.2.10,30005,beast_in'
         },
         'truth': {
             'adsb': {
-                'tar1090': 'sfo1.retnode.com'
+                'tar1090': 'tar1090.example.com'
             }
         }
     }
@@ -266,7 +266,7 @@ def app_client(temp_dir, config_files, test_manifests_dir):
     os.makedirs(mender_dir, exist_ok=True)
     node_id_file = os.path.join(mender_dir, 'node_id')
     with open(node_id_file, 'w') as f:
-        f.write('ret7dd2cb0d')
+        f.write('ret7a000001')
 
     # Set environment variables before importing app
     os.environ['DATA_DIR'] = temp_dir
@@ -307,7 +307,7 @@ def app_client_no_retina(temp_dir, config_files):
     os.makedirs(mender_dir, exist_ok=True)
     node_id_file = os.path.join(mender_dir, 'node_id')
     with open(node_id_file, 'w') as f:
-        f.write('ret7dd2cb0d')
+        f.write('ret7a000001')
 
     os.environ['DATA_DIR'] = temp_dir
     os.environ['USER_CONFIG_PATH'] = user_path

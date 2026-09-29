@@ -1,9 +1,8 @@
 """HTTP client for the blah2_api service.
 
-Isolates all blah2_api HTTP calls so the calibrator's logic can be tested
-against a fake client. All getters return parsed
-JSON dicts or None on any transport/parse failure — callers treat None as
-"no data yet".
+Isolates all blah2_api HTTP calls so the calibrator can be tested against a
+fake client. Getters return parsed JSON dicts, or None on any transport or
+parse failure, which callers treat as "no data yet".
 """
 
 import requests
@@ -52,10 +51,7 @@ class Blah2Client:
 
     def get_overload_status(self):
         """Per-tuner RF overload state: {overloadA, overloadB, timestamp}.
-        Deliberately its own endpoint, not /capture/rf-status — that path
-        belongs to the (unrelated) peak-dBFS meter feature; the two datasets
-        have no shared consumer, so they stay on separate endpoints rather
-        than being coupled together just because they're both RF status."""
+        Deliberately separate from /capture/rf-status (the peak-dBFS meter)."""
         return self._get_json("/capture/overload-status")
 
     def get_detection(self):

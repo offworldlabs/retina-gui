@@ -1,13 +1,6 @@
-{# The wait shown on any wizard step that makes the owner sit and watch a
-   progress bar: the OS update and the RETINA package install.
-
-   One copy, two callers. The checklist is the same physical check in both
-   places, and holding it twice would let a reworded bullet drift between the
-   step that gets it and the step that does not.
-
-   `block_id` is what setup.js reveals and hides. Both blocks ship hidden and
-   are shown only once that step knows a wait is actually coming, so a node
-   with nothing to do is never told to set aside half an hour. #}
+{# Checklist shared by the OS update and package install steps. `block_id` is
+   what setup.js reveals once a wait is coming; it ships hidden.
+   See docs/features/setup-wizard.md#while-you-wait-checklist #}
 {% macro while_you_wait(block_id, duration) %}
 <div id="{{ block_id }}" style="display:none;">
     {% if duration %}

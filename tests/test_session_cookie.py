@@ -18,7 +18,7 @@ import os
 
 import pytest
 
-NODE_ID = "ret7dd2cb0d"
+NODE_ID = "ret7a000001"
 DOMAIN = "retnode.com"
 LAN_URL = "http://owl.local"
 OWNER_URL = f"http://{NODE_ID}.{DOMAIN}"
@@ -115,7 +115,7 @@ def test_a_port_forward_is_treated_as_lan(client):
 
 def test_the_remote_cookie_keeps_secure_and_the_host_prefix(client):
     """Every node is a sibling under one registrable domain, so without the
-    prefix one node could set a `.retnode.com` cookie shadowing another's."""
+    prefix one node could set a parent-domain cookie shadowing another's."""
     client.remote_access.set_enabled(True)
     header = _set_cookie(client.get("/login", base_url=OWNER_URL))
     if header:

@@ -36,7 +36,7 @@ Show the node ID near the top of home page. Auto-generated from RPi serial by co
 
 ```yaml
 network:
-  node_id: "ret7dd2cb0d"
+  node_id: "ret0123abcd"
 ```
 
 **Implementation:**
@@ -53,10 +53,10 @@ Both receiver (rx) and transmitter (tx) locations.
 ```yaml
 location:
   rx:                          # Receiver location
-    latitude: 37.7644          # decimal degrees
-    longitude: -122.3954       # decimal degrees
+    latitude: 37.7749          # decimal degrees
+    longitude: -122.4194       # decimal degrees
     altitude: 23               # meters
-    name: "150 Mississippi"    # human-readable name
+    name: "Example RX"    # human-readable name
   tx:                          # Transmitter location
     latitude: 37.49917
     longitude: -121.87222
@@ -91,7 +91,7 @@ Uses ADS-B data to validate radar detections.
 truth:
   adsb:
     enabled: true
-    tar1090: 'sfo1.retnode.com'
+    tar1090: 'tar1090.example.com'
     adsb2dd: 'localhost:49155'
     delay_tolerance: 2.0
     doppler_tolerance: 5.0
@@ -111,7 +111,7 @@ Configures the tar1090 ADS-B map viewer.
 
 ```yaml
 tar1090:
-  adsb_source: "192.168.8.183,30005,beast_in"
+  adsb_source: "192.0.2.10,30005,beast_in"
   adsblol_fallback: true
   adsblol_radius: 40
 ```
@@ -153,8 +153,8 @@ class TestLocationPoint:
 
     def test_valid_location(self):
         """Valid coordinates should pass."""
-        point = LocationPoint(latitude=37.7644, longitude=-122.3954, altitude=23, name="Test")
-        assert point.latitude == 37.7644
+        point = LocationPoint(latitude=37.7749, longitude=-122.4194, altitude=23, name="Test")
+        assert point.latitude == 37.7749
 
     def test_latitude_bounds(self):
         """Latitude must be -90 to 90."""
@@ -248,7 +248,7 @@ class TestHomePage:
     def test_node_id_displayed(self, app_client):
         """Node ID should be shown on home page."""
         response = app_client.get('/')
-        assert b'ret7dd2cb0d' in response.data
+        assert b'ret0123abcd' in response.data
 
     def test_node_id_unknown(self, app_client_no_node_id):
         """Should show 'Unknown' when node_id not set."""
@@ -276,8 +276,8 @@ class TestConfigPage:
     def test_config_shows_location_values(self, app_client):
         """Location values from user.yml should appear."""
         response = app_client.get('/config')
-        assert b'37.7644' in response.data  # rx latitude
-        assert b'150 Mississippi' in response.data  # rx name
+        assert b'37.7749' in response.data  # rx latitude
+        assert b'Example RX' in response.data  # rx name
 
 
 class TestLocationSave:
@@ -314,7 +314,7 @@ class TestAdsbSourceParsing:
     def test_adsb_source_split_on_load(self, app_client):
         """adsb_source should be split into 3 fields."""
         response = app_client.get('/config')
-        assert b'192.168.8.183' in response.data  # host
+        assert b'192.0.2.10' in response.data  # host
         assert b'30005' in response.data  # port
         assert b'beast_in' in response.data  # protocol
 
@@ -342,19 +342,19 @@ def sample_full_config():
     """Sample config with all sections."""
     return {
         'capture': { ... },
-        'network': {'node_id': 'ret7dd2cb0d'},
+        'network': {'node_id': 'ret0123abcd'},
         'location': {
-            'rx': {'latitude': 37.7644, 'longitude': -122.3954, 'altitude': 23, 'name': '150 Mississippi'},
+            'rx': {'latitude': 37.7749, 'longitude': -122.4194, 'altitude': 23, 'name': 'Example RX'},
             'tx': {'latitude': 37.49917, 'longitude': -121.87222, 'altitude': 783, 'name': 'KSCZ-LD'}
         },
         'truth': {
             'adsb': {
-                'enabled': True, 'tar1090': 'sfo1.retnode.com', 'adsb2dd': 'localhost:49155',
+                'enabled': True, 'tar1090': 'tar1090.example.com', 'adsb2dd': 'localhost:49155',
                 'delay_tolerance': 2.0, 'doppler_tolerance': 5.0
             }
         },
         'tar1090': {
-            'adsb_source': '192.168.8.183,30005,beast_in',
+            'adsb_source': '192.0.2.10,30005,beast_in',
             'adsblol_fallback': True, 'adsblol_radius': 40
         }
     }

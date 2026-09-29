@@ -1,5 +1,5 @@
 {% from "setup/_while_you_wait.html" import while_you_wait %}
-<!-- Step 2: System Update -->
+<!-- System update step -->
 <div data-step="system" class="step-panel" style="display:none;">
     <div class="wiz-title-row">
         <h1>Update OWL-OS</h1>
@@ -17,9 +17,7 @@
 
     <p id="systemStatus" style="color:var(--ink-3);font-size:13.5px;margin:16px 0 0;">Checking for updates…</p>
 
-    {# Shown only when an update is actually going to happen. setup.js reveals
-       this from showStage and showPreparing, and hides it again on the
-       up-to-date branch, so a node that needs nothing is never told to wait
-       half an hour or handed a checklist for a wait it does not have. #}
+    {# Hidden until setup.js knows an update is coming.
+       See docs/features/setup-wizard.md#while-you-wait-checklist #}
     {{ while_you_wait('systemUpdateWait', 'This usually takes around 30 minutes.') }}
 </div>

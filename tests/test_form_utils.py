@@ -199,10 +199,10 @@ class TestSchemaToFormFields:
     def test_location_form_fields(self):
         """Test location form field conversion."""
         values = {
-            'rx_latitude': 37.7644,
-            'rx_longitude': -122.3954,
+            'rx_latitude': 37.7749,
+            'rx_longitude': -122.4194,
             'rx_altitude': 23,
-            'rx_name': '150 Mississippi',
+            'rx_name': 'Example RX',
             'tx_latitude': 37.49917,
             'tx_longitude': -121.87222,
             'tx_altitude': 783,
@@ -213,20 +213,20 @@ class TestSchemaToFormFields:
         # Check rx latitude field
         lat_field = next(f for f in fields if f['name'] == 'rx_latitude')
         assert lat_field['type'] == 'number'
-        assert lat_field['value'] == 37.7644
+        assert lat_field['value'] == 37.7749
         assert lat_field.get('min') == -90
         assert lat_field.get('max') == 90
 
         # Check rx name field
         name_field = next(f for f in fields if f['name'] == 'rx_name')
         assert name_field['type'] == 'text'
-        assert name_field['value'] == '150 Mississippi'
+        assert name_field['value'] == 'Example RX'
 
     def test_adsb_truth_form_fields(self):
         """Test ADS-B truth form field conversion."""
         values = {
             'enabled': True,
-            'tar1090': 'sfo1.retnode.com',
+            'tar1090': 'tar1090.example.com',
             'adsb2dd': 'localhost:49155',
             'delay_tolerance': 2.0,
             'doppler_tolerance': 5.0

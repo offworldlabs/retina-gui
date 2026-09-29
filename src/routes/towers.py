@@ -8,36 +8,24 @@ from config_schema import TX_NAME_MAX_LENGTH, LocationFormConfig
 
 bp = Blueprint('towers', __name__, url_prefix='/towers')
 
-# The tower-finder API already ranks results best-first (signal match, or
-# geography if no measurements); the wizard's own map/table can show all of
-# them, but the cache backing /config's Tower preset picker only needs the
-# best few — capping here keeps that dropdown/manage-list usable.
+# The finder ranks best-first; only the best few back /config's preset picker.
+# See docs/features/towers.md#tower-search
 MAX_CACHED_TOWERS = 5
 
-# The address geocoder allows 10s per provider across two providers, plus the
-# 1s throttle it holds Nominatim to. 30 covers a slow two-provider miss
-# without tying up a browser for the 90s a tower search is allowed.
+# Covers the upstream's two geocoders at 10s each plus its Nominatim throttle.
+# See docs/features/towers.md#timeouts-and-limits
 GEOCODE_TIMEOUT_S = 30
-# The upstream's own bound (its AddressQuery), repeated so an over-long
-# address is refused here with a sentence instead of upstream with a 422.
+# Mirrors the upstream's AddressQuery bound, so we refuse before it 422s.
 GEOCODE_QUERY_MAX_LENGTH = 200
-# One cached upstream lookup, and nothing waits on the result.
 ELEVATION_TIMEOUT_S = 15
 
 
 def _cacheable_towers(towers):
     """Screen finder results before they back /config's preset picker.
 
-    Picking a preset assigns straight into the location inputs with
-    `el.value = ...`. maxlength does not constrain a programmatic assignment
-    and the validity flag it would otherwise raise is ignored because the form
-    is novalidate, so an over-long or out-of-range tower lands in the form
-    intact and the save then fails on a field the owner never touched. Manual
-    adds are already screened in cache_add; this is the same screen on the
-    search path, which until now cached whatever the service returned.
-
-    Auto-Calibrate reads the same cache as its alternate-tower list, and a
-    tower whose coordinates cannot be a position is no use to either caller.
+    Drops towers without a usable position and trims over-long names, the
+    search-path twin of cache_add's checks. The picker assigns values past
+    the form's own validation. See docs/features/towers.md#screening-cached-towers.
     """
     from app import app
 
@@ -52,11 +40,8 @@ def _cacheable_towers(towers):
             continue
         if not (-90 <= latitude <= 90) or not (-180 <= longitude <= 180):
             continue
-        # Names are trimmed rather than dropped: TX_NAME_MAX_LENGTH is
-        # retina-telemetry's tx_callsign limit, not a reason to lose an
-        # otherwise usable tower. Both keys are trimmed because the picker
-        # falls back callsign -> name, and a facility name runs long far more
-        # readily than a callsign does.
+        # Trim, don't drop: TX_NAME_MAX_LENGTH is retina-telemetry's
+        # tx_callsign limit. Both keys, as the picker falls back callsign -> name.
         trimmed = dict(tower)
         for key in ("callsign", "name"):
             value = trimmed.get(key)
@@ -146,22 +131,9 @@ def search():
 def geocode():
     """Resolve a typed address to coordinates, via the tower-finder service.
 
-    The node GUI is served over plain HTTP on a LAN, so the browser's
-    Geolocation API is unavailable to it and the "Use my location" button in
-    the wizard stays commented out. This runs server-side, so that constraint
-    never reaches it: typing an address is the one way an owner can fill the
-    coordinates without reading them off a map.
-
-    Unlike search() above, the upstream's two failure codes are passed through
-    rather than collapsed into one. 404 means neither geocoder knew the
-    address and the spelling is worth another look; 503 means one could not be
-    reached and the very same query is worth retrying. A search box has to
-    tell those apart, and flattening them here would throw away the only
-    reason the endpoint distinguishes them.
-
-    The query text is deliberately kept out of every log line, as it is
-    upstream: an address typed into this box is the most personal thing the
-    route handles, and the outcome alone is what an operator needs.
+    Passes the upstream's 404 (unknown address) and 503 (geocoder
+    unreachable) through, since the owner acts differently on each. Never log
+    the query text. See docs/features/towers.md#address-lookup.
     """
     from app import TOWER_FINDER_URL, app
 
@@ -200,13 +172,8 @@ def geocode():
 def elevation():
     """Ground elevation at a point, for prefilling the altitude box.
 
-    Advisory in every sense. Nothing gates on altitude and the wizard leaves
-    the box blank on failure rather than reporting one, so this answers with a
-    plain error the caller is expected to swallow. It exists because the box
-    was otherwise filled by nothing at all, which left `rx_altitude` at 0 in
-    the radar config for every owner who did not happen to type a figure.
-
-    GET, matching the upstream, which also keeps it clear of CSRF entirely.
+    Advisory: the wizard swallows failures. GET, matching the upstream, which
+    also keeps it clear of CSRF. See docs/features/towers.md#elevation-prefill.
     """
     from app import TOWER_FINDER_URL, app
 
@@ -227,8 +194,7 @@ def elevation():
         resp.raise_for_status()
         return jsonify(resp.json())
     except http_requests.RequestException as e:
-        # Info rather than warning: a missing altitude prefill is not a fault
-        # the owner or an operator needs to act on.
+        # Info, not warning: a missing prefill needs no action.
         app.logger.info(f"Elevation lookup failed: {e}")
         return jsonify({"error": "Unable to reach the elevation service"}), 502
 
@@ -236,9 +202,8 @@ def elevation():
 def _upstream_detail(resp, fallback):
     """The upstream's own sentence, or ours when it did not send one.
 
-    FastAPI reports an HTTPException's message in `detail`, but puts a list of
-    field errors there for a validation failure. Only a plain string is
-    something to show an owner.
+    FastAPI's `detail` is a list of field errors on a validation failure;
+    only a plain string is shown to an owner.
     """
     try:
         detail = (resp.json() or {}).get("detail")
@@ -267,9 +232,7 @@ def cache_add():
 
     if not callsign:
         return jsonify({"success": False, "error": "Name/callsign is required"}), 400
-    # Caught here as well as in LocationFormConfig so the rejection lands on the
-    # field the operator is typing into, rather than later when the tower is
-    # selected and the whole location block fails to validate.
+    # Also checked in LocationFormConfig; here so the error lands on this field.
     if len(callsign) > TX_NAME_MAX_LENGTH:
         return jsonify({
             "success": False,
@@ -344,10 +307,8 @@ def spectrum_events():
 def select():
     """Save RX + TX location to user.yml, then queue a config apply.
 
-    The apply runs on the shared background queue (see apply_service.py) —
-    poll /config/apply/status for progress. In spectrum mode it only runs
-    config-merger: blah2 is intentionally stopped and must not be restarted
-    until the user switches back to radar mode.
+    Returns 202 once queued; poll /config/apply/status for progress.
+    See docs/features/towers.md#saving-a-tower-selection.
     """
     from app import apply_service, config_mgr, device_state, get_node_id
 
@@ -373,9 +334,7 @@ def select():
         errors = ConfigManager.format_validation_errors(e, "location")
         return jsonify({"success": False, "errors": errors}), 400
 
-    # The model now permits a wholly empty location, because a node
-    # legitimately has none. This endpoint is the one that sets one, so an
-    # empty POST must not silently unsite a configured node.
+    # The model allows an empty location; this endpoint must not unsite a node.
     if not validated.is_located:
         return jsonify({
             "success": False,
@@ -410,16 +369,9 @@ def select():
         return jsonify({"success": False,
                         "error": f"{reason}. Choose a tower once it finishes."}), 409
 
-    # The config write above is a local file write and stays synchronous — it
-    # must be visible to anything that reads user.yml the moment this returns.
-    # Only the slow part (config-merger plus a stack restart, ~45s) is handed
-    # to the shared queue, which is what stops this request blocking a browser
-    # for minutes when it lands behind another restart. Poll
-    # /config/apply/status for progress; the queue always merges whatever is
-    # in user.yml when it runs, so it necessarily picks up the write above.
-    # A calibration in flight is refused inside request() — see
-    # ApplyService.ConfigChangeRefused for why that check is not repeated
-    # here.
+    # The user.yml write above stays synchronous; only merge + restart is
+    # queued. A calibration in flight is refused inside request(), not here.
+    # See docs/features/towers.md#saving-a-tower-selection
     try:
         return jsonify({"success": True, "status": apply_service.request()}), 202
     except ConfigChangeRefused as refused:

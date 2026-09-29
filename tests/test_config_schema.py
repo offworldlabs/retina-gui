@@ -153,12 +153,12 @@ class TestLocationFormConfig:
     def test_valid_location(self):
         """Valid location should pass validation."""
         config = LocationFormConfig(
-            rx_latitude=37.7644, rx_longitude=-122.3954,
-            rx_altitude=23, rx_name='150 Mississippi',
+            rx_latitude=37.7749, rx_longitude=-122.4194,
+            rx_altitude=23, rx_name='Example RX',
             tx_latitude=37.49917, tx_longitude=-121.87222,
             tx_altitude=783, tx_name='KSCZ-LD'
         )
-        assert config.rx_latitude == 37.7644
+        assert config.rx_latitude == 37.7749
         assert config.tx_name == 'KSCZ-LD'
 
     def test_an_unsited_node_is_valid(self):
@@ -172,7 +172,7 @@ class TestLocationFormConfig:
     def test_a_partial_location_is_not_located(self):
         """The model permits it; the all-or-nothing rule is enforced on save in
         routes/config.py, beside the ADS-B source trio."""
-        assert LocationFormConfig(rx_latitude=37.7644, rx_longitude=-122.3954).is_located is False
+        assert LocationFormConfig(rx_latitude=37.7749, rx_longitude=-122.4194).is_located is False
 
     def test_names_alone_do_not_make_a_location(self):
         assert LocationFormConfig(rx_name='somewhere', tx_name='a tower').is_located is False
@@ -372,12 +372,12 @@ class TestYamlIO:
             path = os.path.join(tmpdir, 'test.yml')
             data = {
                 'capture': {'fs': 2000000},
-                'location': {'rx': {'latitude': 37.7644}}
+                'location': {'rx': {'latitude': 37.7749}}
             }
             save_yaml_file(path, data)
             loaded = load_yaml_file(path)
             assert loaded['capture']['fs'] == 2000000
-            assert loaded['location']['rx']['latitude'] == 37.7644
+            assert loaded['location']['rx']['latitude'] == 37.7749
 
 
 class TestValuesDiffer:
