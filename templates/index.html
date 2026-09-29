@@ -268,15 +268,9 @@
 
 {% block scripts %}
 <script>
-// Built from the host actually used to get here, so the links stay on this
-// node rather than pointing somewhere the operator did not ask for.
-//
-// Over the support tunnel these ports are not reachable: Cloudflare proxies a
-// fixed set and blah2's are not among them, and an http:// link on an https://
-// page is blocked as mixed content anyway. The tunnel instead routes a few
-// paths on this same hostname straight to those services, so remotely the
-// links are same-origin paths. A card with no remote path has no such route
-// and says so, rather than looking clickable and failing.
+// Links are built from the host actually used, so they stay on this node.
+// Over the tunnel the ports are unreachable, so a card uses its remote path or
+// is disabled. See docs/architecture.md#service-card-links
 var isRemote = {{ 'true' if is_remote else 'false' }};
 document.querySelectorAll('.svc-card[data-port]').forEach(function(el) {
     if (!isRemote) {
@@ -394,10 +388,9 @@ document.querySelectorAll('.svc-card[data-port]').forEach(function(el) {
 {% endif %}
 {% if retina_node_version %}
 <script>
-// Kicks off a server-side restart and then polls for progress — see
-// apply_service.py. The button stays disabled until the run reaches a
-// terminal state, so it can't be clicked into a second, colliding
-// docker compose run against the same project.
+// The button stays disabled until the run reaches a terminal state, so it
+// can't be clicked into a second, colliding docker compose run.
+// See docs/architecture.md#the-apply-service
 document.getElementById('applyRestartBtn').addEventListener('click', function() {
     const btn = this;
     const status = document.getElementById('applyRestartStatus');

@@ -1,19 +1,12 @@
-<!-- Step 4: Location -->
+<!-- Location step -->
 <div data-step="location" class="step-panel" style="display:none;">
     <div class="wiz-title-row">
         <h1>Where is your receiver?</h1>
         <p>Set the coordinates of the radar receiver site. While you do, the spectrum analyser will scan your RF environment to improve tower search results.</p>
     </div>
     <div class="step-stack">
-        {# Address first, because it is the only way to fill the coordinates
-           without reading them off a map: the node is served over plain HTTP,
-           so the browser Geolocation API behind "Use my location" below is
-           unavailable to it. The lookup runs server-side via /towers/geocode,
-           which that constraint does not reach.
-
-           Nothing is gated on this. The coordinate boxes stay editable after a
-           lookup and Find Towers reads only them, so typing coordinates by
-           hand works exactly as it did before this row existed. #}
+        {# Address lookup only fills the coordinate boxes; Find Towers reads
+           only them. See docs/features/setup-wizard.md#address-lookup #}
         <div class="ds-field">
             <label class="ds-field-label" for="rxAddress">Address</label>
             <div style="display:flex;gap:10px;align-items:center;">
@@ -22,13 +15,8 @@
                        autocomplete="street-address" style="flex:1;min-width:0;">
                 <button type="button" class="ds-btn ghost" id="rxAddressBtn" disabled>Look up</button>
             </div>
-            {# Both halves matter: the geocoder is pinned to the US, so a
-               non-US address usually comes back as "no match", which reads as
-               a typo unless the box has already said otherwise. Worse, a
-               foreign place name colliding with a US one ("Toronto, Ontario")
-               returns a confident street-level match in the wrong country.
-               That is measured, not theoretical, so the matched address still
-               has to be checked by the owner. #}
+            {# The geocoder is US-pinned, and a foreign name can match a US
+               place confidently. See docs/features/setup-wizard.md#address-lookup #}
             <p style="font-size:12.5px;color:var(--ink-3);margin:6px 0 0;">
                 US addresses only for now. You can also enter coordinates directly below.
             </p>

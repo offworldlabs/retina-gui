@@ -1,15 +1,7 @@
-"""
-Pydantic models for config validation and form generation.
+"""Pydantic models for config validation and form generation.
 
-These models define:
-- Field types (int, bool, str, float) -> determines HTML input type
-- Constraints (ge, le, gt) -> HTML min/max attributes
-- Metadata (title, description) -> form labels and help text
-
-Layered Config System:
-- config.yml: Merged output (default + user + forced) - READ for display values
-- user.yml: User overrides only - WRITE changes here
-- Form shows values from config.yml, but only saves changed values to user.yml
+Display from config.yml (merged), write only changed values to user.yml.
+Field title/description strings are UI copy. See docs/features/config-editor.md.
 """
 import os
 from copy import deepcopy
@@ -21,10 +13,9 @@ from pydantic import VERSION, BaseModel, Field
 # Detect Pydantic version for Field() syntax
 PYDANTIC_V2 = VERSION.startswith("2.")
 
-# Transmitter names travel to the server as retina-telemetry's `tx_callsign`,
-# which the node-ingest spec caps at 32. Tower-Finder never returns anything
-# near it — the only way to exceed it is a hand-typed name, either in the
-# config form or the manual Add Tower dialog, so both are checked against this.
+# retina-telemetry's `tx_callsign` cap in the node-ingest spec. Must match the
+# spec and maxlength="32" in config.html.
+# See docs/features/config-editor.md#transmitter-name-length
 TX_NAME_MAX_LENGTH = 32
 
 
@@ -155,9 +146,8 @@ LOCATION_COORDINATE_FIELDS = (
 class LocationFormConfig(BaseModel):
     """Flat location config for form display.
 
-    Optional, because a node has no location until its owner picks a tower and
-    retina-node ships these null rather than defaulting to a plausible site.
-    Optional is not partial, though: see the validator below.
+    Optional, but the six coordinates are all-or-nothing, enforced in
+    routes/config.py. See docs/features/config-editor.md#location-all-or-nothing.
     """
     rx_latitude: float | None = Field(None, ge=-90, le=90, title="Receiver Latitude", description="decimal degrees")
     rx_longitude: float | None = Field(None, ge=-180, le=180, title="Receiver Longitude", description="decimal degrees")
@@ -166,15 +156,11 @@ class LocationFormConfig(BaseModel):
     tx_latitude: float | None = Field(None, ge=-90, le=90, title="Transmitter Latitude", description="decimal degrees")
     tx_longitude: float | None = Field(None, ge=-180, le=180, title="Transmitter Longitude", description="decimal degrees")
     tx_altitude: float | None = Field(None, title="Transmitter Altitude", description="meters")
-    # 32 chars is retina-telemetry's tx_callsign limit, not a display concern:
-    # a longer name means it cannot build a NodeConfig, so registration and
-    # every config resend fail and the node never reaches the server.
+    # Contract limit, not display: a longer name blocks registration.
     tx_name: str | None = Field(None, max_length=TX_NAME_MAX_LENGTH, title="Transmitter Name", description="location name")
 
-    # The all-or-nothing rule is enforced on save in routes/config.py, not
-    # here: it is a cross-field rule like the ADS-B source trio, so each
-    # complaint can be attached to the box it concerns. A model validator would
-    # also need pydantic v2, and nodes run v1.
+    # No model validator: nodes run pydantic v1. The all-or-nothing rule is in
+    # routes/config.py:_location_errors.
 
     @property
     def is_located(self) -> bool:
@@ -185,24 +171,15 @@ class LocationFormConfig(BaseModel):
 # ============================================================================
 # Owner Contact Details
 # ============================================================================
-#: Caps copied from the node-ingest spec's `NodeContact`, for the same reason
-#: TX_NAME_MAX_LENGTH is copied: a value past one of these means
-#: retina-telemetry cannot build the payload, so the whole document is refused
-#: and the owner is never reachable. These are contract limits rather than
-#: display preferences, and they move only when the spec does.
+#: Copied from the node-ingest spec's `NodeContact`; move only when the spec
+#: does. See docs/features/config-editor.md#how-we-reach-you.
 CONTACT_NAME_MAX_LENGTH = 64
 CONTACT_EMAIL_MAX_LENGTH = 255
 CONTACT_PHONE_MAX_LENGTH = 32
 
-#: ISO 3166-1 alpha-2, and it belongs to the *phone number* rather than to the
-#: owner: the server added it as "record which country a contact's phone number
-#: is in". Asking it as "where do you live" would put a wrong answer against a
-#: real person.
-#:
-#: Checked in routes/setup.py rather than here. `regex=` is pydantic v1 and
-#: `pattern=` is v2, nodes run v1 and this environment has v2, so a constraint
-#: spelled either way breaks on one of them. The length cap below is portable,
-#: and the shape check joins the other rules the routes already own.
+#: ISO 3166-1 alpha-2 country of the *phone number*, not of the owner.
+#: Checked in routes/setup.py: `regex=`/`pattern=` each work on only one
+#: pydantic version. See docs/features/config-editor.md#pydantic-v1-and-v2.
 CONTACT_COUNTRY_PATTERN = r"^[A-Za-z]{2}$"
 
 CONTACT_FIELDS = ("first_name", "last_name", "email", "phone", "country")
@@ -211,17 +188,9 @@ CONTACT_FIELDS = ("first_name", "last_name", "email", "phone", "country")
 class ContactFormConfig(BaseModel):
     """Whom to contact about this node, as its owner gave them.
 
-    Every field is optional and nullable, and that is the steady state: the
-    spec is explicit that a node with nothing to report never calls the
-    endpoint at all. Nothing here is verified, none of it identifies anyone to
-    the server, and it grants no account or login. It is carried so that a
-    fault we can see and the owner cannot has somewhere to go.
-
-    Not part of the three agreement records, and deliberately not in the same
-    file. Those are versioned acceptances neither end may ever invent, and
-    retina-telemetry refuses to register without all three: putting a mutable
-    optional document beside them would let a malformed contact stop a node
-    registering.
+    All optional; empty is the steady state. Kept out of the agreement records'
+    file so a malformed contact cannot stop registration.
+    See docs/features/config-editor.md#how-we-reach-you.
     """
     first_name: str | None = Field(None, max_length=CONTACT_NAME_MAX_LENGTH, title="First Name")
     last_name: str | None = Field(None, max_length=CONTACT_NAME_MAX_LENGTH, title="Last Name")
@@ -234,43 +203,23 @@ class ContactFormConfig(BaseModel):
 
     @property
     def is_empty(self) -> bool:
-        """Whether there is anything at all to report.
-
-        An owner who skips the step, and one who clears every box, arrive here
-        the same way and mean the same thing: nothing to send.
-        """
+        """Whether there is anything at all to report (skipped and cleared are the same)."""
         return all(getattr(self, f) is None for f in CONTACT_FIELDS)
 
 
-#: The cap the node-ingest spec puts on `NodeClaimRequest.email`, copied for
-#: the same reason as the contact caps above: past it retina-telemetry cannot
-#: build the payload, so the claim never leaves the node.
+#: Copied from the node-ingest spec's `NodeClaimRequest.email`.
 CLAIM_EMAIL_MAX_LENGTH = 255
 
-#: Deliberately thin, and no thinner than what the server itself enforces: one
-#: `@`, something either side of it, no whitespace. Nothing here verifies the
-#: address exists and nothing can, since until the link is clicked it grants
-#: nothing. The point of checking at all is that an owner who mistypes finds
-#: out in the box rather than by waiting for a link that never arrives.
-#:
-#: Checked in routes/setup.py rather than here, for the pydantic v1/v2 reason
-#: CONTACT_COUNTRY_PATTERN gives above.
+#: Deliberately thin, no stricter than the server. Checked in routes/setup.py
+#: (pydantic v1/v2). See docs/features/config-editor.md#node-claim.
 CLAIM_EMAIL_PATTERN = r"^[^@\s]+@[^@\s]+$"
 
 
 class ClaimFormConfig(BaseModel):
-    """The address that owns this node.
+    """The address that owns this node: the server mails it a claim link.
 
-    **Not the contact email**, however alike the two boxes look. That one
-    answers "whom do we ring about this node", is optional throughout and
-    grants nothing. This one answers "who owns it": the server mails it a link,
-    and clicking that link binds the node to the account behind the address. A
-    wrong value here mails a stranger a link that hands them somebody's node.
-
-    Kept in a file of its own for that reason, and nothing anywhere copies one
-    into the other. An owner may well give the same address twice, but that is
-    their answer to two questions rather than our licence to infer the second
-    from the first.
+    **Not the contact email.** Kept in its own file; never copy one into the
+    other. See docs/features/config-editor.md#node-claim.
     """
     email: str | None = Field(None, max_length=CLAIM_EMAIL_MAX_LENGTH, title="Email")
 
@@ -295,8 +244,7 @@ class AdsbTruthConfig(BaseModel):
 class RetinaTrackerConfig(BaseModel):
     """retina-tracker sidecar settings (flat for form display).
 
-    Unrelated to blah2's own built-in tracker (process.tracker in
-    capture config) - this tunes github.com/offworldlabs/retina-tracker.
+    Not blah2's built-in tracker (process.tracker).
     """
     min_snr: float = Field(gt=0, title="Minimum SNR", description="dB. Detections below this are discarded before tracking even begins - too high and the tracker will never confirm a track. Tune to this node's real noise floor.")
 
@@ -308,16 +256,10 @@ class RetinaTrackerConfig(BaseModel):
 class Tar1090Config(BaseModel):
     """tar1090 ADS-B viewer configuration.
 
-    Note: adsb_source is stored as comma-separated string in YAML
-    but split into 3 fields for the form.
-
-    The three source fields are optional here so that a node with no local
-    beast feed can be described at all: one fed from adsb.lol via the tar1090
-    proxy has nothing to point them at, and blanking adsb_source is how that
-    is expressed. Optional does not mean free-standing, though. When they may
-    actually be left empty depends on adsblol_fallback, and a partial set is
-    never valid, so both rules are enforced on save in routes/config.py, where
-    each complaint can be attached to the box it concerns.
+    adsb_source is one "host,port,protocol" string in YAML, split into three
+    fields here. They are all-or-nothing, and may be empty only with
+    adsblol_fallback on (enforced in routes/config.py).
+    See docs/features/config-editor.md#ads-b-source.
     """
     adsb_source_host: str | None = Field(None, title="ADS-B Host", description="IP or hostname")
     adsb_source_port: int | None = Field(None, ge=1, le=65535, title="ADS-B Port")

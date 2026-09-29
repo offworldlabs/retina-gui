@@ -1,32 +1,17 @@
 """Cross-process mutex for anything that drives the retina-node Docker stack.
 
-Every path that runs `docker compose` against project `retina-node` must
-hold this lock for the whole operation. Without it these callers can and do
-collide — a `docker compose down` from the cron watchdog landing inside a
-GUI apply's `up -d --force-recreate` leaves containers renamed to
-`<hash>_<name>` and the daemon rejecting the real name as "already in use",
-which then breaks every subsequent apply until someone cleans up by hand.
+Every path that runs `docker compose` against project `retina-node` must hold
+this lock for the whole operation, or callers interleave and leave containers
+half-recreated (see stack_reconcile.py).
 
-An fcntl.flock on a file, rather than the timestamp-file locks in
-device_state.py, for two reasons that both matter here:
+The file path is shared with blah2-arm's cron watchdog
+(script/blah2_rspduo_restart.bash), which takes it with flock(1). Do not
+rename or move it without changing that script.
 
-  - The kernel releases it when the holding process dies, so there is no
-    staleness heuristic that can be wrong. device_state's locks need
-    timeouts (INSTALL_LOCK_TIMEOUT and friends) precisely because a crashed
-    holder would otherwise wedge them forever; a restart is short and
-    frequent enough that guessing at a staleness window would be worse than
-    the problem it solves.
-  - flock(1) makes the same lock available to shell callers, so the cron
-    watchdog (blah2-arm/script/blah2_rspduo_restart.bash) can eventually
-    replace its point-in-time `pgrep -f "docker compose"` guard — which
-    cannot see the settle window in run_config_merger_and_restart, where no
-    compose process exists for ~30s but the operation is very much still in
-    flight — with `flock -n <file> -c ...` against this exact file.
+NOT re-entrant: exactly one place in a call chain takes it. flock is per file
+descriptor, so a nested acquire from the same process blocks against itself.
 
-Deliberately NOT re-entrant: exactly one place in a call chain should take
-it (run_config_merger_and_restart for the config paths, set_mode for the
-mode transitions). flock is per-file-descriptor, so a nested acquire from
-the same process opens a second fd and blocks against itself forever.
+See docs/architecture.md#the-restart-lock.
 """
 
 import errno
@@ -36,23 +21,16 @@ from contextlib import contextmanager
 
 LOCK_FILENAME = "restart.lock"
 
-# Synchronous HTTP callers (mode switch, tower select, calibrate apply) wait
-# this long for an in-flight restart before giving up and telling the user.
-# A whole restart measures ~45s on real hardware, most of it the settle
-# window, so this covers one queued operation plus headroom without leaving
-# a request hanging indefinitely.
+# Callers on a request thread (mode switch, wizard completion) wait this long.
+# A whole restart is ~45s, so this covers one queued operation plus headroom.
 DEFAULT_TIMEOUT_SECONDS = 90
 
 # The async apply worker is not attached to a request, so it can afford to
 # wait out a long-running operation ahead of it rather than fail.
 BACKGROUND_TIMEOUT_SECONDS = 600
 
-# Fire-and-forget callers — GUI startup, and the wizard's navigate-away
-# beacon — where nobody is waiting on the result and whoever holds the lock
-# is already performing a restart that subsumes what this caller wanted
-# (both only stop/remove retina-spectrum, which every restart path does
-# defensively anyway). They give up quickly rather than queue: blocking GUI
-# startup behind a two-minute restart would be strictly worse than skipping.
+# Fire-and-forget callers (GUI startup, the wizard's navigate-away beacon).
+# Whoever holds the lock is already doing a restart that subsumes theirs.
 OPPORTUNISTIC_TIMEOUT_SECONDS = 10
 
 POLL_SECONDS = 0.25
@@ -71,14 +49,11 @@ def restart_lock(data_dir, timeout=None):
     """Hold the stack-restart lock for the duration of the block.
 
     Raises RestartBusy if it can't be acquired within `timeout` seconds,
-    defaulting to DEFAULT_TIMEOUT_SECONDS. Resolved here rather than as a
-    default argument so the module constant stays adjustable at runtime — a
-    default argument binds once at import and silently ignores any later
-    change, which makes the wait untunable and every contention test pay the
-    full production timeout.
+    defaulting to DEFAULT_TIMEOUT_SECONDS. The default is resolved here, not
+    as a default argument, so the module constant stays adjustable at runtime.
 
-    Polls rather than using a blocking flock so the wait is bounded without
-    needing signals/alarms, which would not be safe on a Flask worker thread.
+    Polls rather than blocking, so the wait is bounded without signals, which
+    are unsafe on a Flask worker thread.
     """
     import time
 

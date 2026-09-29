@@ -219,12 +219,9 @@
                 <span class="desc">Receiver and transmitter coordinates used by the geometry solver.</span>
             </div>
             <div class="cfg-body" {% if not retina_installed %}style="opacity:.5;pointer-events:none;"{% endif %}>
-                {# This section is hand-built rather than rendered through the
-                   render_field macro, so every input has to look config_errors
-                   up itself. Without that the banner above claims the bad
-                   fields are highlighted and none of them are. All eight are
-                   wired, not just the five that can fail today, so a future
-                   constraint cannot reintroduce the invisibility silently. #}
+                {# Hand-built, not render_field, so every input looks up its own
+                   config_errors key. Keep all eight wired.
+                   See docs/features/config-editor.md#validation #}
                 {% set rx_name_err = config_errors.get('location.rx_name') if config_errors else none %}
                 {% set rx_lat_err  = config_errors.get('location.rx_latitude') if config_errors else none %}
                 {% set rx_lon_err  = config_errors.get('location.rx_longitude') if config_errors else none %}
@@ -384,10 +381,8 @@
                 <div class="cfg-grid three">
                     {% for fname in ['adsb_source_host', 'adsb_source_port', 'adsb_source_protocol'] %}
                     {% if fname in t %}
-                    {# This section is hand-built rather than rendered through
-                       render_field, so it has to look config_errors up itself.
-                       Without this the banner above claims fields are
-                       highlighted and none of them are. #}
+                    {# Hand-built, so it looks config_errors up itself.
+                       See docs/features/config-editor.md#validation #}
                     {% set t_err = config_errors.get('tar1090.' ~ fname) if config_errors else none %}
                     <div>
                         <div class="ds-label-micro" style="margin-bottom:6px;">{{ t[fname].title }}</div>
@@ -584,15 +579,8 @@
         </section>
 
         {# ── How we reach you ── #}
-        {# The other half of Remote support: those settings are how support reaches
-           the node, this is how they reach you. A section of its own because it is
-           the only block on the page asking about a person rather than the radar,
-           and because the card's own head and rows are what make it legible: the
-           name/desc/help classes it used inside Remote support are only styled
-           within a toggle-row, so it rendered as unstyled text.
-
-           Optional throughout, and an empty document means the node never calls the
-           contact endpoint at all. See routes/setup.py. #}
+        {# Optional throughout; empty means the node never calls the contact
+           endpoint. See docs/features/config-editor.md#how-we-reach-you #}
         <section id="contact" class="cfg-section" style="margin-top:12px;">
             <div class="cfg-section-head">
                 <h2>How we reach you</h2>
@@ -667,17 +655,10 @@
         </section>
 
         {# ── Node claim ──
-           Who owns this node, which is a different question from How we reach you
-           above and carries a worse failure: the server mails this address a link,
-           and opening it binds the node to the account behind that address. Nothing
-           copies the contact email in here for exactly that reason.
-
-           The state is retina-telemetry's, because it is the only thing on the node
-           that talks to the server. One button, and every press is an ask for a
-           link: retina-telemetry decides whether that is an offer or a resend. A
-           separate Save could store an address the node already held without
-           anyone seeing the press, which after a release mailed nothing. See
-           device_state.save_telemetry_claim. #}
+           Not the contact email: this address is mailed a link that binds the
+           node to its account, so nothing copies the contact email in here.
+           One button, every press asks for a link.
+           See docs/features/config-editor.md#node-claim #}
         <section id="claim" class="cfg-section" style="margin-top:12px;">
             <div class="cfg-section-head">
                 <h2>Node claim</h2>
@@ -961,16 +942,12 @@
                                 budget (fast, but a persistent clutter/multipath return can occasionally pass
                                 confirmation too).</span>
                         </label>
-                        <!-- ADS-B verified mode is temporarily unavailable — benched, not removed;
-                             see calibrator.py's module docstring. The backend also rejects
-                             mode: "adsb" outright (routes/calibrate.py), so this isn't just a UI hide. -->
+                        <!-- ADS-B verified mode is benched, not removed: the backend also
+                             rejects mode: "adsb" (routes/calibrate.py). See calibrator.py. -->
                     </div>
                 </div>
                 {# Quick Calibrate's prompt. No mode choice: the run never
-                   confirms anything, so "how should it decide it's calibrated"
-                   has no answer to offer. Says plainly what it does and does
-                   not do, since the tuning it persists was never checked
-                   against a real aircraft. #}
+                   confirms anything. #}
                 <div id="calQuickSetup" style="display:none;">
                     <p style="margin:0 0 10px;">This tunes <strong>the tower you are on now</strong>. It backs the gain
                         off until the receiver stops overloading, then watches that setting for 45 seconds to be sure
@@ -1015,10 +992,8 @@
 {% block scripts %}
 <script src="/static/calibrate.js"></script>
 <script>
-// This node's own permanent address. Deliberately not owl.local: that name is
-// answered by every node on the network at once, so telling someone to check
-// it proves only that *a* node is reachable, not this one — and on a network
-// with more than one node it would send them to the fleet list instead.
+// This node's own address, deliberately not owl.local (answered by every node).
+// See docs/features/config-editor.md#this-node
 var NODE_URL = 'http://{{ node_id }}.local';
 
 // This node: rename. Saves on its own, not with the config form, so the button
@@ -1137,9 +1112,8 @@ var NODE_URL = 'http://{{ node_id }}.local';
     }
 })();
 
-// Tower — preset select fills in Location (transmitter) + Capture (center frequency).
-// Manage list add/remove persists straight to the cache file, independent of the
-// staged config form below (same "takes effect immediately" model as SSH keys).
+// Tower: preset select only fills form fields; add/remove saves the cache at once.
+// See docs/features/config-editor.md#tower-presets
 (function() {
     var presetSelect = document.getElementById('towerPresetSelect');
     if (!presetSelect) return;
@@ -1539,11 +1513,8 @@ var NODE_URL = 'http://{{ node_id }}.local';
     scan();
 })();
 
-// Auto-apply after successful save redirect.
-// The apply runs on the server's own thread — this only kicks it off and
-// then reports progress, so a slow apply (~45s, mostly the SDR settle
-// window) can't be mistaken for a hang and re-clicked into a second,
-// colliding docker compose run.
+// Auto-apply after a successful save redirect. The apply runs server-side;
+// this only starts it and reports progress. See docs/features/config-editor.md#apply
 if (window.location.search.includes('saved=1')) {
     history.replaceState({}, '', window.location.pathname);
     const btn = document.getElementById('applyBtn');
@@ -1636,13 +1607,9 @@ if (window.location.search.includes('saved=1')) {
     form.addEventListener('input', update);
     form.addEventListener('change', update);
 
-    // Adopt values that were written to config by something other than this
-    // form. Today that is only Auto-Calibrate saving a run (see the modal's
-    // saveAutomatically). Both halves matter: the fields have to change,
-    // or the page goes on showing the pre-calibration tuning and a later Save posts
-    // it back over what was just persisted; and the baseline has to move with
-    // them, or the savebar claims unsaved changes for values that are
-    // already on disk.
+    // Adopt values written to config by something else (today, Auto-Calibrate
+    // saving a run). Change the fields AND move the baseline, or a later Save
+    // undoes them. See docs/features/config-editor.md#adopting-the-persisted-values
     window.RetinaConfigForm = {
         adoptSaved: function(values) {
             Object.keys(values).forEach(function(name) {
@@ -1825,9 +1792,7 @@ if (discardBtn) discardBtn.addEventListener('click', () => location.reload());
         closeBtn.style.display = '';
     }
 
-    // The server refuses config changes during a run (see ApplyService's
-    // ConfigChangeRefused), but being refused after filling in a form is a
-    // poor way to find out. Reflect it in the page too.
+    // Mirror the server's refusal (ApplyService's ConfigChangeRefused) in the page.
     function setConfigLockedOut(locked) {
         var apply = document.getElementById('applyBtn');
         if (apply) {
@@ -1836,8 +1801,7 @@ if (discardBtn) discardBtn.addEventListener('click', () => location.reload());
                 ? 'Auto-calibration is running. Cancel it before changing configuration.'
                 : '';
         }
-        // Tower controls apply immediately (they POST /towers/select, which
-        // restarts the stack), so they need locking out too.
+        // Tower preset and remove controls are locked out too.
         document.querySelectorAll('#towerPresetSelect, .tower-remove-btn')
             .forEach(function(el) { el.disabled = locked; });
     }
@@ -1907,12 +1871,9 @@ if (discardBtn) discardBtn.addEventListener('click', () => location.reload());
                 + '.' + adsbNote;
             saveAutomatically(status);
         } else {
-            // A quick run ends in "failed" by design — there is no confirmed
-            // result because none was asked for (see calibrator.py's
-            // skip_confirmation branch). It still resolved tuning and proved
-            // it holds, so reporting it as "No calibration found" in red
-            // would call a successful run a failure. Cancelled runs keep
-            // their own wording: they have no tuning to offer either way.
+            // A quick run ends in "failed" by design but still resolved tuning,
+            // so it must not read as a failure. Cancelled runs keep their wording.
+            // See docs/features/config-editor.md#auto-calibrate-on-this-page
             var quickTuned = !!status.skip_confirmation && !!status.fallback
                              && status.state !== 'cancelled';
             phaseText.textContent = status.state === 'cancelled' ? 'Cancelled'
@@ -1922,15 +1883,9 @@ if (discardBtn) discardBtn.addEventListener('click', () => location.reload());
             errorEl.innerHTML = quickTuned
                 ? '<span style="color:var(--ink-2);">' + escapeHtml(status.error || '') + '</span>'
                 : escapeHtml(status.error || '');
-            // The run's own message assumes the towers were actually watched.
-            // When they weren't — the tuning never reached the device, the
-            // operating point kept clipping, or time ran out mid-search —
-            // saying "no aircraft was overhead" is simply wrong, and it is
-            // the failure the user most needs to distinguish. Report what the
-            // engine actually determined, per tower.
-            // A deployment restarting the radar is the explanation, so lead
-            // with it rather than leaving the per-tower failures to imply
-            // something about the tuning or the sky.
+            // Lead with any deployment warning, then say what the engine
+            // determined per tower: the run's own message assumes the towers
+            // were actually watched.
             errorEl.innerHTML += updateWarning(status);
             var diagnosis = diagnose(status.history || []);
             if (diagnosis) {
@@ -1938,9 +1893,7 @@ if (discardBtn) discardBtn.addEventListener('click', () => location.reload());
                     + 'background:var(--surface-2,rgba(128,128,128,.08));border-radius:6px;'
                     + 'color:var(--ink-2);font-size:12.5px;">' + diagnosis + '</div>';
             }
-            // "Closest attempt ... try these as a starting point" is advice
-            // for a run that fell short. A quick run did not: the box below
-            // already names the tuning it settled on and the radar is on it.
+            // Advice for a run that fell short; a quick run did not.
             if (status.best_attempt && !quickTuned) {
                 best.style.display = '';
                 best.innerHTML = 'Closest attempt: ' + mhz(status.best_attempt.fc)
@@ -1949,13 +1902,9 @@ if (discardBtn) discardBtn.addEventListener('click', () => location.reload());
                     + ': ' + status.best_attempt.reason
                     + '.<br>Try entering these in the Capture fields below as a starting point.';
             }
-            // A run that found no track still resolved an operating point the
-            // descent proved this device tolerates, and the radar is on it
-            // right now — but only live, until it is written to config. Save
-            // it the same way as a success, or the next restart throws the
-            // whole run away. Distinct from "Closest attempt"
-            // above, which is informational and may name a different tower:
-            // this is what the radar is actually running.
+            // The operating point the radar is running now, live only until
+            // saved the same way as a success. Not the same as "Closest
+            // attempt" above.
             if (status.fallback) {
                 resultEl.style.display = '';
                 resultEl.innerHTML = 'The radar is running on <strong>'
@@ -2018,10 +1967,8 @@ if (discardBtn) discardBtn.addEventListener('click', () => location.reload());
         cancelBtn.style.display = '';
     }
 
-    // Opening either button's modal has to cope with a run already going —
-    // started by the other button, another tab, or the setup wizard. Offering
-    // "Start Calibration" there would only earn a 409, so attach to the run
-    // instead, exactly as a page load does.
+    // Attach to a run already going (other button, tab, or wizard) rather than
+    // offer Start, which would only earn a 409.
     function openModal(quick) {
         function offerToStart() {
             resetModal(quick);
@@ -2043,12 +1990,7 @@ if (discardBtn) discardBtn.addEventListener('click', () => location.reload());
         quickBtn.addEventListener('click', function() { openModal(true); });
     }
 
-    // A run outlives the page: it is a background thread on the node, not
-    // something this tab owns. Without reattaching, navigating away or
-    // refreshing left it going with no way to see or cancel it — the Cancel
-    // button only ever appeared for the tab that started the run, so the only
-    // recourse was to wait out the full budget. Reattach on load so any tab
-    // can watch and stop it.
+    // A run outlives the page, so reattach on load: any tab can watch and cancel it.
     (function reattachIfRunning() {
         fetch('/calibrate/status')
             .then(function(r) { return r.json(); })
@@ -2112,15 +2054,8 @@ if (discardBtn) discardBtn.addEventListener('click', () => location.reload());
         }).finally(function() { cancelBtn.disabled = false; });
     });
 
-    // The fields behind this modal were rendered from config.yml before the
-    // run, so persisting a result leaves them showing the old tuning. That is
-    // not only confusing (reported as "auto-calibrate set 59/54/7 but the
-    // config screen still shows 59/59/9"), it is destructive: Save posts every
-    // field, and compute_user_overrides drops an override whose submitted
-    // value matches the merged config, so one Save from a stale form deletes
-    // the calibration from user.yml. Adopt what the server says it wrote,
-    // as soon as it says so: user.yml is written synchronously inside that
-    // POST, well before the merge finishes.
+    // Adopt what the server wrote as soon as it answers, or a Save from the stale
+    // form undoes the calibration. See docs/features/config-editor.md#adopting-the-persisted-values
     var TX_FIELDS = {
         name: 'location.tx_name',
         latitude: 'location.tx_latitude',
@@ -2137,9 +2072,8 @@ if (discardBtn) discardBtn.addEventListener('click', () => location.reload());
             'capture.device_lnaState': persisted.lna_state,
             'capture.device_bandwidthNumber': persisted.bandwidth_number
         };
-        // Only present when the run moved to a different tower, which is the
-        // one case where fc alone would leave the page (and blah2's geometry)
-        // describing the wrong transmitter.
+        // Only present when the run moved tower; fc alone would leave the wrong
+        // transmitter in the form.
         if (persisted.tx) {
             Object.keys(TX_FIELDS).forEach(function(key) {
                 values[TX_FIELDS[key]] = persisted.tx[key];
@@ -2148,13 +2082,9 @@ if (discardBtn) discardBtn.addEventListener('click', () => location.reload());
         window.RetinaConfigForm.adoptSaved(values);
     }
 
-    // A finished run's tuning is saved without asking, through the same
-    // /calibrate/apply the "Persist to config" button used to call: user.yml
-    // is written, then the shared apply queue merges and restarts the stack.
-    // Asking was the confusing part (ClickUp 123zgec4dua): the button sat
-    // under the result as if pressing it were optional, when leaving the
-    // tuning unsaved only meant the next restart threw the run away.
-    // Cancelled runs have no tuning (see CAL.tuningOf), so they save nothing.
+    // Saves a finished run's tuning without asking, once per run, via
+    // /calibrate/apply. Cancelled runs have no tuning, so they save nothing.
+    // See docs/features/config-editor.md#auto-calibrate-on-this-page
     function saveAutomatically(status) {
         if (!CAL.tuningOf(status) || savedRun === status.started_at) return;
         savedRun = status.started_at;
@@ -2218,9 +2148,8 @@ if (discardBtn) discardBtn.addEventListener('click', () => location.reload());
     });
 })();
 
-// Live per-tuner peak dBFS meter in the Capture section — rack-ladder style,
-// PPM-like ballistics (instant attack, timed decay) smooth the raw ~1s reports
-// from /config/rf-status into a settled reading instead of a jumpy one.
+// Live per-tuner peak dBFS meter in the Capture section.
+// See docs/features/config-editor.md#signal-peak-meter
 (function() {
     var trackA = document.getElementById('peakTrackA');
     var trackB = document.getElementById('peakTrackB');
@@ -2266,10 +2195,8 @@ if (discardBtn) discardBtn.addEventListener('click', () => location.reload());
         for (var i = 0; i < segs.length; i++) segs[i].style.background = 'var(--danger)';
     }
     function makeBallistics(start) {
-        // PPM-style ballistics: instant attack (snap up to a new, louder
-        // report), timed decay (ease down toward a quieter report instead of
-        // snapping). `raw` always reflects the latest report — it is NOT a
-        // running max — so `current` has something below it to decay toward.
+        // Instant attack, timed decay. `raw` is the latest report, NOT a
+        // running max, so `current` has something to decay toward.
         var state = { current: start, raw: start, hasData: false };
         return {
             feed: function(newRaw) {
@@ -2290,20 +2217,13 @@ if (discardBtn) discardBtn.addEventListener('click', () => location.reload());
     var ballA = makeBallistics(FLOOR), ballB = makeBallistics(FLOOR);
     var last = performance.now();
 
-    // Missing rf-status data isn't itself a hardware alarm — blah2 is
-    // intentionally stopped in spectrum/SDRconnect mode, and a single dropped
-    // poll or container restart is normal. Only escalate to "no signal" when
-    // radar mode says blah2 *should* be running and data has stayed missing
-    // for a sustained period (e.g. an overload-induced device crash).
+    // Alarm only when in radar mode and data has been missing for ALARM_GAP_MS.
     var ALARM_GAP_MS = 4000;
     var currentMode = null;   // unknown until checked; only re-checked while data is missing
     var missingSinceMs = null;
 
-    // blah2 clamps peak to a minimum of 1 sample before taking log10 (to
-    // avoid log(0)), so "device never actually delivered a sample" reads as
-    // exactly 20*log10(1/32767) ≈ -90.3 dBFS — not "very quiet", which a real
-    // connected front end's own thermal noise would never actually reach.
-    // Treat a reading at/near that floor the same as missing data.
+    // blah2's "no samples" floor is 20*log10(1/32767), about -90.3 dBFS; treat
+    // readings near it as missing data.
     var NO_CAPTURE_THRESHOLD = -89;
     function isFloorReading(dbfs) { return dbfs <= NO_CAPTURE_THRESHOLD; }
 
@@ -2350,8 +2270,7 @@ if (discardBtn) discardBtn.addEventListener('click', () => location.reload());
                 if (noCapture) {
                     if (missingSinceMs == null) missingSinceMs = performance.now();
                     ballA.clear(); ballB.clear();
-                    // Refresh mode only while it actually matters (data missing) —
-                    // no extra request during normal healthy operation.
+                    // Only fetch the mode while data is missing.
                     return fetch('/api/mode')
                         .then(function(r) { return r.json(); })
                         .then(function(m) { currentMode = m.mode; })
@@ -2415,9 +2334,7 @@ if (discardBtn) discardBtn.addEventListener('click', () => location.reload());
                 say(first ? errors[first] : (data.error || 'Could not save.'), true);
                 return;
             }
-            // `stored` is false when every box was empty, which removes the
-            // record rather than saving one. Saying "Saved" there would claim
-            // we are holding details we have just deleted.
+            // `stored` is false when every box was empty: the record was removed.
             say(data.stored ? 'Saved' : 'Details removed');
             setTimeout(function () { say(''); }, 3000);
         })
@@ -2445,9 +2362,7 @@ if (discardBtn) discardBtn.addEventListener('click', () => location.reload());
         msg.style.display = text ? 'inline' : 'none';
     }
 
-    // Every press is an ask for a link. Nothing is claimed from here: the
-    // node reads the file and asks the server on its next pass, within a
-    // minute, choosing between an offer and a resend itself.
+    // Every press asks for a link; retina-telemetry acts on its next pass.
     sendBtn.addEventListener('click', function () {
         sendBtn.disabled = true;
         say('');
@@ -2502,9 +2417,8 @@ if (discardBtn) discardBtn.addEventListener('click', () => location.reload());
         }).then(function (r) { return r.json().then(function (j) { return {ok: r.ok, body: j}; }); });
     }
 
-    // Each toggle drives its own endpoint and reverts itself on failure. They
-    // are deliberately not wired together: the whole point of two settings is
-    // that changing one says nothing about the other.
+    // Each toggle drives its own endpoint and reverts on failure. Deliberately
+    // independent. See docs/features/config-editor.md#remote-support
     function wire(input, url, field, statusEl, describe) {
         input.addEventListener('change', function () {
             var want = input.checked;
@@ -2528,17 +2442,14 @@ if (discardBtn) discardBtn.addEventListener('click', () => location.reload());
     }
 
     wire(support, '/remote-access/toggle', 'enabled', supportStatus, function (b) {
-        // No estimate offered. How long this takes depends on node-infra's
-        // scheduling, which this node has no knowledge of and cannot promise.
+        // No time estimate: it depends on node-infra's scheduling.
         return b.enabled
             ? 'On. The connection is not live yet.'
             : 'Off. Support can only reach this node from your own network.';
     });
 
-    // Safe to state plainly here: the route enforces before it records and
-    // errors if enforcement failed, so an ok response means the node really is
-    // in this state. The page-load branch cannot assume that and reads the
-    // enforced value back instead.
+    // An ok response means enforced (the route enforces before it records).
+    // The page-load branch reads the enforced value back instead.
     wire(shell, '/remote-access/shell', 'allowed', shellStatus, function (b) {
         return b.shell_allowed ? 'On.' : 'Off. No session can be opened, from anywhere.';
     });

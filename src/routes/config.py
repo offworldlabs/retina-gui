@@ -16,15 +16,10 @@ from node_name import MAX_LENGTH as NAME_MAX_LENGTH
 bp = Blueprint('config', __name__)
 
 
-# The wizard's tower step polls /config/apply/status to know when the restart
-# it queued has finished. Redirecting that hands fetch() an HTML page rather
-# than an error: the request succeeds, .json() rejects, and the step re-polls
-# a redirect forever with its spinner still up and its skip button hidden.
-# Same rule as _CALIBRATION_ALLOWED_PREFIXES in app.py — never redirect the
-# status endpoint the watching window depends on.
-#
-# Matched exactly, not by prefix: this route only reads status, while
-# /config/apply and /config/save mutate and must stay blocked mid-wizard.
+# The wizard polls this mid-wizard, and a redirect would hang it. Matched
+# exactly, not by prefix: /config/apply and /config/save must stay blocked.
+# Same rule as _CALIBRATION_ALLOWED_PREFIXES in app.py.
+# See docs/features/config-editor.md#guards
 _WIZARD_ALLOWED_PATHS = ('/config/apply/status',)
 
 
@@ -40,17 +35,11 @@ def _check_wizard_not_active():
 
 @bp.context_processor
 def _remote_access_context():
-    """Remote access state, for every template this blueprint renders.
+    """Remote access, contact and claim state, for every template this blueprint renders.
 
-    Deliberately not passed per call site. config.html has two render points:
-    /config, and the validation-error branch of /config/save. Handing them
-    the same three arguments by hand is how the second one shipped without them.
-    A context processor is the version of this that cannot drift when a third
-    render point appears.
-
-    remote_host is derived rather than reported: the hostname is a pure function
-    of node_id and the zone, so the page can name the address before anything
-    has provisioned it.
+    A context processor rather than per-call arguments, so config.html's render
+    points cannot drift apart.
+    See docs/features/config-editor.md#administration-sections.
     """
     from app import (
         REMOTE_ACCESS_DOMAIN,
@@ -62,36 +51,25 @@ def _remote_access_context():
     )
     from remote_access import tunnel_status
 
-    # Where the claim stands, which only retina-telemetry knows: it is the only
-    # thing here that talks to the server. None when that service is not
-    # running or predates the claim, and the section says so rather than
-    # guessing. Read through the same status document the home page uses.
+    # Claim state is retina-telemetry's; None when it is not running or predates
+    # the claim. See docs/features/config-editor.md#node-claim
     telemetry = telemetry_status.read()
 
     return {
         'remote_access': remote_access.status(),
-        # Whom to contact about this node, shown in the same section for the
-        # same reason: it is the other half of how support reaches a problem,
-        # the settings above being how they reach the node. Empty when nothing
-        # was ever given, which is the ordinary case.
+        # Empty when nothing was ever given, which is the ordinary case.
         'contact': device_state.get_telemetry_contact(),
-        # The address this node has been told to claim with, as stored here.
-        # Distinct from `claim_state` below, which is what the server has
-        # actually done with it, and the two disagree for as long as it takes
-        # retina-telemetry to notice a change and be answered.
+        # Stored address; `claim_state` is what the server did with it. They
+        # can disagree until retina-telemetry's next pass.
         'claim': device_state.get_telemetry_claim(),
         'claim_state': (telemetry or {}).get('claim'),
         'claim_reported': telemetry is not None and not (telemetry or {}).get('stale'),
-        # The *enforced* shell state, read back from mender-connect's own config
-        # rather than from what we recorded. They can disagree: an enforcement
-        # that failed, or a hand-edited config, would otherwise leave this page
-        # confidently showing a choice the node is not honouring. True, False,
-        # or None when the config cannot be read at all.
+        # The *enforced* shell state, read back from mender-connect's config,
+        # not what we recorded. None when that config cannot be read.
         'shell_enforced': mender_connect.is_shell_enabled(),
-        # Asked of systemd, not of a server. Nothing on the node is told whether
-        # provisioning worked, so the honest answer to "is it reachable" is
-        # whether the connector is up. See remote_access.tunnel_status.
+        # Asked of systemd: whether the connector is up is all the node can know.
         'remote_tunnel': tunnel_status() if remote_access.is_enabled() else 'off',
+        # Derived, not reported, so it can be shown before provisioning.
         'remote_host': f"{read_node_id()}.{REMOTE_ACCESS_DOMAIN}",
     }
 
@@ -164,10 +142,8 @@ def delete_key():
 def set_node_name():
     """Rename this node.
 
-    The name is only a label — it is what the fleet page shows on this node's
-    card instead of ret4c844c20, and it reaches the other nodes through the
-    DNS-SD TXT record. Nothing addresses the node by it, so a rename cannot
-    break a bookmark or an SSH config.
+    Only a label (fleet page, DNS-SD TXT record): nothing addresses the node
+    by it. See docs/features/config-editor.md#this-node.
     """
     from app import node_name
 
@@ -177,41 +153,24 @@ def set_node_name():
     return jsonify({"ok": True, "name": node_name.get()})
 
 
-# The three ADS-B source boxes are one YAML value (host,port,protocol), so they
-# only mean anything as a set: complete, or empty because adsb.lol is feeding
-# tar1090 instead. Neither of those is what the form produces on its own, hence
-# both checks here.
-#
-# Checked here rather than in the schema so each complaint lands on the box it
-# belongs to. Pydantic can see adsblol_fallback perfectly well - it is a field
-# of the same model - but a model-level error carries no field name, so the
-# page would raise its banner with nothing highlighted, which is the failure
-# this whole change exists to remove.
+# One YAML value (host,port,protocol): complete, or empty with adsblol_fallback
+# on. Checked here, not in the schema, so each error lands on its own box.
+# See docs/features/config-editor.md#ads-b-source
 _ADSB_SOURCE_FIELDS = ("adsb_source_host", "adsb_source_port", "adsb_source_protocol")
 
 
 def _location_errors(location_flat):
-    """Per-field errors for a geometry that is neither complete nor empty.
+    """A form-level error for a geometry that is neither complete nor empty.
 
-    A node legitimately has no location until its owner picks a tower, so an
-    empty set is fine. A partial one is not: blah2 derives its whole bistatic
-    solution from these six numbers, and a missing one becomes NaN rather than
-    an error, so the radar runs and silently associates nothing. This is the
-    only place an owner finds out.
-
-    Names are excluded. They are labels, and a position without one is still a
-    position.
+    A missing coordinate becomes NaN in blah2 and the radar silently associates
+    nothing. See docs/features/config-editor.md#location-all-or-nothing.
     """
     missing = [f for f in LOCATION_COORDINATE_FIELDS if location_flat.get(f) in (None, "")]
     if not missing or len(missing) == len(LOCATION_COORDINATE_FIELDS):
         return {}
 
-    # Form-level rather than per-field, and now a choice rather than a
-    # constraint. The location inputs do consult config_errors since the
-    # highlight fix, so per-field keys would mark the right boxes if we sent
-    # them. They are not sent because the rule is about the group: one sentence
-    # naming what is missing says it better than up to five separately lit
-    # fields each repeating the same all-or-nothing complaint.
+    # Form-level by choice: the rule is about the group, so one sentence beats
+    # up to five boxes repeating it.
     return {"_form": (
         "A location needs all six coordinates or none. Missing: "
         + ", ".join(f.replace("_", " ") for f in missing)
@@ -232,7 +191,7 @@ def _adsb_source_errors(tar1090_data):
         reason = "an ADS-B source is required unless adsb.lol fallback is turned on"
     else:
         # A partial set joins into a malformed "host,," that tar1090 accepts
-        # and then quietly never connects on.
+        # and then never connects on.
         reason = ("required when an ADS-B source is set "
                   "(clear all three to feed tar1090 from adsb.lol instead)")
 
@@ -249,11 +208,9 @@ def save_config():
 
     all_errors = {}
 
-    # Refuse the save itself, not just the apply that follows it. The form
-    # posts here and the page then auto-POSTs /config/apply, so guarding only
-    # the apply would leave the user with changes written to user.yml that
-    # were never applied — and silently swept into the next merge, including
-    # the one /calibrate/apply performs on a successful run.
+    # Refuse the save too, not just the apply: otherwise unapplied changes sit
+    # in user.yml and get swept into the next merge.
+    # See docs/features/config-editor.md#guards
     from app import calibrator
     from app import device_state as _device_state
     if calibrator.is_running() or _device_state.is_calibration_locked()[0]:
@@ -316,11 +273,8 @@ def save_config():
         host = tar1090_data.pop('adsb_source_host', '')
         port = tar1090_data.pop('adsb_source_port', '')
         protocol = tar1090_data.pop('adsb_source_protocol', '')
-        # An emptied source is written as "" rather than omitted. default.yml
-        # ships a source of its own, so dropping the key here would leave the
-        # merge free to put that default straight back and silently undo the
-        # clearing. compute_user_overrides still discards the "" when it
-        # matches what is already merged, so nothing is pinned needlessly.
+        # Write "" rather than omitting the key, or the merge restores
+        # default.yml's source and undoes the clearing.
         tar1090_nested['adsb_source'] = (f"{host},{port},{protocol}"
                                          if host or port or protocol else "")
         tar1090_nested.update(tar1090_data)
@@ -365,14 +319,10 @@ def save_config():
 
 @bp.route("/config/apply", methods=["POST"])
 def apply_config():
-    """Start a config apply and return immediately.
+    """Start a config apply on apply_service's thread and return immediately.
 
-    The work (config-merger, then in radar mode a stack restart) runs on a
-    background thread — see apply_service.py for why it is not done inline
-    on this request. Poll /config/apply/status for progress.
-
-    In spectrum mode only config-merger runs — blah2 is intentionally stopped
-    and must not be restarted until the user switches back to radar mode.
+    Poll /config/apply/status. In spectrum mode only config-merger runs; blah2
+    must stay stopped. See docs/features/config-editor.md#apply.
     """
     from app import DEV_MODE, apply_service, config_mgr, device_state
 
@@ -382,22 +332,15 @@ def apply_config():
     if not config_mgr.is_retina_node_installed():
         return jsonify({"success": False, "error": "retina-node not installed"}), 400
 
-    # Refuse during a Mender install rather than queue behind it. The install
-    # replaces the compose manifests this apply's config-merger runs against,
-    # and mender-update's own docker commands are outside the restart lock —
-    # so an apply here can genuinely run concurrently with them. It would also
-    # report success having skipped the restart entirely, since the install
-    # sets mode.txt to 'spectrum'. An install can end in a rollback or reboot,
-    # so holding the apply across it and then applying to a stack that may
-    # have been replaced underneath is worse than asking the user to retry.
+    # Refuse during a Mender install rather than queue behind it: its docker
+    # commands are outside the restart lock. See docs/features/config-editor.md#guards
     in_progress, reason = device_state.is_any_update_in_progress()
     if in_progress:
         return jsonify({"success": False,
                         "error": f"{reason}. Apply your changes once it finishes."}), 409
 
-    # An in-flight calibration is refused inside request() rather than here,
-    # so no future route can reintroduce the gap this one had — see
-    # ApplyService.ConfigChangeRefused.
+    # An in-flight calibration is refused inside request(), so no route can
+    # skip it. See ApplyService.ConfigChangeRefused.
     try:
         return jsonify({"success": True, "status": apply_service.request()}), 202
     except ConfigChangeRefused as refused:

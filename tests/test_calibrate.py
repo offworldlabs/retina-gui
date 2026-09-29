@@ -2,7 +2,7 @@
 
 Calibrator logic runs against a scripted FakeBlah2Client (no real HTTP, no
 SDR hardware) and a scripted FakeRetinaTrackerClient (no real socket or
-background tail thread) — see calibrator.py's module docstring for why
+background tail thread). See docs/features/auto-calibrate.md#track-confirmation for why
 confirmation goes through the shared retina-tracker sidecar rather than an
 in-process tracker or blah2's own. Route guards run against the Flask test
 client.
@@ -337,7 +337,7 @@ class TestDescent:
 
     def test_reference_reverts_alone_with_no_refine(self, fast):
         # tuner A overloads below 30 dB reduction; B is always clean.
-        # Reference gets no refine step (see module docstring) — it just
+        # Reference gets no refine step (see docs/features/auto-calibrate.md#search-order): it just
         # reverts to the last clean step the moment it overloads. This
         # rule is lna-independent, so the identical pattern repeats at
         # every lna_state the search tries (9 down to 1) before landing
@@ -442,7 +442,7 @@ class TestLnaDescent:
         2, inclusive of the level that ultimately fails) even though it's
         reference, not surveillance, that trips the revert — proving
         there's no "only redo the triggering channel" shortcut in this
-        direction (see module docstring: that optimisation only ever
+        direction (see docs/features/auto-calibrate.md#lna-state-vs-gain-reduction: that optimisation only ever
         applied to descending toward *more* attenuation, never toward
         more sensitivity)."""
         client = FakeBlah2Client(
@@ -888,7 +888,7 @@ class TestTuningVerifiedBeforeDwell:
     passed for detections produced by the old tuning. The dwell looked
     healthy while measuring a different frequency and reported the answer
     against the tower it thought it was on. Observed live: minutes of dwell
-    labelled WWLP/201MHz while blah2 was still tuned to 545MHz.
+    labelled with a 201MHz tower while blah2 was still tuned to 545MHz.
     """
 
     def test_tower_whose_retune_never_applied_is_not_dwelt_on(self, fast):
@@ -1290,7 +1290,7 @@ class TestSkipConfirmation:
         assert status["fallback"]["gain_b"] == client.current["gain_b"]
 
     def test_soak_does_not_claim_to_be_watching_for_aircraft(self, fast):
-        """Caught in live testing on owl: the soak reused the dwell's phase,
+        """Caught in live testing on a node: the soak reused the dwell's phase,
         so the wizard step — whose copy deliberately promises no aircraft —
         displayed "Watching for aircraft…" for its whole 45s."""
         seen = []
@@ -1443,7 +1443,7 @@ class TestTrackerSidecarIntegration:
 
 
 class TestAdsbMode:
-    """MODE_ADSB has no time division (see calibrator.py's module docstring)
+    """MODE_ADSB has no time division (see docs/features/auto-calibrate.md#time-budget)
     — an aircraft that's simply never present makes the dwell wait forever
     by design, so tests for that case must cancel explicitly rather than
     rely on a timeout. adsb_aircraft_appears_then_leaves simulates a real
@@ -1454,7 +1454,7 @@ class TestAdsbMode:
     The engine fully supports MODE_ADSB now — it's still blocked at the
     route level (see TestRoutes). The match itself is scripted via
     FakeRetinaTrackerClient's adsb_hex, mirroring the sidecar's own native
-    ADS-B matching (see calibrator.py's module docstring)."""
+    ADS-B matching (see docs/features/auto-calibrate.md#success-modes)."""
 
     def test_matched_track_succeeds_immediately(self, fast):
         client = FakeBlah2Client(
@@ -1962,8 +1962,8 @@ class TestRoutes:
         assert "Invalid mode" in resp.get_json()["error"]
 
     def test_start_rejects_adsb_mode_unconditionally(self, app_client, config_files):
-        """ADS-B mode's engine support is complete (see calibrator.py's
-        module docstring) but it's still rejected at the route regardless
+        """ADS-B mode's engine support is complete (see
+        docs/features/auto-calibrate.md#success-modes) but it's still rejected at the route regardless
         of truth.adsb.enabled — exposing it to users is a separate decision
         not yet made."""
         def enable_adsb(merged):
@@ -2003,7 +2003,7 @@ class TestRoutes:
         """When the wizard's tower search was cached, /calibrate/start uses
         it directly and never calls the live geography lookup."""
         import app as app_module
-        app_module.device_state.save_towers_cache(37.7644, -122.3954, [
+        app_module.device_state.save_towers_cache(37.7749, -122.4194, [
             {"callsign": "Cached Tower", "frequency_mhz": 91.1},
         ])
         with patch.object(app_module.calibrator, 'start',
@@ -2247,8 +2247,8 @@ class TestRoutes:
         assert user['location']['tx']['name'] == 'KQED-TV'
         # The receiver is nothing to do with the tower search and must survive
         # untouched - it is the one half of location the owner measured.
-        assert user['location']['rx']['name'] == '150 Mississippi'
-        assert user['location']['rx']['latitude'] == 37.7644
+        assert user['location']['rx']['name'] == 'Example RX'
+        assert user['location']['rx']['latitude'] == 37.7749
 
     def test_apply_leaves_the_transmitter_alone_when_the_tower_did_not_change(
             self, app_client, config_files):

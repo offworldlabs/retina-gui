@@ -1,33 +1,11 @@
 """Discovery of the other owl nodes on this LAN.
 
-Each node advertises `_owl-node._tcp` over DNS-SD (the service file is written
-at boot by owl-mdns-identity, in owl-os). This module keeps a live picture of
-who is out there, which is what the fleet landing page renders and what decides
-whether `owl.local` shows that page at all.
+Browses the `_owl-node._tcp` DNS-SD service (advertised by owl-mdns-identity in
+owl-os) and keeps a live list of nodes for the fleet bar and Summary page. A
+node counts as present only while it answers an HTTP probe, not merely while it
+is in the mDNS cache.
 
-## Why a service type rather than looking for host names
-
-DNS-SD is multi-instance by design: every node advertising the same service type
-is the normal case, so there is nothing to collide over — unlike host names,
-where two nodes wanting one name is a conflict Avahi has to arbitrate. The SRV
-record it generates points at a host *name* rather than an address, so it also
-cannot go stale the way an address record can.
-
-## Why liveness is probed rather than read out of the mDNS cache
-
-Appearing in a browse is not evidence a node is reachable. RFC 6762 gives
-service PTR records a 75-minute TTL (only SRV and A records get the 120-second
-one), and a node powered off at the wall sends no goodbye packet. So a node
-that has been unplugged keeps showing up in the browse list for over an hour,
-long after it stopped answering.
-
-That matters here specifically because the count drives the landing page. Left
-to the cache, a fleet that went from two nodes back to one would keep showing a
-two-card page — with one card leading nowhere — for the rest of the afternoon.
-
-So a node counts as present only when it answers an HTTP probe. Two consecutive
-failures are required before it drops off, so that a marginal WiFi link cannot
-flip the page between its one-node and many-node forms on every refresh.
+See docs/features/fleet-and-naming.md#peer-discovery.
 """
 
 import ipaddress
@@ -43,30 +21,15 @@ import requests as http_requests
 
 SERVICE_TYPE = "_owl-node._tcp"
 
-# Long enough that a node rebooting does not vanish from the page, short enough
-# that one genuinely gone is cleared while the operator is still looking at it.
+# See docs/features/fleet-and-naming.md#liveness-probing for these values.
 PROBE_INTERVAL_SECONDS = 20
 PROBE_TIMEOUT_SECONDS = 2
-# Consecutive failures before a peer is treated as gone. See the module
-# docstring — this is the hysteresis that stops the page flapping.
+# Consecutive failures before a peer is treated as gone (hysteresis).
 FAILURES_BEFORE_GONE = 2
 
-# How long one `avahi-browse` invocation is allowed to run before it is
-# replaced by a fresh one.
-#
-# The stream is the fast path: it reports a node appearing or going away the
-# moment it happens. What it will not report is a change to an *existing*
-# node — `avahi-browse -r` resolves each service once, when it first sees it,
-# and never resolves it again. So a node being renamed through the GUI updates
-# its own TXT record and announces it, every other node hears the announcement
-# at the Avahi layer, and not one of them notices, because their browser
-# already considers that service resolved. Observed exactly that way: the new
-# name was on the wire and visible to `avahi-browse` run by hand, while the
-# fleet page kept showing the old one indefinitely.
-#
-# Restarting the browser re-resolves everything, so a rename lands within this
-# interval. Cheap — one short-lived process a minute — and it keeps the
-# instant add/remove path rather than replacing it with polling.
+# How long one `avahi-browse` runs before it is replaced. `-r` resolves each
+# service only once, so without a restart a peer's rename (new TXT record) is
+# never seen. See docs/features/fleet-and-naming.md#browse-restarts.
 BROWSE_RESTART_SECONDS = 60
 
 # avahi-browse escapes non-printables in the instance name as a backslash and
@@ -83,12 +46,9 @@ def _unescape(value):
 def _is_ipv4(address):
     """Whether this address can be dropped into a URL as it stands.
 
-    Judged from the address itself rather than from avahi's protocol column,
-    which describes the socket an announcement arrived on and not what was
-    resolved. An `IPv4` resolve line has been observed in the field carrying an
-    IPv6 link-local address, and taking that column at its word is what made a
-    healthy node vanish from every other node's banner 40 seconds after it
-    appeared.
+    Judged from the address, never from avahi's protocol column: an `IPv4`
+    line can carry an IPv6 link-local address.
+    See docs/features/fleet-and-naming.md#addresses-and-interfaces.
     """
     try:
         return isinstance(ipaddress.ip_address(address), ipaddress.IPv4Address)
@@ -108,26 +68,11 @@ def parse_txt(blob):
 
 
 def sort_key(peer):
-    """How the fleet is ordered, identically on every node.
+    """How the fleet is ordered, identically on every node: node_id alone.
 
-    The node_id alone, and the point is that every node agrees. This banner is
-    drawn by each node for itself, so an order that depends on where you are
-    standing gives an operator a different row of tabs on every box. That is
-    what happened while this node sorted itself to the front, and it is what
-    makes a tab move under the cursor as you click through the fleet.
-
-    Everything else available here drifts. The friendly name arrives in a TXT
-    record that can be BROWSE_RESTART_SECONDS out of date, so during a rename
-    the nodes genuinely disagree about the value they are sorting on, and an
-    unnamed node sorts ahead of every named one until somebody names it, then
-    jumps. The node_id is derived from the board serial: unique, fixed for the
-    life of the board, and known to every node the moment it has seen the peer
-    at all.
-
-    The sequence that produces is arbitrary rather than meaningful, and that is
-    the trade. An arbitrary order that never changes can be learned; a
-    meaningful one that is different on each node cannot. Which node you are
-    looking at is answered by the active tab, not by position.
+    Must not depend on which node is drawing the banner or on the friendly
+    name, or tabs reorder between nodes and during renames.
+    See docs/features/fleet-and-naming.md#fleet-order.
     """
     return peer["node_id"]
 
@@ -136,8 +81,7 @@ def parse_line(line):
     """Turn one line of `avahi-browse -p` output into a dict, or None.
 
     Only resolved (`=`) and removal (`-`) events carry anything useful. The
-    `+` announcement that precedes a resolve tells us a name exists but not
-    where it is, so it is ignored — the `=` for the same name follows.
+    `+` announcement that precedes a resolve is ignored: the `=` follows.
     """
     # maxsplit keeps a TXT value containing a semicolon in one piece; every
     # field before the TXT blob is semicolon-free.
@@ -168,7 +112,7 @@ def parse_line(line):
 class PeerDirectory:
     """Live view of the owl nodes on this LAN, including this one.
 
-    Owns two threads, so exactly one of these may exist per process — it is
+    Owns two threads, so exactly one of these may exist per process. It is
     constructed in services.py for that reason.
     """
 
@@ -283,9 +227,7 @@ class PeerDirectory:
                 "address": event["address"] if _is_ipv4(event["address"]) else "",
                 "port": event["port"],
                 "sources": set(),
-                # Assumed present on first sight. The prober demotes it if that
-                # turns out to be wrong, which is the right way round: a node
-                # that just appeared is almost always real.
+                # Assumed present on first sight; the prober demotes it if not.
                 "alive": True,
                 "failures": 0,
                 # The peer's last good /healthz body. Filled by the prober, and
@@ -299,12 +241,8 @@ class PeerDirectory:
             peer["friendly_name"] = event["friendly_name"]
             peer["hostname"] = event["hostname"]
             peer["is_self"] = event["node_id"] == own
-            # Keep an address only when it is one anything can actually
-            # reach. A link-local needs a zone index to be usable, so it fails
-            # every probe, and it is worse than useless to an owner reading it
-            # off a card as the fallback for when the name will not resolve.
-            # Better to hold no address at all: the hostname still serves both
-            # the prober and the browser, and a later resolve fills this in.
+            # Keep only a reachable (IPv4) address. With none, the hostname
+            # serves the prober and the browser until a later resolve fills it.
             if _is_ipv4(event["address"]):
                 peer["address"] = event["address"]
                 peer["port"] = event["port"]
@@ -358,10 +296,8 @@ class PeerDirectory:
             if is_self:
                 reachable, payload = True, None
             else:
-                # By name when no usable address has been seen yet. mDNS
-                # resolution is how every other client here reaches a node, so
-                # this keeps one whose A record has not arrived from being
-                # declared gone while it is running perfectly well.
+                # By name when no usable address has been seen yet, so a node
+                # whose A record has not arrived is not declared gone.
                 reachable, payload = self._probe_peer(address or hostname)
             with self._lock:
                 peer = self._peers.get(name)
@@ -384,16 +320,10 @@ class PeerDirectory:
     def _probe_peer(address):
         """Ask a peer whether it is there, and keep what it says.
 
-        Returns `(reachable, payload)`, and the two are deliberately
-        independent. Reachable is any answer at all, not a 200 carrying valid
-        JSON: a node mid-calibration redirects most GETs, and one returning 500
-        is still a node the operator should be able to reach and look at. Only
-        the payload needs a clean answer, and a node that cannot give one is
-        just a card with less on it.
-
-        This is also why the Summary page costs nothing. The request happens
-        every 20 seconds regardless, to keep the banner honest. Until now the
-        body was read and thrown away.
+        Returns `(reachable, payload)`, deliberately independent. Reachable is
+        any HTTP answer at all (a calibrating node redirects, a broken one may
+        500); payload is the JSON object body, or None.
+        See docs/features/fleet-and-naming.md#liveness-probing.
         """
         if not address:
             return False, None

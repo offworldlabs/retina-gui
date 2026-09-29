@@ -57,8 +57,8 @@ class FakeTelemetry:
         return self._status
 
 
-SELF = "ret7dd2cb0d"      # the node_id the app_client fixture writes
-OTHER = "ret4c844c20"
+SELF = "ret7a000001"      # the node_id the app_client fixture writes
+OTHER = "ret4a000001"
 
 
 def tab_strip(body):
@@ -122,9 +122,9 @@ def test_this_node_is_sorted_into_place_rather_than_pinned_first(app_client,
 
 def test_a_friendly_name_labels_the_tab(app_client, fleet):
     fleet(node(SELF, is_self=True),
-          node(OTHER, "192.168.1.58", friendly="Boston Rooftop"))
+          node(OTHER, "192.168.1.58", friendly="Sample Rooftop"))
     body = app_client.get("/").data.decode()
-    assert "Boston Rooftop" in body
+    assert "Sample Rooftop" in body
 
 
 def test_tabs_are_absolute_so_a_click_leaves_the_shared_alias(app_client, fleet):

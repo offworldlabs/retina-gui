@@ -1,3 +1,5 @@
+// Makes the summary page's flight-path diagram interactive.
+// See docs/architecture.md#flight-simulator
 (function () {
     "use strict";
 
@@ -28,8 +30,8 @@
     var RANGE_MAX = 60;                  // km, the full width of the plot
     var DOPPLER_MAX = 300;               // Hz, top and bottom of the plot
 
-    // Doppler from the real relation rather than a fudge factor, at the centre
-    // frequency this node actually tunes. 170 m/s is an unremarkable airliner.
+    // Doppler from the real relation rather than a fudge factor, at a fixed
+    // typical centre frequency. 170 m/s is an unremarkable airliner.
     var FC = 213e6, LAMBDA = 299792458 / FC, SPEED = 170;
 
     // A gentle arc past the node, so the piece says something before anyone
@@ -285,7 +287,7 @@
         planeEl.setAttribute("transform",
             "translate(" + start.x.toFixed(1) + " " + start.y.toFixed(1) + ")");
     }
-    // Deliberately not autoplaying, and doubly so when reduced motion is asked
-    // for: a page nobody has touched should not be animating.
+    // Deliberately not autoplaying: a page nobody has touched should not be
+    // animating. With reduced motion, the hint points at Play instead.
     if (REDUCED) hint.textContent = "Press Play to fly the path, or drag to draw your own.";
 })();

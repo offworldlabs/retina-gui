@@ -494,7 +494,7 @@ class TestNoSelfDeadlock:
 class TestRestartSdrplayService:
     """A wedged SDRplay device leaves sdrplay.service hanging in
     `deactivating (stop-sigterm)`, so `systemctl restart` never returns.
-    Confirmed live on jonathan-node-2 against a genuinely wedged RSPduo: the
+    Confirmed live on a real node against a genuinely wedged RSPduo: the
     bare subprocess call this replaces timed out, TimeoutExpired escaped
     run_config_merger_and_restart into ApplyService as 'Command timed out',
     and the container recreate never ran — aborting the one path that can

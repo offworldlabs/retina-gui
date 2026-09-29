@@ -1,4 +1,4 @@
-<!-- Step 5: Tower Selection -->
+<!-- Tower selection step -->
 <div data-step="towers" class="step-panel" style="display:none;">
     <div class="wiz-title-row">
         <h1>Choose a tower</h1>
@@ -22,15 +22,8 @@
 
         <div style="overflow-x:auto;margin-top:14px;">
             <table class="tower-table">
-                {# Columns and their order follow tower-finder's own results table,
-                   so a tower reads the same on both surfaces. Detect Area sits
-                   beside the rank on purpose: the ranking is built on it, and at
-                   the far end of the row it would look like an afterthought.
-
-                   hide-mobile is ours, not theirs. They render this on a desk;
-                   we render it on a node GUI someone may be holding in a field,
-                   and sixteen columns do not fit a phone. What survives is what
-                   a choice is actually made on. #}
+                {# Columns follow tower-finder's results table; hide-mobile is ours.
+                   See docs/features/setup-wizard.md#tower-presentation #}
                 <thead>
                     <tr>
                         <th>#</th>
@@ -60,9 +53,8 @@
             <div class="tower-detail" id="selectedTowerDetail"></div>
         </div>
 
-        {# Aiming guide for whichever tower is selected. Filled by setup.js from
-           that tower's bearing and the finder's recommended surveillance
-           azimuth; hidden until there is a selection to aim at. #}
+        {# Filled by renderAntennaGuide in setup.js once a tower is selected.
+           See docs/features/setup-wizard.md#antenna-aiming-guide #}
         <div id="antennaGuide" class="antenna-guide" style="display:none;"></div>
     </div>
 

@@ -3,9 +3,8 @@
 Handles the layered config system:
   default.yml -> user.yml -> forced.yml -> config.yml (merged)
 
-This class:
-  - READS from config.yml (merged) to show actual running values
-  - WRITES to user.yml (only values that differ from merged config)
+READS config.yml (merged) to show running values, WRITES only overrides to
+user.yml. See docs/features/config-editor.md#layered-config.
 """
 
 import os
@@ -201,10 +200,11 @@ class ConfigManager:
         return capture, location, truth, tar1090, retina_tracker
 
     def compute_user_overrides(self, submitted_nested, merged_config, existing_user_config, section_key):
-        """Compare submitted values against merged config, return only values that differ.
+        """Return the submitted values worth keeping in user.yml, or None.
 
-        Only writes to user.yml values that the user explicitly changed from
-        the defaults/merged config.
+        Keeps a value that differs from the merged config, or that user.yml
+        already overrides with the same value.
+        See docs/features/config-editor.md#override-computation.
         """
         merged_section = merged_config.get(section_key, {}) or {}
         existing_section = existing_user_config.get(section_key, {}) or {}

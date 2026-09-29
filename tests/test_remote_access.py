@@ -24,7 +24,7 @@ from remote_access import (
     tunnel_status,
 )
 
-NODE_ID = "ret7dd2cb0d"
+NODE_ID = "ret7a000001"
 DOMAIN = "retnode.com"
 OWNER_URL = f"http://{NODE_ID}.{DOMAIN}"
 LAN_URL = "http://owl.local"
@@ -363,7 +363,7 @@ def test_unknown_names_on_the_remote_domain_are_not_ours():
 def test_only_our_own_hostname_is_the_remote_pathway():
     """Including another node's: reaching us on a sibling's name is not us, and
     challenging for an audience we can never match helps nobody."""
-    for host in (f"ret9f2b1e44.{DOMAIN}", f"anything.{DOMAIN}",
+    for host in (f"ret9a000001.{DOMAIN}", f"anything.{DOMAIN}",
                  f"{NODE_ID}.admin.{DOMAIN}", f"{NODE_ID}-ui.{DOMAIN}"):
         assert classify_host(host, NODE_ID, DOMAIN) == LAN, host
     assert classify_host(f"{NODE_ID}.{DOMAIN}", NODE_ID, DOMAIN) == OWNER
@@ -405,9 +405,9 @@ def test_ordinary_paths_do_not_need_presence(path):
 # rather than trusting it, so a deleted or misconfigured Access application
 # cannot silently leave a node open.
 
-ACCESS_TEAM = "offworldlab.cloudflareaccess.com"
-ACCESS_AUD = "b62aeb13c198cd2118bd5d92b350f2af5c42830c703baeab42aad5fa3e01f29a"
-ENGINEER = "jehan@offworldlab.com"
+ACCESS_TEAM = "example-team.cloudflareaccess.com"
+ACCESS_AUD = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+ENGINEER = "engineer@example.com"
 
 
 @pytest.fixture(scope="module")
@@ -883,8 +883,8 @@ def test_this_nodes_own_hostname_is_the_remote_pathway():
 def test_another_name_on_the_domain_is_not_gated():
     """The regression. These are hostnames we built by hand and have served
     unauthenticated for months; the feature must not claim them."""
-    for host in (f"{NODE_ID}-ui.{DOMAIN}", "jonathan-node-1-ui." + DOMAIN,
-                 "jonathan-node-1." + DOMAIN, DOMAIN):
+    for host in (f"{NODE_ID}-ui.{DOMAIN}", "test-node-1-ui." + DOMAIN,
+                 "test-node-1." + DOMAIN, DOMAIN):
         assert classify_host(host, NODE_ID, DOMAIN) == LAN, host
 
 

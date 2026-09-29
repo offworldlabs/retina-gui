@@ -5,24 +5,13 @@ function formatSize(bytes) {
 
 // ── Tower presentation helpers ───────────────────────────────────────────
 //
-// Ports of tower-finder's frontend/src/utils/rankTier.ts and format.ts, kept
-// as close to the originals as ES5 allows. A tower has to read the same on
-// both surfaces, and these four functions are the only place that could drift.
+// Ports of tower-finder's frontend/src/utils/rankTier.ts, format.ts and
+// basemap.ts, kept as close to the originals as ES5 allows so a tower reads
+// the same on both surfaces. See docs/features/setup-wizard.md#tower-presentation
 
-// Attaches the CARTO API key to a basemap tile URL. Port of tower-finder's
-// frontend/src/utils/basemap.ts.
-//
-// Not optional in practice. CARTO answers an unkeyed request with HTTP 200 and
-// a tile stamped "API KEY REQUIRED", so a missing key defaces the map rather
-// than breaking it, and an environment without one degrades visibly.
-//
-// The parameter is `key`, and getting that wrong fails silently: measured
-// 2026-09-25, an unkeyed tile, one with `?key=` set to a bogus value and one
-// with `?api_key=` all come back as the same watermarked PNG, byte for byte.
-//
-// Guarding on the host keeps this safe to wrap around any tile URL, so
-// swapping a layer to another provider later cannot start appending a CARTO
-// key to somebody else's CDN.
+// Appends the CARTO key to CARTO tile URLs only. The parameter must be `key`:
+// a wrong name fails silently with a watermarked tile.
+// See docs/features/setup-wizard.md#basemap-key
 var CARTO_HOST = 'basemaps.cartocdn.com';
 
 function withCartoKey(url) {
@@ -35,14 +24,9 @@ function withCartoKey(url) {
 // isFinite('5') is true and a string would sail through every guard below.
 function isNum(v) { return typeof v === 'number' && isFinite(v); }
 
-// Quintile of a tower's position in the list that came back. Derived from
-// rank, deliberately not from expected_area_km2: the finder ranks with
-// diversity folded in (query.ranking is "expected_area_mmr"), so the two
-// genuinely disagree — a tower with the larger area can sit below one with a
-// smaller one. A tier taken from rank can never contradict the # beside it.
-//
-// Relative to the returned list, not absolute, so a short list still spreads
-// across the ramp instead of every tower clustering into "Best".
+// Quintile of rank within the returned list. Deliberately from rank, not
+// expected_area_km2, so a tier never contradicts the # beside it.
+// See docs/features/setup-wizard.md#tower-presentation
 var RANK_TIERS = [
     { tier: 1, label: 'Best',   cls: 'rank-1', color: 'var(--rank-1)' },
     { tier: 2, label: 'Upper',  cls: 'rank-2', color: 'var(--rank-2)' },
@@ -57,9 +41,8 @@ function rankTier(rank, total) {
     return RANK_TIERS[t - 1];
 }
 
-// 16-point compass. The finder sends a cardinal for bearing_deg but not for
-// best_azimuth_deg, so the pointing advice is named here from the same table
-// it uses server-side (bearing_to_cardinal in tower_ranking.py). Keep in step.
+// 16-point compass for best_azimuth_deg, which the finder sends without a
+// cardinal. Must match bearing_to_cardinal in tower-finder's tower_ranking.py.
 var COMPASS_POINTS = [
     'N', 'NNE', 'NE', 'ENE', 'E', 'ESE', 'SE', 'SSE',
     'S', 'SSW', 'SW', 'WSW', 'W', 'WNW', 'NW', 'NNW'
@@ -75,23 +58,20 @@ var AREA_FORMAT = (typeof Intl !== 'undefined' && Intl.NumberFormat)
     ? new Intl.NumberFormat('en-GB', { maximumFractionDigits: 0 })
     : null;
 
-// Whole km2 with thousands separators. An absent value renders empty, never a
-// zero or a NaN: these fields are additive and an older finder simply omits
-// them, which must not read as a measured nothing.
+// Whole km2 with thousands separators. Absent renders empty, never 0 or NaN:
+// an older finder omits the field.
 function formatAreaKm2(km2) {
     if (!isNum(km2)) return '';
     return AREA_FORMAT ? AREA_FORMAT.format(km2) : String(Math.round(km2));
 }
 
-// Past its own radio horizon. The finder penalises these heavily but still
-// returns them, so the row is muted rather than dropped: an owner who can see
-// why a transmitter they know is strong ranks low learns more than one who
-// cannot find it at all.
+// Past its own radio horizon: shown muted rather than dropped.
 function beyondHorizon(distanceKm, horizonKm) {
     if (!isNum(horizonKm) || !isNum(distanceKm)) return false;
     return distanceKm > horizonKm;
 }
 
+// Step engine and per-step hooks. See docs/features/setup-wizard.md.
 function initSetupWizard(resumeStep, devMode, isRerun, demoMode) {
     var steps = [];
     var currentIndex = 0;
@@ -113,7 +93,6 @@ function initSetupWizard(resumeStep, devMode, isRerun, demoMode) {
         complete: 'You\'re all set'
     };
 
-    // Build dots once
     var track = document.getElementById('progressTrack');
     steps.forEach(function(s, i) {
         var dot = document.createElement('div');
@@ -132,11 +111,9 @@ function initSetupWizard(resumeStep, devMode, isRerun, demoMode) {
 
         label.textContent = 'Step ' + (index + 1) + ' of ' + total;
 
-        // Fill width: from first dot to current dot
         var pct = total > 1 ? (index / (total - 1)) * 100 : 0;
         fill.style.width = pct + '%';
 
-        // Update dots — only dots behind current are blue, future dots stay grey
         track.querySelectorAll('.progress-dot').forEach(function(dot, i) {
             dot.className = 'progress-dot';
             if (i === index) {
@@ -208,14 +185,9 @@ function initSetupWizard(resumeStep, devMode, isRerun, demoMode) {
 
     var csrfToken = (document.querySelector('meta[name="csrf-token"]') || {}).content || '';
 
-    // fetch() resolves for every HTTP status, so a caller that only chains
-    // .then() treats a 400 as a success. That is how an expired CSRF token
-    // reached the owner as two different bugs: the location step's mode
-    // switch "succeeded", so its catch never ran and the step sat on
-    // "Waiting for sweep to start" with Find Towers disabled forever, while
-    // steps that do parse the body handed the HTML error page to r.json()
-    // and reported `Failed to save: Unexpected token '<'`. Rejecting here
-    // makes every existing catch block correct.
+    // Rejects on any non-2xx, since fetch() resolves for every status and a
+    // .then()-only caller would treat a 400 as success.
+    // See docs/features/setup-wizard.md#session-expiry
     function postJSON(url, body) {
         return fetch(url, {
             method: 'POST',
@@ -244,11 +216,8 @@ function initSetupWizard(resumeStep, devMode, isRerun, demoMode) {
         return err;
     }
 
-    // The wizard is a single page load that deliberately outlives a reboot
-    // and can sit open for hours while an owner reads the agreements or
-    // researches towers. If the session behind it does go, every button
-    // silently stops working, so say so once and offer the only fix there
-    // is. A reload resumes at the step the server last recorded.
+    // Once only: every button stops working when the session goes, and a
+    // reload (which resumes at the recorded step) is the only fix.
     var sessionExpiredShown = false;
     function showSessionExpired() {
         if (sessionExpiredShown) return;
@@ -278,10 +247,8 @@ function initSetupWizard(resumeStep, devMode, isRerun, demoMode) {
         document.body.appendChild(overlay);
     }
 
-    // Single beforeunload guard for the entire wizard lifetime.
-    // Shows the browser's native "leave site?" dialog on all steps.
-    // On the location step it also fires the SDR-release beacon so
-    // retina-spectrum stops even if the user confirms and leaves.
+    // Single beforeunload guard for the whole wizard. On the location step it
+    // also releases the SDR so retina-spectrum stops if the owner leaves.
     function handleBeforeUnload(e) {
         if (steps[currentIndex] && steps[currentIndex].name === 'location') {
             var fd = new FormData();
@@ -293,7 +260,8 @@ function initSetupWizard(resumeStep, devMode, isRerun, demoMode) {
     }
     window.addEventListener('beforeunload', handleBeforeUnload);
 
-    // ── Demo mode: mock all API calls ────────────────────
+    // ── Demo mode: fakes some API calls, not all ─────────
+    // See docs/features/setup-wizard.md#demo-and-dev-modes
     if (demoMode) {
         var _demoNodeInstalling = false;
         var _realFetch = window.fetch;
@@ -341,7 +309,7 @@ function initSetupWizard(resumeStep, devMode, isRerun, demoMode) {
     var spectrumGating = false;    // true while scan is in progress; gates Find Towers
     var abortAddressLookups = null; // defined inside enterHooks.location on first entry
 
-    // Step 1: Agreements
+    // Agreements. See docs/features/setup-wizard.md#agreements
     enterHooks.agreements = function() {
         var boxes = ['eulaCheck', 'cloudCheck'];
         var btn = document.getElementById('agreementsContinueBtn');
@@ -353,13 +321,8 @@ function initSetupWizard(resumeStep, devMode, isRerun, demoMode) {
             btn.disabled = !allChecked;
         }
 
-        // Derived on every entry, not just the first. The click handler below
-        // sets the label imperatively and only the failure path put it back,
-        // so returning to a step whose consent had already succeeded found a
-        // button still reading "Connecting..." and still disabled, with
-        // nothing in flight and no code left to clear it. Deriving the label
-        // and the disabled state from the checkboxes here is what makes
-        // re-entry correct, rather than adding another restore path.
+        // Derived on every entry, not just the first, so re-entry never finds
+        // a stale "Connecting..." button. See docs/features/setup-wizard.md#navigation
         btn.textContent = 'Continue';
         update();
 
@@ -381,16 +344,13 @@ function initSetupWizard(resumeStep, devMode, isRerun, demoMode) {
         btn.addEventListener('click', function() {
             btn.disabled = true;
             btn.textContent = 'Connecting...';
-            // Demo mode pre-ticks both boxes, so a consent write here would
-            // record an acceptance nobody gave — the one thing the whole
-            // versioned-record design exists to prevent. Demoing the wizard on
-            // a live node must leave the record untouched.
+            // Never in demo mode: the boxes are pre-ticked, so it would record
+            // an acceptance nobody gave.
             var recordConsent = demoMode
                 ? Promise.resolve()
                 : postJSON('/set-up/consent', {}).then(function(r) { return r.json(); });
-            // Consent is recorded before the Mender toggle because it is the
-            // half that unblocks telemetry: if cloud services fail, the owner
-            // has still accepted and retina-telemetry can register.
+            // Consent first: it is what unblocks telemetry, even if the cloud
+            // services toggle then fails.
             recordConsent
             .then(function() { return postJSON('/mender/cloud-services', {enabled: true}); })
             .then(function(r) { return r.json(); })
@@ -402,7 +362,8 @@ function initSetupWizard(resumeStep, devMode, isRerun, demoMode) {
         });
     };
 
-    // Step 2: Contact details — optional, and skipping writes nothing at all
+    // Contact details. Optional, and skipping writes nothing.
+    // See docs/features/setup-wizard.md#contact-details
     enterHooks.contact = function() {
         var fields = {
             first_name: 'contactFirstName',
@@ -429,9 +390,7 @@ function initSetupWizard(resumeStep, devMode, isRerun, demoMode) {
             msg.style.display = text ? '' : 'none';
         }
 
-        // The boxes are prefilled server-side from what is already stored, so a
-        // wizard re-run shows the owner their details rather than empty boxes
-        // that would read as "we hold nothing". See routes/setup.py.
+        // The boxes are prefilled server-side (routes/setup.py).
         say('');
         saveBtn.disabled = false;
         saveBtn.textContent = 'Save and continue';
@@ -456,14 +415,12 @@ function initSetupWizard(resumeStep, devMode, isRerun, demoMode) {
             });
         });
 
-        // Skipping is an answer, not an abandonment, so it writes nothing and
-        // moves on. Anything already stored is deliberately left alone: an
-        // owner skipping past details they gave earlier has not withdrawn them.
+        // Writes nothing: stored details are left alone, not withdrawn.
         skipBtn.addEventListener('click', function() { advance(); });
     };
 
-    // Step 3: Node claim. Optional, and uses the same route as the Node claim
-    // section on the configuration page. Skipping writes nothing.
+    // Node claim. Optional; skipping writes nothing.
+    // See docs/features/setup-wizard.md#node-claim
     enterHooks.claim = function() {
         var box = document.getElementById('wizClaimEmail');
         var sendBtn = document.getElementById('wizClaimSendBtn');
@@ -523,9 +480,8 @@ function initSetupWizard(resumeStep, devMode, isRerun, demoMode) {
         });
     };
 
-    // Step 2: System Update — fully automatic (server-pushed deployment +
-    // managed-mode Mender daemon). This page only reports progress; there is
-    // nothing for the user to click until it's done.
+    // System update. Automatic; this step only reports progress.
+    // See docs/features/setup-wizard.md#system-update
     enterHooks.system = function() {
         if (hookInitialized.system) return;
         hookInitialized.system = true;
@@ -535,7 +491,7 @@ function initSetupWizard(resumeStep, devMode, isRerun, demoMode) {
         var cardStatus = document.getElementById('systemCardStatus');
         var stuckTimer = null;
 
-        // On re-run, OS updates are managed remotely after onboarding — just inform.
+        // On a re-run OS updates are managed remotely, so just inform.
         if (isRerun) {
             fetch('/mender/check-os')
                 .then(function(r) { return r.json(); })
@@ -560,10 +516,8 @@ function initSetupWizard(resumeStep, devMode, isRerun, demoMode) {
         nextBtn.addEventListener('click', advance);
         startSystemPoll();
 
-        // The duration and the "While You Wait" checklist belong to a wait
-        // that is actually going to happen. Revealed from both update paths
-        // below, and taken away again the moment the node turns out to need
-        // nothing — see templates/setup/_system.html.
+        // Only for a wait that is actually coming.
+        // See docs/features/setup-wizard.md#while-you-wait-checklist
         function showUpdateWait(on) {
             var el = document.getElementById('systemUpdateWait');
             if (el) el.style.display = on ? '' : 'none';
@@ -593,11 +547,8 @@ function initSetupWizard(resumeStep, devMode, isRerun, demoMode) {
             installStatus.innerHTML = '<span class="text-warning">Do not power off the device.</span>';
         }
 
-        // Update is on its way from the server but hasn't started downloading
-        // yet (deployment still being created). The Packages step isn't safe
-        // to enter until this either starts downloading or turns out not to
-        // be needed, so there is deliberately no way to skip past this —
-        // just reassure the user it hasn't stalled.
+        // Deliberately no way past: Packages is not safe to enter until the
+        // update starts downloading or turns out not to be needed.
         function showPreparing(version) {
             status.textContent = 'Preparing system update...';
             showTarget(version);
@@ -631,15 +582,13 @@ function initSetupWizard(resumeStep, devMode, isRerun, demoMode) {
                             clearStuckTimer();
                             nextBtn.style.display = 'none';
                             // data.version is a generic placeholder for
-                            // server-pushed updates (no GUI install lock to
-                            // read a real tag from) — don't show it.
+                            // server-pushed updates, so it is not shown.
                             showStage(data.stage);
                             return;
                         }
                         if (data.error) {
-                            // Transient check failure (e.g. GitHub unreachable) — keep
-                            // polling rather than letting the user past an unconfirmed
-                            // update state.
+                            // Keep polling: never let the owner past an
+                            // unconfirmed update state.
                             status.textContent = 'Unable to check: ' + data.error + ' \u2014 retrying...';
                             return;
                         }
@@ -647,8 +596,7 @@ function initSetupWizard(resumeStep, devMode, isRerun, demoMode) {
                             showPreparing(data.latest_version);
                             return;
                         }
-                        // Up to date — either nothing was ever needed, or the
-                        // update just finished and the device rebooted back in.
+                        // Up to date, or the update finished and the node rebooted.
                         clearInterval(pollTimer);
                         pollTimer = null;
                         clearStuckTimer();
@@ -669,7 +617,7 @@ function initSetupWizard(resumeStep, devMode, isRerun, demoMode) {
         }
     };
 
-    // Step 3: Packages
+    // Packages. See docs/features/setup-wizard.md#packages
     enterHooks.radar = function() {
         if (hookInitialized.radar) return;
         hookInitialized.radar = true;
@@ -680,12 +628,8 @@ function initSetupWizard(resumeStep, devMode, isRerun, demoMode) {
         var regionCheck = document.getElementById('regionCheck');
         var packageStatus = document.getElementById('radarPackageStatus');
 
-        // Re-run: RETINA is already installed — package management isn't
-        // the user's responsibility from here on, same framing as the
-        // System step. No install affordance, no polling, no failure
-        // states tied to packages — just say so and let them continue.
-        // The version lookup below is purely cosmetic and never blocks
-        // or gates the Continue button.
+        // Re-run: updates are managed remotely, so just inform. The version
+        // lookup is cosmetic and never gates Continue.
         if (isRerun) {
             document.getElementById('regionCheckRow').style.display = 'none';
             document.getElementById('radarPackageRadio').style.display = 'none';
@@ -710,7 +654,7 @@ function initSetupWizard(resumeStep, devMode, isRerun, demoMode) {
             return;
         }
 
-        // Fresh install — RETINA is not yet on this node, installation is required.
+        // First run: installing the latest RETINA is required.
         document.getElementById('radarDescription').textContent = 'RETINA is not yet installed on this node. Select a version below to continue.';
         installBtn.classList.remove('ghost');
         installBtn.classList.add('primary');
@@ -722,10 +666,8 @@ function initSetupWizard(resumeStep, devMode, isRerun, demoMode) {
         }
         regionCheck.addEventListener('change', updateInstallGate);
 
-        // Mirrors the OS update step: the checklist belongs to a wait that is
-        // actually going to happen. Revealed once an install is known to be
-        // required or already running, and taken away when the node turns out
-        // to be current. See templates/setup/_while_you_wait.html.
+        // Only for a wait that is actually coming.
+        // See docs/features/setup-wizard.md#while-you-wait-checklist
         function showRadarWait(on) {
             var el = document.getElementById('radarInstallWait');
             if (el) el.style.display = on ? '' : 'none';
@@ -733,21 +675,16 @@ function initSetupWizard(resumeStep, devMode, isRerun, demoMode) {
 
         var latestVersion = null;
 
-        // GitHub is the only source of truth for what to install on a fresh
-        // node, and there's no skipping this step — so a transient failure
-        // here must not be a dead end. Keep retrying every 5s until it
-        // succeeds; the backend caches the GitHub call for 60s so this
-        // doesn't blow through GitHub's unauthenticated rate limit.
+        // Retries every 5s, since this step cannot be skipped. The backend
+        // caches the GitHub call for 60s, keeping retries inside its rate limit.
         function checkAvailability() {
             fetch('/mender/check')
                 .then(function(r) { return r.json(); })
                 .then(function(data) {
                     if (data.installing) {
-                        // Resuming into an install already running in the background
-                        // (e.g. after a page reload) — latestVersion was never set by
-                        // this fresh page load, so recover it from the lock's release
-                        // name ("retina-node-vX") to keep the success check below
-                        // accurate instead of comparing against null.
+                        // Resuming a running install after a reload: recover
+                        // latestVersion from the lock's "retina-node-vX" name so
+                        // the success check does not compare against null.
                         if (!latestVersion && data.version) {
                             latestVersion = data.version.replace(/^retina-node-/, '');
                         }
@@ -778,13 +715,10 @@ function initSetupWizard(resumeStep, devMode, isRerun, demoMode) {
                         installBtn.style.display = '';
                         updateInstallGate();
                         if (data.current_version) {
-                            // Node shipped with retina-node pre-installed, but
-                            // a newer version exists. Installing the latest
-                            // is mandatory on first run regardless — no skip.
+                            // Pre-installed but outdated: still mandatory on first run.
                             document.getElementById('radarDescription').textContent =
                                 'A newer version of RETINA is available (currently ' + data.current_version + '). Select a version below to install it before continuing.';
                         }
-                        // No skip — installation of the latest version is required on first run
                     }
                 })
                 .catch(function() {
@@ -814,12 +748,8 @@ function initSetupWizard(resumeStep, devMode, isRerun, demoMode) {
                     }
                 })
                 .catch(function(err) {
-                    // /mender/install answers 409 with a reason worth reading
-                    // ("Auto-calibration is running", "Install already in
-                    // progress"). Those used to arrive here as a parsed body;
-                    // now that a non-2xx rejects, the reason travels on the
-                    // error, and dropping it for a generic string would tell
-                    // the owner to retry something that cannot succeed yet.
+                    // Show the server's reason: a 409 says why a retry cannot
+                    // succeed yet.
                     installStatus.innerHTML = '<span class="text-danger">'
                         + esc(err.message || 'Request failed. Please try again.')
                         + '</span>';
@@ -847,10 +777,8 @@ function initSetupWizard(resumeStep, devMode, isRerun, demoMode) {
                                 installStatus.innerHTML = '';
                                 advance();
                             } else if (data.current_version) {
-                                // Install failed, but the previously working version
-                                // came back up — give the user an explicit way to
-                                // continue rather than getting stuck if updates keep
-                                // failing, instead of silently treating this as success.
+                                // Failed, previous version restored: offer an explicit
+                                // way on rather than trapping or faking success.
                                 installStatus.innerHTML = '<span class="text-danger">Update failed. Your previous version (' +
                                     data.current_version + ') has been restored and is running.</span>';
                                 packageStatus.innerHTML = '';
@@ -879,7 +807,7 @@ function initSetupWizard(resumeStep, devMode, isRerun, demoMode) {
         }
     };
 
-    // Step 4: Location input
+    // Location. See docs/features/setup-wizard.md#location
     leaveHooks.location = function() {
         locationActive = false;
         if (abortAddressLookups) abortAddressLookups();
@@ -889,13 +817,12 @@ function initSetupWizard(resumeStep, devMode, isRerun, demoMode) {
         wizardWasMode = null;
         var pending = pendingModeSwitch;
         pendingModeSwitch = null;
-        // No revert needed: spectrum was never started (user left before the mode
-        // switch completed), or we were already in spectrum mode.
+        // No revert: spectrum never started, or it was already the mode.
         if (!targetMode || targetMode === 'spectrum') return;
         var scanStatus = document.getElementById('scanStatus');
         if (scanStatus) { scanStatus.textContent = 'Reverting to radar mode…'; scanStatus.style.display = ''; }
-        // Wait for any in-flight spectrum switch to finish before sending the
-        // radar revert — prevents concurrent docker operations racing each other.
+        // Wait for any in-flight spectrum switch first, so two docker
+        // operations never race.
         return (pending || Promise.resolve()).then(function() {
             return postJSON('/api/mode', { mode: targetMode });
         }).then(
@@ -905,8 +832,8 @@ function initSetupWizard(resumeStep, devMode, isRerun, demoMode) {
     };
 
     enterHooks.location = function() {
-        // Start retina-spectrum on every entry (idempotent — no-op if already in
-        // spectrum mode or if retina-node is not yet installed).
+        // Start retina-spectrum on every entry. Idempotent, and a no-op if
+        // retina-node is not installed yet.
         locationActive = true;
         spectrumGating = true;
         document.getElementById('findTowersBtn').disabled = true;
@@ -932,7 +859,6 @@ function initSetupWizard(resumeStep, devMode, isRerun, demoMode) {
                 document.getElementById('findTowersBtn').disabled = isNaN(lat) || isNaN(lon);
             });
 
-        // Event listeners and inner state set up only once
         if (hookInitialized.location) return;
         hookInitialized.location = true;
 
@@ -944,7 +870,6 @@ function initSetupWizard(resumeStep, devMode, isRerun, demoMode) {
             rxLat.value = '37.7749';
             rxLon.value = '-122.4194';
             rxAlt.value = '16';
-            // Fire input events so dependent listeners (find button gate) update
             rxLat.dispatchEvent(new Event('input'));
             rxLon.dispatchEvent(new Event('input'));
         }
@@ -954,8 +879,8 @@ function initSetupWizard(resumeStep, devMode, isRerun, demoMode) {
         var skipBtn = document.getElementById('locationSkipBtn');
 
 
-        // RF scan — SSE connected after retina-spectrum starts; button sets 'waiting'
-        // phase and the next sweep 'start' event begins accumulation.
+        // RF scan over SSE, opened once retina-spectrum is up.
+        // See docs/features/setup-wizard.md#spectrum-scan
         var scanResult = document.getElementById('scanResult');
         var rfMeasurements = [];
         var rfPhase = 'idle'; // idle | waiting | scanning | done
@@ -968,12 +893,8 @@ function initSetupWizard(resumeStep, devMode, isRerun, demoMode) {
             return id.toUpperCase();
         }
 
-        // retina-spectrum averages each sweep step over a ring of passes and
-        // exports no channel results at all until that ring holds
-        // METRICS_MIN_ENTRIES (5) of them. That is about 3 minutes on a
-        // container this step has just started. An empty early pass is
-        // therefore normal, not a failure, and the copy has to say so rather
-        // than report it as a measurement of the sky.
+        // Matches retina-spectrum's METRICS_MIN_ENTRIES: no channels are
+        // exported before then, so an empty early pass is normal.
         var RF_PASSES_TO_DATA = 5;
 
         function updateRfUI() {
@@ -996,7 +917,7 @@ function initSetupWizard(resumeStep, devMode, isRerun, demoMode) {
             }
         }
 
-        // Assign to outer-scope var so leaveHooks.location and re-entries can reach it
+        // Outer-scope so leaveHooks.location and re-entries can reach it.
         connectRfSse = function() {
             if (rfSse) return;
             rfMeasurements = [];
@@ -1031,11 +952,8 @@ function initSetupWizard(resumeStep, devMode, isRerun, demoMode) {
                 } else if (msg.type === 'complete') {
                     if (rfPhase !== 'scanning') return;
                     rfPass++;
-                    // A pass that measured nothing means the averaging ring is not
-                    // ready yet, so re-arm for the next sweep instead of freezing on
-                    // an empty profile. Find Towers is ungated either way once a full
-                    // pass is in: more passes only sharpen the profile, and the search
-                    // still works without one.
+                    // Empty pass: the averaging ring is not ready, so re-arm.
+                    // Find Towers is ungated after any full pass.
                     rfPhase = rfMeasurements.length === 0 ? 'waiting' : 'done';
                     spectrumGating = false;
                     updateRfUI();
@@ -1048,7 +966,7 @@ function initSetupWizard(resumeStep, devMode, isRerun, demoMode) {
             };
         };
 
-        // Enable Find Towers when lat/lon filled AND RF scan done (or unavailable)
+        // Enable Find Towers when lat/lon are filled and the scan is done or unavailable.
         function updateFindBtn() {
             var lat = parseFloat(rxLat.value);
             var lon = parseFloat(rxLon.value);
@@ -1058,11 +976,8 @@ function initSetupWizard(resumeStep, devMode, isRerun, demoMode) {
         rxLon.addEventListener('input', updateFindBtn);
 
         // ── Address lookup and altitude prefill ──────────────
-        //
-        // Both of these do nothing but fill the coordinate boxes.
-        // updateFindBtn above reads those boxes and nothing else, so an owner
-        // can ignore this row entirely and type coordinates as before, and no
-        // failure in here can block the step.
+        // Both only fill boxes; nothing in here can block the step.
+        // See docs/features/setup-wizard.md#address-lookup
         var addressInput = document.getElementById('rxAddress');
         var addressBtn = document.getElementById('rxAddressBtn');
         var addressMsg = document.getElementById('rxAddressMsg');
@@ -1070,15 +985,12 @@ function initSetupWizard(resumeStep, devMode, isRerun, demoMode) {
         var geocodeAbort = null;
         var elevationAbort = null;
         var elevationTimer = null;
-        // Whether the figure in the altitude box is ours or the owner's. We
-        // may replace our own stale value when the coordinates move; we must
-        // never replace theirs.
+        // Whether the altitude is ours (replaceable) or the owner's (never
+        // replaced by the manual path).
         var altAutoFilled = false;
 
-        // A geocoder that could only place the postcode or the town has to say
-        // so. These coordinates are not merely a search input: /towers/select
-        // writes them to the radar config as rx_latitude/rx_longitude, and a
-        // city-centre fix can sit 10 km from the real receiver.
+        // Coarse matches must say so: these coordinates become the receiver
+        // position in the radar config.
         var PRECISION_WARNINGS = {
             postcode: 'Postcode centre only. Add the street address for a precise fix.',
             locality: 'City centre only. Add the street address for a precise fix.'
@@ -1100,9 +1012,7 @@ function initSetupWizard(resumeStep, devMode, isRerun, demoMode) {
             var query = addressInput.value.trim();
             if (!query || addressLoading) return;
 
-            // Only reachable from the leave hook, since the button is disabled
-            // for the duration, but it is what stops a late answer writing
-            // coordinates into a step the owner has already left.
+            // Stops a late answer writing into a step the owner has left.
             if (geocodeAbort) geocodeAbort.abort();
             var controller = window.AbortController ? new AbortController() : null;
             geocodeAbort = controller;
@@ -1119,10 +1029,7 @@ function initSetupWizard(resumeStep, devMode, isRerun, demoMode) {
                 signal: controller ? controller.signal : undefined
             })
             .then(function(r) {
-                // Both halves of the answer matter here, so this deliberately
-                // does not use postJSON: the route reports "no such address"
-                // and "could not ask" as different statuses, each with its own
-                // sentence, and both are shown as-is.
+                // Not postJSON: both failure statuses carry a sentence to show.
                 return r.json().then(
                     function(data) { return { ok: r.ok, data: data || {} }; },
                     function() { return { ok: false, data: {} }; });
@@ -1134,8 +1041,7 @@ function initSetupWizard(resumeStep, devMode, isRerun, demoMode) {
                     return;
                 }
                 var d = res.data;
-                // Six decimals is about 0.1 m, finer than any geocoder claims
-                // to be.
+                // Six decimals is about 0.1 m.
                 rxLat.value = Number(d.latitude).toFixed(6);
                 rxLon.value = Number(d.longitude).toFixed(6);
                 updateFindBtn();
@@ -1144,9 +1050,7 @@ function initSetupWizard(resumeStep, devMode, isRerun, demoMode) {
                 sayAddress(warning || ('Matched: ' + d.matched_address),
                            warning ? 'warn' : '');
 
-                // An explicit lookup means "the node is here", so whatever
-                // altitude went with the old coordinates is stale. Typing
-                // coordinates by hand is gentler; see scheduleElevation.
+                // Forced: an explicit lookup makes the old altitude stale.
                 fetchElevation(d.latitude, d.longitude, true);
             })
             .catch(function(err) {
@@ -1155,8 +1059,7 @@ function initSetupWizard(resumeStep, devMode, isRerun, demoMode) {
                 sayAddress('Address lookup failed. Check the connection and try again.', 'error');
             })
             .then(function() {
-                // Aborted means a newer owner of this button is in charge of
-                // its label, so leave it alone.
+                // Aborted: a newer request owns the button label.
                 if (controller && controller.signal.aborted) return;
                 addressLoading = false;
                 addressBtn.textContent = 'Look up';
@@ -1164,12 +1067,8 @@ function initSetupWizard(resumeStep, devMode, isRerun, demoMode) {
             });
         }
 
-        // Ground elevation for the altitude box, which until now nothing ever
-        // filled — leaving rx_altitude at 0 in the radar config for every
-        // owner who did not happen to type a figure. Advisory throughout: a
-        // failure leaves the box exactly as it was and says nothing, because
-        // nothing gates on altitude and an error here would be noise on a step
-        // that already has a spectrum sweep reporting into it.
+        // Ground elevation for the altitude box. Silent on failure.
+        // See docs/features/setup-wizard.md#altitude-prefill
         function fetchElevation(lat, lon, force) {
             if (!force && rxAlt.value.trim() !== '' && !altAutoFilled) return;
             if (elevationAbort) elevationAbort.abort();
@@ -1183,17 +1082,13 @@ function initSetupWizard(resumeStep, devMode, isRerun, demoMode) {
                     if (!d || !locationActive) return;
                     if (controller && controller.signal.aborted) return;
                     if (d.elevation_m == null) return;
-                    // Whole metres: this is a site altitude for the radar
-                    // config, not a survey figure.
                     rxAlt.value = Math.round(d.elevation_m);
                     altAutoFilled = true;
                 })
                 .catch(function() {});
         }
 
-        // Typing coordinates by hand has to fill the altitude too, or the
-        // manual path — the one that always has to work — still leaves
-        // rx_altitude at 0. Debounced, because this fires per keystroke.
+        // The manual path fills the altitude too. Debounced per keystroke.
         function scheduleElevation() {
             clearTimeout(elevationTimer);
             elevationTimer = setTimeout(function() {
@@ -1213,9 +1108,7 @@ function initSetupWizard(resumeStep, devMode, isRerun, demoMode) {
         addressInput.addEventListener('input', updateAddressBtn);
         addressBtn.addEventListener('click', lookupAddress);
         addressInput.addEventListener('keydown', function(e) {
-            // Enter in this box means "look up", not "run the step": the owner
-            // is still filling the form, and Find Towers is a deliberate
-            // second action they take once the coordinates look right.
+            // Enter means "look up", not "run the step".
             if (e.key === 'Enter' || e.keyCode === 13) {
                 e.preventDefault();
                 lookupAddress();
@@ -1223,8 +1116,7 @@ function initSetupWizard(resumeStep, devMode, isRerun, demoMode) {
         });
         updateAddressBtn();
 
-        // Published so leaveHooks.location, which lives outside this hook, can
-        // drop in-flight work when the step goes off screen.
+        // Published so leaveHooks.location can drop in-flight work.
         abortAddressLookups = function() {
             clearTimeout(elevationTimer);
             if (geocodeAbort) { geocodeAbort.abort(); geocodeAbort = null; }
@@ -1234,7 +1126,8 @@ function initSetupWizard(resumeStep, devMode, isRerun, demoMode) {
             updateAddressBtn();
         };
 
-        // Use My Location (button commented out in markup until HTTPS lands; see 20260616-location-fetch-https)
+        // Use My Location: inert while the button is commented out in the
+        // markup (needs HTTPS). See docs/features/setup-wizard.md#address-lookup
         if (useMyLocBtn) useMyLocBtn.addEventListener('click', function() {
             if (!navigator.geolocation) {
                 geoError.textContent = 'Geolocation not supported by your browser';
@@ -1270,7 +1163,6 @@ function initSetupWizard(resumeStep, devMode, isRerun, demoMode) {
             );
         });
 
-        // Find Towers → advance to towers step and trigger search
         findBtn.addEventListener('click', function() {
             window._towerSearchParams = {
                 lat: parseFloat(rxLat.value),
@@ -1287,9 +1179,8 @@ function initSetupWizard(resumeStep, devMode, isRerun, demoMode) {
         });
     };
 
-    // Step 5: Tower Selection
+    // Tower selection. See docs/features/setup-wizard.md#tower-selection
     enterHooks.towers = (function() {
-        // Closure to hold state across re-entries
         var towerMarkers = [];
         var selectedTower = null;
         var listenersAdded = false;
@@ -1312,7 +1203,6 @@ function initSetupWizard(resumeStep, devMode, isRerun, demoMode) {
         towerMarkers = [];
         selectedTower = null;
 
-        // Clean up map from previous visit
         var mapEl = document.getElementById('towerMap');
         if (window._towerMap) {
             try {
@@ -1324,7 +1214,6 @@ function initSetupWizard(resumeStep, devMode, isRerun, demoMode) {
         mapEl.innerHTML = '';
         delete mapEl._leaflet_id;
 
-        // Reset UI
         selectedCard.style.display = 'none';
         var guideEl = document.getElementById('antennaGuide');
         if (guideEl) { guideEl.style.display = 'none'; guideEl.innerHTML = ''; }
@@ -1334,14 +1223,11 @@ function initSetupWizard(resumeStep, devMode, isRerun, demoMode) {
         summaryEl.innerHTML = '';
         errorEl.style.display = 'none';
 
-        // Chips are CSS classes now rather than colours read back out of the
-        // stylesheet: common.css already carried .tower-badge.band-*, and
-        // gained .tower-badge.rank-* when the dead --suit-* set was retired.
+        // Chips use .tower-badge.band-* and .rank-* classes from common.css.
         var BAND_CLASS = { FM: 'band-fm', VHF: 'band-vhf', UHF: 'band-uhf' };
 
-        // Takes a colour rather than a class: this lands in an inline style
-        // attribute inside the divIcon's HTML, which is one of the few places
-        // a var() still resolves. Same approach as tower-finder's TowerMap.
+        // Takes a colour, not a class: it lands in an inline style inside the
+        // divIcon, where a var() still resolves.
         function makeTowerIcon(color, highlighted) {
             var size = highlighted ? 16 : 11;
             var border = highlighted ? 3 : 2;
@@ -1365,14 +1251,10 @@ function initSetupWizard(resumeStep, devMode, isRerun, demoMode) {
             iconAnchor: [8, 8]
         });
 
-        // Start search immediately on entering this step
         var params = window._towerSearchParams;
         if (!params) {
-            // Reachable only when no search has ever been cached for this
-            // device, since the page rehydrates from that cache on load. The
-            // wizard runs forwards, so offer the way on rather than naming a
-            // Back button that no longer exists: the tower is editable in
-            // Config, and Auto-Calibrate can pick one from a later search.
+            // Only when no search was ever cached. Forward-only, so offer the
+            // way on. See docs/features/setup-wizard.md#rehydrating-the-tower-search
             loadingEl.style.display = 'none';
             errorEl.textContent = 'No location has been saved for this device, '
                 + 'so there is nothing to search with yet. Skip this step and '
@@ -1419,10 +1301,7 @@ function initSetupWizard(resumeStep, devMode, isRerun, demoMode) {
                 return;
             }
 
-            // Summary. The old "Ideal Range" tile counted distance_class ===
-            // 'Ideal' and has read 0 ever since the finder stopped sending that
-            // field. Replaced by the number the ranking is actually built on:
-            // the best tower's detectable area.
+            // Summary. Best detect area is the figure the ranking is built on.
             var bands = [];
             towers.forEach(function(t) { if (bands.indexOf(t.band) === -1) bands.push(t.band); });
             var best = towers[0];
@@ -1448,9 +1327,7 @@ function initSetupWizard(resumeStep, devMode, isRerun, demoMode) {
                 points.push(userLatLng);
                 L.marker(userLatLng, { icon: userIcon }).addTo(towerMap)
                     .bindPopup('<span class="popup-callsign">Your Location</span>');
-                // From the response rather than a literal: the finder reports
-                // the radius it actually searched, and a circle that disagrees
-                // with it misrepresents the area the list covers.
+                // The radius the finder actually searched, not a literal.
                 L.circle(userLatLng, {
                     radius: (isNum(query.radius_km) ? query.radius_km : 80) * 1000,
                     color: '#3b82f6', weight: 1.5, fillOpacity: 0.04, dashArray: '6 4'
@@ -1463,9 +1340,7 @@ function initSetupWizard(resumeStep, devMode, isRerun, demoMode) {
                 points.push(ll);
                 var marker = L.marker(ll, {
                     icon: makeTowerIcon(tier.color, false),
-                    // Co-located stations share a mast and so share a position.
-                    // Leaflet gives them equal z-indexes and DOM order then
-                    // decides, which would paint the worst-ranked on top.
+                    // Co-located stations share a position; keep the best-ranked on top.
                     zIndexOffset: 1000 - (isNum(t.rank) ? t.rank : 0)
                 }).addTo(towerMap);
                 var area = formatAreaKm2(t.expected_area_km2);
@@ -1506,9 +1381,6 @@ function initSetupWizard(resumeStep, devMode, isRerun, demoMode) {
                 var tier = rankTier(t.rank, towers.length);
                 var tr = document.createElement('tr');
 
-                // Listed but muted. The finder penalises a tower past its own
-                // horizon rather than dropping it, so an owner who knows a
-                // transmitter is strong can see why it ranks low.
                 if (beyondHorizon(t.distance_km, t.horizon_km)) {
                     tr.className = 'beyond-horizon';
                     tr.title = 'Beyond radio horizon';
@@ -1564,17 +1436,8 @@ function initSetupWizard(resumeStep, devMode, isRerun, demoMode) {
         }
 
         // ── Antenna aiming guide ─────────────────────────────
-        //
-        // A passive radar has two antennas doing different jobs, and they do
-        // not point the same way. The reference antenna looks at the
-        // illuminator for a clean copy of what it is transmitting. The
-        // surveillance antenna looks wherever the detectable area is largest.
-        //
-        // best_azimuth_deg is the finder's own answer for that second one and
-        // is taken exactly as given, never derived from the tower bearing.
-        // Measured against live data the separation between the two runs from
-        // 58 to 180 degrees, so "point it the other way" would be wrong about
-        // a third of the time.
+        // best_azimuth_deg is used exactly as given, never derived from the
+        // tower bearing. See docs/features/setup-wizard.md#antenna-aiming-guide
 
         // Screen y grows downward, so a true-north bearing maps to
         // (sin, -cos): 0 deg lands at the top, 90 at the right.
@@ -1628,8 +1491,7 @@ function initSetupWizard(resumeStep, devMode, isRerun, demoMode) {
             var refDeg = isNum(t.bearing_deg) ? t.bearing_deg : null;
             var surDeg = isNum(t.best_azimuth_deg) ? t.best_azimuth_deg : null;
 
-            // Without a bearing to the tower there is no advice to give, and a
-            // panel of dashes would read as a finding.
+            // No bearing, no guide: a panel of dashes would read as a finding.
             if (refDeg === null) {
                 guide.style.display = 'none';
                 guide.innerHTML = '';
@@ -1644,8 +1506,7 @@ function initSetupWizard(resumeStep, devMode, isRerun, demoMode) {
                     'Where the largest area is expected' +
                     (area ? ', about ' + esc(area) + ' km&sup2;' : '') + '.');
             } else {
-                // Additive field: an older finder omits it. Say so rather than
-                // inventing a bearing from the tower's.
+                // An older finder omits it. Say so rather than invent one.
                 surCard = '<div class="antenna-dir">' +
                     '<div class="antenna-dir-role"><span class="swatch" style="background:var(--ink);"></span>' +
                     'Surveillance antenna (input 2)</div>' +
@@ -1702,7 +1563,6 @@ function initSetupWizard(resumeStep, devMode, isRerun, demoMode) {
             });
         }
 
-        // Bind listeners only once
         if (!listenersAdded) {
             listenersAdded = true;
 
@@ -1751,12 +1611,8 @@ function initSetupWizard(resumeStep, devMode, isRerun, demoMode) {
                         }
                     })
                     .catch(function() {
-                        // A miss or two is transient — the GUI can blink out
-                        // while the stack restarts under us. A run of them is
-                        // not, and re-polling forever without saying so leaves
-                        // this step frozen on its spinner with the skip button
-                        // hidden and nothing to click. Surface it instead, and
-                        // give back the way past.
+                        // A few misses are normal during the restart; a run of
+                        // them gives back the way past instead of spinning forever.
                         if (++pollFailures >= 5) {
                             statusEl.innerHTML = '<span class="text-warning">Configuration saved, but progress could not be read.</span>';
                             saveBtn.disabled = false;
@@ -1780,9 +1636,8 @@ function initSetupWizard(resumeStep, devMode, isRerun, demoMode) {
                         return;
                     }
                     if (data.status) {
-                        // The restart runs on the server's shared queue now.
-                        // Still wait for it to finish before advancing —
-                        // later wizard steps expect the radar to be back up.
+                        // Wait for the queued restart: later steps expect the
+                        // radar to be back up.
                         pollApply();
                     } else if (data.error) {
                         statusEl.innerHTML = '<span class="text-warning">Configuration saved but services failed to restart: ' + data.error + '</span>';
@@ -1791,7 +1646,7 @@ function initSetupWizard(resumeStep, devMode, isRerun, demoMode) {
                         skipBtn.style.display = '';
                         skipBtn.textContent = 'Continue anyway \u2192';
                     } else {
-                        // retina-node not installed yet — config saved, advance
+                        // retina-node not installed yet: config saved, advance.
                         statusEl.innerHTML = '<span class="text-success">Configuration saved. Services will start when retina-node is installed.</span>';
                         setTimeout(advance, 1500);
                     }
@@ -1809,19 +1664,10 @@ function initSetupWizard(resumeStep, devMode, isRerun, demoMode) {
     };
     })();
 
-    // Step 6: Auto-Calibrate against the tower just chosen.
-    //
-    // Deliberately a different run shape from the Configuration page's
-    // Auto-Calibrate: CAL.QUICK_RUN, which is scope current_tower (the owner
-    // picked a tower one step ago; re-searching alternates contradicts that
-    // and triples the time) plus skip_confirmation (descend, then soak the
-    // resolved point for overload, but never wait for a confirmed track).
-    // ~4 min instead of ~15, and nothing can be falsely confirmed because
-    // nothing is confirmed at all. The Configuration page's Quick Calibrate
-    // button posts the same object, so keep the shape in calibrate.js.
-    // The soak is not optional: descent proves a point over one second, and
-    // intermittent clipping only shows when the point is sat on — see
-    // calibrator.py's SOAK_SECONDS.
+    // Auto-Calibrate against the tower just chosen, using CAL.QUICK_RUN (the
+    // shape shared with Quick Calibrate lives in calibrate.js). The soak it
+    // keeps is not optional; see calibrator.py's SOAK_SECONDS.
+    // See docs/features/setup-wizard.md#auto-calibrate-step
     enterHooks.calibrate = (function() {
         var stopPoll = null;
         var listenersAdded = false;
@@ -1842,10 +1688,9 @@ function initSetupWizard(resumeStep, devMode, isRerun, demoMode) {
             el('calWizCancelBtn').disabled = false;
         }
 
-        // A confirmed result or the no-track fallback both carry tuning worth
-        // keeping, and the wizard persists either without asking, as the
-        // Configuration page's calibrate window does: the stack restart at
-        // /set-up/complete would discard anything left unsaved seconds later.
+        // Persists any tuning without asking, as the Configuration page's
+        // calibrate window does: /set-up/complete restarts the stack seconds
+        // later and would discard it.
         function persistThenAllowNext(status) {
             var CAL = window.RetinaCalibrate;
             var tuning = CAL.tuningOf(status);
@@ -1854,10 +1699,9 @@ function initSetupWizard(resumeStep, devMode, isRerun, demoMode) {
             statusEl.textContent = 'Saving settings…';
             CAL.apply().then(function(d) {
                 if (!d.success) throw new Error(d.error || 'Apply failed');
-                // Wait for the merge+restart to finish before letting the user
-                // advance: /set-up/complete force-recreates the stack, and two
-                // overlapping restarts race the 90s restart lock, whose
-                // failure enforce_radar_mode swallows silently.
+                // Wait before allowing advance: an overlapping restart from
+                // /set-up/complete races the 90s restart lock, and
+                // enforce_radar_mode swallows that failure silently.
                 return CAL.pollApply(function(s) {
                     var label = s.phase_label || 'Applying';
                     if (s.phase === 'settling' && s.settle_remaining) {
@@ -1869,8 +1713,7 @@ function initSetupWizard(resumeStep, devMode, isRerun, demoMode) {
                 statusEl.textContent = 'Settings saved.';
                 setButtons('terminal');
             }).catch(function(err) {
-                // Never blocks completion — the tuning is live either way, and
-                // the owner must be able to finish setup.
+                // Never blocks completion: the tuning is live either way.
                 statusEl.textContent = 'Could not save settings: ' + err.message;
                 setButtons('terminal');
             });
@@ -1886,16 +1729,13 @@ function initSetupWizard(resumeStep, devMode, isRerun, demoMode) {
             var tuning = CAL.tuningOf(status);
             if (tuning) {
                 var before = status.original;
-                // What the run changed, not just what it ended on: the owner
-                // has no other way to see that these settings are not the
-                // generic ones the radio shipped with.
+                // Show what changed, not just the end state.
                 var wasRow = before
                     ? '<div style="font-size:12.5px;color:var(--ink-3);margin-top:6px;">'
                       + 'Previously gain reduction A ' + before.gain_a + ' dB / B '
                       + before.gain_b + ' dB, LNA state ' + before.lna_state + '.</div>'
                     : '';
-                // What the soak proved. Shared with the Configuration page's
-                // Quick Calibrate, which reports the same run.
+                // What the soak proved; shared with Quick Calibrate.
                 var soak = CAL.soakSummary(status);
                 var held = soak
                     ? '<div style="font-size:12.5px;color:var(--ink-3);margin-top:6px;">'
@@ -1914,7 +1754,7 @@ function initSetupWizard(resumeStep, devMode, isRerun, demoMode) {
                     + ' / B <strong>' + tuning.gain_b + ' dB</strong>'
                     + ', LNA state <strong>' + tuning.lna_state + '</strong>.</div>'
                     + wasRow + held + '</div>';
-                // Static copy lives in the template — see #calWizNext there.
+                // Static copy lives in the template: see #calWizNext there.
                 el('calWizNext').style.display = '';
             } else {
                 errorEl.style.display = '';
@@ -1971,21 +1811,16 @@ function initSetupWizard(resumeStep, devMode, isRerun, demoMode) {
             el('calWizStatus').textContent = '';
             advancing = false;
 
-            // Never auto-start: this hook fires on every entry, including
-            // when the owner clicks back to a step they already finished.
-            // Reattach to whatever the node is actually doing instead — the
-            // run is a background thread there, not something this tab owns.
+            // Never auto-start: this fires on every entry, including after a
+            // reload. Reattach to the run on the node, which this tab does not own.
             CAL.getStatus().then(function(status) {
                 if (status.state === 'running') { watch(); return; }
                 if (CAL.isTerminal(status) && CAL.tuningOf(status)) {
-                    // A finished run from this session (or before a reload):
-                    // show what it found rather than offering to redo it.
+                    // A finished run: show it rather than offer to redo it.
                     renderTerminal(status);
                     return;
                 }
-                // Includes "step says calibrate, calibrator says idle", which
-                // is the normal state after a reboot mid-run — the start
-                // prompt is the honest thing to show, not an error.
+                // Includes idle after a reboot mid-run, which is normal.
                 show(true, false);
                 setButtons('idle');
             }).catch(function() {
@@ -2052,7 +1887,7 @@ function initSetupWizard(resumeStep, devMode, isRerun, demoMode) {
         if (window._calWizStopPoll) { window._calWizStopPoll(); window._calWizStopPoll = null; }
     };
 
-    // Step 7: Complete
+    // Complete. See docs/features/setup-wizard.md#completion
     enterHooks.complete = function() {
         window.removeEventListener('beforeunload', handleBeforeUnload);
         postJSON('/set-up/complete').catch(function() {});
@@ -2063,7 +1898,7 @@ function initSetupWizard(resumeStep, devMode, isRerun, demoMode) {
     var startIndex = 0;
 
     if (demoMode) {
-        // Demo: start from the top, seed tower search params so towers step works
+        // Demo: start from the top and seed the tower search.
         window._towerSearchParams = { lat: 37.7749, lon: -122.4194, alt: 16, measurements: [] };
         startIndex = 0;
     } else if (devMode) {

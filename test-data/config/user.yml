@@ -1,17 +1,17 @@
 network:
-  node_id: ret7dd2cb0d
+  node_id: ret7a000001
 capture:
   device:
     agcSetPoint: -50
 location:
   rx:
-    latitude: 37.7644
-    longitude: -122.3954
+    latitude: 37.7749
+    longitude: -122.4194
     altitude: 23
-    name: 150 Mississippi
+    name: Example RX
   tx:
     latitude: 37.49917
     longitude: -121.87222
     altitude: 783
 tar1090:
-  adsb_source: 192.168.8.183,30005,beast_in
+  adsb_source: 192.0.2.10,30005,beast_in

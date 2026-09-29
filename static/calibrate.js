@@ -1,18 +1,9 @@
-// Shared Auto-Calibrate driver.
+// Shared Auto-Calibrate driver for all three entry points (Configuration
+// page Auto-Calibrate and Quick Calibrate, and the setup wizard step), so
+// they cannot drift. Everything except DOM rendering lives here.
+// See docs/features/auto-calibrate.md#entry-points-and-run-shapes.
 //
-// Three entry points run calibration and they must not drift: the
-// Configuration page's Auto-Calibrate button (a full run — every candidate
-// tower, dwelling on each until a track confirms), its Quick Calibrate button,
-// and the setup wizard step. The last two are the same run: current tower,
-// descend then soak for overload, no track wait (see QUICK_RUN and
-// calibrator.py's skip_confirmation). What they share is everything except the
-// DOM: the run shapes, the status vocabulary, the formatting, the "what did
-// this run actually mean" interpretation, and the fetch calls. Rendering stays
-// with each caller, since one is a Bootstrap modal and the other is a
-// full-page wizard step.
-//
-// Deliberately ES5-flavoured (var/function, no arrow functions) to match
-// setup.js, which is the more constrained of the two consumers.
+// Deliberately ES5-flavoured (var/function, no arrow functions) to match setup.js.
 window.RetinaCalibrate = (function() {
     'use strict';
 
@@ -27,28 +18,20 @@ window.RetinaCalibrate = (function() {
         descending: 'Maximizing gain, backing off overload…',
         refining: 'Refining gain…',
         dwelling: 'Watching for aircraft…',
-        // The skip-confirmation soak: watching the settled operating point
-        // for overload, not waiting for a track. See calibrator.SOAK_SECONDS.
+        // The skip-confirmation soak: overload watch, no track wait.
         soaking: 'Checking the settings hold…',
         restoring: 'Restoring original tuning…'
     };
 
     var MODE_LABELS = { track: 'Standard', adsb: 'ADS-B verified' };
 
-    // The quick run's start body, defined once because two callers post it:
-    // the setup wizard step and the Configuration page's Quick Calibrate
-    // button. Both mean the same thing — the tower is already chosen, so
-    // searching alternates would contradict that, and the run resolves the
-    // operating point and soaks it for overload rather than waiting for a
-    // track it was never asked to find. Neither caller should spell this out
-    // itself: a run shape that differs between the two is exactly the drift
-    // this module exists to prevent. See routes/calibrate.py, which treats
-    // the two flags as independent, and calibrator.SOAK_SECONDS.
+    // The quick run's start body, posted by both the setup wizard step and
+    // Quick Calibrate. Neither caller should spell it out itself.
+    // See docs/features/auto-calibrate.md#skip-confirmation-and-the-soak.
     var QUICK_RUN = { scope: 'current_tower', skip_confirmation: true };
 
-    // Per-tower outcomes the engine records but the run's summary message
-    // cannot express. Without these every failure reads as "probably no
-    // aircraft", including the ones that never looked for one.
+    // Per-tower outcomes the run's summary message cannot express.
+    // See docs/features/auto-calibrate.md#status-and-ui.
     var OUTCOME_TEXT = {
         no_confirmed_track: 'watched, but nothing confirmed',
         confirmed_track: 'confirmed a track',
@@ -78,9 +61,8 @@ window.RetinaCalibrate = (function() {
             + 'color:var(--warn,#b7791f);font-size:12.5px;">' + html + '</div>';
     }
 
-    // A server-pushed Mender deployment installs on its own schedule and
-    // cannot be refused from here, so it can replace the containers under a
-    // run. Say so rather than let the run die unexplained.
+    // A server-pushed Mender deployment can break a run and cannot be refused.
+    // See docs/features/auto-calibrate.md#server-pushed-mender-deployments.
     function updateWarning(status) {
         if (!status.system_update) return '';
         return warnBox('<strong>A system update is installing.</strong> '
@@ -105,10 +87,7 @@ window.RetinaCalibrate = (function() {
             if (h.tuning_error) extra += ' - ' + escapeHtml(h.tuning_error);
             return '<div>' + escapeHtml(h.tower_name || 'Tower') + ': ' + txt + extra + '</div>';
         });
-        // "Nothing was watched" is a warning for a run that meant to watch
-        // for aircraft, and simply a description for one that never intended
-        // to. A soak DID watch — for overload, which is the thing it cared
-        // about — so saying this about it would invent a problem.
+        // Not said of a soak-only run: a soak did watch, for overload.
         var lead = (watched === 0 && !soakOnly)
             ? '<strong>No tower was actually watched, so this is not evidence '
               + 'about aircraft.</strong><br>'
@@ -116,11 +95,8 @@ window.RetinaCalibrate = (function() {
         return lead + lines.join('');
     }
 
-    // What a quick run's soak proved, in one sentence, or '' if this run
-    // never soaked. An empty dwell_backoffs means the point never clipped
-    // across the whole soak — the reassurance the soak earns and that neither
-    // caller otherwise states. A quick run only ever tries the current tower,
-    // so its soak is history[0]'s.
+    // What a quick run's soak proved, in one sentence, or '' if it never
+    // soaked. A quick run only tries the current tower, so history[0].
     function soakSummary(status) {
         var entry = (status.history || [])[0] || {};
         if (!entry.soak_seconds) return '';
@@ -132,11 +108,8 @@ window.RetinaCalibrate = (function() {
               + 's check, and settled here.';
     }
 
-    // The tuning a terminal run left available to persist, or null. A
-    // confirmed result wins; otherwise the no-track fallback, which exists
-    // precisely so a run that confirmed nothing still leaves something worth
-    // keeping (see calibrator.py's _apply_top_tower_fallback). Cancelled runs
-    // deliberately have neither.
+    // The tuning a terminal run left available to persist, or null: the
+    // confirmed result, else the no-track fallback. Cancelled runs have neither.
     function tuningOf(status) {
         if (status.state === 'done' && status.result) return status.result;
         return status.fallback || null;

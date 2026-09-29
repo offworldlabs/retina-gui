@@ -9,8 +9,8 @@ block_network fixture in conftest rightly refuses.
 import mdns_peers
 from mdns_peers import PeerDirectory, parse_line, parse_txt
 
-RESOLVED = ('=;eth0;IPv4;ret4c844c20;_owl-node._tcp;local;ret4c844c20.local;'
-            '192.168.1.57;80;"node_id=ret4c844c20" "name=Boston Rooftop"')
+RESOLVED = ('=;eth0;IPv4;ret4a000001;_owl-node._tcp;local;ret4a000001.local;'
+            '192.168.1.57;80;"node_id=ret4a000001" "name=Sample Rooftop"')
 
 
 # ── Line parsing ───────────────────────────────────────────────
@@ -20,22 +20,22 @@ def test_parses_a_resolved_service():
     assert event["event"] == "resolve"
     assert event["interface"] == "eth0"
     assert event["protocol"] == "IPv4"
-    assert event["hostname"] == "ret4c844c20.local"
+    assert event["hostname"] == "ret4a000001.local"
     assert event["address"] == "192.168.1.57"
     assert event["port"] == "80"
-    assert event["node_id"] == "ret4c844c20"
-    assert event["friendly_name"] == "Boston Rooftop"
+    assert event["node_id"] == "ret4a000001"
+    assert event["friendly_name"] == "Sample Rooftop"
 
 
 def test_ignores_the_announcement_that_precedes_a_resolve():
     # A '+' says a name exists but not where — the '=' for it follows.
-    assert parse_line("+;eth0;IPv4;ret4c844c20;_owl-node._tcp;local") is None
+    assert parse_line("+;eth0;IPv4;ret4a000001;_owl-node._tcp;local") is None
 
 
 def test_parses_a_removal():
-    event = parse_line("-;eth0;IPv4;ret4c844c20;_owl-node._tcp;local")
+    event = parse_line("-;eth0;IPv4;ret4a000001;_owl-node._tcp;local")
     assert event == {"event": "remove", "interface": "eth0",
-                     "protocol": "IPv4", "name": "ret4c844c20"}
+                     "protocol": "IPv4", "name": "ret4a000001"}
 
 
 def test_ignores_junk_and_blank_lines():
@@ -43,11 +43,11 @@ def test_ignores_junk_and_blank_lines():
     assert parse_line("\n") is None
     assert parse_line("Failed to resolve service") is None
     # Truncated resolve line: no address to use, so nothing to report.
-    assert parse_line("=;eth0;IPv4;ret4c844c20;_owl-node._tcp") is None
+    assert parse_line("=;eth0;IPv4;ret4a000001;_owl-node._tcp") is None
 
 
 def test_unescapes_decimal_escapes_in_the_instance_name():
-    line = RESOLVED.replace("ret4c844c20;_owl-node", "my\\032node;_owl-node")
+    line = RESOLVED.replace("ret4a000001;_owl-node", "my\\032node;_owl-node")
     assert parse_line(line)["name"] == "my node"
 
 
@@ -87,10 +87,10 @@ def resolve(name, address, interface="eth0", protocol="IPv4", friendly=""):
 
 def test_a_resolved_node_appears_and_is_counted():
     d = directory()
-    d._apply(resolve("ret4c844c20", "192.168.1.57", friendly="Roof"))
+    d._apply(resolve("ret4a000001", "192.168.1.57", friendly="Roof"))
     assert d.count() == 1
     peer = d.peers()[0]
-    assert peer["node_id"] == "ret4c844c20"
+    assert peer["node_id"] == "ret4a000001"
     assert peer["friendly_name"] == "Roof"
     assert peer["is_self"] is False
 

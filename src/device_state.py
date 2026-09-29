@@ -11,6 +11,10 @@ State sources:
 Guards:
 - Can't toggle cloud services while any update is in progress
 - Can't start GUI install while one is already running
+
+Also holds the wizard state and the telemetry records (consent, contact,
+claim), several of which retina-telemetry reads by path. See
+docs/features/device-state-and-telemetry.md.
 """
 
 import json
@@ -23,24 +27,18 @@ from datetime import datetime, timedelta, timezone
 INSTALL_LOCK_TIMEOUT = timedelta(minutes=40)
 MENDER_STATUS_TIMEOUT = timedelta(hours=2)
 SETUP_WIZARD_TIMEOUT = timedelta(hours=24)
+# Mirrored by CALIBRATE_LOCK_TIMEOUT_SECONDS in blah2-arm's watchdog script.
 CALIBRATE_LOCK_TIMEOUT = timedelta(minutes=20)
 
-# Identifies the terms the owner was actually shown, so it is possible later to
-# say what a given owner agreed to. It must change whenever that text changes,
-# and "that text" is the whole agreements screen — the two checkbox labels in
-# templates/setup/_agreements.html as much as templates/eula.html, because the
-# publication disclosure lives in the checkbox wording rather than in the EULA.
-# A version that does not move when the wording does makes the record a lie.
-#
-# Deferred deliberately: nothing re-prompts an owner whose stored version is
-# older than this one. Changing the text today leaves existing nodes holding
-# their original record, which is correct but silent.
+# Identifies the terms the owner was shown. Bump it whenever that text changes:
+# templates/eula.html AND the checkbox labels in templates/setup/_agreements.html,
+# which carry the publication disclosure. Nothing re-prompts older records.
+# See docs/features/device-state-and-telemetry.md#consent-version-and-wording.
 TELEMETRY_CONSENT_VERSION = "2026-08-15"
 
-# What publication means here. Publishing is a condition of participation
-# rather than a choice, so there is no UI for it — see the disclosure in the
-# agreements step, which is what makes recording this honest. The wire supports
-# "private", so making it optional later is a UI change and nothing more.
+# Publishing is a condition of participation, so there is no UI for it. Only
+# honest while the agreements step checkbox discloses it (a matched pair).
+# See docs/features/device-state-and-telemetry.md#publication-choice.
 TELEMETRY_PUBLICATION_CHOICE = "public"
 
 
@@ -64,24 +62,18 @@ class DeviceState:
         self.mender_conf_backup_dir = mender_conf_backup_dir
         self.mender_conf_backup_path = mender_conf_backup_path
         self.setup_wizard_file = os.path.join(data_dir, "setup-wizard.json")
-        # Also read by the retina-telemetry container, which will not register a
-        # node without it: it is what proves the owner has been through the
-        # tower step, so the config being reported is theirs rather than the
-        # shipped default. A cross-repo contract, like the consent file below.
+        # Cross-repo contract: retina-telemetry will not register a node
+        # without this flag (proof the owner went through the tower step).
         self.setup_wizard_completed_flag = os.path.join(data_dir, "setup-wizard-completed")
         self.calibrate_lock_file = os.path.join(data_dir, "calibrate.lock")
         self.towers_cache_file = os.path.join(data_dir, "towers-cache.json")
-        # Read by the retina-telemetry container, which refuses to register
-        # without it. The path is a cross-repo contract, not an internal
-        # detail — see save_telemetry_consent.
+        # Cross-repo contract: retina-telemetry refuses to register without it.
         self.telemetry_consent_file = os.path.join(data_dir, "telemetry-consent.json")
-        # Also read by retina-telemetry, and also a cross-repo contract. A
-        # separate file from the consent records on purpose: see
-        # save_telemetry_contact.
+        # Cross-repo contract, read by retina-telemetry. Kept apart from the
+        # consent records on purpose: see save_telemetry_contact.
         self.telemetry_contact_file = os.path.join(data_dir, "telemetry-contact.json")
-        # The address that owns the node. Separate from the contact document
-        # because they answer different questions with different consequences;
-        # see save_telemetry_claim.
+        # Cross-repo contract, read by retina-telemetry. The address that owns
+        # the node; never mixed with the contact document.
         self.telemetry_claim_file = os.path.join(data_dir, "telemetry-claim.json")
         self.dev_mode = dev_mode
 
@@ -97,7 +89,7 @@ class DeviceState:
         return "idle"
 
     def is_install_locked(self) -> tuple[bool, dict | None]:
-        """Check GUI install lock. Auto-clears stale locks (>30 min)."""
+        """Check GUI install lock. Auto-clears stale locks (INSTALL_LOCK_TIMEOUT)."""
         if not os.path.exists(self.install_lock_file):
             return False, None
         try:
@@ -386,12 +378,9 @@ class DeviceState:
     def save_setup_wizard_step(self, step: str):
         """Save current wizard step. Preserves original started_at timestamp.
 
-        This is the resume point, and with the wizard forward-only it is also
-        the furthest step reached. It used to track a separate highest_step so
-        a reloaded page could offer back-navigation to finished steps; nothing
-        navigates backwards now, and that ordering never listed the calibrate
-        step, so a run that reached it recorded itself as being back at the
-        start.
+        The wizard is forward-only, so this is both the resume point and the
+        furthest step reached. See
+        docs/features/device-state-and-telemetry.md#resume-point.
         """
         data = {}
         if os.path.exists(self.setup_wizard_file):
@@ -424,27 +413,12 @@ class DeviceState:
     def save_telemetry_consent(self, version=TELEMETRY_CONSENT_VERSION):
         """Record that the owner accepted the terms.
 
-        Writes the three records retina-telemetry requires — it refuses to
-        register without all three and will never write a default of its own,
-        because a record it invented would claim an owner agreed to something
-        they were never shown. That discipline only holds if this end never
-        writes one speculatively either: call this from the agreements step and
-        nowhere else.
-
-        Shape mirrors the wire's `Agreements` object one-for-one, so there is
-        no translation to get wrong between what the owner saw and what the
-        server is told.
-
-        `accepted_at` is timezone-aware on purpose. The wire types it
-        `AwareDatetime`, so a naive timestamp is rejected at the boundary and
-        the node silently never registers — and every other timestamp in this
-        class uses a naive `datetime.now()`, which makes copying the
-        surrounding idiom the natural way to break it.
-
-        Re-accepting the same version preserves the original `accepted_at`: the
-        record answers "when did they agree to this text", and a wizard re-run
-        that shows unchanged wording has not produced a new agreement. A
-        changed version is a genuine re-acceptance and re-dates all three.
+        Call from the agreements step and nowhere else: neither end may write
+        a consent the owner was not shown. Shape mirrors the wire's
+        `Agreements`. `accepted_at` must be timezone-aware (the wire rejects
+        naive ones, unlike every other timestamp here), and is kept when the
+        same version is re-accepted.
+        See docs/features/device-state-and-telemetry.md#telemetry-consent.
         """
         existing = self.get_telemetry_consent() or {}
         accepted_at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
@@ -464,9 +438,7 @@ class DeviceState:
     def get_telemetry_contact(self) -> dict:
         """Read the stored contact details, or an empty dict if there are none.
 
-        Empty rather than None, because "nothing recorded" and "recorded, then
-        cleared" mean the same thing to everyone downstream: there is nothing
-        to send. Only the consent records need to tell those apart.
+        Empty rather than None: "never given" and "cleared" mean the same thing.
         """
         if not os.path.exists(self.telemetry_contact_file):
             return {}
@@ -480,26 +452,13 @@ class DeviceState:
     def save_telemetry_contact(self, contact: dict):
         """Record whom to contact about this node, or remove the record.
 
-        Kept out of telemetry-consent.json deliberately. Those are versioned
-        acceptances that neither end may invent, and retina-telemetry refuses
-        to register without all three; a mutable optional document sharing that
-        file would let a malformed contact stop a node registering. The wire
-        treats them as separate endpoints too.
-
-        Shape mirrors the wire's `NodeContact` one-for-one, the same discipline
-        as save_telemetry_consent, so nothing has to be translated between what
-        the owner typed and what the server is told.
-
-        Empty values are dropped rather than written as null, and a document
-        with nothing left in it removes the file. The spec is explicit that a
-        node with nothing to report never calls the endpoint, so "no file" is
-        the honest way to say that, and it is what an owner who skipped the
-        step and an owner who cleared every box both mean.
+        Shape mirrors the wire's `NodeContact`. Empty values are dropped, and
+        nothing left removes the file. Never merge this into the consent file,
+        or a malformed contact could stop a node registering.
+        See docs/features/device-state-and-telemetry.md#contact-details.
         """
         populated = {k: v for k, v in contact.items() if v not in (None, "")}
         if not populated:
-            # Clearing is a real outcome, not a no-op: an owner who empties
-            # every box wants the details gone rather than left behind.
             try:
                 os.remove(self.telemetry_contact_file)
             except OSError:
@@ -510,11 +469,7 @@ class DeviceState:
     # ── The address that owns the node ─────────────────────────
 
     def get_telemetry_claim(self) -> dict:
-        """Read the stored claim document, or an empty dict if there is none.
-
-        Empty for the same reason as the contact details: "never given" and
-        "given, then cleared" mean the same thing to everyone downstream.
-        """
+        """Read the stored claim document, or an empty dict if there is none."""
         if not os.path.exists(self.telemetry_claim_file):
             return {}
         try:
@@ -527,39 +482,16 @@ class DeviceState:
     def save_telemetry_claim(self, email) -> dict:
         """Ask for a claim link to be sent to this address, or remove the record.
 
-        Kept apart from telemetry-contact.json on purpose, and nothing copies
-        between them. The contact email answers "whom do we ring"; this one
-        answers "who owns this node", and a wrong value here mails a stranger a
-        link that hands them somebody's node. See ClaimFormConfig.
-
-        ## Every write is an ask
-
-        The page has one button, and pressing it means "send a link to this
-        address". So every write stamps `send_requested_at` as well as storing
-        `email`, and one press produces one email, whatever state the claim is
-        in. There used to be a separate Save, and it was a trap: saving an
-        address the node already held wrote an identical file, so the press
-        could not be seen and nothing was mailed. That is what a released node
-        showed its owner.
-
-        `email` is state and `send_requested_at` is the event, because
-        retina-telemetry needs both to choose its call. A changed address is
-        `PUT /nodes/claim`, which mails, and the stamp beside it counts as
-        answered by it. The same address is `POST /nodes/claim/resend`, which
-        is the only way out after a declined link, since re-offering an address
-        the node already holds mails nothing. The same address on a node whose
-        owner released it is a `PUT` again, because a release clears the
-        address and a resend would have nothing on file to mail.
-
-        Which call to make is deliberately not decided here. retina-telemetry
-        is the only side that knows where the claim actually stands, and
-        putting the rule in both places is how they drift.
+        Every write is an ask: it stamps `send_requested_at` beside `email`, so
+        one press mails once even for an unchanged address. Which server call
+        that becomes is decided only in retina-telemetry. Never copy between
+        this and the contact file: a wrong address here hands a stranger the
+        node. See docs/features/device-state-and-telemetry.md#node-claim.
         """
         email = (email or "").strip()
         if not email:
-            # Clearing is a real outcome: an owner who empties the box wants
-            # the address gone rather than left behind. It does not unclaim the
-            # node, which only its owner can do from the dashboard.
+            # Removes the address. It does not unclaim the node, which only
+            # its owner can do from the dashboard.
             try:
                 os.remove(self.telemetry_claim_file)
             except OSError:
@@ -576,9 +508,7 @@ class DeviceState:
     def _write_json_atomically(self, path, payload):
         """Write JSON via a temp file and a rename.
 
-        A half-written consent file reads as "not accepted" to
-        retina-telemetry, so the node goes quiet and looks like a telemetry
-        bug rather than an interrupted write.
+        A half-written consent file reads as "not accepted" to retina-telemetry.
         """
         os.makedirs(os.path.dirname(path), exist_ok=True)
         temporary = path + ".tmp"
@@ -596,12 +526,9 @@ class DeviceState:
     def save_towers_cache(self, lat: float, lon: float, towers: list):
         """Cache the wizard's tower-finder search results.
 
-        Reused by Auto-Calibrate as its alternate-tower list — the wizard's
-        search is RF-measurement-informed (better ranking than a plain
-        geography lookup) and this avoids a second live tower-finder call at
-        calibration time. No expiry: broadcast tower frequencies/locations
-        essentially never change, and a re-run of the wizard's tower step
-        just overwrites this file with a fresh search.
+        Also Auto-Calibrate's alternate-tower list. Never expires; a wizard
+        re-run overwrites it. See
+        docs/features/device-state-and-telemetry.md#tower-cache.
         """
         self._write_towers_cache({
             "lat": lat,
@@ -650,9 +577,8 @@ class DeviceState:
     def has_completed_setup_wizard(self) -> bool:
         """Whether the wizard has ever been completed on this device.
 
-        Distinct from retina-node being installed: a node can ship with
-        retina-node pre-installed but never have had the wizard run on it,
-        in which case it's still a first run.
+        Distinct from retina-node being installed: a pre-installed node that
+        never ran the wizard is still a first run.
         """
         return os.path.exists(self.setup_wizard_completed_flag)
 
@@ -665,28 +591,16 @@ class DeviceState:
     def backfill_setup_wizard_completed(self, user_config: dict | None) -> bool:
         """Write the completion flag for a node that finished setup before it existed.
 
-        retina-telemetry gates registration on this flag, so that a node cannot
-        register while its config is still the shipped Greenwich/Crystal Palace
-        default. The flag only arrived in aee29a6 (2026-06-24), and nodes that
-        completed the wizard before then have none. Without this they would be
-        blocked from registering forever, which is the same failure the gate
-        exists to prevent.
-
-        `location` in user.yml is the evidence, because that is the *override*
-        layer: the merged config.yml always carries a location, so the presence
-        of one there proves nothing, whereas an entry in user.yml means someone
-        chose it. `/towers/select` has written it since 4afa307 (2026-03-23),
-        three months before the flag, so every node in the gap is covered.
-
-        Deliberately not a coordinate check against the default. A node genuinely
-        sited near Greenwich would be refused registration for life, and it would
-        make a config default load-bearing across two repos.
+        retina-telemetry gates registration on the flag, so without this such
+        nodes could never register. The evidence is a receiver location in
+        user.yml (the override layer), deliberately not a coordinate check
+        against the shipped default.
+        See docs/features/device-state-and-telemetry.md#setup-completion-backfill.
 
         Returns:
             True if a flag was written. False if one already existed (its
-            original timestamp is kept: this answers "when was setup finished",
-            and a backfill has not finished anything), or if there is no
-            evidence the owner ever chose a location.
+            original timestamp is kept), or if there is no evidence the owner
+            ever chose a location.
         """
         if self.has_completed_setup_wizard():
             return False
@@ -702,9 +616,8 @@ class DeviceState:
     def _has_user_chosen_location(user_config: dict | None) -> bool:
         """Whether user.yml records a receiver position the owner picked.
 
-        Both coordinates are required. A partial block is not evidence of a
-        completed tower step, and `0` is a legitimate latitude, so this tests
-        for presence rather than truthiness.
+        Both coordinates are required, tested for presence rather than
+        truthiness because `0` is a legitimate latitude.
         """
         if not isinstance(user_config, dict):
             return False

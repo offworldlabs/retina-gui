@@ -1,33 +1,11 @@
 """Repair a retina-node compose project left half-recreated.
 
-Compose recreates a container by renaming the existing one to
-`<id-prefix>_<name>`, creating the replacement under the real name, then
-removing the old one. Interrupt it between the rename and the remove and the
-project is left with a container squatting a name compose is about to need:
-
-    Error response from daemon: Error when allocating new name: Conflict.
-    The container name "/tar1090" is already in use by container
-    "56f30a56ce9b..."
-
-Nothing clears that on its own, so **every subsequent apply fails the same
-way**, and the state survives a reboot. It is the difference between one bad
-restart and a node that can never accept a config change again.
-
-Two things interrupt a recreate mid-flight:
-
-  - subprocess.run's timeout, which SIGKILLs the compose CLI while the
-    daemon carries on with the operation;
-  - systemd restarting retina-gui.service, which kills the whole control
-    group — compose runs as a child of the Flask process, so a crash, a
-    `systemctl restart`, or a redeploy during an apply all do this.
-
-The second is why reconcile also runs at startup and not only after a failed
-compose call: by the time the GUI is back up, the process that could have
-cleaned up is gone.
-
-Scoped by compose's own project label rather than by name pattern. A bare
-`^[0-9a-f]{12}_` regex over `docker ps -a` would also match containers from
-other projects on the same host, and this removes what it finds.
+Compose recreates a container by renaming the old one to `<id-prefix>_<name>`
+before removing it. Interrupted in between (a subprocess timeout, or systemd
+killing retina-gui's control group), the renamed container blocks every later
+apply with a name conflict, across reboots. Runs after a failed recreate and at
+startup. Scoped by compose's project label, never a bare name regex, because it
+removes what it finds. See docs/architecture.md#stack-reconcile.
 """
 
 import re
@@ -65,9 +43,8 @@ def find_stale_containers(project=PROJECT, timeout=30):
 def reconcile(retina_node_path, project=PROJECT, bring_up=True):
     """Remove half-recreated containers and, optionally, restore the stack.
 
-    Callers must already hold the restart lock — this runs `docker rm -f`
-    and `docker compose up`, which is exactly the kind of work that must not
-    interleave with another caller's.
+    Callers must already hold the restart lock: this runs `docker rm -f` and
+    `docker compose up`, which must not interleave with another caller's.
 
     bring_up=False skips the `up`, for callers that must not start the radar
     stack (spectrum/sdrconnect mode, where blah2 is deliberately stopped).
@@ -91,9 +68,8 @@ def reconcile(retina_node_path, project=PROJECT, bring_up=True):
     if not bring_up:
         return stale, None
 
-    # Plain `up -d`, deliberately not --force-recreate: this is a repair, so
-    # it should create whatever the removals left missing and leave every
-    # healthy container alone.
+    # Plain `up -d`, not --force-recreate: create what is missing and leave
+    # healthy containers alone.
     try:
         result = subprocess.run(
             ["docker", "compose", "-p", project, "up", "-d", "--remove-orphans"],

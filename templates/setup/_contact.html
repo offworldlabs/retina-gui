@@ -1,9 +1,5 @@
-<!-- Step 2: Contact details -->
-{# Optional and skippable, and placed straight after the agreements step so it
-   is asked while the owner is still answering questions about themselves
-   rather than about the radar. Nothing downstream blocks on it: the node-ingest
-   spec says a node with nothing to report never calls the contact endpoint, so
-   skipping is a legitimate answer rather than an unfinished step. #}
+<!-- Contact details step -->
+{# Optional; skipping writes nothing. See docs/features/setup-wizard.md#contact-details #}
 <div data-step="contact" class="step-panel" style="display:none;">
     <div class="wiz-title-row">
         <h1>How can we reach you?</h1>

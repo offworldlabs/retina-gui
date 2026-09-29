@@ -1,16 +1,6 @@
 {# Shown when a request reaches this node's support hostname without an Access
-   assertion this node could verify.
-
-   Deliberately does not extend base.html, for the same reason login.html does
-   not: the fleet bar and the Home/Config tabs are links to pages this visitor
-   has not been let into, and offering them invites a click that lands straight
-   back here, which reads as the node being broken.
-
-   This page exists because the gate used to redirect here to login.html
-   instead. No password can be set from the support pathway and the page offers
-   no way to set one, so that form could only ever refuse: somebody whose
-   assertion failed to verify was shown a password box rather than the reason,
-   with nothing to do but guess. Say what happened instead. #}
+   assertion this node could verify. Does not extend base.html, like login.html.
+   See docs/features/remote-access.md#login-and-denied-pages #}
 <!DOCTYPE html>
 <html lang="en">
 <head>

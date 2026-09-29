@@ -1,9 +1,5 @@
-{# Deliberately does not extend base.html.
-
-   base.html renders the fleet bar and the Home/Config tabs, which are links to
-   pages this visitor has not been let into yet. A login page that shows the
-   navigation of the thing it is guarding invites people to click it and collect
-   a redirect back here, which reads as the page being broken. #}
+{# Deliberately does not extend base.html: its navigation links to pages this
+   visitor has not been let into. See docs/features/remote-access.md#login-and-denied-pages #}
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -45,8 +41,7 @@
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
         <input type="hidden" name="next" value="{{ next }}">
         <label for="password">Password</label>
-        {# autofocus so the only control on the page is the one already selected.
-           autocomplete=current-password lets a password manager fill it. #}
+        {# autocomplete=current-password lets a password manager fill it. #}
         <input type="password" id="password" name="password" class="ds-input mono"
                autocomplete="current-password" autofocus required>
         <button type="submit" class="ds-btn primary">Sign in</button>

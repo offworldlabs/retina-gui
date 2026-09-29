@@ -9,6 +9,7 @@ import re
 import tempfile
 
 # Valid SSH key types (exact match to prevent prefix tricks)
+# See docs/features/remote-access.md#ssh-keys.
 VALID_KEY_TYPES = (
     'ssh-rsa', 'ssh-ed25519', 'ssh-dss',
     'ecdsa-sha2-nistp256', 'ecdsa-sha2-nistp384', 'ecdsa-sha2-nistp521',
@@ -51,7 +52,7 @@ class SSHKeyManager:
         if key_type not in VALID_KEY_TYPES:
             return False
 
-        # Key data must be valid base64 (alphanumeric + / + = padding)
+        # Key data must be valid base64
         return re.match(r'^[A-Za-z0-9+/]+=*$', key_data) is not None
 
     def get_keys(self):

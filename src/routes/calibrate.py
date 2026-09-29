@@ -14,29 +14,19 @@ from config_schema import TX_NAME_MAX_LENGTH
 
 bp = Blueprint('calibrate', __name__, url_prefix='/calibrate')
 
-# Total towers tried per run, including the currently-configured one — the
-# tower-finder already ranks by expected signal, so this is the best N.
-# Deliberately small: every tower costs a full descent (up to ~4.5 minutes on
-# a node that never overloads) plus its own dwell, and dwell is where success
-# actually comes from. Towers past the top-ranked one are speculative, so
-# trading tower count for dwell time is the right way round — a run that
-# searches five towers but dwells on none of them searches nothing at all.
+# Total towers per run, including the configured one. Deliberately small:
+# each costs a descent plus a dwell. See
+# docs/features/auto-calibrate.md#candidate-towers.
 MAX_TOWERS = 3
 
-# AGC bandwidths that enable hardware AGC on the reference channel — the AGC
-# would fight the gain search, so calibration refuses to run with these set.
+# AGC bandwidths that enable hardware AGC on the reference channel. AGC would
+# fight the manual gain search, so calibration refuses to run with these set.
 AGC_BANDWIDTHS = (5, 50, 100)
 
 
 def _tower_tx(tower):
     """The transmitter position to persist along with this tower's fc, or
-    None if the record has no usable one.
-
-    blah2 computes its bistatic geometry from location.tx, so a tower is only
-    safe to move to if its position can move with it. A record without
-    coordinates is still worth searching, since fc alone is what the run
-    tunes, but it must not be persisted: a new fc against the old tower's
-    position is worse than either tower on its own.
+    None if the record has no usable one (then fc must not move location.tx).
     """
     latitude, longitude = tower.get("latitude"), tower.get("longitude")
     if latitude is None or longitude is None:
@@ -53,9 +43,8 @@ def _towers_to_alternates(towers, current_fc, limit):
     {name, fc, tx} shape the calibrator expects, excluding the current tower
     and capping at `limit`.
 
-    Only alternates carry a `tx` block. The currently-configured tower is
-    added by start() without one, which is what tells /calibrate/apply that a
-    run staying put must not rewrite the location the owner chose.
+    Only alternates carry `tx`; the configured tower has none, which is how
+    /calibrate/apply knows not to rewrite location.tx.
     """
     alternates = []
     for tower in towers:
@@ -76,14 +65,8 @@ def _towers_to_alternates(towers, current_fc, limit):
 def _fetch_alternate_towers(merged, current_fc, limit):
     """Best-ranked alternate towers to try, excluding the current one.
 
-    Prefers the setup wizard's cached search — it's RF-measurement-informed
-    (real signal strength, not just geography) and avoids a second live
-    tower-finder call at calibration time. Falls back to a plain geography
-    lookup only if the wizard was never run (or was skipped) on this node.
-
-    Best-effort throughout: returns [] if location is unset, no cache
-    exists, and the service is unreachable — the run then just searches the
-    current tower.
+    Prefers the setup wizard's cached (RF-informed) search, else a live
+    geography lookup. Best-effort: returns [] when neither is available.
     """
     from app import TOWER_FINDER_URL, app, device_state
 
@@ -128,14 +111,8 @@ def start():
     if not ok:
         return jsonify({"success": False, "error": reason}), 409
 
-    # The refusal has to run both ways. ApplyService stops a config apply
-    # starting during a run; this stops a run starting during an apply, which
-    # nothing covered — can_start_calibration() knows about Mender installs
-    # but not about the ~45s stack restart an apply performs. Hit by accident
-    # while testing: Apply Changes, then Auto-Calibrate a few seconds later,
-    # and every retune failed against restarting containers. All three towers
-    # came back tuning_not_applied, which is honest but is a whole run wasted
-    # on something that could simply have been refused.
+    # The other half of ApplyService's guard: no run during an apply's stack
+    # restart. See docs/features/auto-calibrate.md#start-guards.
     if apply_service.is_running():
         return jsonify({"success": False,
                         "error": "A configuration change is still being applied. "
@@ -184,21 +161,14 @@ def start():
     if mode not in VALID_MODES:
         return jsonify({"success": False, "error": f"Invalid mode: {mode}"}), 400
     if mode == MODE_ADSB:
-        # Engine support is complete (see calibrator.py's module docstring),
-        # but exposing it to users is a separate decision not yet made.
+        # Engine support is complete, but exposing it to users is a separate
+        # decision not yet made. See docs/features/auto-calibrate.md#success-modes.
         return jsonify({"success": False,
                         "error": "ADS-B verified mode is not currently available"}), 409
 
-    # The quick shape: resolve the operating point, soak it long enough to
-    # prove it is stable, and stop — rather than dwelling ~700s for a
-    # confirmation the caller does not need. It still watches for overload;
-    # only the track wait is skipped (see calibrator.SOAK_SECONDS). Asked for
-    # by the setup wizard step and by the Configuration page's Quick
-    # Calibrate button, which post an identical body (static/calibrate.js's
-    # QUICK_RUN). Opt-in per request, so that page's Auto-Calibrate button is
-    # untouched and keeps all three towers plus the full dwell. Paired there with
-    # scope: "current_tower", but deliberately independent of it — the two
-    # answer different questions (how many towers vs whether to confirm).
+    # Opt-in per request (static/calibrate.js's QUICK_RUN). Independent of
+    # scope: how many towers vs whether to confirm. See
+    # docs/features/auto-calibrate.md#entry-points-and-run-shapes.
     skip_confirmation = bool(body.get("skip_confirmation"))
 
     if not device_state.acquire_calibration_lock():
@@ -222,20 +192,9 @@ def status():
 
     payload = calibrator.get_status()
 
-    # A Mender deployment pushed from the server installs autonomously —
-    # mender-updated polls on its own and retina-gui is never consulted, so
-    # unlike /mender/install there is no guard that can refuse it. It
-    # replaces the containers underneath a run, after which every retune
-    # fails; the run then reports tuning_not_applied and gets abandoned for
-    # no reason the user can see. Annotating the status the modal already
-    # polls turns that from a mystery into an explanation. Cheap enough to
-    # do on every poll: it is a file-exists check plus a small JSON read.
-    #
-    # Deliberately reported rather than prevented. Blocking deployments
-    # would mean publishing Mender Update Control maps, and a map left
-    # behind by a crashed GUI would stall the fleet's updates - a worse
-    # failure than the one being avoided. Judged an accepted risk: the
-    # overlap window is narrow and the run already fails safely.
+    # A server-pushed Mender deployment cannot be refused and breaks a run,
+    # so it is reported here rather than prevented. See
+    # docs/features/auto-calibrate.md#server-pushed-mender-deployments.
     in_progress, reason = device_state.is_any_update_in_progress()
     payload["system_update"] = reason if in_progress else None
 
@@ -254,27 +213,15 @@ def apply():
     """Persist a calibration run's tuning: write user.yml, then queue the
     config-merger + service restart (mirrors /towers/select).
 
-    Takes a confirmed-track result when there is one, and otherwise the
-    operating point a no-track run settled on (see calibrator's "fallback").
-
-    can_start_calibration() below already covers a Mender install in progress,
-    which is why this route needs no separate update guard.
+    Takes the confirmed result, else the no-track "fallback". See
+    docs/features/auto-calibrate.md#persisting-a-result.
     """
     from app import apply_service, calibrator, config_mgr, device_state
 
     run_status = calibrator.get_status()
     result = run_status.get("result")
-    # A run that confirmed no track still resolved an operating point this
-    # device's own descent proved it tolerates, and _apply_top_tower_fallback
-    # has already left blah2 running on it. That tuning is live-only until
-    # something writes it to config: the next stack restart re-reads
-    # config.yml and silently discards it. In the setup wizard that restart
-    # is seconds away (/set-up/complete force-recreates the stack), so
-    # without this the run's only durable output is lost every single time.
-    # It is the same write as a success, from values proven the same way.
-    # Cancelled runs never arrive here with a fallback — cancel restores the
-    # original tuning, and _run's _check_cancel fires before the fallback is
-    # ever recorded — so cancelling still means "put it back".
+    # The fallback is live-only until written here (the next restart
+    # re-reads config.yml). Cancelled runs never have one.
     tuning = result if run_status.get("state") == "done" and result else run_status.get("fallback")
     if not tuning:
         return jsonify({"success": False,
@@ -290,22 +237,14 @@ def apply():
     device = dict(capture.get('device', {}) or {})
     device['gainReduction'] = [int(tuning['gain_a']), int(tuning['gain_b'])]
     device['lnaState'] = int(tuning['lna_state'])
-    # Always assert AGC off: a calibration result is by definition a manual
-    # gain/LNA operating point (the AGC guard above refuses to run against
-    # hardware AGC), so persisting one must never inherit a stale AGC-on
-    # bandwidth from whatever was in user.yml before.
+    # Always assert AGC off: a result is a manual operating point and must
+    # never inherit a stale AGC-on bandwidth.
     device['bandwidthNumber'] = 0
     capture['device'] = device
     user_config['capture'] = capture
 
-    # A run that settled on an alternate tower moved fc to a different
-    # transmitter, and blah2 derives its whole bistatic geometry from
-    # location.tx. Persisting fc on its own would leave the node
-    # processing the new tower's signal against the old tower's position,
-    # with nothing on the Configuration page to show which one it is really
-    # listening to. Mirrors what /towers/select writes for a hand-picked
-    # tower. Only alternates carry `tx` (see _towers_to_alternates), so a run
-    # that stays on the configured tower leaves location untouched.
+    # A new fc must move location.tx with it (blah2's bistatic geometry).
+    # Only alternates carry `tx`. Mirrors /towers/select.
     persisted_tx = None
     tx = tuning.get('tx')
     if tx:
@@ -316,30 +255,20 @@ def apply():
         persisted_tx['altitude'] = tx['altitude']
         name = (tuning.get('tower_name') or '').strip()
         if name:
-            # Truncated rather than dropped: TX_NAME_MAX_LENGTH is
-            # retina-telemetry's tx_callsign limit (a longer name means the
-            # node cannot build a NodeConfig at all), and keeping the old
-            # tower's name next to the new tower's coordinates would be a
-            # plain lie about what this node is pointed at.
+            # Truncated, not dropped: TX_NAME_MAX_LENGTH matches
+            # retina-telemetry's tx_callsign limit.
             persisted_tx['name'] = name[:TX_NAME_MAX_LENGTH]
         location['tx'] = persisted_tx
         user_config['location'] = location
 
     config_mgr.save_user_config(user_config)
 
-    # The user.yml write above stays synchronous — it must be on disk before
-    # this returns. Only the slow merge+restart goes to the shared queue,
-    # which always merges whatever is in user.yml when it runs, so it picks up
-    # the write above. Poll /config/apply/status for progress.
+    # The user.yml write above must be on disk before this returns; only the
+    # merge+restart is queued. Poll /config/apply/status for progress.
     return jsonify({
         "success": True,
-        # Exactly what was written, so the Configuration page can put these
-        # into its own form fields instead of going on showing the values it
-        # rendered before the run. That page is not reloaded by persisting,
-        # and a Save from a stale form posts the pre-calibration values back
-        # over these: compute_user_overrides drops an override whose
-        # submitted value matches the merged config, so the calibration
-        # disappears from user.yml without a word.
+        # Exactly what was written, so the Configuration page can update its
+        # form; a stale form's Save would silently drop the calibration.
         "persisted": {
             "fc": capture['fc'],
             "gain_a": device['gainReduction'][0],

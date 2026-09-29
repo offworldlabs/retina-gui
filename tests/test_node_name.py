@@ -18,8 +18,8 @@ def test_unset_reads_as_empty(names):
 
 
 def test_round_trip(names):
-    assert names.set("Boston Rooftop") == (True, None)
-    assert names.get() == "Boston Rooftop"
+    assert names.set("Sample Rooftop") == (True, None)
+    assert names.get() == "Sample Rooftop"
 
 
 def test_surrounding_whitespace_is_dropped(names):
@@ -63,8 +63,8 @@ def test_characters_that_would_break_the_advertisement_are_refused(names, bad):
 
 
 def test_unicode_is_fine(names):
-    assert names.set("Rooftop Café Boston 🦉")[0] is True
-    assert names.get() == "Rooftop Café Boston 🦉"
+    assert names.set("Rooftop Café Sample 🦉")[0] is True
+    assert names.get() == "Rooftop Café Sample 🦉"
 
 
 def test_the_file_is_world_readable(names):
@@ -138,10 +138,10 @@ def test_a_missing_identity_script_is_not_an_error(tmp_path, monkeypatch):
 def test_saving_a_name_over_http(app_client):
     import app as app_module
 
-    response = app_client.post("/node-name", data={"name": "Boston Rooftop"})
+    response = app_client.post("/node-name", data={"name": "Sample Rooftop"})
     assert response.status_code == 200
-    assert response.get_json() == {"ok": True, "name": "Boston Rooftop"}
-    assert app_module.node_name.get() == "Boston Rooftop"
+    assert response.get_json() == {"ok": True, "name": "Sample Rooftop"}
+    assert app_module.node_name.get() == "Sample Rooftop"
 
 
 def test_a_rejected_name_comes_back_as_a_400_with_a_reason(app_client):
@@ -153,19 +153,19 @@ def test_a_rejected_name_comes_back_as_a_400_with_a_reason(app_client):
 
 
 def test_the_name_appears_on_the_config_page(app_client):
-    app_client.post("/node-name", data={"name": "Boston Rooftop"})
+    app_client.post("/node-name", data={"name": "Sample Rooftop"})
     body = app_client.get("/config").data.decode()
-    assert "Boston Rooftop" in body
+    assert "Sample Rooftop" in body
 
 
 def test_the_config_page_shows_this_node_s_own_address(app_client):
     """owl.local is shared, so the address worth bookmarking is the node's."""
     body = app_client.get("/config").data.decode()
-    assert "http://ret7dd2cb0d.local" in body
+    assert "http://ret7a000001.local" in body
 
 
 def test_renaming_is_not_offered_on_the_home_page(app_client):
     """It lives under Administration on the config page, with the other
     settings that save on their own rather than with the config form."""
-    body = app_client.get("/", headers={"Host": "ret7dd2cb0d.local"}).data.decode()
+    body = app_client.get("/", headers={"Host": "ret7a000001.local"}).data.decode()
     assert "nodeNameInput" not in body
