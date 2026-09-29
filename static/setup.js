@@ -1843,10 +1843,9 @@ function initSetupWizard(resumeStep, devMode, isRerun, demoMode) {
         }
 
         // A confirmed result or the no-track fallback both carry tuning worth
-        // keeping, and the wizard persists either without asking — the
-        // Configuration page's "Persist to config" button is not reachable
-        // from here, and the stack restart at /set-up/complete would discard
-        // anything left unsaved seconds later.
+        // keeping, and the wizard persists either without asking, as the
+        // Configuration page's calibrate window does: the stack restart at
+        // /set-up/complete would discard anything left unsaved seconds later.
         function persistThenAllowNext(status) {
             var CAL = window.RetinaCalibrate;
             var tuning = CAL.tuningOf(status);

@@ -2487,6 +2487,36 @@ class TestQuickCalibrateEntryPoint:
             "never looked for a track from one that looked and found nothing")
 
 
+class TestResultIsSavedWithoutAsking:
+    """The Configuration page saves a finished run's tuning itself, through
+    /calibrate/apply, rather than offering a "Persist to config" button whose
+    optional look was the confusion in ClickUp 123zgec4dua. Browser JS, so
+    this guards the wiring rather than the behaviour."""
+
+    @staticmethod
+    def _modal_script():
+        with open(os.path.join(REPO_ROOT, 'templates', 'config.html')) as f:
+            src = f.read()
+        return src[src.index('// Auto-Calibrate'):]
+
+    def test_there_is_no_persist_button(self):
+        with open(os.path.join(REPO_ROOT, 'templates', 'config.html')) as f:
+            src = f.read()
+        assert 'calApplyBtn' not in src
+        assert '>Persist to config<' not in src
+
+    def test_both_endings_with_tuning_save_it(self):
+        """A confirmed result and a no-track fallback (which includes every
+        quick run) are both saved. A cancelled run has no tuning and saves
+        nothing, which saveAutomatically leaves to CAL.tuningOf."""
+        script = self._modal_script()
+        terminal = script[script.index('// terminal states'):script.index('function poll()')]
+        assert terminal.count('saveAutomatically(status);') == 2
+        save = script[script.index('function saveAutomatically('):]
+        assert "fetch('/calibrate/apply'" in save[:800]
+        assert 'CAL.tuningOf(status)' in save[:300]
+
+
 class TestPersistedTuningReachesTheForm:
     """The Configuration page fills its own fields from /calibrate/apply's
     `persisted` payload, because persisting does not reload the page.
@@ -2501,7 +2531,7 @@ class TestPersistedTuningReachesTheForm:
         with open(os.path.join(REPO_ROOT, 'templates', 'config.html')) as f:
             src = f.read()
         start = src.index('var TX_FIELDS = {')
-        return src[start:src.index('applyBtn.addEventListener', start)]
+        return src[start:src.index('function saveAutomatically(', start)]
 
     def test_every_field_name_it_writes_exists_on_the_form(self):
         import re

@@ -999,13 +999,13 @@
                 <div id="calBest" style="display:none;margin-top:10px;padding:8px 10px;background:var(--surface-2,rgba(128,128,128,.08));border-radius:6px;font-size:12.5px;"></div>
                 <div id="calResult" style="display:none;margin-top:10px;"></div>
                 <div id="calError" style="display:none;margin-top:10px;color:var(--danger,#c0392b);"></div>
+                <div id="calSaveStatus" style="display:none;margin-top:10px;font-size:12.5px;"></div>
             </div>
             <div class="modal-footer">
                 <button type="button" class="ds-btn ghost" id="calSetupCancelBtn" data-bs-dismiss="modal">Cancel</button>
                 <button type="button" class="ds-btn primary" id="calStartBtn">Start Calibration</button>
                 <button type="button" class="ds-btn ghost" id="calCancelBtn" style="display:none;">Cancel run</button>
                 <button type="button" class="ds-btn ghost" id="calCloseBtn" data-bs-dismiss="modal" style="display:none;">Close</button>
-                <button type="button" class="ds-btn primary" id="calApplyBtn" style="display:none;">Persist to config</button>
             </div>
         </div>
     </div>
@@ -1637,8 +1637,8 @@ if (window.location.search.includes('saved=1')) {
     form.addEventListener('change', update);
 
     // Adopt values that were written to config by something other than this
-    // form. Today that is only Auto-Calibrate persisting a run (see the
-    // modal's apply handler). Both halves matter: the fields have to change,
+    // form. Today that is only Auto-Calibrate saving a run (see the modal's
+    // saveAutomatically). Both halves matter: the fields have to change,
     // or the page goes on showing the pre-calibration tuning and a later Save posts
     // it back over what was just persisted; and the baseline has to move with
     // them, or the savebar claims unsaved changes for values that are
@@ -1772,7 +1772,7 @@ if (discardBtn) discardBtn.addEventListener('click', () => location.reload());
     });
 })();
 
-// Auto-Calibrate — start a run, poll status every 2s, offer persist on success
+// Auto-Calibrate — start a run, poll status every 2s, save the result when it ends
 (function() {
     var csrf = document.querySelector('meta[name="csrf-token"]').content;
     var btn = document.getElementById('autoCalibrateBtn');
@@ -1795,7 +1795,7 @@ if (discardBtn) discardBtn.addEventListener('click', () => location.reload());
     var startBtn = document.getElementById('calStartBtn');
     var cancelBtn = document.getElementById('calCancelBtn');
     var closeBtn = document.getElementById('calCloseBtn');
-    var applyBtn = document.getElementById('calApplyBtn');
+    var saveStatusEl = document.getElementById('calSaveStatus');
     var pollTimer = null;
     var lastStatus = null;
     // Which shape the Start button will launch. Only meaningful before a run
@@ -1805,6 +1805,9 @@ if (discardBtn) discardBtn.addEventListener('click', () => location.reload());
     // Whether the tuning just persisted also moved the transmitter, so the
     // "saved" line can name the fields that changed.
     var movedTower = false;
+    // The run whose result this tab has already saved (by started_at), so a
+    // second render of the same finished run cannot apply it twice.
+    var savedRun = null;
 
     // Shared with the setup wizard's calibrate step — see static/calibrate.js
     // for why the vocabulary and interpretation live there rather than here.
@@ -1901,9 +1904,8 @@ if (discardBtn) discardBtn.addEventListener('click', () => location.reload());
             resultEl.innerHTML = '<strong>' + (status.result.tower_name || 'Tower') + '</strong> at '
                 + mhz(status.result.fc) + ', gain reduction A ' + status.result.gain_a
                 + ' dB / B ' + status.result.gain_b + ' dB, LNA state ' + status.result.lna_state
-                + '.' + adsbNote
-                + '<br>The radar is running with this tuning now. Persist it to keep it after restarts.';
-            applyBtn.style.display = '';
+                + '.' + adsbNote;
+            saveAutomatically(status);
         } else {
             // A quick run ends in "failed" by design — there is no confirmed
             // result because none was asked for (see calibrator.py's
@@ -1949,9 +1951,9 @@ if (discardBtn) discardBtn.addEventListener('click', () => location.reload());
             }
             // A run that found no track still resolved an operating point the
             // descent proved this device tolerates, and the radar is on it
-            // right now — but only live, until it is written to config. Offer
-            // the same persist the success path offers, or the next restart
-            // throws the whole run away. Distinct from "Closest attempt"
+            // right now — but only live, until it is written to config. Save
+            // it the same way as a success, or the next restart throws the
+            // whole run away. Distinct from "Closest attempt"
             // above, which is informational and may name a different tower:
             // this is what the radar is actually running.
             if (status.fallback) {
@@ -1965,10 +1967,8 @@ if (discardBtn) discardBtn.addEventListener('click', () => location.reload());
                     // What the quick run's soak actually observed. Empty for a
                     // full run, which reaches this box by a different route
                     // (the dwell ran and found no track) and has no soak.
-                    + (CAL.soakSummary(status) ? '<br>' + CAL.soakSummary(status) : '')
-                    + '<br>This is not saved yet: a restart would go back to the previous tuning. '
-                    + 'Persist it to keep it.';
-                applyBtn.style.display = '';
+                    + (CAL.soakSummary(status) ? '<br>' + CAL.soakSummary(status) : '');
+                saveAutomatically(status);
             }
         }
     }
@@ -2001,9 +2001,8 @@ if (discardBtn) discardBtn.addEventListener('click', () => location.reload());
         errorEl.style.display = 'none';
         cancelBtn.style.display = 'none';
         closeBtn.style.display = 'none';
-        applyBtn.style.display = 'none';
-        applyBtn.disabled = false;
-        applyBtn.textContent = 'Persist to config';
+        saveStatusEl.style.display = 'none';
+        saveStatusEl.innerHTML = '';
         movedTower = false;
     }
 
@@ -2149,30 +2148,46 @@ if (discardBtn) discardBtn.addEventListener('click', () => location.reload());
         window.RetinaConfigForm.adoptSaved(values);
     }
 
-    applyBtn.addEventListener('click', function() {
-        applyBtn.disabled = true;
-        applyBtn.innerHTML = '<span class="spinner-border spinner-border-sm" style="width:.8em;height:.8em;border-width:1.5px;"></span> Applying…';
+    // A finished run's tuning is saved without asking, through the same
+    // /calibrate/apply the "Persist to config" button used to call: user.yml
+    // is written, then the shared apply queue merges and restarts the stack.
+    // Asking was the confusing part (ClickUp 123zgec4dua): the button sat
+    // under the result as if pressing it were optional, when leaving the
+    // tuning unsaved only meant the next restart threw the run away.
+    // Cancelled runs have no tuning (see CAL.tuningOf), so they save nothing.
+    function saveAutomatically(status) {
+        if (!CAL.tuningOf(status) || savedRun === status.started_at) return;
+        savedRun = status.started_at;
+        showSaveProgress('Saving these settings');
         fetch('/calibrate/apply', {
             method: 'POST',
             headers: { 'X-CSRFToken': csrf }
         })
         .then(function(r) { return r.json(); })
         .then(function(d) {
-            if (!d.success) { calApplyFailed(d.error || 'Apply failed'); return; }
+            if (!d.success) { saveFailed(d.error || 'Apply failed'); return; }
             adoptPersisted(d.persisted);
             movedTower = !!(d.persisted && d.persisted.tx);
             // The tuning is already written to user.yml; the merge and restart
             // run on the server's shared queue (see apply_service.py).
             pollCalApply();
         })
-        .catch(function() { calApplyFailed('Apply request failed'); });
-    });
+        .catch(function() { saveFailed('Apply request failed'); });
+    }
 
-    function calApplyFailed(message) {
-        applyBtn.disabled = false;
-        applyBtn.textContent = 'Persist to config';
-        errorEl.style.display = '';
-        errorEl.textContent = message;
+    function showSaveProgress(label) {
+        saveStatusEl.style.display = '';
+        saveStatusEl.style.color = 'var(--ink-3)';
+        saveStatusEl.innerHTML = '<span class="spinner-border spinner-border-sm" '
+            + 'style="width:.8em;height:.8em;border-width:1.5px;"></span> '
+            + escapeHtml(label) + '…';
+    }
+
+    function saveFailed(message) {
+        saveStatusEl.style.display = '';
+        saveStatusEl.style.color = 'var(--danger,#c0392b)';
+        saveStatusEl.textContent = 'These settings could not be saved: ' + message
+            + '. The radar is running with them until it next restarts.';
     }
 
     function pollCalApply() {
@@ -2184,13 +2199,13 @@ if (discardBtn) discardBtn.addEventListener('click', () => location.reload());
                 if (s.phase === 'settling' && s.settle_remaining) {
                     label += ' (' + s.settle_remaining + 's)';
                 }
-                applyBtn.innerHTML = '<span class="spinner-border spinner-border-sm" style="width:.8em;height:.8em;border-width:1.5px;"></span> ' + label + '…';
+                showSaveProgress(label);
                 setTimeout(pollCalApply, 1000);
             } else if (s.state === 'failed') {
-                calApplyFailed(s.error || 'Apply failed');
+                saveFailed(s.error || 'Apply failed');
             } else {
-                applyBtn.style.display = 'none';
-                resultEl.innerHTML += '<br><strong>Saved and applied.</strong> Services are restarting with the new tuning. '
+                saveStatusEl.style.color = 'var(--ink-2)';
+                saveStatusEl.innerHTML = '<strong>Saved and applied.</strong> Services are restarting with the new tuning. '
                     + 'The ' + (movedTower ? 'Capture and Transmitter' : 'Capture')
                     + ' settings on this page now show it.';
             }
