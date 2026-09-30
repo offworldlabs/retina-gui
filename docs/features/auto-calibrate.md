@@ -240,6 +240,16 @@ one tower while blah2 was still on another. Comparing against the device's own a
 retune, an abandoned generation, and anything else that retuned the radio behind the run's back. The dwell then uses the
 verified `appliedAt`, not descent's.
 
+### Notch filters are not retuned
+
+Known limitation. The RSPduo's DAB and RF notch filters are set by retina-node's config-merger from `capture.fc` (see
+[config-editor.md#notch-filters](config-editor.md#notch-filters)) and applied only when blah2 starts. A live retune
+changes fc but not the notches, so every candidate is probed with the notches chosen for the tower blah2 started on. A
+candidate in a different notch band (RF 77-115 MHz, DAB 155-235 MHz) from that starting tower is probed with the wrong
+notches: its own band may be notched out, or interference its notch would remove may get through, so it may be
+under-scored or miss its track. The applied result is still correct, because `/calibrate/apply` runs config-merger and
+restarts blah2, which derives and applies the notches for the chosen fc.
+
 ## Preflight and recovery
 
 Before the search starts, `_preflight` parks the device at the safe corner (59/59, LNA 9) at whatever frequency blah2 is
