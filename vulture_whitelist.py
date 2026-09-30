@@ -67,12 +67,6 @@ adsblol_radius
 #   src/config_schema.py:131  (unused variable)
 device_bandwidthNumber
 # TODO: config field: parsed but no reader found — wire it up or drop it
-#   src/config_schema.py:129  (unused variable)
-device_dabNotch
-# TODO: config field: parsed but no reader found — wire it up or drop it
-#   src/config_schema.py:130  (unused variable)
-device_rfNotch
-# TODO: config field: parsed but no reader found — wire it up or drop it
 #   src/config_schema.py:163  (unused variable)
 doppler_tolerance
 # TODO: helper function with no callers found

@@ -266,8 +266,6 @@ class TestConfigSaveRoute:
             'capture.device_gainReductionA': '35',
             'capture.device_gainReductionB': '30',
             'capture.device_lnaState': '5',
-            'capture.device_dabNotch': 'on',
-            'capture.device_rfNotch': 'on',
             'capture.device_bandwidthNumber': '5'
         }, follow_redirects=False)
 
@@ -282,26 +280,38 @@ class TestConfigSaveRoute:
         assert saved['capture']['device']['gainReduction'] == [35, 30]
         assert saved['capture']['device']['lnaState'] == 5
 
-    def test_save_unchecked_checkbox(self, app_client, user_config_file):
-        """Unchecked checkboxes should be saved as False."""
+    def test_save_does_not_write_notch_filters(self, app_client, user_config_file):
+        """Saving never writes dabNotch/rfNotch: config-merger derives them from fc."""
+        # A user.yml from before the fields were removed may still hold them.
+        with open(user_config_file) as f:
+            config = yaml.safe_load(f) or {}
+        config.setdefault('capture', {}).setdefault('device', {}).update(
+            {'dabNotch': False, 'rfNotch': False})
+        with open(user_config_file, 'w') as f:
+            yaml.dump(config, f)
+
         response = app_client.post('/config/save', data={
             'capture.fs': '2000000',
-            'capture.fc': '503000000',
+            'capture.fc': '100000000',
             'capture.device_type': 'RspDuo',
             'capture.device_agcSetPoint': '-50',
             'capture.device_gainReductionA': '40',
             'capture.device_gainReductionB': '40',
             'capture.device_lnaState': '4',
-            # dabNotch and rfNotch NOT included (unchecked)
-            'capture.device_bandwidthNumber': '0'
+            'capture.device_bandwidthNumber': '0',
+            # Stale field names from an old cached page are ignored.
+            'capture.device_dabNotch': 'on',
+            'capture.device_rfNotch': 'on',
         }, follow_redirects=False)
 
         assert response.status_code == 302
 
         with open(user_config_file) as f:
             saved = yaml.safe_load(f)
-        assert saved['capture']['device']['dabNotch'] is False
-        assert saved['capture']['device']['rfNotch'] is False
+        assert saved['capture']['fc'] == 100000000
+        device = saved['capture'].get('device', {})
+        assert 'dabNotch' not in device
+        assert 'rfNotch' not in device
 
     def test_save_invalid_gain_reduction(self, app_client):
         """Invalid gain reduction should show validation error."""
@@ -313,8 +323,6 @@ class TestConfigSaveRoute:
             'capture.device_gainReductionA': '100',  # Invalid: > 59
             'capture.device_gainReductionB': '40',
             'capture.device_lnaState': '4',
-            'capture.device_dabNotch': 'on',
-            'capture.device_rfNotch': 'on',
             'capture.device_bandwidthNumber': '0'
         })
 
@@ -333,8 +341,6 @@ class TestConfigSaveRoute:
             'capture.device_gainReductionA': '40',
             'capture.device_gainReductionB': '40',
             'capture.device_lnaState': '0',  # Invalid: < 1
-            'capture.device_dabNotch': 'on',
-            'capture.device_rfNotch': 'on',
             'capture.device_bandwidthNumber': '0'
         })
 
@@ -352,8 +358,6 @@ class TestConfigSaveRoute:
             'capture.device_gainReductionA': '40',
             'capture.device_gainReductionB': '40',
             'capture.device_lnaState': '4',
-            'capture.device_dabNotch': 'on',
-            'capture.device_rfNotch': 'on',
             'capture.device_bandwidthNumber': '0'
         })
 
@@ -378,8 +382,6 @@ class TestConfigSaveRoute:
             'capture.device_gainReductionA': '40',
             'capture.device_gainReductionB': '40',
             'capture.device_lnaState': '4',
-            'capture.device_dabNotch': 'on',
-            'capture.device_rfNotch': 'on',
             'capture.device_bandwidthNumber': '0'
         }, follow_redirects=False)
 
@@ -1179,10 +1181,10 @@ class TestParseFlatFormData:
         """Boolean true values should be converted."""
         from config_manager import ConfigManager
 
-        capture, _, _, _, _ = ConfigManager.parse_flat_form_data({
-            'capture.device_dabNotch': 'on'
+        _, _, truth, _, _ = ConfigManager.parse_flat_form_data({
+            'truth.enabled': 'on'
         })
-        assert capture['device_dabNotch'] is True
+        assert truth['enabled'] is True
 
     def test_parse_empty_string_skipped(self):
         """Empty strings should be skipped."""
