@@ -215,6 +215,35 @@ class TestConfigPageRoute:
         assert response.status_code == 200
         assert b'Apply changes' in response.data
 
+    def test_no_signal_help_starts_hidden(self, app_client):
+        """The meter script reveals it; the page must not show it on load."""
+        response = app_client.get('/config')
+        assert b'id="noSignalHelp" style="display:none;' in response.data
+        assert b'id="useSafeSettingsBtn"' in response.data
+
+    def test_safe_settings_are_the_least_sensitive_the_form_accepts(self):
+        """Use safe settings fills these fields and submits. A renamed field
+        would be silently skipped, and a value off the calibrator's limits
+        would no longer be the safest setting."""
+        import re
+
+        from calibrator import GAIN_REDUCTION_MAX, LNA_STATE_MAX
+        from config_schema import CaptureFormConfig
+
+        with open(os.path.join(os.path.dirname(__file__), '..',
+                               'templates', 'config.html')) as f:
+            src = f.read()
+        block = src[src.index('var SAFE_SETTINGS = {'):]
+        block = block[:block.index('};')]
+        settings = dict(re.findall(r"'capture\.(\w+)': (\d+)", block))
+        assert settings == {
+            'device_gainReductionA': str(GAIN_REDUCTION_MAX),
+            'device_gainReductionB': str(GAIN_REDUCTION_MAX),
+            'device_lnaState': str(LNA_STATE_MAX),
+        }
+        fields = getattr(CaptureFormConfig, 'model_fields', None) or CaptureFormConfig.__fields__
+        assert set(settings) <= set(fields)
+
     def test_cloud_services_toggle_not_hardcoded_checked(self, app_client):
         """Cloud services toggle should not hardcode checked attribute."""
         response = app_client.get('/config')
