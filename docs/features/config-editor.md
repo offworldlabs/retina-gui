@@ -330,6 +330,31 @@ polled every second from `/config/rf-status`, which proxies blah2's `/capture/rf
   `/api/mode` says radar and data has been missing for 4 s or more (for example after an
   overload-induced device crash). The mode is only fetched while data is missing.
 
+### No-signal help
+
+When "no signal" has lasted 60 s, a yellow box under the meter tells the owner what to do:
+check the USB cable, restart on the safest settings, then run Quick Calibrate once a signal is
+back, and contact support if nothing helps. Its **Use safe settings** button sets both gain
+reductions to 59 and the LNA state to 9 (`calibrator.GAIN_REDUCTION_MAX` and `LNA_STATE_MAX`,
+which the page script mirrors in `SAFE_SETTINGS`) and submits the form, so it takes the normal
+[save and apply](#save-and-apply) path. If the page already has unsaved changes, it asks first,
+because they are submitted with it.
+
+Why it says this and not something more specific:
+
+- **"No signal" cannot say why.** Once blah2 stops delivering samples, an unplugged USB cable,
+  a wedged SDRplay service and a device that crashed on overload look the same from here. The
+  advice has to cover all of them, so it does not call the receiver overloaded.
+- **A plain restart is not enough.** An apply restarts on the same config, so a tuning that
+  overloads the radio when the stack starts would take it down again. The cron watchdog also
+  already restarts the stack every 5 minutes while blah2 crash-loops, so by the time the box shows,
+  a restart has usually been tried. Restarting on 59/59/9 also removes overload as a cause. The LNA
+  state matters most: a node near a strong tower can overload at 59/59 with a sensitive LNA state.
+- **The safe settings are almost deaf.** That is why the next step is Quick Calibrate.
+- **It waits 60 s and stays hidden while a calibration or an apply runs**, because each of those
+  restarts the radar and shows "no signal" for 30-60 s. `/calibrate/status` and
+  `/config/apply/status` are only fetched once the minute has passed, not on every poll.
+
 ## Auto-Calibrate on this page
 
 The Capture section has two buttons, deliberately separate because they answer different questions
