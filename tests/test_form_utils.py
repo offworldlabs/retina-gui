@@ -12,7 +12,7 @@ class TestGetFieldInputType:
 
     def test_bool_to_checkbox(self):
         """Boolean fields should map to checkbox."""
-        field_info = AdsbTruthConfig.model_fields['enabled']
+        field_info = CaptureFormConfig.model_fields['device_dabNotch']
         assert get_field_input_type(field_info) == 'checkbox'
 
     def test_int_to_number(self):
@@ -103,12 +103,14 @@ class TestSchemaToFormFields:
             'device_gainReductionA': 40,
             'device_gainReductionB': 40,
             'device_lnaState': 4,
+            'device_dabNotch': True,
+            'device_rfNotch': True,
             'device_bandwidthNumber': 0
         }
         fields = schema_to_form_fields(CaptureFormConfig, values)
 
         # Should have all flat fields
-        assert len(fields) == 8
+        assert len(fields) == 10
 
         # Check fs field (Literal -> select with fixed options)
         fs_field = next(f for f in fields if f['name'] == 'fs')
@@ -119,22 +121,27 @@ class TestSchemaToFormFields:
 
     def test_checkbox_field(self):
         """Boolean fields should be checkboxes."""
-        truth_fields = schema_to_form_fields(AdsbTruthConfig, {'enabled': True})
-        enabled_field = next(f for f in truth_fields if f['name'] == 'enabled')
-        assert enabled_field['type'] == 'checkbox'
-        assert enabled_field['value'] is True
+        values = {
+            'fs': 2000000,
+            'fc': 503000000,
+            'device_type': 'RspDuo',
+            'device_agcSetPoint': -50,
+            'device_gainReductionA': 40,
+            'device_gainReductionB': 40,
+            'device_lnaState': 4,
+            'device_dabNotch': True,
+            'device_rfNotch': False,
+            'device_bandwidthNumber': 0
+        }
+        fields = schema_to_form_fields(CaptureFormConfig, values)
 
-        tar1090_fields = schema_to_form_fields(Tar1090Config, {'adsblol_fallback': False})
-        fallback_field = next(f for f in tar1090_fields if f['name'] == 'adsblol_fallback')
-        assert fallback_field['type'] == 'checkbox'
-        assert fallback_field['value'] is False
+        dab_field = next(f for f in fields if f['name'] == 'device_dabNotch')
+        assert dab_field['type'] == 'checkbox'
+        assert dab_field['value'] is True
 
-    def test_capture_has_no_notch_fields(self):
-        """The notch filters are derived from fc by config-merger, not set in the form."""
-        fields = schema_to_form_fields(CaptureFormConfig, {})
-        names = {f['name'] for f in fields}
-        assert 'device_dabNotch' not in names
-        assert 'device_rfNotch' not in names
+        rf_field = next(f for f in fields if f['name'] == 'device_rfNotch')
+        assert rf_field['type'] == 'checkbox'
+        assert rf_field['value'] is False
 
     def test_constraints_included(self):
         """Field constraints should be included."""
@@ -155,6 +162,8 @@ class TestSchemaToFormFields:
             'device_gainReductionA': 25,
             'device_gainReductionB': 25,
             'device_lnaState': 7,
+            'device_dabNotch': False,
+            'device_rfNotch': False,
             'device_bandwidthNumber': 5
         }
         fields = schema_to_form_fields(CaptureFormConfig, values)
@@ -247,3 +256,7 @@ class TestSchemaToFormFields:
         # fs does not have readonly
         fs_field = next(f for f in fields if f['name'] == 'fs')
         assert fs_field.get('readonly') is False
+
+        # dabNotch does not have readonly
+        dab_field = next(f for f in fields if f['name'] == 'device_dabNotch')
+        assert dab_field.get('readonly') is False

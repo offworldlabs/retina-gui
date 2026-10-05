@@ -39,6 +39,8 @@ class TestCaptureFormConfig:
             device_gainReductionA=40,
             device_gainReductionB=45,
             device_lnaState=4,
+            device_dabNotch=True,
+            device_rfNotch=True,
             device_bandwidthNumber=0
         )
         assert config.fs == 2000000
@@ -52,7 +54,8 @@ class TestCaptureFormConfig:
         config = CaptureFormConfig(
             fs=2000000, fc=503000000, device_type='RspDuo',
             device_agcSetPoint=-60, device_gainReductionA=40, device_gainReductionB=40,
-            device_lnaState=4, device_bandwidthNumber=0
+            device_lnaState=4, device_dabNotch=True,
+            device_rfNotch=True, device_bandwidthNumber=0
         )
         assert config.device_agcSetPoint == -60
 
@@ -60,7 +63,8 @@ class TestCaptureFormConfig:
         config = CaptureFormConfig(
             fs=2000000, fc=503000000, device_type='RspDuo',
             device_agcSetPoint=0, device_gainReductionA=40, device_gainReductionB=40,
-            device_lnaState=4, device_bandwidthNumber=0
+            device_lnaState=4, device_dabNotch=True,
+            device_rfNotch=True, device_bandwidthNumber=0
         )
         assert config.device_agcSetPoint == 0
 
@@ -69,7 +73,8 @@ class TestCaptureFormConfig:
             CaptureFormConfig(
                 fs=2000000, fc=503000000, device_type='RspDuo',
                 device_agcSetPoint=10, device_gainReductionA=40, device_gainReductionB=40,
-                device_lnaState=4, device_bandwidthNumber=0
+                device_lnaState=4, device_dabNotch=True,
+                device_rfNotch=True, device_bandwidthNumber=0
             )
         assert 'less than or equal to 0' in str(exc_info.value)
 
@@ -79,7 +84,8 @@ class TestCaptureFormConfig:
         base_kwargs = dict(
             fs=2000000, fc=503000000, device_type='RspDuo',
             device_agcSetPoint=-50, device_gainReductionA=40, device_gainReductionB=40,
-            device_lnaState=4, device_bandwidthNumber=0
+            device_lnaState=4, device_dabNotch=True,
+            device_rfNotch=True, device_bandwidthNumber=0
         )
 
         # Valid: minimum
@@ -106,7 +112,8 @@ class TestCaptureFormConfig:
         config = CaptureFormConfig(
             fs=2000000, fc=503000000, device_type='RspDuo',
             device_agcSetPoint=-50, device_gainReductionA=40, device_gainReductionB=40,
-            device_lnaState=1, device_bandwidthNumber=0
+            device_lnaState=1, device_dabNotch=True,
+            device_rfNotch=True, device_bandwidthNumber=0
         )
         assert config.device_lnaState == 1
 
@@ -114,7 +121,8 @@ class TestCaptureFormConfig:
         config = CaptureFormConfig(
             fs=2000000, fc=503000000, device_type='RspDuo',
             device_agcSetPoint=-50, device_gainReductionA=40, device_gainReductionB=40,
-            device_lnaState=9, device_bandwidthNumber=0
+            device_lnaState=9, device_dabNotch=True,
+            device_rfNotch=True, device_bandwidthNumber=0
         )
         assert config.device_lnaState == 9
 
@@ -123,7 +131,8 @@ class TestCaptureFormConfig:
             CaptureFormConfig(
                 fs=2000000, fc=503000000, device_type='RspDuo',
                 device_agcSetPoint=-50, device_gainReductionA=40, device_gainReductionB=40,
-                device_lnaState=0, device_bandwidthNumber=0
+                device_lnaState=0, device_dabNotch=True,
+                device_rfNotch=True, device_bandwidthNumber=0
             )
         assert 'greater than or equal to 1' in str(exc_info.value)
 
@@ -132,7 +141,8 @@ class TestCaptureFormConfig:
             CaptureFormConfig(
                 fs=2000000, fc=503000000, device_type='RspDuo',
                 device_agcSetPoint=-50, device_gainReductionA=40, device_gainReductionB=40,
-                device_lnaState=10, device_bandwidthNumber=0
+                device_lnaState=10, device_dabNotch=True,
+                device_rfNotch=True, device_bandwidthNumber=0
             )
         assert 'less than or equal to 9' in str(exc_info.value)
 

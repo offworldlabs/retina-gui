@@ -57,6 +57,8 @@ class ConfigManager:
             'device_gainReductionA': gain_reduction_a,
             'device_gainReductionB': gain_reduction_b,
             'device_lnaState': device.get('lnaState'),
+            'device_dabNotch': device.get('dabNotch'),
+            'device_rfNotch': device.get('rfNotch'),
             'device_bandwidthNumber': device.get('bandwidthNumber'),
         }
 
@@ -71,6 +73,8 @@ class ConfigManager:
                 'agcSetPoint': flat.get('device_agcSetPoint'),
                 'gainReduction': [flat.get('device_gainReductionA'), flat.get('device_gainReductionB')],
                 'lnaState': flat.get('device_lnaState'),
+                'dabNotch': flat.get('device_dabNotch', False),
+                'rfNotch': flat.get('device_rfNotch', False),
                 'bandwidthNumber': flat.get('device_bandwidthNumber'),
             }
         }
@@ -179,7 +183,15 @@ class ConfigManager:
             elif key.startswith('retina_tracker.'):
                 retina_tracker[key[15:]] = parsed  # Remove 'retina_tracker.' prefix
 
-        # Unchecked checkboxes are not posted.
+        # Handle unchecked checkboxes (they don't get submitted)
+        # Only add checkbox defaults if there's other capture data (not just checkboxes)
+        capture_has_data = any(k not in ('device_dabNotch', 'device_rfNotch') for k in capture)
+        if capture_has_data:
+            if 'device_dabNotch' not in capture:
+                capture['device_dabNotch'] = False
+            if 'device_rfNotch' not in capture:
+                capture['device_rfNotch'] = False
+
         if truth and 'enabled' not in truth:
             truth['enabled'] = False
         if tar1090 and 'adsblol_fallback' not in tar1090:
