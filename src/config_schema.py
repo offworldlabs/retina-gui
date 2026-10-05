@@ -123,8 +123,8 @@ class CaptureFormConfig(BaseModel):
     device_gainReductionA: int = Field(ge=20, le=59, title="Reference Gain Reduction", description="20-59 dB, higher=less gain")
     device_gainReductionB: int = Field(ge=20, le=59, title="Surveillance Gain Reduction", description="20-59 dB, higher=less gain")
     device_lnaState: int = Field(ge=1, le=9, title="Low Noise Amplifier State", description="1=max gain, 9=min gain. RF attenuator block also used similarly to gain.")
-    device_dabNotch: bool = Field(title="DAB Notch Filter", description="Not recommended to enable unless you are sure.")
-    device_rfNotch: bool = Field(title="RF Notch Filter", description="Not recommended to enable unless you are sure.")
+    device_dabNotch: bool = Field(title="DAB Notch Filter", description="Blocks 155-235 MHz (DAB and VHF TV). Leave on unless your tower is in this range. Changing it changes signal level a lot, so recalibrate afterwards.")
+    device_rfNotch: bool = Field(title="RF Notch Filter", description="Blocks 77-115 MHz (FM radio). Leave on unless your tower is in this range. Changing it changes signal level a lot, so recalibrate afterwards.")
     device_bandwidthNumber: Literal[0, 5, 50, 100] = Field(
         title="Bandwidth Number",
         description="AGC loop bandwidth (Hz). 0 disables AGC: gain is fixed by Gain Reduction/LNA State. "
