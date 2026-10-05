@@ -117,7 +117,7 @@ This shapes the schema in a few ways:
 
 | Section | Fields | Notes |
 | --- | --- | --- |
-| Capture | `fs`, `fc`, `device_type` (readonly), `device_agcSetPoint`, `device_gainReductionA/B`, `device_lnaState`, `device_bandwidthNumber` | `fs` and `device_bandwidthNumber` are `Literal` selects. The notch filters are not form fields: see [Notch filters](#notch-filters). |
+| Capture | `fs`, `fc`, `device_type` (readonly), `device_agcSetPoint`, `device_gainReductionA/B`, `device_lnaState`, `device_dabNotch`, `device_rfNotch`, `device_bandwidthNumber` | `fs` and `device_bandwidthNumber` are `Literal` selects. |
 | Location | `rx_*` and `tx_*` latitude, longitude, altitude, name | All optional. See [Location: all or nothing](#location-all-or-nothing). |
 | ADS-B truth | `enabled`, `tar1090`, `adsb2dd`, `delay_tolerance`, `doppler_tolerance` | Stored under `truth.adsb`. |
 | tar1090 | `adsb_source_host/port/protocol`, `adsblol_fallback`, `adsblol_radius` | See [ADS-B source](#ads-b-source). |
@@ -152,23 +152,6 @@ There is no per-tuner LNA state in the form or the schema.
 
 `device_bandwidthNumber` is the AGC loop bandwidth: 0 disables AGC so gain is fixed by the gain
 reduction and LNA state fields; 5, 50 and 100 enable it.
-
-## Notch filters
-
-The RSPduo's two hardware notch filters, `capture.device.dabNotch` and `capture.device.rfNotch`,
-are not user settings and the form does not show them. retina-node's config-merger derives both
-from the final `capture.fc` on every merge: a notch is on unless the capture band overlaps its
-stopband (RF 77-115 MHz, DAB 155-235 MHz). The merger overwrites whatever `user.yml` holds, so a
-value written there would be ignored.
-A node whose `fc` sits inside a stopband has that notch turned off, so its signal arrives 20-30 dB
-stronger than before. Gain set while the notch was on may then overload the front end: lower it, or
-run Auto-Calibrate again.
-
-The form used to carry them as "DAB Notch Filter" and "RF Notch Filter" checkboxes. A `user.yml`
-written then may still hold the keys. That is harmless: the merger overwrites them, and the next
-Save drops them, because `save_config` only keeps the capture keys the form posts (see
-[Override computation](#override-computation)). `/calibrate/apply` and `/towers/select` copy the
-existing `capture` section and so leave any old keys in place, equally harmlessly.
 
 ## Validation
 
@@ -237,10 +220,8 @@ Apply changes (submit)
 `truth.`, `tar1090.`, `retina_tracker.`). Values are typed by their shape, not by the schema:
 `true`/`false`/`on` become booleans, strings containing `.` are tried as floats, others as ints,
 and anything that fails stays a string. Empty strings are dropped. Unchecked checkboxes are not
-posted, so the parser fills `truth.enabled` and `tar1090.adsblol_fallback` with `False` when the
-rest of their section was posted. Posted keys that no schema field declares, such as the old
-`capture.device_dabNotch` from a stale page, are parsed but never reach `user.yml`:
-`unflatten_capture_from_form` builds the nested capture section from a fixed key list.
+posted, so the parser fills `device_dabNotch`, `device_rfNotch`, `truth.enabled` and
+`tar1090.adsblol_fallback` with `False` when the rest of their section was posted.
 
 ### Override computation
 
