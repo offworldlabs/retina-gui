@@ -298,7 +298,10 @@ current transmitter fields. It updates on preset picks, hand edits and add/remov
 ## Signal peak meter
 
 The Capture section shows a live peak level for each tuner (Reference / A, Surveillance / B),
-polled every second from `/config/rf-status`, which proxies blah2's `/capture/rf-status`.
+polled every second from `/config/rf-status`. That route returns blah2's `/capture/rf-status`
+(the peaks), plus the overload flags and onset counts from `/capture/overload-status` while they
+are fresh (see [Overload indicator](#overload-indicator)). blah2_api keeps the two on separate
+endpoints; the meter is the one consumer that needs both, so the route merges them.
 
 - Scale -60 to 0 dBFS in 24 segments; 0 dBFS is saturated.
 - PPM-style ballistics: instant attack up to a louder report, decay at 14 dB/s toward a quieter one.
@@ -308,30 +311,90 @@ polled every second from `/config/rf-status`, which proxies blah2's `/capture/rf
   that low, so anything at or below -89 dBFS is treated as no data.
 - Missing data alone is not an alarm: blah2 is stopped on purpose in spectrum and SDRconnect modes,
   and a dropped poll or container restart is normal. The meter shows "no signal" only when
-  `/api/mode` says radar and data has been missing for 4 s or more (for example after an
-  overload-induced device crash). The mode is only fetched while data is missing.
+  `/api/mode` says radar and data has been missing for 4 s or more (for example a hung SDRplay
+  service or an unplugged SDR). The mode is only fetched while data is missing.
+
+### Overload indicator
+
+A tuner's value reads **overload** in red, in place of its dBFS figure, while either holds:
+
+- its overload flag has stayed set for 3 s (`OVERLOAD_HOLD_MS`), so a momentary clip does not
+  flicker the label, or
+- the tuner has had 3 or more overload onsets within the last 60 s (`CLIP_ONSETS`,
+  `CLIP_WINDOW_MS`). The RSPduo clips and recovers faster than the flag can be sampled: a whole
+  episode can pass with every reading of the flag false, and only blah2's onset count shows it.
+
+How the onsets are tallied:
+
+- Each poll adds the rise in the tuner's onset count since the previous poll, so a single poll
+  where the count jumped by 3 is enough.
+- The first poll after the page loads is the baseline. Onsets from before the page was opened do
+  not count, however many blah2 has recorded.
+- A drop in the count is a restarted blah2 counting from 0 again, and is taken as a new baseline.
+- A blah2 that does not report counts (older than the onset counters) leaves only the flag rule.
+
+When it clears: on the flag rule, as soon as the flag drops. On the onset rule, once fewer than 3
+onsets remain inside the last 60 s, so the label can stay up to a minute after the last clip. That
+is deliberate: a radar clipping every few seconds is overloaded, even though every individual
+reading between clips looks clean. The ladder itself still shows the peak level throughout.
+
+The flag comes from the SDRplay API's own overload detector, separate from the peak. They usually
+agree: measured on a test node with a strong tower and the DAB notch off, the overloaded tuner's
+peak sat at about -2 dBFS. But the flag is the authoritative signal, so the label does not wait
+for the peak to reach the top of the scale.
+
+`/config/rf-status` only passes the overload state through while blah2_api received it within the
+last 10 s (`OVERLOAD_STALE_MS` in `routes/config.py`). blah2 re-posts it at least every 2 s, so an
+older state means blah2 has stopped, and a last-known "overloaded" must not keep showing. It skips
+the overload lookup altogether when there are no peaks, since the meter is then on its no-signal
+path.
+
+### Overload help
+
+While either tuner reads as overloaded, a yellow box under the meter says which input is clipping
+("the Reference input (Tuner A)", "the Surveillance input (Tuner B)" or "both inputs") and what to
+do: run Quick Calibrate to find the most sensitive settings that do not overload, or restart on
+the safest settings to stop it straight away. It shows and hides with the meter's label, by the
+rules in [Overload indicator](#overload-indicator). Its **Quick Calibrate** button opens the
+same run as the button above it, and **Use safe settings** behaves as in
+[No-signal help](#no-signal-help). It stays hidden while a calibration or an apply runs: a
+calibration overloads the radio on purpose while it searches, and an apply restarts it.
+
+Why the page needs this: until blah2-arm#79, an overload while blah2 applied its start-up gains,
+or during a live retune onto a strong tower, deadlocked the SDRplay API. blah2 exited, the
+service hung, and the meter showed "no signal", so the No-signal help was in practice the overload
+help. blah2 now acknowledges overloads outside the API's event callback, so an overloaded radio
+keeps streaming. Without this box it would run clipped, with degraded detections, and nothing on
+the page would prompt the owner to act.
 
 ### No-signal help
 
-When "no signal" has lasted 60 s, a yellow box under the meter tells the owner what to do:
-check the USB cable, restart on the safest settings, then run Quick Calibrate once a signal is
-back, and contact support if nothing helps. Its **Use safe settings** button sets both gain
-reductions to 59 and the LNA state to 9 (`calibrator.GAIN_REDUCTION_MAX` and `LNA_STATE_MAX`,
-which the page script mirrors in `SAFE_SETTINGS`) and submits the form, so it takes the normal
-[save and apply](#save-and-apply) path. If the page already has unsaved changes, it asks first,
-because they are submitted with it.
+When "no signal" has lasted 60 s, a yellow box under the meter tells the owner what to do: check
+the USB cable, restart the radar, and if there is still no signal, restart on the safest settings
+and then run Quick Calibrate once a signal is back. If nothing helps, contact support.
+
+- **Restart radar** reloads the page with `?saved=1`, which runs the page's normal
+  [apply](#apply) on the saved settings: config-merger, a forced `sdrplay_apiService` restart, the
+  settle window and a container recreate, with progress on the Apply button. If the page has
+  unsaved changes, it asks first, because the reload discards them.
+- **Use safe settings** sets both gain reductions to 59 and the LNA state to 9
+  (`calibrator.GAIN_REDUCTION_MAX` and `LNA_STATE_MAX`, which the page script mirrors in
+  `SAFE_SETTINGS`) and submits the form, so it takes the normal [save and apply](#save-and-apply)
+  path. If the page already has unsaved changes, it asks first, because they are submitted with it.
 
 Why it says this and not something more specific:
 
-- **"No signal" cannot say why.** Once blah2 stops delivering samples, an unplugged USB cable,
-  a wedged SDRplay service and a device that crashed on overload look the same from here. The
-  advice has to cover all of them, so it does not call the receiver overloaded.
-- **A plain restart is not enough.** An apply restarts on the same config, so a tuning that
-  overloads the radio when the stack starts would take it down again. The cron watchdog also
-  already restarts the stack every 5 minutes while blah2 crash-loops, so by the time the box shows,
-  a restart has usually been tried. Restarting on 59/59/9 also removes overload as a cause. The LNA
-  state matters most: a node near a strong tower can overload at 59/59 with a sensitive LNA state.
-- **The safe settings are almost deaf.** That is why the next step is Quick Calibrate.
+- **"No signal" cannot say why.** Once blah2 stops delivering samples, an unplugged USB cable, a
+  hung SDRplay service and a blah2 that failed for some other reason look the same from here.
+- **A restart comes before safe settings.** The usual cause of a hung service is now something
+  other than overload, and the apply's forced service restart and settle clear it. The cron
+  watchdog restarts the stack every 5 minutes while blah2 crash-loops, but without a settle window,
+  so a restart from this page is still worth trying.
+- **Safe settings are still the next step.** A node on a blah2 older than blah2-arm#79 still goes
+  down when it overloads at start-up, and restarts on the same tuning go down again. Restarting on
+  59/59/9 removes overload as a cause. The LNA state matters most: a node near a strong tower can
+  overload at 59/59 with a sensitive LNA state.
+- **The safe settings are almost deaf.** That is why Quick Calibrate follows.
 - **It waits 60 s and stays hidden while a calibration or an apply runs**, because each of those
   restarts the radar and shows "no signal" for 30-60 s. `/calibrate/status` and
   `/config/apply/status` are only fetched once the minute has passed, not on every poll.

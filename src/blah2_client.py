@@ -50,8 +50,9 @@ class Blah2Client:
         return self._get_json("/capture/retune/status")
 
     def get_overload_status(self):
-        """Per-tuner RF overload state: {overloadA, overloadB, timestamp}.
-        Deliberately separate from /capture/rf-status (the peak-dBFS meter)."""
+        """Per-tuner RF overload state: {overloadA, overloadB, timestamp,
+        receivedAt, overloadCountA, overloadCountB}. Separate from
+        /capture/rf-status, which carries only the peaks."""
         return self._get_json("/capture/overload-status")
 
     def get_detection(self):
@@ -65,6 +66,6 @@ class Blah2Client:
         return self._get_json("/api/adsb2dd")
 
     def get_rf_status(self):
-        """Per-tuner RF overload state + peak dBFS: {overloadA, overloadB,
-        peakDbfsA, peakDbfsB, timestamp}."""
+        """Per-tuner peak dBFS: {peakDbfsA, peakDbfsB, timestamp, receivedAt}.
+        No overload state: that is get_overload_status()."""
         return self._get_json("/capture/rf-status")

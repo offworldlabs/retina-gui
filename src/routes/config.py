@@ -1,3 +1,5 @@
+import time
+
 from flask import Blueprint, jsonify, redirect, render_template, request, url_for
 from pydantic import ValidationError
 
@@ -110,11 +112,26 @@ def config_page():
                            ssh_keys=ssh_keys.get_keys())
 
 
+# blah2 re-posts its overload state at least every 2 s, so an older one means
+# blah2 has stopped and the state is unknown, not current.
+# See docs/features/config-editor.md#overload-indicator
+OVERLOAD_STALE_MS = 10_000
+_OVERLOAD_KEYS = ('overloadA', 'overloadB', 'overloadCountA', 'overloadCountB')
+
+
 @bp.route("/config/rf-status")
 def rf_status():
-    """Live per-tuner RF overload + peak dBFS, proxied from blah2's API."""
+    """Live per-tuner peak dBFS, plus the overload flags and onset counts while
+    they are fresh, from blah2's API."""
     from app import blah2_client
-    return jsonify(blah2_client.get_rf_status() or {})
+    status = blah2_client.get_rf_status() or {}
+    if status:
+        overload = blah2_client.get_overload_status() or {}
+        received = overload.get('receivedAt')
+        if (isinstance(received, (int, float))
+                and time.time() * 1000 - received <= OVERLOAD_STALE_MS):
+            status.update({k: overload[k] for k in _OVERLOAD_KEYS if k in overload})
+    return jsonify(status)
 
 
 @bp.route("/ssh-keys", methods=["POST"])

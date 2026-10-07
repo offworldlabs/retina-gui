@@ -164,9 +164,14 @@ abort the whole multi-tower run. A wedge is, if anything, a stronger signal that
   an aborted run, and the following retune surfaces the problem anyway.
 - Any `device_error` in a tower's `descent` or `gains_tried` log marks the whole tower entry `device_error`.
 
-Once the SDRplay API starts returning `ServiceNotResponding` (what a hard overload looks like from outside) it keeps doing
-so, so a live retune cannot rescue a wedged device. Only a restart from a safe config works, which is what the preflight's
-recovery branch does.
+Once the SDRplay API starts returning `ServiceNotResponding` it keeps doing so, so a live retune cannot rescue a wedged
+device. Only a restart from a safe config works, which is what the preflight's recovery branch does.
+
+`ServiceNotResponding` used to be read as what a hard overload looks like from outside. Most of it was a blah2 bug, fixed
+in blah2-arm#79: blah2 acknowledged each overload from inside the SDRplay API's event callback, which deadlocked the API
+whenever another Update was in flight. Overloads arrive at exactly those moments, such as a frequency change onto a strong
+tower from a sensitive gain. With the fix, a candidate that overloads reads as a clean overload instead of a device error.
+The handling above stays, because a node can still run an older blah2, and a device can wedge for other reasons.
 
 ## Retune protocol
 

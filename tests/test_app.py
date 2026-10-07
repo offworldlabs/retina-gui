@@ -219,7 +219,15 @@ class TestConfigPageRoute:
         """The meter script reveals it; the page must not show it on load."""
         response = app_client.get('/config')
         assert b'id="noSignalHelp" style="display:none;' in response.data
-        assert b'id="useSafeSettingsBtn"' in response.data
+        assert b'id="restartRadarBtn"' in response.data
+        assert b'data-safe-settings' in response.data
+
+    def test_overload_help_starts_hidden(self, app_client):
+        """The meter script reveals it while a tuner stays overloaded."""
+        response = app_client.get('/config')
+        assert b'id="overloadHelp" style="display:none;' in response.data
+        assert b'id="overloadQuickCalBtn"' in response.data
+        assert response.data.count(b'data-safe-settings>Use safe settings') == 2
 
     def test_safe_settings_are_the_least_sensitive_the_form_accepts(self):
         """Use safe settings fills these fields and submits. A renamed field
@@ -789,6 +797,64 @@ class TestApplyConfigRoute:
         data = json.loads(response.data)
         assert data['phase'] == 'settling'
         assert data['settle_remaining'] == 12
+
+
+class TestRfStatusRoute:
+    """/config/rf-status feeds the signal peak meter: blah2's peaks, plus its
+    overload flags and onset counts while they are fresh. A stale overload
+    state means blah2 has stopped, so it must not read as a live overload.
+    See docs/features/config-editor.md#overload-indicator."""
+
+    PEAKS = {'peakDbfsA': -2.0, 'peakDbfsB': -23.0, 'timestamp': 1, 'receivedAt': 1}
+
+    def _get(self, app_client, rf, overload):
+        import app as app_module
+        with patch.object(app_module, 'blah2_client') as client:
+            client.get_rf_status.return_value = rf
+            client.get_overload_status.return_value = overload
+            response = app_client.get('/config/rf-status')
+        assert response.status_code == 200
+        return json.loads(response.data), client
+
+    def _overload(self, age_ms):
+        import time
+        return {'overloadA': True, 'overloadB': False, 'timestamp': 1,
+                'receivedAt': time.time() * 1000 - age_ms,
+                'overloadCountA': 4, 'overloadCountB': 0}
+
+    def test_fresh_overload_state_is_merged_with_the_peaks(self, app_client):
+        data, _ = self._get(app_client, dict(self.PEAKS), self._overload(1000))
+        assert data['peakDbfsA'] == -2.0
+        assert data['overloadA'] is True
+        assert data['overloadB'] is False
+        assert data['overloadCountA'] == 4
+        assert data['overloadCountB'] == 0
+
+    def test_stale_overload_state_is_left_out(self, app_client):
+        data, _ = self._get(app_client, dict(self.PEAKS), self._overload(60_000))
+        assert data['peakDbfsA'] == -2.0
+        assert 'overloadA' not in data
+        assert 'overloadCountA' not in data
+
+    def test_overload_state_without_a_receipt_time_is_left_out(self, app_client):
+        overload = self._overload(0)
+        del overload['receivedAt']
+        data, _ = self._get(app_client, dict(self.PEAKS), overload)
+        assert 'overloadA' not in data
+
+    def test_older_blah2_without_counts_still_reports_the_flags(self, app_client):
+        overload = self._overload(0)
+        del overload['overloadCountA'], overload['overloadCountB']
+        data, _ = self._get(app_client, dict(self.PEAKS), overload)
+        assert data['overloadA'] is True
+        assert 'overloadCountA' not in data
+
+    def test_no_peaks_means_no_overload_lookup(self, app_client):
+        """With no peak data the meter is in its no-signal path, so a second
+        call to a blah2_api that may be down would only add a timeout."""
+        data, client = self._get(app_client, None, self._overload(0))
+        assert data == {}
+        client.get_overload_status.assert_not_called()
 
 
 class TestNavigationLockedToConfigDuringCalibration:
