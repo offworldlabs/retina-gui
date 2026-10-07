@@ -210,9 +210,9 @@ class TestBothSurfacesRender:
         page = app_client.get('/config').data.decode()
 
         assert 'id="contact" class="cfg-section"' in page
-        assert '<h2>How we reach you</h2>' in page
+        assert '<h2>How We Reach You</h2>' in page
         assert 'contactSaveBtn' in page
-        assert '<a href="#contact">How we reach you</a>' in page, \
+        assert '<a href="#contact">How We Reach You</a>' in page, \
             "a section nobody can navigate to is only half a section"
 
     def test_the_config_page_prefills_what_is_stored(self, app_client):

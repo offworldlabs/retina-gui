@@ -11,7 +11,7 @@ A node's GUI can be reached two ways: from its own network (the LAN pathway), an
 | [mender_connect.py](../../src/mender_connect.py) | `MenderConnect`: enforces the shell agreement by editing `mender-connect.conf` and restarting the daemon. |
 | [ssh_keys.py](../../src/ssh_keys.py) | `SSHKeyManager`: validates and stores public keys in the `authorized_keys` file sshd trusts. |
 | [routes/remote_access.py](../../src/routes/remote_access.py) | `/login`, `/logout`, and the `/remote-access/*` controls (toggle, shell, password, generate). |
-| [routes/config.py](../../src/routes/config.py) | `/ssh-keys` add and delete routes, and the context processor that feeds the Remote support section of the config page. |
+| [routes/config.py](../../src/routes/config.py) | `/ssh-keys` add and delete routes, and the context processor that feeds the Remote Support section of the config page. |
 | [app.py](../../src/app.py) | `_gate_the_remote_pathways` (the before-request gate), `_PathwaySessionInterface` (cookie flags per pathway), `_reapply_shell_agreement` and the startup `publish_marker` call. |
 | [services.py](../../src/services.py) | Builds the shared instances and defines `REMOTE_ACCESS_DOMAIN`. |
 | [login.html](../../templates/login.html) | Password prompt for the deferred owner-password design. |

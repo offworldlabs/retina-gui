@@ -165,7 +165,7 @@ def test_the_config_page_shows_this_node_s_own_address(app_client):
 
 
 def test_renaming_is_not_offered_on_the_home_page(app_client):
-    """It lives under Administration on the config page, with the other
+    """It lives in the Identifiers section of the config page, with the other
     settings that save on their own rather than with the config form."""
     body = app_client.get("/", headers={"Host": "ret7a000001.local"}).data.decode()
     assert "nodeNameInput" not in body

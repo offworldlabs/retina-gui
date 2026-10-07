@@ -1,7 +1,8 @@
 # Config editor
 
-The `/config` page is a form over the node's radar configuration (capture, location, ADS-B truth,
-tar1090 and retina-tracker settings) plus a set of administration panels that save on their own.
+The `/config` page is a form over the node's radar configuration (capture, location, ADS-B Truth,
+tar1090 and retina-tracker settings) plus a set of panels that save on their own. See
+[Page layout](#page-layout) for how the two are arranged.
 The radar fields are generated from Pydantic models, display the merged `config.yml` that the stack
 is actually running, and write only the user's overrides to `user.yml`. Saving is followed
 automatically by an apply, which runs retina-node's config-merger and restarts the stack.
@@ -14,8 +15,8 @@ automatically by an apply, which runs retina-node's config-merger and restarts t
 | [src/config_manager.py](../../src/config_manager.py) | `ConfigManager`: reads `config.yml` and `user.yml`, flattens nested YAML into form fields and back, parses the posted form, computes the overrides to write. |
 | [src/form_utils.py](../../src/form_utils.py) | `schema_to_form_fields`: turns a Pydantic model plus current values into the field dicts the template renders. Works on Pydantic v1 and v2. |
 | [src/routes/config.py](../../src/routes/config.py) | Blueprint: `/config`, `/config/save`, `/config/apply`, `/config/apply/status`, `/config/rf-status`, plus `/ssh-keys`, `/ssh-keys/delete` and `/node-name`. Cross-field validation (location, ADS-B source). |
-| [templates/config.html](../../templates/config.html) | The page: `render_field` macro, hand-built Location and tar1090 sections, tower presets, mode switch, save bar, auto-apply, peak meter, Auto-Calibrate modal, administration panels. |
-| [src/routes/towers.py](../../src/routes/towers.py) | `/towers/cache/add` and `/towers/cache/remove`, used by the Tower section. |
+| [templates/config.html](../../templates/config.html) | The page: `render_field` macro, hand-built Tower and tar1090 sections, tower presets, mode switch, save bar, auto-apply, peak meter, Auto-Calibrate modal, administration panels. |
+| [src/routes/towers.py](../../src/routes/towers.py) | `/towers/cache/add` and `/towers/cache/remove`, used by the Cached Towers section. |
 | [static/calibrate.js](../../static/calibrate.js) | `RetinaCalibrate`, shared with the setup wizard's calibrate step. |
 | retina-node `config-merger/script/merge_config.py` | Builds `config.yml` from `default.yml`, `user.yml` and `forced.yml` (separate repo). |
 
@@ -96,7 +97,7 @@ type (a port rendered as a text box). The repo's ruff config enforces `X | None`
 
 The `render_field` macro in `config.html` draws each dict. A readonly text field is shown locked
 with a hidden input so its value still posts; a readonly checkbox posts through a hidden input too.
-Location and tar1090 are hand-built rather than rendered through the macro (see
+Tower and tar1090 are hand-built rather than rendered through the macro (see
 [Validation](#validation) for what that costs).
 
 The Pydantic `Field(description=...)` strings are UI copy. Changing them changes the page.
@@ -113,15 +114,85 @@ This shapes the schema in a few ways:
   checks such as `CONTACT_COUNTRY_PATTERN` and `CLAIM_EMAIL_PATTERN` are applied in
   `routes/setup.py`. Length caps are portable and stay on the model.
 
+## Page layout
+
+The side nav and the page share one order, in five groups:
+
+| Group | Sections | Saved by |
+| --- | --- | --- |
+| Node | Identifiers, Mode, Node Claim, Network | Each on its own (Mode on Apply changes, see [Mode switch](#mode-switch)) |
+| Radar | Cached Towers, Tower, Capture, Tracking | Apply changes |
+| ADS-B | ADS-B Truth, tar1090 | Apply changes |
+| Other | SSH Access, Setup Wizard | Each on its own |
+| Support | Cloud Services, Remote Support, How We Reach You | Each on its own |
+
+The groups are how an owner thinks about the node (what it is, what it listens to, what it is
+checked against, who can help with it), not how the settings are stored. Support is last: it is
+set once and rarely revisited.
+
+`#configForm`, the form Apply changes submits, wraps the Radar and ADS-B groups and nothing else.
+Every other section has inputs or forms of its own, so it has to stay outside: a form cannot
+contain another form, and an Enter key in a contact box would otherwise submit the radar settings.
+A new section that saves on its own goes in a group outside the form, and a new radar section
+goes inside it, or its fields are silently left out of the POST, which the server reads as those
+settings having been cleared. `tests/test_config_layout.py` checks both.
+
+Each group's title is also in the page itself, above the group's first section: an `h2.cfg-group`
+with a rule running out to the right edge, so the page shows where one group ends and the next
+starts without the side nav (which is hidden on a narrow window). The side nav's own group
+titles carry the same rule, so they read as dividers and not as one more link. The titles are written twice,
+in the side nav and in the page, and `tests/test_config_layout.py` holds both to the same list.
+
+Section names are in title case (Node Claim, SSH Access), the same in the side nav, on the
+section's own heading and wherever the page or the setup wizard points an owner at a section.
+
+The scrollspy at the bottom of `config.html` lists the section ids in page order and marks the
+first one on screen as active, so a section added to the page has to be added there as well.
+A link that has just been clicked stays active until the owner scrolls by hand: the last
+sections on the page are short, so the page cannot scroll them to the top, and "first one on
+screen" would light up an earlier section than the one that was asked for.
+A side-nav click scrolls its section to the top of the window; `scroll-margin-top` on
+`.cfg-section` stops it short of the sticky banner, which would otherwise cover the heading.
+A group's first section stops a little lower still, so its group title stays in view above it.
+
 ## Sections and schema models
 
 | Section | Fields | Notes |
 | --- | --- | --- |
-| Capture | `fs`, `fc`, `device_type` (readonly), `device_agcSetPoint`, `device_gainReductionA/B`, `device_lnaState`, `device_dabNotch`, `device_rfNotch`, `device_bandwidthNumber` | `fs` and `device_bandwidthNumber` are `Literal` selects. |
-| Location | `rx_*` and `tx_*` latitude, longitude, altitude, name | All optional. See [Location: all or nothing](#location-all-or-nothing). |
-| ADS-B truth | `enabled`, `tar1090`, `adsb2dd`, `delay_tolerance`, `doppler_tolerance` | Stored under `truth.adsb`. |
+| Cached Towers | none of its own | Fills in the Tower section's fields and edits the tower cache. See [Tower presets](#tower-presets). |
+| Tower | `rx_*` and `tx_*` latitude, longitude, altitude, name, and Capture's `fc` | The location model's fields plus the center frequency. See [Tower section](#tower-section). |
+| Capture | `fs`, `device_type` (readonly), `device_agcSetPoint`, `device_gainReductionA/B`, `device_lnaState`, `device_dabNotch`, `device_rfNotch`, `device_bandwidthNumber` | `fs` and `device_bandwidthNumber` are `Literal` selects. `fc` belongs to this model but is shown in the Tower section. |
+| ADS-B Truth | `enabled`, `tar1090`, `adsb2dd`, `delay_tolerance`, `doppler_tolerance` | Stored under `truth.adsb`. |
 | tar1090 | `adsb_source_host/port/protocol`, `adsblol_fallback`, `adsblol_radius` | See [ADS-B source](#ads-b-source). |
-| Retina Tracker | `min_snr` | Tunes the retina-tracker sidecar, not blah2's built-in tracker (`process.tracker`). Reaches the sidecar via config-merger's `retina-tracker.yaml`. |
+| Tracking | `min_snr` | Tunes the retina-tracker sidecar, not blah2's built-in tracker (`process.tracker`). Reaches the sidecar via config-merger's `retina-tracker.yaml`. Its own section, straight after Capture: it governs what is done with detections afterwards, not how the signal is captured. Posted as `retina_tracker.min_snr`. |
+
+### Tower section
+
+The section titled Tower is the `location` part of the config: where the receiver stands and
+which transmitter it listens to. It is named for what an owner is choosing there, the tower. Its
+fields are the location model's (all optional, see [Location: all or nothing](#location-all-or-nothing)),
+with the receiver name read-only (see [Receiver name](#receiver-name)).
+
+The center frequency is shown here too, in the Transmitter block between the tower's name and
+its latitude, because it is a property of the tower: picking a different tower changes it along
+with the coordinates. It is still a capture setting. The input is named `capture.fc`, the Capture
+loop in `config.html` skips it, and it is validated by `CaptureFormConfig` and stored under
+`capture`, so nothing on the server knows it moved.
+
+The section that lists the wizard's search results, and was called Tower before, is Cached Towers
+(see [Tower presets](#tower-presets)).
+
+### Receiver name
+
+The receiver is the node, so `location.rx.name` is not a second name to keep. The Tower
+section shows the node's name (set under Identifiers) read-only, and posts it as
+`location.rx_name` in a hidden field, so Apply changes writes it to the radar config. An unnamed
+node goes by its node ID, which is also what the setup wizard writes (`/towers/select`).
+
+Renaming the node under Identifiers saves at once and updates what Tower shows and will post,
+but the radar config's copy only changes with the next Apply changes. Nothing reads that copy to
+address the node, so the lag is harmless; it is not worth a stack restart on every rename, which
+is what keeping the two in step immediately would cost.
 
 ### Transmitter name length
 
@@ -161,9 +232,9 @@ A special `_form` key carries a message that belongs to no field. On any error t
 re-rendered from the submitted values (not from disk), so the user's input is kept.
 
 The banner at the top shows `config_errors['_form']` if present, otherwise "Please fix the
-highlighted fields below". The `render_field` macro highlights its own field. The Location and
+highlighted fields below". The `render_field` macro highlights its own field. The Tower and
 tar1090 sections are hand-built, so every input in them looks up its own `config_errors` key.
-Without that the banner claimed fields were highlighted when none were. All eight Location inputs
+Without that the banner claimed fields were highlighted when none were. All nine Tower inputs (the eight location fields and the center frequency)
 are wired, not only the ones that can fail today, so a future constraint cannot silently
 reintroduce the problem.
 
@@ -261,7 +332,7 @@ for the apply service.
 
 | Guard | Where | Why |
 | --- | --- | --- |
-| Setup wizard in progress | `routes/config.py:_check_wizard_not_active` redirects every route in the blueprint to `/set-up`, except `/config/apply/status` | The wizard's tower step polls that status. A redirect would hand `fetch()` an HTML page: the request succeeds, `.json()` rejects, and the step re-polls forever with its spinner up and skip button hidden. Matched exactly, not by prefix, because `/config/apply` and `/config/save` mutate and must stay blocked. The same rule applies to `_CALIBRATION_ALLOWED_PREFIXES` in `app.py`. |
+| Setup Wizard in progress | `routes/config.py:_check_wizard_not_active` redirects every route in the blueprint to `/set-up`, except `/config/apply/status` | The wizard's tower step polls that status. A redirect would hand `fetch()` an HTML page: the request succeeds, `.json()` rejects, and the step re-polls forever with its spinner up and skip button hidden. Matched exactly, not by prefix, because `/config/apply` and `/config/save` mutate and must stay blocked. The same rule applies to `_CALIBRATION_ALLOWED_PREFIXES` in `app.py`. |
 | Auto-Calibrate running | `/config/save` (form-level error) and `ApplyService.request()` (raises `ConfigChangeRefused`, 409) | The save is refused as well as the apply. Guarding only the apply would leave changes in `user.yml` that were never applied, and they would be swept silently into the next merge, including the one `/calibrate/apply` runs after a successful calibration. The apply check lives in `request()` so no future route can skip it. |
 | Mender install in progress | `/config/apply`, 409 | The install replaces the compose manifests config-merger runs against, and mender-update's own docker commands are outside the restart lock, so the two can genuinely run at once. The apply would also report success while skipping the restart, since the install sets `mode.txt` to `spectrum`. An install can end in rollback or reboot, so the user is asked to retry rather than having the apply held across it. |
 | retina-node missing | `/config/apply`, 400 | Nothing to apply to. |
@@ -280,7 +351,7 @@ value read back after setting it, so a select that rejects a value is not record
 
 ## Tower presets
 
-The Tower section offers the towers cached by the setup wizard's search (`towers-cache.json`, read
+The Cached Towers section offers the towers cached by the setup wizard's search (`towers-cache.json`, read
 through `device_state.get_towers_cache`). Two different save models share the section:
 
 - **Picking a preset** only fills form fields: `location.tx_name` (callsign, else name),
@@ -450,7 +521,7 @@ Vocabulary and interpretation shared with the wizard (phase labels, `diagnose`, 
 
 ### Adopting the persisted values
 
-The Capture and Location fields were rendered from `config.yml` before the run, so after a save
+The Capture and Tower fields were rendered from `config.yml` before the run, so after a save
 they show the old tuning. That is not only confusing (a user saw the calibrated gains in the modal
 and the old ones in the form), it is destructive: Save posts every field. Before the merge finishes,
 `config.yml` still holds the old values, so the stale submission matches it and
@@ -466,27 +537,31 @@ save bar does not claim changes that are already on disk.
 
 ## Administration sections
 
-Everything after the radar form (`#configForm` closes after Retina Tracker) saves on its own
-endpoint, immediately, and is not part of Apply changes.
+Everything that is not a radar field saves on its own endpoint, immediately, and is not part of
+Apply changes. These sections are spread across the Node, Support and Other groups (see
+[Page layout](#page-layout)); what they share is how they save.
 
-| Section | Endpoint | Notes |
-| --- | --- | --- |
-| This node | `POST /node-name` | See below. |
-| SSH access | `POST /ssh-keys`, `/ssh-keys/delete` | Form posts that redirect back to `/config`. |
-| Remote support | `/remote-access/toggle`, `/remote-access/shell` | Two independent toggles. |
-| How we reach you | `POST /set-up/contact` | Optional owner contact details. |
-| Node claim | `POST /set-up/claim` | The address that owns the node. |
-| Cloud services | (page script) | Disabling also switches off Remote support. |
-| Setup wizard | link to `/set-up` | |
-| Network | (page script) | Status, scan, manual entry, connect. |
+| Section | Group | Endpoint | Notes |
+| --- | --- | --- | --- |
+| Identifiers | Node | `POST /node-name` | See below. |
+| Node Claim | Node | `POST /set-up/claim` | The address that owns the node. |
+| Network | Node | (page script) | Status, scan, manual entry, connect. |
+| SSH Access | Other | `POST /ssh-keys`, `/ssh-keys/delete` | Form posts that redirect back to `/config`. |
+| Setup Wizard | Other | link to `/set-up` | |
+| Cloud Services | Support | (page script) | Disabling also switches off Remote Support. |
+| Remote Support | Support | `/remote-access/toggle`, `/remote-access/shell` | Two independent toggles. |
+| How We Reach You | Support | `POST /set-up/contact` | Optional owner contact details. |
 
-The Remote support, contact and claim template variables come from the blueprint's context
+The Remote Support, contact and claim template variables come from the blueprint's context
 processor `_remote_access_context`, not from each `render_template` call. `config.html` has two
 render points (`/config` and the validation-error branch of `/config/save`), and passing the same
 arguments by hand is how the second one once shipped without them. A context processor cannot drift
 when a third render point appears.
 
-### This node
+### Identifiers
+
+The section an owner goes to for "what is this node called": its name, its address, and the two
+identifiers it is known by. Only the name can be changed.
 
 The node name is only a label. The fleet page shows it on the node's card instead of the
 `ret<node_id>` identifier, and it reaches other nodes through the DNS-SD TXT record. Nothing
@@ -496,7 +571,19 @@ The address shown is the node's own `http://<node_id>.local`, deliberately not `
 name is answered by every node on the network at once, so checking it proves only that some node is
 reachable, and on a network with more than one node it leads to the fleet list instead.
 
-### Remote support
+The two identifiers are shown together because owners meet both and need telling apart:
+
+| Shown as | Value | Where it comes from |
+| --- | --- | --- |
+| Node local identifier | `ret<8 hex>`, the `node_id` | The board's serial, through Mender's device identity. Fixed for the life of the board. It is the name in the node's address and what the node is listed by until it is named. |
+| Node server identifier | The `node_ref` | Assigned by the server when the node registers, and learned only through retina-telemetry's status document (see [device-state-and-telemetry.md](device-state-and-telemetry.md#node-reference-cache)). It is what finds the node's data on the server's views. |
+
+`_remote_access_context` passes the second as `server_node_ref`. It is `None` on a node that has
+not registered yet and on one without the telemetry package, and the page then says it has not been
+assigned rather than leaving the row blank. This is the same value the Home page's Telemetry card
+shows.
+
+### Remote Support
 
 - `remote_host` is derived as `<node_id>.<REMOTE_ACCESS_DOMAIN>`, not reported, so the page can name
   the address before anything has provisioned it.
@@ -512,11 +599,11 @@ reachable, and on a network with more than one node it leads to the fleet list i
 - The two toggles drive separate endpoints, each reverting itself on failure, and are deliberately
   not linked: the point of two settings is that changing one says nothing about the other.
 
-### How we reach you
+### How We Reach You
 
-The other half of Remote support: those settings are how support reaches the node, this is how
+The other half of Remote Support: those settings are how support reaches the node, this is how
 support reaches the owner. It is its own section because it is the only block about a person rather
-than the radar, and because the `name`/`desc`/`help` classes it used inside Remote support are only
+than the radar, and because the `name`/`desc`/`help` classes it used inside Remote Support are only
 styled within a `toggle-row`, so it rendered as unstyled text there.
 
 `ContactFormConfig` is optional and nullable throughout, and empty is the steady state: a node with
@@ -539,7 +626,7 @@ The length caps (`CONTACT_NAME_MAX_LENGTH` 64, `CONTACT_EMAIL_MAX_LENGTH` 255,
 them retina-telemetry cannot build the payload, so the whole document is refused and the owner is
 unreachable. They move only when the spec does.
 
-### Node claim
+### Node Claim
 
 **Not the contact email**, however alike the boxes look. The contact answers "whom do we ring about
 this node", is optional and grants nothing. The claim answers "who owns it": the server mails the

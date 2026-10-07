@@ -66,6 +66,9 @@ def _remote_access_context():
         'claim': device_state.get_telemetry_claim(),
         'claim_state': (telemetry or {}).get('claim'),
         'claim_reported': telemetry is not None and not (telemetry or {}).get('stale'),
+        # The server's name for this node, or None before it has registered.
+        # See docs/features/config-editor.md#identifiers
+        'server_node_ref': (telemetry or {}).get('node_ref'),
         # The *enforced* shell state, read back from mender-connect's config,
         # not what we recorded. None when that config cannot be read.
         'shell_enforced': mender_connect.is_shell_enabled(),
@@ -160,7 +163,7 @@ def set_node_name():
     """Rename this node.
 
     Only a label (fleet page, DNS-SD TXT record): nothing addresses the node
-    by it. See docs/features/config-editor.md#this-node.
+    by it. See docs/features/config-editor.md#identifiers.
     """
     from app import node_name
 

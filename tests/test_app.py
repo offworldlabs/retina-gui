@@ -88,7 +88,7 @@ class TestIndexRoute:
         """SSH keys should be on config page, not index."""
         response = app_client.get('/config')
         assert response.status_code == 200
-        assert b'SSH access' in response.data
+        assert b'SSH Access' in response.data
         assert b'Add key' in response.data
 
     def test_index_shows_version_labels(self, app_client):
@@ -167,7 +167,7 @@ class TestConfigPageRoute:
         assert response.status_code == 200
         assert b'Capture' in response.data
         assert b'Location' in response.data
-        assert b'ADS-B truth' in response.data
+        assert b'ADS-B Truth' in response.data
         assert b'tar1090' in response.data
 
     def test_config_shows_capture_values(self, app_client):
@@ -183,7 +183,10 @@ class TestConfigPageRoute:
         response = app_client.get('/config')
         assert response.status_code == 200
         assert b'37.7749' in response.data  # rx latitude
-        assert b'Example RX' in response.data  # rx name
+        # Not the stored rx name: Location shows the node's own name instead.
+        # See tests/test_config_layout.py and
+        # docs/features/config-editor.md#receiver-name
+        assert b'Example RX' not in response.data
 
     def test_config_shows_truth_values(self, app_client):
         """Truth/ADS-B values from user.yml should appear."""
