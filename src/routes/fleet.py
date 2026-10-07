@@ -41,21 +41,27 @@ def _mailto(name, address):
 PRIMER_URL = ""
 
 # Fixed links out, ordered by distance from the node: the company, the manual
-# for this box, then the two live views of the wider network.
+# for this box, the live view of the wider network (dashboard and map are one
+# site, also linked from the banner), news from the field, then the community
+# around blah2, the radar software the node runs. That Discord is theirs, not
+# Offworld Labs support, which is why it is here and not under Help.
+# Each card shows its URL's host, so a URL is written the way it should read:
+# passiveradar.com, not the www. address it redirects to.
 RESOURCES = (
     _resource("Offworld Labs", "https://offworldlabs.com", "globe"),
     _resource("Retina Wiki",
               "https://github.com/offworldlabs/owl-os/wiki/4-Troubleshooting-and-Tuning",
               "book"),
-    _resource("Retina Network Map", "https://map.retina.fm", "map"),
-    _resource("Retina Dashboard", "https://dash.retina.fm", "chart"),
+    _resource("Network Map and Dashboard", "https://app.retina.fm", "map"),
+    _resource("Passive Radar News", "https://passiveradar.com/", "news"),
+    _resource("blah2 Discord", "https://discord.gg/ewNQbeK5Zn", "chat"),
 )
 
-# Where to go when something is wrong. The Discord is the blah2 project's
-# community server, not Offworld Labs support, and is labelled as such.
+# Where to go when something is wrong: our own channels only, the Retina
+# Discord and the support address.
 # See docs/features/fleet-and-naming.md#resources-and-help-links.
 HELP = (
-    _resource("blah2 Discord", "https://discord.gg/ewNQbeK5Zn", "chat"),
+    _resource("Retina Discord", "https://discord.gg/tZHwSm3Rs", "chat"),
     _mailto("Email us", "info@offworldlabs.com"),
 )
 

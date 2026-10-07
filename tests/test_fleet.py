@@ -160,13 +160,33 @@ def test_the_summary_tab_has_no_node_mark(app_client, fleet):
     assert "nav-tab-icon" not in summary[0]
 
 
-# ── Both external links ────────────────────────────────────────
+# ── The external link ──────────────────────────────────────────
 
-def test_the_banner_carries_both_outbound_links(app_client, fleet):
+def test_the_banner_carries_the_network_link(app_client, fleet):
+    """One button: the map and the dashboard are one site now."""
     fleet(node(SELF, is_self=True))
     body = app_client.get("/").data.decode()
-    assert "https://map.retina.fm" in body and "Retina Network Map" in body
-    assert "https://dash.retina.fm" in body and "Retina Dashboard" in body
+    assert "https://app.retina.fm" in body and "Network Map and Dashboard" in body
+    assert "map.retina.fm" not in body and "dash.retina.fm" not in body
+    assert "Retina Dashboard" not in body
+
+
+def test_the_banner_and_the_resources_send_the_network_link_to_the_same_place():
+    """The address is written twice, in the banner template and in RESOURCES."""
+    network = [r for r in RESOURCES if r["name"] == "Network Map and Dashboard"]
+    assert [r["url"] for r in network] == ["https://app.retina.fm"]
+    banner = (PROJECT_ROOT / "templates" / "_fleet_bar.html").read_text()
+    assert 'href="https://app.retina.fm"' in banner
+
+
+def test_the_resources_run_from_ours_to_the_wider_field():
+    assert [r["name"] for r in RESOURCES] == [
+        "Offworld Labs", "Retina Wiki", "Network Map and Dashboard", "Passive Radar News",
+        "blah2 Discord"]
+    news = RESOURCES[3]
+    assert news["url"] == "https://passiveradar.com/"
+    # Shown under the name as written, like the others: no www.
+    assert news["host"] == "passiveradar.com"
 
 
 # ── The child row ──────────────────────────────────────────────
@@ -558,7 +578,7 @@ def test_the_offer_of_a_second_node_points_at_the_store(app_client, fleet, telem
 def test_both_ways_of_reaching_us_are_offered(app_client, fleet, telemetry):
     fleet(node(SELF, is_self=True))
     cards = "".join(help_strip(app_client.get("/summary").data.decode()))
-    assert "https://discord.gg/ewNQbeK5Zn" in cards
+    assert "https://discord.gg/tZHwSm3Rs" in cards
     assert "mailto:info@offworldlabs.com" in cards
 
 
@@ -579,19 +599,31 @@ def test_the_email_card_does_not_open_a_tab(app_client, fleet, telemetry):
     assert "link-arrow" not in mail[0]
 
 
-def test_the_discord_card_does_open_a_tab(app_client, fleet, telemetry):
+def test_the_discord_cards_do_open_a_tab(app_client, fleet, telemetry):
+    body = app_client.get("/summary").data.decode()
+    discord = [c for c in help_strip(body) + resource_strip(body) if "discord.gg" in c]
+    assert len(discord) == 2
+    for card in discord:
+        assert 'target="_blank"' in card and 'rel="noopener"' in card
+        assert "link-arrow" in card
+
+
+def test_help_is_our_own_channels_only(app_client, fleet, telemetry):
+    """The Retina Discord and the support address. The blah2 server is that
+    project's community, not Offworld Labs support, so it is not offered as
+    help: an owner with a hardware problem would be sent into a volunteer
+    channel expecting us."""
     cards = help_strip(app_client.get("/summary").data.decode())
-    discord = [c for c in cards if "discord.gg" in c]
-    assert len(discord) == 1
-    assert 'target="_blank"' in discord[0] and 'rel="noopener"' in discord[0]
-    assert "link-arrow" in discord[0]
+    names = [c.split('class="link-name">')[1].split("<")[0] for c in cards]
+    assert names == ["Retina Discord", "Email us"]
+    assert "discord.gg/tZHwSm3Rs" in cards[0]
+    assert "blah2" not in "".join(cards)
 
 
-def test_the_discord_is_named_for_whose_it_is(app_client, fleet, telemetry):
-    """It is the blah2 project's community server, not ours. Calling it ours
-    would send an owner with a hardware problem into a volunteer channel
-    expecting Offworld Labs support."""
-    cards = "".join(help_strip(app_client.get("/summary").data.decode()))
+def test_the_blah2_discord_is_a_resource_named_for_whose_it_is(app_client, fleet, telemetry):
+    last = resource_strip(app_client.get("/summary").data.decode())[-1]
+    assert "discord.gg/ewNQbeK5Zn" in last
+    cards = last
     assert "blah2 Discord" in cards
 
 

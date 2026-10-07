@@ -143,11 +143,11 @@ h1, h2, h3, h4, h5, h6 {
     z-index: 5;
     /* Bootstrap also defines .nav, and sets flex-wrap:wrap on it. Left to that,
        the banner folds onto a second row once the tab strip grows: at six nodes
-       on a 1400px screen the Retina Dashboard button dropped to its own line.
+       on a 1400px screen the last outbound button dropped to its own line.
        The tab strip scrolls instead (see .nav-tabs). */
     flex-wrap: nowrap;
 }
-/* The brand and the two outbound buttons keep their size; the tab strip is the
+/* The brand and the outbound button keep their size; the tab strip is the
    only part that gives, so a long fleet never squashes the furniture around it. */
 .nav > a { flex-shrink: 0; }
 .nav-tabs {
@@ -169,7 +169,7 @@ h1, h2, h3, h4, h5, h6 {
 .nav-tabs > .nav-tab { flex-shrink: 0; }
 
 /* Below the app's narrow breakpoint there is not room for the brand, the tab
-   strip and both outbound buttons on one line, and holding nowrap there
+   strip and the outbound button on one line, and holding nowrap there
    squeezes the tab strip to nothing: every node tab disappears rather than
    scrolling. Wrapping is the right answer at this width (the footer already
    wraps), so the strip gets its own row and still scrolls within it. */
