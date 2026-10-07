@@ -183,7 +183,7 @@
     {# Progressive: the markup alone is a correct still diagram, and
        flight-sim.js reveals the hidden controls. Keep it that way.
        See docs/architecture.md#flight-simulator #}
-    <div class="section-head sim-head"><h2>How your node sees</h2></div>
+    <div class="section-head sim-head"><h2>Doppler Mapping Tool</h2></div>
     <p class="sim-lead">
         Your node measures two things: how much further the echo travelled than
         the direct signal, and how fast that distance is changing. Draw a flight
@@ -193,19 +193,25 @@
     <div class="sim">
         <div class="sim-panel">
             <p class="sim-label">The sky above your node</p>
-            <svg class="sim-scene" id="fs-map" viewBox="0 0 300 220" role="img" aria-label="A tower, your node, the wedge of sky it hears, and a flight path">
+            {# The view is 1.3 times the box that just holds the beam at its
+               widest, so there is sky to spare all round it: see flight-sim.js
+               (BEAM_R, WIDEST, SKY) and docs/architecture.md#flight-simulator #}
+            <svg class="sim-scene" id="fs-map" viewBox="-58 -58 540 309" role="img" aria-label="A tower, your node, the wedge of sky it hears, and a flight path">
                 <path id="fs-beam" class="sim-beam" d="M212 186 L38.8 86.0 A200 200 0 0 1 385.2 86.0 Z"></path>
                 <path id="fs-beam-edge" class="sim-beam-edge" d="M212 186 L38.8 86.0 A200 200 0 0 1 385.2 86.0 Z"></path>
                 <line class="sim-base" x1="34" y1="186" x2="212" y2="186" stroke-dasharray="3 3"></line>
-                <path id="fs-path" class="sim-flightpath" d="M20.0 150.0 L26.6 142.5 L33.2 135.0 L39.9 127.6 L46.5 120.3 L53.1 113.3 L59.8 106.4 L66.4 99.8 L73.0 93.6 L79.6 87.7 L86.2 82.1 L92.9 77.0 L99.5 72.3 L106.1 68.1 L112.8 64.5 L119.4 61.3 L126.0 58.7 L132.6 56.7 L139.2 55.2 L145.9 54.3 L152.5 54.0 L159.1 54.3 L165.8 55.2 L172.4 56.7 L179.0 58.7 L185.6 61.3 L192.2 64.5 L198.9 68.1 L205.5 72.3 L212.1 77.0 L218.8 82.1 L225.4 87.7 L232.0 93.6 L238.6 99.8 L245.2 106.4 L251.9 113.3 L258.5 120.3 L265.1 127.6 L271.8 135.0 L278.4 142.5 L285.0 150.0"></path>
+                <path id="fs-path" class="sim-flightpath" d="M20.0 150.0 L29.5 140.7 L39.0 131.5 L48.5 122.5 L58.0 113.5 L67.5 104.8 L77.0 96.4 L86.5 88.3 L96.0 80.6 L105.5 73.4 L115.0 66.6 L124.5 60.3 L134.0 54.5 L143.5 49.4 L153.0 44.9 L162.5 41.0 L172.0 37.8 L181.5 35.3 L191.0 33.5 L200.5 32.4 L210.0 32.0 L219.5 32.4 L229.0 33.5 L238.5 35.3 L248.0 37.8 L257.5 41.0 L267.0 44.9 L276.5 49.4 L286.0 54.5 L295.5 60.3 L305.0 66.6 L314.5 73.4 L324.0 80.6 L333.5 88.3 L343.0 96.4 L352.5 104.8 L362.0 113.5 L371.5 122.5 L381.0 131.5 L390.5 140.7 L400.0 150.0"></path>
                 <path class="sim-mark" d="M34 186 l-6 10 h12 z"></path>
                 <line class="sim-base" x1="34" y1="186" x2="34" y2="168"></line>
                 <text class="sim-axis-label" x="34" y="208" text-anchor="middle">tower</text>
                 <circle class="sim-mark" cx="212" cy="186" r="3.5"></circle>
                 <text class="sim-axis-label" x="212" y="208" text-anchor="middle">your node</text>
                 <g id="fs-aim" class="sim-grab" tabindex="0" transform="translate(212 116)">
-                    <circle r="12" fill="transparent"></circle>
+                    <circle r="16" fill="transparent"></circle>
                     <circle r="5" fill="var(--surface)" stroke="var(--accent)" stroke-width="1.5"></circle>
+                    {# Not drawn until flight-sim.js can make it true: without
+                       the script nothing here can be grabbed. #}
+                    <text id="fs-aim-label" class="sim-aim-label" x="10" y="3.4" display="none">Grab to Aim</text>
                 </g>
                 <g id="fs-plane" transform="translate(20 150)">
                     <circle r="8" fill="none" stroke="var(--accent-edge)" stroke-width="1"></circle>
@@ -216,13 +222,14 @@
 
         <div class="sim-panel">
             <p class="sim-label">What your node records</p>
-            <svg class="sim-scene" id="fs-plot" viewBox="0 0 300 220" role="img" aria-label="A delay-Doppler plot: range across, Doppler up">
-                <rect x="46" y="14" width="240" height="168" fill="var(--surface-2)" stroke="var(--line)"></rect>
-                <line class="sim-grid" x1="46" y1="98" x2="286" y2="98"></line>
+            <svg class="sim-scene" id="fs-plot" viewBox="0 0 416 220" role="img" aria-label="A delay-Doppler plot: range across, Doppler up">
+                {# The box is PLOT in flight-sim.js: keep the two the same. #}
+                <rect x="46" y="14" width="356" height="168" fill="var(--surface-2)" stroke="var(--line)"></rect>
+                <line class="sim-grid" x1="46" y1="98" x2="402" y2="98"></line>
                 {# 15, 30 and 45 km. #}
-                <line class="sim-grid" x1="106" y1="14" x2="106" y2="182"></line>
-                <line class="sim-grid" x1="166" y1="14" x2="166" y2="182"></line>
-                <line class="sim-grid" x1="226" y1="14" x2="226" y2="182"></line>
+                <line class="sim-grid" x1="135" y1="14" x2="135" y2="182"></line>
+                <line class="sim-grid" x1="224" y1="14" x2="224" y2="182"></line>
+                <line class="sim-grid" x1="313" y1="14" x2="313" y2="182"></line>
                 <g id="fs-track"></g>
                 <circle id="fs-live" r="3.4" fill="var(--accent)" opacity="0"></circle>
                 {# The axes are labelled with their real limits, because a plot
@@ -232,8 +239,8 @@
                 <text class="sim-axis-label" x="40" y="101" text-anchor="end">0 Hz</text>
                 <text class="sim-axis-label" x="40" y="180" text-anchor="end">&#8722;300</text>
                 <text class="sim-axis-label" x="46" y="198" text-anchor="start">0</text>
-                <text class="sim-axis-label" x="166" y="198" text-anchor="middle">range</text>
-                <text class="sim-axis-label" x="286" y="198" text-anchor="end">60 km</text>
+                <text class="sim-axis-label" x="224" y="198" text-anchor="middle">range</text>
+                <text class="sim-axis-label" x="402" y="198" text-anchor="end">60 km</text>
             </svg>
         </div>
     </div>
@@ -251,7 +258,7 @@
         </span>
     </div>
     <p class="sim-hint" id="fs-hint">
-        Drag across the sky to draw your own path. Drag the blue ring to steer the
+        Drag across the sky to draw your own path. Grab the blue ring to aim the
         beam. The track breaks wherever the aircraft leaves it.
     </p>
 

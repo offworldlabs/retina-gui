@@ -5,6 +5,8 @@ through real routes rather than calling the helper directly: what matters is
 that it survives base.html inheritance and the blocks pages override.
 """
 
+import math
+import re
 from pathlib import Path
 
 import pytest
@@ -627,7 +629,7 @@ def test_the_blah2_discord_is_a_resource_named_for_whose_it_is(app_client, fleet
     assert "blah2 Discord" in cards
 
 
-# ── How your node sees ─────────────────────────────────────────
+# ── Doppler Mapping Tool ─────────────────────────────────────────
 #
 # The primer's closing simulation, cut down. It is the one piece here that
 # needs an animation loop, so what these pin down is mostly the fencing.
@@ -645,6 +647,104 @@ def test_the_simulation_is_a_still_diagram_without_any_script(app_client, fleet,
     sim = sim_section(app_client.get("/summary").data.decode())
     assert 'id="fs-beam"' in sim and 'd="M212 186' in sim
     assert 'id="fs-path"' in sim and 'd="M20.0 150.0' in sim
+
+
+def _sim_constants():
+    """The numbers flight-sim.js draws the beam from."""
+    js = (PROJECT_ROOT / "static" / "flight-sim.js").read_text()
+    node = re.search(r"N = \{ x: (\d+), y: (\d+) \}", js)
+    beam = re.search(r"var BEAM_R = (\d+), WIDEST = ([\d.]+)", js)
+    return js, (int(node.group(1)), int(node.group(2))), int(beam.group(1)), float(beam.group(2))
+
+
+def test_the_sky_holds_the_whole_beam_at_its_widest(app_client, fleet, telemetry):
+    """Opened right out and pointing up, as it starts, no part of the wedge
+    may be cut off by the edge of the picture."""
+    sim = sim_section(app_client.get("/summary").data.decode())
+    left, top, width, height = map(float, re.search(
+        r'id="fs-map" viewBox="([-\d. ]+)"', sim).group(1).split())
+    _, (nx, ny), reach, widest = _sim_constants()
+
+    assert left < nx - reach * math.sin(widest) and nx + reach * math.sin(widest) < left + width
+    assert top < ny - reach
+    assert ny < top + height        # the node itself, where the wedge's edges meet
+    # And not edge to edge: the scene is drawn 30% further out than a snug fit.
+    assert width >= 1.3 * 2 * reach * math.sin(widest) and height >= 1.3 * reach
+
+
+def test_a_path_can_be_drawn_anywhere_in_the_sky_and_nowhere_outside_it(app_client, fleet, telemetry):
+    """SKY in the script is the view in the markup, less a small margin."""
+    sim = sim_section(app_client.get("/summary").data.decode())
+    left, top, width, height = map(float, re.search(
+        r'id="fs-map" viewBox="([-\d. ]+)"', sim).group(1).split())
+    js, _, _, _ = _sim_constants()
+    sky = dict((k, float(v)) for k, v in re.findall(
+        r"(left|right|top|bottom): (-?[\d.]+)", js.split("var SKY = {")[1].split("}")[0]))
+    assert 0 <= sky["left"] - left <= 8 and 0 <= (left + width) - sky["right"] <= 8
+    assert 0 <= sky["top"] - top <= 8 and 0 <= (top + height) - sky["bottom"] <= 8
+
+
+def test_an_aircraft_beyond_the_drawn_beam_is_not_heard():
+    """The arc is in the picture now, so the reach it draws has to be real."""
+    js, _, _, _ = _sim_constants()
+    in_beam = js.split("function inBeam(p) {")[1].split("\n    }")[0]
+    assert "> BEAM_R) return false" in in_beam
+    assert "R = BEAM_R" in js.split("function drawBeam() {")[1].split("\n    }")[0]
+
+
+def test_the_plot_is_drawn_where_the_script_plots(app_client, fleet, telemetry):
+    """The box is written twice, in the markup and in PLOT."""
+    sim = sim_section(app_client.get("/summary").data.decode())
+    js, _, _, _ = _sim_constants()
+    x, w, mid, h = map(int, re.search(
+        r"var PLOT = \{ x: (\d+), w: (\d+), mid: (\d+), h: (\d+) \}", js).groups())
+    assert f'<rect x="{x}" y="{mid - h}" width="{w}" height="{2 * h}"' in sim
+    assert f'x="{x + w}" y="198" text-anchor="end">60 km<' in sim
+
+
+def test_the_still_diagram_starts_on_the_script_s_own_flight_path(app_client, fleet, telemetry):
+    """Or the path would jump the moment the script took over."""
+    sim = sim_section(app_client.get("/summary").data.decode())
+    js, _, _, _ = _sim_constants()
+    x0, dx, y0, dy = map(float, re.search(
+        r"x: ([\d.]+) \+ t \* ([\d.]+), y: ([\d.]+) - Math\.sin\(t \* Math\.PI\) \* ([\d.]+)", js).groups())
+    drawn = [tuple(map(float, pair.split())) for pair in
+             re.split(r"\s*[ML]", re.search(r'id="fs-path"[^>]* d="([^"]+)"', sim).group(1))[1:]]
+    assert len(drawn) == 41
+    for i, (x, y) in enumerate(drawn):
+        t = i / 40
+        assert abs(x - (x0 + t * dx)) < 0.06 and abs(y - (y0 - math.sin(t * math.pi) * dy)) < 0.06, i
+
+
+def test_the_two_panels_are_stacked_at_every_width():
+    css = (PROJECT_ROOT / "static" / "common.css").read_text()
+    rules = re.findall(r"\.sim \{([^}]*)\}", css)
+    assert rules and all("1fr 1fr" not in rule for rule in rules)
+
+
+def test_the_section_is_titled_for_what_it_does(app_client, fleet, telemetry):
+    body = app_client.get("/summary").data.decode()
+    assert '<div class="section-head sim-head"><h2>Doppler Mapping Tool</h2></div>' in body
+    assert "How your node sees" not in body
+
+
+def test_the_knob_says_grab_to_aim_only_once_it_can_be_grabbed(app_client, fleet, telemetry):
+    """Like the controls: the label ships undrawn and the script reveals it,
+    so the still diagram never invites a drag that cannot happen."""
+    sim = sim_section(app_client.get("/summary").data.decode())
+    knob = sim.split('<g id="fs-aim"')[1].split("</g>")[0]
+    label = re.search(r'<text id="fs-aim-label"[^>]*>([^<]*)</text>', knob)
+    assert label.group(1) == "Grab to Aim" and 'display="none"' in label.group(0)
+    js = (PROJECT_ROOT / "static" / "flight-sim.js").read_text()
+    assert 'aimLabel.removeAttribute("display")' in js.split("First paint")[1]
+
+
+def test_grabbing_the_knob_draws_no_focus_box():
+    """The knob takes focus when grabbed; the browser's outline round it read
+    as a stray black box. Keyboard focus is shown on the ring instead."""
+    css = (PROJECT_ROOT / "static" / "common.css").read_text()
+    assert ".sim-grab:focus { outline: none; }" in css
+    assert ".sim-grab:focus-visible" in css
 
 
 def test_the_controls_are_hidden_until_something_can_drive_them(app_client, fleet,

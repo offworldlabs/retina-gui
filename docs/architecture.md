@@ -556,13 +556,28 @@ blanks the node sub-nav: Home and Config would be about whichever node served th
   two sections cannot drift apart. They are separate from the node grid because those cards
   stand for hardware on this network. The outbound arrow means "this leaves for another page",
   so a `mailto` card does not wear one.
-- **How your node sees**: the flight-path diagram below.
+- **Doppler Mapping Tool**: the flight-path diagram below.
 
 ### Flight simulator
 
-A cut-down version of the primer's closing simulation. The left panel shows a tower, the node,
-the wedge of sky the node hears and a flight path; the right panel plots what the node would
+A cut-down version of the primer's closing simulation. The top panel shows a tower, the node,
+the wedge of sky the node hears and a flight path; the panel under it plots what the node would
 record, range (bistatic excess path) across and Doppler up.
+
+The two panels are stacked, each the full width of the page's column, at every window size.
+They used to sit side by side, which left each too small to draw a path in comfortably and cut
+the beam off at the edges of the sky. The sky's `viewBox` in `summary.html` is sized from two
+numbers in `flight-sim.js`, `BEAM_R` (how far the node hears) and `WIDEST` (the widest the beam
+opens): pointing up, as it starts, the whole wedge is in the picture at its widest. The view is
+1.3 times the box that would just hold that wedge, so the tower, the node and the beam sit in the
+middle with sky to spare all round, and a path can start and end well outside the beam. Steered
+far enough off vertical, a wide beam still runs off the bottom edge; fitting every direction would
+need a square panel. `tests/test_fleet.py` holds the view to the two numbers, and the area a path
+can be drawn in (`SKY`) to the view.
+
+Because the far arc of the wedge is now in the picture, it is also a real limit: an aircraft
+beyond it is not heard (`inBeam`). Before, only the angle was checked, which did not show while
+the arc was off the edge of the panel.
 
 It is progressive. The markup alone is a correct still diagram, with the beam and a default
 flight path drawn in. [flight-sim.js](../static/flight-sim.js) only adds the ability to fly it,
@@ -572,17 +587,21 @@ rather than inline so the browser caches it.
 
 How the numbers are made:
 
-- Range is `d1 + d2 - baseline` scaled by `KM` (0.15 km per SVG unit, baseline about 27 km).
+- Range is `d1 + d2 - baseline` scaled by `KM` (0.125 km per SVG unit: baseline about 22 km, and
+  the beam reaches 25 km).
 - Doppler uses the real bistatic relation, `-(v . (u1 + u2)) / lambda`, with a fixed 213 MHz
   centre frequency and 170 m/s aircraft speed. It is zero when the heading is perpendicular to
   the sum of the two unit legs, which is not the same as perpendicular to the node. That sum
   has magnitude at most 2, which caps Doppler at `2v/lambda`.
-- The scale is chosen so the picture cannot reach its own axes: drawn into the furthest corner
-  the scene tops out around 51 km and 242 Hz, inside a plot of 60 km and 300 Hz. A track pinned
+- The scale is chosen so the picture cannot reach its own axes: heard at the far end of the beam
+  the scene tops out around 50 km and 242 Hz, inside a plot of 60 km and 300 Hz. A track pinned
   to a bound would say the aircraft stopped changing when really the plot ran out. The clamps in
   the plotting code are a backstop, not a working part.
 - Leg lengths are floored so a path drawn straight over the tower or the node does not divide by
   zero and make the track vanish.
+- The plot's box is written twice, in the markup and as `PLOT` in the script, as is the default
+  flight path (so the still diagram does not jump when the script takes over). Tests hold both
+  pairs together.
 - Where the aircraft is outside the beam, the track has a gap. Nothing was heard, so nothing is
   drawn; that break is the point of the beam.
 
@@ -593,7 +612,15 @@ Behaviour:
 - The loop runs at most 30 fps and stops (not just hides) when the tab is hidden or the section
   scrolls out of view.
 - Drawn samples closer than 4 units are dropped; a path is a shape, not a recording of the hand.
+- The aircraft's heading turns steadily between one drawn point and the next (`tangent`, `at`).
+  Read off each straight piece of the path, it jumps at every point and takes Doppler with it,
+  which drew the track as a sawtooth; small in the old half-width plot, obvious in this one.
 - The beam can be steered by dragging the ring or with the arrow keys, and narrowed or widened.
+  The ring is labelled "Grab to Aim". The label ships undrawn (`display="none"`) and the
+  script reveals it, for the same reason the controls ship hidden.
+- The ring takes keyboard focus so the arrow keys work, but it never shows the browser's focus
+  outline: a mouse grab focuses it too, and the outline then sat round it as a black box.
+  Keyboard focus is shown by the ring thickening (`:focus-visible`).
 
 The plot axes carry their real limits, because a plot whose bounds are a mystery teaches the
 wrong lesson about where a track sits. The link to the full primer shows only when `PRIMER_URL`

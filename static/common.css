@@ -1309,7 +1309,7 @@ main > .cfg-group:first-of-type { margin-top: 0; }
 .help-lead { margin: -6px 0 12px; font-size: 13px; color: var(--ink-2); max-width: 62ch; }
 
 /* ══════════════════════════════════════════════
-   How your node sees: the flight path simulator
+   Doppler Mapping Tool: the flight path simulator
    ══════════════════════════════════════════════ */
 
 .sim-head { margin-top: 28px; }
@@ -1318,8 +1318,10 @@ main > .cfg-group:first-of-type { margin-top: 0; }
 .sim-lead { margin: -6px 0 14px; font-size: 13px; line-height: 1.6;
             color: var(--ink-2); }
 
-.sim { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; align-items: start; }
-@media (max-width: 760px) { .sim { grid-template-columns: 1fr; } }
+/* One above the other, each the full width of the column: the sky first,
+   then what the node records of it. Side by side they were too small to
+   draw in, and the sky could not show the whole beam. */
+.sim { display: grid; grid-template-columns: minmax(0, 1fr); gap: 14px; }
 
 .sim-panel { background: var(--surface); border: 1px solid var(--line);
              border-radius: var(--r-md); padding: 10px 10px 8px; }
@@ -1340,10 +1342,26 @@ main > .cfg-group:first-of-type { margin-top: 0; }
 .sim-track { stroke: var(--accent); stroke-width: 1.8; fill: none;
              stroke-linecap: round; stroke-linejoin: round; }
 .sim-grid { stroke: var(--line-2); stroke-width: 1; }
-.sim-axis-label { font-family: var(--font-body); font-size: 10px; fill: var(--ink-3); }
+/* In the drawing's own units, so it scales with the panel: about 12px on a
+   desktop column, and held near 10px on a phone, where the panel is narrow. */
+.sim-axis-label { font-family: var(--font-body); font-size: 7.5px; fill: var(--ink-3); }
+/* The sky is drawn 1.3 times further out than the plot, so its labels are
+   1.3 times larger in its units to come out the same size on screen. */
+#fs-map .sim-axis-label { font-size: 9.75px; }
+@media (max-width: 760px) {
+    .sim-axis-label { font-size: 12px; }
+    #fs-map .sim-axis-label { font-size: 15.6px; }
+}
 .sim-mark { fill: var(--ink-2); }
 .sim-grab { cursor: grab; }
 .sim-grab:active { cursor: grabbing; }
+/* No focus box, ever: grabbing the knob focuses it, and the browser's outline
+   then sat round it as a black rectangle. A keyboard user still needs to see
+   where they are, so for them the ring itself thickens. */
+.sim-grab:focus { outline: none; }
+.sim-grab:focus-visible circle + circle { stroke-width: 3; }
+.sim-aim-label { font-family: var(--font-body); font-size: 9.75px; font-weight: 600; fill: var(--accent); }
+@media (max-width: 760px) { .sim-aim-label { font-size: 15.6px; } }
 
 .sim-controls { display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
                 margin-top: 12px; }
