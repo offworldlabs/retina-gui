@@ -518,8 +518,11 @@ redirects to `/set-up` while the setup wizard is in progress. Otherwise it shows
   the node identifier (`node_ref`) and state, and the `detail` prose from retina-telemetry
   verbatim: mapping its states to our own wording would be a second vocabulary to keep in step
   with a file we do not own. See [device-state-and-telemetry.md](features/device-state-and-telemetry.md).
-- Service cards (Passive Radar, Max-Hold, Controller, ADS-B Map, Tracker), or the spectrum
+- Service cards (Passive Radar, Max-Hold, ADS-B Map, Tracker, Controller), or the spectrum
   iframe or SDRconnect panel in those modes (see [sdr-mode.md](features/sdr-mode.md)).
+  Controller is last because it is the way into every view the other cards do not cover. The
+  Tracker card says how much it keeps (up to 4 hours, the sidecar's limit; see
+  [tracker.md](features/tracker.md#view-window)).
 
 The page is host-agnostic: `owl.local` and the node's own `ret<node_id>.local` produce the same
 page. The shared alias is a way in, and the fleet banner moves you between nodes from there.
