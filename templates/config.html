@@ -354,12 +354,28 @@
                     <div style="font-weight:600;font-size:14px;color:var(--warn-ink);margin-bottom:6px;">The radio has stopped sending data</div>
                     <ol style="margin:0 0 8px;padding-left:20px;">
                         <li>Check the USB cable between the SDR and the Pi is plugged in.</li>
-                        <li>Restart the radar on its safest settings: gain reduction 59 dB on both tuners and LNA state 9.</li>
-                        <li>Once the meter shows a signal again, run Quick Calibrate to find better settings.</li>
+                        <li>Restart the radar. This resets the SDR and starts it again on the current settings.</li>
+                        <li>If there is still no signal, restart on the safest settings: gain reduction 59 dB on both tuners and LNA state 9. Once the meter shows a signal again, run Quick Calibrate to find better settings.</li>
                     </ol>
                     <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
-                        <button type="button" class="ds-btn" id="useSafeSettingsBtn">Use safe settings</button>
-                        <span>If there is still no signal, contact support.</span>
+                        <button type="button" class="ds-btn" id="restartRadarBtn">Restart radar</button>
+                        <button type="button" class="ds-btn ghost" data-safe-settings>Use safe settings</button>
+                        <span>If nothing helps, contact support.</span>
+                    </div>
+                </div>
+                {# Shown by the meter script while a tuner stays overloaded.
+                   See docs/features/config-editor.md#overload-help #}
+                <div id="overloadHelp" style="display:none;margin-top:12px;padding:12px 14px;border-radius:var(--r-md);background:var(--warn-soft);border:1px solid oklch(0.87 0.06 75);font-size:13px;color:var(--ink-2);">
+                    <div style="font-weight:600;font-size:14px;color:var(--warn-ink);margin-bottom:6px;">The radio is overloaded</div>
+                    <p style="margin:0 0 6px;">The signal on <span id="overloadHelpTuners">the receiver</span> is too strong for the current settings, so it is clipping. The radar keeps running, but it detects less.</p>
+                    <ol style="margin:0 0 8px;padding-left:20px;">
+                        <li>Run Quick Calibrate to find the most sensitive settings that do not overload.</li>
+                        <li>To stop the overload straight away instead, restart on the safest settings: gain reduction 59 dB on both tuners and LNA state 9. The radar hears very little on them, so run Quick Calibrate afterwards.</li>
+                    </ol>
+                    <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
+                        <button type="button" class="ds-btn" id="overloadQuickCalBtn">Quick Calibrate</button>
+                        <button type="button" class="ds-btn ghost" data-safe-settings>Use safe settings</button>
+                        <span>If it overloads even on the safest settings, contact support.</span>
                     </div>
                 </div>
                 <div class="divider"></div>
@@ -2231,6 +2247,33 @@ if (discardBtn) discardBtn.addEventListener('click', () => location.reload());
     var ballA = makeBallistics(FLOOR), ballB = makeBallistics(FLOOR);
     var last = performance.now();
 
+    // A tuner reads as overloaded once its flag has held for OVERLOAD_HOLD_MS,
+    // or it has clipped CLIP_ONSETS times within CLIP_WINDOW_MS: the device
+    // clips and recovers faster than the flag can be sampled.
+    // See docs/features/config-editor.md#overload-indicator
+    var OVERLOAD_HOLD_MS = 3000, CLIP_WINDOW_MS = 60000, CLIP_ONSETS = 3;
+    function makeOverloadWatch() {
+        var since = null, lastCount = null, onsets = [];
+        return {
+            feed: function(level, count, now) {
+                if (level === true) { if (since == null) since = now; } else { since = null; }
+                if (typeof count === 'number') {
+                    // A restarted blah2 counts from 0 again, so a drop is a new baseline.
+                    var added = lastCount == null ? 0 : Math.min(count - lastCount, CLIP_ONSETS);
+                    for (var i = 0; i < added; i++) onsets.push(now);
+                    lastCount = count;
+                }
+                onsets = onsets.filter(function(t) { return now - t <= CLIP_WINDOW_MS; });
+            },
+            clear: function() { since = null; lastCount = null; onsets = []; },
+            active: function(now) {
+                return (since != null && now - since >= OVERLOAD_HOLD_MS)
+                    || onsets.length >= CLIP_ONSETS;
+            }
+        };
+    }
+    var watchA = makeOverloadWatch(), watchB = makeOverloadWatch();
+
     // Alarm only when in radar mode and data has been missing for ALARM_GAP_MS.
     var ALARM_GAP_MS = 4000;
     var currentMode = null;   // unknown until checked; only re-checked while data is missing
@@ -2246,6 +2289,20 @@ if (discardBtn) discardBtn.addEventListener('click', () => location.reload());
             && (performance.now() - missingSinceMs) >= ALARM_GAP_MS;
     }
 
+    function paintTuner(track, val, ball, overloaded) {
+        paintLadder(track, ball.hasData ? ball.current : FLOOR - 1);
+        if (!ball.hasData) {
+            val.className = 'ladder-value';
+            val.textContent = '-';
+        } else if (overloaded) {
+            val.className = 'ladder-value alarm';
+            val.textContent = 'overload';
+        } else {
+            val.className = 'ladder-value';
+            val.innerHTML = ball.current.toFixed(1) + '<span class="unit">dBFS</span>';
+        }
+    }
+
     function frame(now) {
         var dt = Math.min(0.25, (now - last) / 1000);
         last = now;
@@ -2255,21 +2312,8 @@ if (discardBtn) discardBtn.addEventListener('click', () => location.reload());
             valA.textContent = 'no signal'; valA.className = 'ladder-value alarm';
             valB.textContent = 'no signal'; valB.className = 'ladder-value alarm';
         } else {
-            valA.className = 'ladder-value'; valB.className = 'ladder-value';
-            if (a.hasData) {
-                paintLadder(trackA, a.current);
-                valA.innerHTML = a.current.toFixed(1) + '<span class="unit">dBFS</span>';
-            } else {
-                paintLadder(trackA, FLOOR - 1);
-                valA.textContent = '-';
-            }
-            if (b.hasData) {
-                paintLadder(trackB, b.current);
-                valB.innerHTML = b.current.toFixed(1) + '<span class="unit">dBFS</span>';
-            } else {
-                paintLadder(trackB, FLOOR - 1);
-                valB.textContent = '-';
-            }
+            paintTuner(trackA, valA, a, watchA.active(now));
+            paintTuner(trackB, valB, b, watchB.active(now));
         }
         requestAnimationFrame(frame);
     }
@@ -2284,6 +2328,7 @@ if (discardBtn) discardBtn.addEventListener('click', () => location.reload());
                 if (noCapture) {
                     if (missingSinceMs == null) missingSinceMs = performance.now();
                     ballA.clear(); ballB.clear();
+                    watchA.clear(); watchB.clear();
                     // Only fetch the mode while data is missing.
                     return fetch('/api/mode')
                         .then(function(r) { return r.json(); })
@@ -2293,13 +2338,29 @@ if (discardBtn) discardBtn.addEventListener('click', () => location.reload());
                 missingSinceMs = null;
                 ballA.feed(s.peakDbfsA);
                 ballB.feed(s.peakDbfsB);
+                var t = performance.now();
+                watchA.feed(s.overloadA, s.overloadCountA, t);
+                watchB.feed(s.overloadB, s.overloadCountB, t);
             })
             .catch(function() {
                 if (missingSinceMs == null) missingSinceMs = performance.now();
                 ballA.clear(); ballB.clear();
+                watchA.clear(); watchB.clear();
             })
             .then(updateNoSignalHelp)
+            .then(updateOverloadHelp)
             .then(function() { setTimeout(pollCapturePeak, 1000); });
+    }
+
+    // Neither help box shows during a calibration or an apply: both restart
+    // or retune the radar, and a calibration overloads it on purpose.
+    function isBusy() {
+        return Promise.all([
+            fetch('/calibrate/status').then(function(r) { return r.json(); }),
+            fetch('/config/apply/status').then(function(r) { return r.json(); })
+        ]).then(function(statuses) {
+            return statuses[0].state === 'running' || statuses[1].state === 'running';
+        });
     }
 
     // Help for a radio that has stopped. Waits a minute because every apply
@@ -2314,12 +2375,29 @@ if (discardBtn) discardBtn.addEventListener('click', () => location.reload());
             helpEl.style.display = 'none';
             return;
         }
-        return Promise.all([
-            fetch('/calibrate/status').then(function(r) { return r.json(); }),
-            fetch('/config/apply/status').then(function(r) { return r.json(); })
-        ]).then(function(statuses) {
-            var busy = statuses[0].state === 'running' || statuses[1].state === 'running';
+        return isBusy().then(function(busy) {
             helpEl.style.display = busy ? 'none' : '';
+        }).catch(function() {});
+    }
+
+    // Help for a radio that keeps running while overloaded, which blah2 does
+    // now that an overload no longer takes it down.
+    // See docs/features/config-editor.md#overload-help
+    var overloadHelpEl = document.getElementById('overloadHelp');
+    var overloadTunersEl = document.getElementById('overloadHelpTuners');
+
+    function updateOverloadHelp() {
+        if (!overloadHelpEl) return;
+        var t = performance.now();
+        var a = watchA.active(t), b = watchB.active(t);
+        if (isAlarming() || !(a || b)) {
+            overloadHelpEl.style.display = 'none';
+            return;
+        }
+        overloadTunersEl.textContent = (a && b) ? 'both inputs'
+            : a ? 'the Reference input (Tuner A)' : 'the Surveillance input (Tuner B)';
+        return isBusy().then(function(busy) {
+            overloadHelpEl.style.display = busy ? 'none' : '';
         }).catch(function() {});
     }
 
@@ -2331,8 +2409,8 @@ if (discardBtn) discardBtn.addEventListener('click', () => location.reload());
         'capture.device_lnaState': 9
     };
 
-    var safeBtn = document.getElementById('useSafeSettingsBtn');
-    if (safeBtn) {
+    var safeBtns = document.querySelectorAll('[data-safe-settings]');
+    safeBtns.forEach(function(safeBtn) {
         safeBtn.addEventListener('click', function() {
             var form = document.getElementById('configForm');
             var pill = document.getElementById('configChangesPill');
@@ -2346,11 +2424,37 @@ if (discardBtn) discardBtn.addEventListener('click', () => location.reload());
                 el.value = SAFE_SETTINGS[name];
                 el.dispatchEvent(new Event('input', { bubbles: true }));
             });
-            safeBtn.disabled = true;
+            safeBtns.forEach(function(b) { b.disabled = true; });
             // The same path as Apply changes: save to user.yml, then the
             // reload applies it (merge, SDR restart, settle, recreate).
             form.requestSubmit();
         });
+    });
+
+    // Restarts on the saved settings through the page's own apply-after-save
+    // flow (merge, SDR restart, settle, recreate), with its progress on the
+    // Apply button. See docs/features/config-editor.md#no-signal-help
+    var restartBtn = document.getElementById('restartRadarBtn');
+    if (restartBtn) {
+        restartBtn.addEventListener('click', function() {
+            var pill = document.getElementById('configChangesPill');
+            if (pill && pill.style.display !== 'none' && !confirm(
+                    'You have unsaved changes on this page. Restarting the radar discards them. Continue?')) {
+                return;
+            }
+            restartBtn.disabled = true;
+            window.location.href = '/config?saved=1';
+        });
+    }
+
+    var overloadQuickBtn = document.getElementById('overloadQuickCalBtn');
+    var quickCalBtn = document.getElementById('quickCalibrateBtn');
+    if (overloadQuickBtn) {
+        if (quickCalBtn) {
+            overloadQuickBtn.addEventListener('click', function() { quickCalBtn.click(); });
+        } else {
+            overloadQuickBtn.style.display = 'none';
+        }
     }
 
     pollCapturePeak();
