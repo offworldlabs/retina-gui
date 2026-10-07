@@ -13,6 +13,7 @@ shape of the app, then the feature doc for the area you are changing.
 | [architecture.md](architecture.md) | App startup, blueprints, sessions and CSRF, service status, the apply service, stack reconcile, the restart lock and its couplings to other repos, home and summary pages |
 | [features/auto-calibrate.md](features/auto-calibrate.md) | Auto-Calibrate: the tower, gain and LNA search, overload handling, wedge recovery, the wizard path |
 | [features/setup-wizard.md](features/setup-wizard.md) | The onboarding wizard, step by step |
+| [features/tutorial.md](features/tutorial.md) | The guided tutorial of the Summary, Home and Configuration pages |
 | [features/device-state-and-telemetry.md](features/device-state-and-telemetry.md) | What the node persists about itself, telemetry consent and claim, the telemetry status document |
 | [features/remote-access.md](features/remote-access.md) | LAN vs tunnel access, identity and login, Mender Connect, SSH keys |
 | [features/fleet-and-naming.md](features/fleet-and-naming.md) | mDNS peer discovery, the fleet bar, node names |
@@ -34,6 +35,7 @@ Use this to find the doc to update when you change a file.
 | `templates/base.html`, `templates/index.html`, `templates/summary.html`, `templates/eula.html`, `static/flight-sim.js`, `static/common.css` | [architecture.md](architecture.md) |
 | `src/calibrator.py`, `src/routes/calibrate.py`, `src/blah2_client.py`, `static/calibrate.js`, `templates/setup/_calibrate.html` | [features/auto-calibrate.md](features/auto-calibrate.md) |
 | `src/routes/setup.py`, `static/setup.js`, `templates/setup.html`, `templates/setup/*` | [features/setup-wizard.md](features/setup-wizard.md) |
+| `src/tutorial.py`, `src/routes/tutorial.py`, `static/tutorial.js`, `static/tutorial.css`, `static/tutorial/*` | [features/tutorial.md](features/tutorial.md) |
 | `src/device_state.py`, `src/telemetry_status.py` | [features/device-state-and-telemetry.md](features/device-state-and-telemetry.md) |
 | `src/remote_access.py`, `src/access_identity.py`, `src/mender_connect.py`, `src/ssh_keys.py`, `src/routes/remote_access.py`, `templates/login.html`, `templates/remote_denied.html` | [features/remote-access.md](features/remote-access.md) |
 | `src/mdns_peers.py`, `src/routes/fleet.py`, `src/node_name.py`, `templates/_fleet_bar.html` | [features/fleet-and-naming.md](features/fleet-and-naming.md) |

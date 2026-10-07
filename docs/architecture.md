@@ -179,12 +179,17 @@ Route modules are imported at the bottom of `app.py`, after the app exists, beca
 | `tracker`, `tracker_legacy` | [routes/tracker.py](../src/routes/tracker.py) | [tracker.md](features/tracker.md) |
 | `fleet` | [routes/fleet.py](../src/routes/fleet.py) | [fleet-and-naming.md](features/fleet-and-naming.md), [Summary page](#summary-page) |
 | `remote_access` | [routes/remote_access.py](../src/routes/remote_access.py) | [remote-access.md](features/remote-access.md) |
+| `tutorial` | [routes/tutorial.py](../src/routes/tutorial.py) | [tutorial.md](features/tutorial.md) |
 
 `inject_globals` (a context processor) adds to every template: `node_id`, the owl-os and
 retina-node versions, `is_remote` and `pathway` (which way the request arrived, defaulting to
 LAN outside a request), and `fleet_nodes` for the banner. The banner is in `base.html`, so the
 node list has to come from here rather than per route. It is an in-memory list copied and
 sorted, cheap enough per render.
+
+It also adds `tutorial`, which is `None` on every ordinary request and the guided tutorial's
+payload when the address names a tour step that lives on the page being rendered. See
+[tutorial.md](features/tutorial.md#how-a-run-moves).
 
 ## Request hooks
 
@@ -639,5 +644,10 @@ owner pathway; the LAN has no session to end.
 
 [common.css](../static/common.css) holds the shared design-system styles for every page. Its
 comments explain individual rules in place.
+
+When `tutorial` is set, `base.html` also loads `tutorial.css`, the tour payload and
+`tutorial.js`, which draws the guided tutorial over the page. Elements on the Summary, Home and
+Configuration pages, in the fleet bar and on the sub-nav's Config link carry `data-tutorial` attributes naming what the tour
+points at; they have no other effect. See [tutorial.md](features/tutorial.md#targets).
 
 [eula.html](../templates/eula.html) is a placeholder, linked from the wizard.

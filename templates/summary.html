@@ -69,11 +69,15 @@
 <main class="main">
     <div class="section-head"><h2>Nodes on this network</h2></div>
 
+    {# Each data-tutorial wrapper on this page is a region the guided tutorial
+       lights up; a step's target must keep its token.
+       See docs/features/tutorial.md#targets #}
+    <div data-tutorial="summary-nodes">
     <div class="node-grid">
         {% for card in cards %}
         {# The whole card is the link, exactly as a banner tab is. A card that
            only looked clickable would be the odd one out on this page. #}
-        <a class="node-card{% if card.is_self %} self{% endif %}" href="{{ card.url }}">
+        <a class="node-card{% if card.is_self %} self{% endif %}" href="{{ card.url }}"{% if card.is_self %} data-tutorial="summary-this-node"{% endif %}>
             <div class="node-head">
                 {# The same antenna mark the tabs and the "listening on" row
                    use, so a card reads as a node without a label saying so. #}
@@ -156,10 +160,12 @@
         </a>
         {% endif %}
     </div>
+    </div>
 
     {# Fixed links out. A separate section rather than more cards in the grid
        above: those stand for hardware on this network and this one does not,
        and mixing them would make the antenna mark stop meaning anything. #}
+    <div data-tutorial="summary-resources">
     <div class="section-head resources-head"><h2>Resources</h2></div>
 
     <div class="node-grid">
@@ -167,10 +173,12 @@
         {{ link_card(resource) }}
         {% endfor %}
     </div>
+    </div>
 
     {# Kept apart from Resources, and above the reading matter below it: the
        links above are things to look at, this is what to do when the node is
        not doing what it should. #}
+    <div data-tutorial="summary-help">
     <div class="section-head help-head"><h2>Help</h2></div>
     <p class="help-lead">If you are running into problems, please reach out.</p>
 
@@ -179,10 +187,12 @@
         {{ link_card(item) }}
         {% endfor %}
     </div>
+    </div>
 
     {# Progressive: the markup alone is a correct still diagram, and
        flight-sim.js reveals the hidden controls. Keep it that way.
        See docs/architecture.md#flight-simulator #}
+    <div data-tutorial="summary-sim">
     <div class="section-head sim-head"><h2>Doppler Mapping Tool</h2></div>
     <p class="sim-lead">
         Your node measures two things: how much further the echo travelled than
@@ -261,6 +271,7 @@
         Drag across the sky to draw your own path. Grab the blue ring to aim the
         beam. The track breaks wherever the aircraft leaves it.
     </p>
+    </div>
 
     {% if primer_url %}
     <p class="facts-more">
