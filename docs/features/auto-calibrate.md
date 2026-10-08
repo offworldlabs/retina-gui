@@ -266,7 +266,7 @@ If the probe fails, the device is wedged ([Device wedges](#device-wedges)):
 3. `_persist_safe_corner` writes the safe corner to `user.yml`. If this fails the run aborts: restarting without it would
    bring blah2 straight back up on the tuning that wedged it.
 4. `_run_recovery_apply` runs the ordinary config-apply path (`ApplyService.request(bypass_guard=True)`: config-merger,
-   `sdrplay_apiService` restart, settle, container recreate) and polls it to completion. `bypass_guard` is required
+   blah2 stop, `sdrplay_apiService` restart, settle, container recreate) and polls it to completion. `bypass_guard` is required
    because that guard refuses applies during a calibration, and this is the one caller that owns the run. The poll ignores
    cancel so containers are never left half-recreated; the run aborts at the next cancel check once the stack is settled.
 5. The safe-corner probe is retried every `PREFLIGHT_APPLY_POLL_SECONDS` until it acks or
@@ -280,7 +280,7 @@ Without the preflight, the wedged case was near invisible: every retune failed, 
 
 | Constant | Value | Why |
 | --- | --- | --- |
-| `PREFLIGHT_RECOVERY_APPLY_TIMEOUT_SECONDS` | 180 | Covers config-merger, the `sdrplay_apiService` restart, `routes.mode`'s own 30 s settle and a container recreate measured at about 47 s, with headroom so a slow node is not declared dead. |
+| `PREFLIGHT_RECOVERY_APPLY_TIMEOUT_SECONDS` | 180 | Covers config-merger, stopping blah2 (up to 10 s), the `sdrplay_apiService` restart, `routes.mode`'s own 30 s settle and a container recreate measured at about 47 s, with headroom so a slow node is not declared dead. |
 | `PREFLIGHT_RECOVERY_PROBE_SECONDS` | 60 | Covers blah2 coming up and claiming the device. SDRplay hardware needs a real 20-60 s settle before it answers again; anything shorter reports a false failure on a device about to recover. |
 
 The preflight runs **before** the run budget clock starts, so a recovery (about 90 s) is not charged against every tower's

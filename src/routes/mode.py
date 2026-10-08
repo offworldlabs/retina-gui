@@ -89,6 +89,20 @@ def restart_sdrplay_service(on_phase=None):
     return f'{detail}; forced a reset of sdrplay_apiService'
 
 
+def _stop_blah2(retina_node_path):
+    """Stop blah2 so nothing holds the RSPduo. Best effort; never raises.
+
+    Must run before restart_sdrplay_service(): stopping the service while
+    blah2 streams from the device segfaults it, and the device can then stay
+    unavailable. See docs/features/sdr-mode.md#stop-blah2-first.
+    """
+    try:
+        subprocess.run(['docker', 'compose', '-p', 'retina-node', 'stop', 'blah2'],
+                       cwd=retina_node_path, capture_output=True, timeout=60)
+    except Exception:
+        pass
+
+
 def _settle(seconds, on_phase):
     """Sleep out the SDRplay settle window, reporting the remaining time.
 
@@ -162,8 +176,11 @@ def _run_config_merger_and_restart_locked(retina_node_path, on_phase):
     except Exception:
         pass
 
-    # Re-initialise the USB device before blah2 claims it, as the watchdog
-    # does. Non-fatal; reports its own phases.
+    # Stop blah2, then re-initialise the USB device before the recreate starts
+    # it again, as the watchdog does. Both non-fatal; the restart reports its
+    # own phases. See docs/features/sdr-mode.md#stop-blah2-first.
+    on_phase('stopping_radar', None)
+    _stop_blah2(retina_node_path)
     restart_sdrplay_service(on_phase)
 
     # See SDRPLAY_RESTART_SETTLE_SECONDS: skipping this wedges the device.
@@ -358,6 +375,9 @@ def _set_mode_locked(mode, current_mode, retina_node_path):
 
         # Force a clean sdrplay_apiService restart so the USB device is
         # properly re-initialised before blah2 claims it.  Non-fatal.
+        # blah2 is stopped first: it is still running when radar is selected
+        # while already in radar mode. See docs/features/sdr-mode.md#stop-blah2-first.
+        _stop_blah2(retina_node_path)
         restart_sdrplay_service()
 
         result = subprocess.run(
@@ -436,6 +456,8 @@ def _enforce_radar_mode_locked(retina_node_path: str) -> None:
         )
         subprocess.run(['systemctl', 'stop', 'sdrconnect.service'],
                        capture_output=True, timeout=30)
+        # See docs/features/sdr-mode.md#stop-blah2-first.
+        _stop_blah2(retina_node_path)
         restart_sdrplay_service()
         subprocess.run(
             ['docker', 'compose', '-p', 'retina-node', 'up', '-d', '--force-recreate',

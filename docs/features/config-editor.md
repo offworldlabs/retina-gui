@@ -374,8 +374,8 @@ the USB cable, restart the radar, and if there is still no signal, restart on th
 and then run Quick Calibrate once a signal is back. If nothing helps, contact support.
 
 - **Restart radar** reloads the page with `?saved=1`, which runs the page's normal
-  [apply](#apply) on the saved settings: config-merger, a forced `sdrplay_apiService` restart, the
-  settle window and a container recreate, with progress on the Apply button. If the page has
+  [apply](#apply) on the saved settings: config-merger, stopping blah2, a forced `sdrplay_apiService`
+  restart, the settle window and a container recreate, with progress on the Apply button. If the page has
   unsaved changes, it asks first, because the reload discards them.
 - **Use safe settings** sets both gain reductions to 59 and the LNA state to 9
   (`calibrator.GAIN_REDUCTION_MAX` and `LNA_STATE_MAX`, which the page script mirrors in
