@@ -40,7 +40,7 @@ locations are cross-repo contracts: do not rename them without changing the othe
 | `secret-key` | `services.secret_key()` | retina-gui | Flask signing key, mode 0600. Anyone who can read it can forge an owner session. See [architecture.md](../architecture.md#session-cookies). |
 | `restart.lock` | `restart_lock.py` (`flock`) | retina-gui, **blah2-arm watchdog** | Serialises every `docker compose` run against `retina-node`. Contents (`pid=`) are informational. See [architecture.md](../architecture.md#the-restart-lock). |
 | `calibrate.lock` | `DeviceState.acquire_calibration_lock` | retina-gui, **blah2-arm watchdog** | JSON `{"started_at": ...}`; stale after 20 minutes. Cleared at every GUI start. |
-| `mode.txt` | `routes/mode.py` | retina-gui, **blah2-arm watchdog** | `radar`, `spectrum` or `sdrconnect`. Deleted at every GUI start, so the node boots into radar. |
+| `mode.txt` | `routes/sdr.py` | retina-gui, **blah2-arm watchdog** | `radar`, `spectrum` or `sdrconnect`. Deleted at every GUI start, so the node boots into radar. |
 | `install.lock` | `DeviceState` | retina-gui | A GUI-initiated install is in progress; stale after 40 minutes. |
 | `mender-update.status` | owl-os Mender state scripts | retina-gui | A server-pushed update is in progress. |
 | `cloud-services-disabled` | `DeviceState` | retina-gui | Empty flag: the owner turned Mender cloud services off. |

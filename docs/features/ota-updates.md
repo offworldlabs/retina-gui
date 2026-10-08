@@ -9,7 +9,7 @@ A node carries two independently versioned things: the owl-os root filesystem an
 | [mender.py](../../src/mender.py) | `MenderClient` (JWT, installed versions, artifact listing, standalone install), GitHub release lookups, version parsing, dev-mode simulation |
 | [routes/mender_routes.py](../../src/routes/mender_routes.py) | `/mender/check`, `/mender/install`, `/mender/check-os`, `/mender/cloud-services` |
 | [device_state.py](../../src/device_state.py) | `install.lock`, `mender-update.status`, cloud-services flag, `ensure_cloud_services_enabled` |
-| [routes/mode.py](../../src/routes/mode.py) | `enforce_radar_mode` and `_write_mode`, used to recover a failed install |
+| [routes/sdr.py](../../src/routes/sdr.py) | `enforce_radar_mode` and `_write_mode`, used to recover a failed install |
 | [static/setup.js](../../static/setup.js) | Wizard System and Packages steps: polling and success/failure display |
 
 ## Two kinds of update

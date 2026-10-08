@@ -1,6 +1,6 @@
 from flask import Blueprint, redirect, render_template, request
 
-from routes.mode import get_current_mode
+from routes.sdr import get_current_mode
 
 bp = Blueprint('home', __name__)
 

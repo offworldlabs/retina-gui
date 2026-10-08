@@ -99,7 +99,7 @@ def _fetch_alternate_towers(merged, current_fc, limit):
 def start():
     """Start an auto-calibration run against the live radar."""
     from app import apply_service, calibrator, config_mgr, device_state
-    from routes.mode import get_current_mode
+    from routes.sdr import get_current_mode
 
     if not config_mgr.is_retina_node_installed():
         return jsonify({"success": False, "error": "retina-node is not installed"}), 409

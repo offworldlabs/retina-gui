@@ -254,9 +254,9 @@ from routes.config import bp as config_bp
 from routes.fleet import bp as fleet_bp
 from routes.home import bp as home_bp
 from routes.mender_routes import bp as mender_bp
-from routes.mode import bp as mode_bp
 from routes.network import bp as network_bp
 from routes.remote_access import bp as remote_access_bp
+from routes.sdr import bp as mode_bp
 from routes.setup import bp as setup_bp
 from routes.towers import bp as towers_bp
 from routes.tracker import bp as tracker_bp

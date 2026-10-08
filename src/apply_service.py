@@ -52,7 +52,7 @@ class ApplyService:
         # Optional callable returning (ok, reason), checked by request().
         self._guard = guard
         # Injected so tests can pass a fake. None resolves the real one lazily,
-        # because routes.mode imports app, which constructs this class.
+        # because routes.sdr imports app, which constructs this class.
         self._restart_fn = restart_fn
         self._lock = threading.Lock()
         self._thread = None
@@ -125,7 +125,7 @@ class ApplyService:
     def _resolve_restart_fn(self):
         if self._restart_fn is not None:
             return self._restart_fn
-        from routes.mode import run_config_merger_and_restart
+        from routes.sdr import run_config_merger_and_restart
         return run_config_merger_and_restart
 
     def _run(self):

@@ -152,7 +152,7 @@ def install():
     def _run_install(download_url):
         from app import RETINA_NODE_PATH
         from mender import get_retina_node_version_from_docker
-        from routes.mode import _write_mode, enforce_radar_mode
+        from routes.sdr import _write_mode, enforce_radar_mode
 
         def _recover():
             # Backstop to the Update Module's own rollback: bring the previous

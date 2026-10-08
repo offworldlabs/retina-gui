@@ -1,12 +1,12 @@
 # SDR mode and stack restarts
 
-The node's single SDRplay RSPduo can be owned by one of three consumers at a time: the blah2 radar stack (`radar`), the retina-spectrum container (`spectrum`), or the SDRconnect systemd service (`sdrconnect`). `routes/mode.py` switches between them, persists the choice, and also owns the shared "merge config and restart the radar stack" path used by config apply, tower selection and Auto-Calibrate. Every transition restarts `sdrplay_apiService` before handing the device over, and that restart needs more than a plain `systemctl restart`.
+The node's single SDRplay RSPduo can be owned by one of three consumers at a time: the blah2 radar stack (`radar`), the retina-spectrum container (`spectrum`), or the SDRconnect systemd service (`sdrconnect`). `routes/sdr.py` switches between them, persists the choice, and also owns the shared "merge config and restart the radar stack" path used by config apply, tower selection and Auto-Calibrate. Every transition except the one into spectrum mode restarts `sdrplay_apiService` before handing the device over, and that restart needs more than a plain `systemctl restart`.
 
 ## Where it lives
 
 | File | Role |
 | --- | --- |
-| [routes/mode.py](../../src/routes/mode.py) | Mode routes, `restart_sdrplay_service`, `run_config_merger_and_restart`, `enforce_radar_mode` |
+| [routes/sdr.py](../../src/routes/sdr.py) | Mode routes, `restart_sdrplay_service`, `run_config_merger_and_restart`, `enforce_radar_mode` |
 | [restart_lock.py](../../src/restart_lock.py) | Cross-process lock every `docker compose` caller must hold |
 | [stack_reconcile.py](../../src/stack_reconcile.py) | Repairs half-recreated containers after a failed recreate |
 | [apply_service.py](../../src/apply_service.py) | Background config apply, calls `run_config_merger_and_restart` with the long lock timeout |

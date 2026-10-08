@@ -62,7 +62,7 @@ def service():
     """Builds an ApplyService wired to a FakeRestart.
 
     The restart callable is injected rather than monkeypatched onto
-    routes.mode: conftest's app_client fixture calls importlib.reload(app),
+    routes.sdr: conftest's app_client fixture calls importlib.reload(app),
     which rebuilds that module, so a patched attribute there would silently
     stop being the one this service calls.
     """

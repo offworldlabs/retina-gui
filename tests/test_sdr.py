@@ -15,14 +15,14 @@ from restart_lock import is_locked, restart_lock
 def reset_mode_cache():
     """Reset the in-memory mode cache before every test.
 
-    _mode_cache is a module-level variable in routes.mode that survives
+    _mode_cache is a module-level variable in routes.sdr that survives
     importlib.reload(app) because Python's module cache doesn't re-execute
     already-imported submodules. Without this reset, a test that switches to
     'spectrum' would pollute the next test's default mode.
     """
     import sys
-    if 'routes.mode' in sys.modules:
-        sys.modules['routes.mode']._mode_cache = 'radar'
+    if 'routes.sdr' in sys.modules:
+        sys.modules['routes.sdr']._mode_cache = 'radar'
     yield
 
 
@@ -295,7 +295,7 @@ class TestRepairAfterInterruptedRecreate:
     so without this repair every later apply fails identically, forever."""
 
     def _run_apply(self, temp_dir, run_side_effect):
-        import routes.mode as mode_module
+        import routes.sdr as mode_module
         with patch('subprocess.run', side_effect=run_side_effect):
             return mode_module.run_config_merger_and_restart(temp_dir)
 
@@ -374,7 +374,7 @@ class TestRepairAfterInterruptedRecreate:
         assert 'automatic repair also failed' in error.lower()
 
     def test_conflict_detection_matches_the_real_daemon_message(self):
-        import routes.mode as mode_module
+        import routes.sdr as mode_module
         assert mode_module._is_name_conflict(CONFLICT_OUTPUT)
         assert not mode_module._is_name_conflict('no such image: blah2:v9')
         assert not mode_module._is_name_conflict('')
@@ -389,7 +389,7 @@ class TestRestartLockCoverage:
 
     def test_enforce_radar_mode_takes_the_lock(self, app_client, temp_dir, monkeypatch):
         import app as app_module
-        import routes.mode as mode_module
+        import routes.sdr as mode_module
         monkeypatch.setattr(app_module, 'DATA_DIR', temp_dir)
 
         held = []
@@ -407,7 +407,7 @@ class TestRestartLockCoverage:
         restarting, so this must not raise or hang."""
         import app as app_module
         import restart_lock as rl
-        import routes.mode as mode_module
+        import routes.sdr as mode_module
         monkeypatch.setattr(app_module, 'DATA_DIR', temp_dir)
         monkeypatch.setattr(rl, 'DEFAULT_TIMEOUT_SECONDS', 0.1)
 
@@ -459,7 +459,7 @@ class TestNoSelfDeadlock:
     def test_enforce_radar_mode_does_not_nest_inside_its_own_lock(
             self, app_client, temp_dir, monkeypatch):
         import app as app_module
-        import routes.mode as mode_module
+        import routes.sdr as mode_module
         monkeypatch.setattr(app_module, 'DATA_DIR', temp_dir)
 
         with patch('subprocess.run') as mock_run:
@@ -476,7 +476,7 @@ class TestNoSelfDeadlock:
 
     def test_shared_restart_fn_does_not_nest(self, app_client, temp_dir, monkeypatch):
         import app as app_module
-        import routes.mode as mode_module
+        import routes.sdr as mode_module
         monkeypatch.setattr(app_module, 'DATA_DIR', temp_dir)
 
         with patch('subprocess.run') as mock_run:
@@ -505,7 +505,7 @@ class TestRestartSdrplayService:
 
     @patch('subprocess.run')
     def test_clean_restart_needs_no_force(self, mock_run):
-        import routes.mode as mode_module
+        import routes.sdr as mode_module
         mock_run.return_value = MagicMock(returncode=0, stdout='', stderr='')
 
         assert mode_module.restart_sdrplay_service() is None
@@ -516,7 +516,7 @@ class TestRestartSdrplayService:
     @patch('subprocess.run')
     def test_hung_restart_is_forced_down_rather_than_raising(
             self, mock_run, monkeypatch):
-        import routes.mode as mode_module
+        import routes.sdr as mode_module
         monkeypatch.setattr(mode_module.time, 'sleep', lambda s: None)
 
         def fake_run(argv, **kwargs):
@@ -545,7 +545,7 @@ class TestRestartSdrplayService:
         sdrplay-restart.sh is a silent no-op. And the pattern is bracketed so
         it cannot match a shell command line merely carrying it: the
         unbracketed form run over ssh kills the invoking session."""
-        import routes.mode as mode_module
+        import routes.sdr as mode_module
         monkeypatch.setattr(mode_module.time, 'sleep', lambda s: None)
 
         def fake_run(argv, **kwargs):
@@ -569,7 +569,7 @@ class TestRestartSdrplayService:
     @patch('subprocess.run')
     def test_missing_systemd_is_a_silent_no_op(self, mock_run):
         """Dev machines have no sdrplay.service and must not be forced."""
-        import routes.mode as mode_module
+        import routes.sdr as mode_module
         mock_run.side_effect = FileNotFoundError()
 
         assert mode_module.restart_sdrplay_service() is None
@@ -578,7 +578,7 @@ class TestRestartSdrplayService:
     @patch('subprocess.run')
     def test_forced_reset_failing_still_does_not_raise(self, mock_run,
                                                       monkeypatch):
-        import routes.mode as mode_module
+        import routes.sdr as mode_module
         monkeypatch.setattr(mode_module.time, 'sleep', lambda s: None)
 
         def fake_run(argv, **kwargs):
@@ -593,7 +593,7 @@ class TestRestartSdrplayService:
             self, mock_run, app_client, temp_dir, monkeypatch):
         """The regression this exists for, at the level that actually
         mattered: the recreate must still happen."""
-        import routes.mode as mode_module
+        import routes.sdr as mode_module
         monkeypatch.setattr(mode_module, 'SDRPLAY_RESTART_SETTLE_SECONDS', 0)
         monkeypatch.setattr(mode_module.time, 'sleep', lambda s: None)
 
@@ -630,7 +630,7 @@ class TestRestartSettleTime:
         chunk of it falls between the restart and the recreate — not a
         single flat sleep call, which is an implementation detail.
         """
-        import routes.mode as mode_module
+        import routes.sdr as mode_module
         monkeypatch.setattr(mode_module, 'SDRPLAY_RESTART_SETTLE_SECONDS', 30)
 
         order = []
@@ -665,7 +665,7 @@ class TestRestartSettleTime:
     def test_reports_each_phase_in_order(self, mock_run, app_client, temp_dir):
         """The UI's progress display depends on these phases arriving in
         order — a silent apply is what got clicked twice in the first place."""
-        import routes.mode as mode_module
+        import routes.sdr as mode_module
         mock_run.return_value = MagicMock(returncode=0, stdout='', stderr='')
 
         phases = []
@@ -704,7 +704,7 @@ class TestStopBlah2BeforeSdrRestart:
         assert calls.index(self.STOP_BLAH2) < calls.index(self.RESTART)
 
     def test_apply_stops_blah2_before_restarting_the_service(self, app_client, temp_dir):
-        import routes.mode as mode_module
+        import routes.sdr as mode_module
         calls, run = self._record()
         with patch('subprocess.run', side_effect=run):
             assert mode_module.run_config_merger_and_restart(temp_dir) is None
@@ -721,7 +721,7 @@ class TestStopBlah2BeforeSdrRestart:
 
     def test_enforce_radar_mode_stops_blah2_first(self, app_client, temp_dir, monkeypatch):
         import app as app_module
-        import routes.mode as mode_module
+        import routes.sdr as mode_module
         monkeypatch.setattr(app_module, 'DATA_DIR', temp_dir)
         calls, run = self._record()
         with patch('subprocess.run', side_effect=run):
@@ -731,7 +731,7 @@ class TestStopBlah2BeforeSdrRestart:
     def test_apply_carries_on_when_blah2_will_not_stop(self, app_client, temp_dir):
         """Best effort, like the spectrum stop: a stop that times out must not
         abort the apply, which then behaves as it did before this change."""
-        import routes.mode as mode_module
+        import routes.sdr as mode_module
         calls = []
 
         def run(*a, **k):
