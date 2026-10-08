@@ -152,8 +152,9 @@ class TestSetMode:
 
         assert response.status_code == 200
         assert json.loads(response.data)['success'] is True
-        # stop retina-spectrum, rm retina-spectrum, restart sdrplay, up the radar stack
-        assert mock_run.call_count == 4
+        # stop retina-spectrum, rm retina-spectrum, stop blah2, restart sdrplay,
+        # up the radar stack
+        assert mock_run.call_count == 5
 
         stop_spectrum_args = mock_run.call_args_list[0][0][0]
         assert stop_spectrum_args[:4] == ['docker', 'compose', '-p', 'retina-node']
@@ -164,9 +165,11 @@ class TestSetMode:
         assert 'rm' in rm_spectrum_args
         assert 'retina-spectrum' in rm_spectrum_args
 
-        assert mock_run.call_args_list[2][0][0] == ['systemctl', 'restart', 'sdrplay.service']
+        assert mock_run.call_args_list[2][0][0] == [
+            'docker', 'compose', '-p', 'retina-node', 'stop', 'blah2']
+        assert mock_run.call_args_list[3][0][0] == ['systemctl', 'restart', 'sdrplay.service']
 
-        up_args = mock_run.call_args_list[3][0][0]
+        up_args = mock_run.call_args_list[4][0][0]
         assert up_args[:4] == ['docker', 'compose', '-p', 'retina-node']
         assert 'up' in up_args
         assert '--force-recreate' in up_args
@@ -673,4 +676,70 @@ class TestRestartSettleTime:
         assert phases[0] == 'waiting_for_lock'
         assert [p for p in phases if p != 'settling'] == [
             'waiting_for_lock', 'merging', 'stopping_spectrum',
-            'restarting_sdr', 'recreating']
+            'stopping_radar', 'restarting_sdr', 'recreating']
+
+
+class TestStopBlah2BeforeSdrRestart:
+    """Every path that restarts sdrplay_apiService must stop blah2 first.
+
+    Stopping the service while blah2 streams from the RSPduo segfaults it
+    (4 of 4 rounds on a test node, 0 of 4 with blah2 stopped first), and the
+    device can then stay unavailable until the watchdog recovers it.
+    See docs/features/sdr-mode.md#stop-blah2-first."""
+
+    STOP_BLAH2 = ['docker', 'compose', '-p', 'retina-node', 'stop', 'blah2']
+    RESTART = ['systemctl', 'restart', 'sdrplay.service']
+
+    def _record(self):
+        calls = []
+
+        def run(*a, **k):
+            calls.append(a[0])
+            return MagicMock(returncode=0, stdout='', stderr='')
+        return calls, run
+
+    def _assert_stop_first(self, calls):
+        assert self.STOP_BLAH2 in calls, "blah2 was never stopped"
+        assert self.RESTART in calls, "the SDRplay service was never restarted"
+        assert calls.index(self.STOP_BLAH2) < calls.index(self.RESTART)
+
+    def test_apply_stops_blah2_before_restarting_the_service(self, app_client, temp_dir):
+        import routes.mode as mode_module
+        calls, run = self._record()
+        with patch('subprocess.run', side_effect=run):
+            assert mode_module.run_config_merger_and_restart(temp_dir) is None
+        self._assert_stop_first(calls)
+
+    def test_selecting_radar_while_in_radar_stops_blah2_first(self, app_client, temp_dir):
+        """Radar is the default mode, so blah2 is running here."""
+        calls, run = self._record()
+        with patch('subprocess.run', side_effect=run):
+            response = app_client.post('/api/mode', data=json.dumps({'mode': 'radar'}),
+                                       content_type='application/json')
+        assert response.status_code == 200
+        self._assert_stop_first(calls)
+
+    def test_enforce_radar_mode_stops_blah2_first(self, app_client, temp_dir, monkeypatch):
+        import app as app_module
+        import routes.mode as mode_module
+        monkeypatch.setattr(app_module, 'DATA_DIR', temp_dir)
+        calls, run = self._record()
+        with patch('subprocess.run', side_effect=run):
+            mode_module.enforce_radar_mode(temp_dir)
+        self._assert_stop_first(calls)
+
+    def test_apply_carries_on_when_blah2_will_not_stop(self, app_client, temp_dir):
+        """Best effort, like the spectrum stop: a stop that times out must not
+        abort the apply, which then behaves as it did before this change."""
+        import routes.mode as mode_module
+        calls = []
+
+        def run(*a, **k):
+            calls.append(a[0])
+            if a[0] == self.STOP_BLAH2:
+                raise subprocess.TimeoutExpired(a[0], 60)
+            return MagicMock(returncode=0, stdout='', stderr='')
+        with patch('subprocess.run', side_effect=run):
+            assert mode_module.run_config_merger_and_restart(temp_dir) is None
+        assert self.RESTART in calls
+        assert any('--force-recreate' in c for c in calls), "the recreate never ran"

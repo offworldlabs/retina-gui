@@ -29,6 +29,7 @@ PHASE_LABELS = {
     'waiting_for_lock': 'Waiting for another restart to finish',
     'merging': 'Merging configuration',
     'stopping_spectrum': 'Releasing the SDR',
+    'stopping_radar': 'Stopping the radar',
     'restarting_sdr': 'Restarting the SDR service',
     'resetting_sdr': 'SDR service stuck, forcing it down',
     'settling': 'Waiting for the SDR to settle',

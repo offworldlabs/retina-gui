@@ -36,7 +36,7 @@ Otherwise `_set_mode_locked` runs the transition with the restart lock held for 
 | --- | --- |
 | `spectrum` | Write mode first. Stop `sdrconnect.service` or the blah2 containers. Start `retina-spectrum` (compose profile `spectrum`). |
 | `sdrconnect` | Write mode first. Stop and remove `retina-spectrum`, or stop the blah2 containers. `restart_sdrplay_service`. Start `sdrconnect.service`. |
-| `radar` | Stop `sdrconnect.service`, or stop and remove `retina-spectrum`. `restart_sdrplay_service`. Force-recreate blah2, blah2_api, blah2_web, blah2_host and retina-tracker. Write mode last. |
+| `radar` | Stop `sdrconnect.service`, or stop and remove `retina-spectrum`. Stop blah2 ([why](#stop-blah2-first)). `restart_sdrplay_service`. Force-recreate blah2, blah2_api, blah2_web, blah2_host and retina-tracker. Write mode last. |
 
 Leaving radar, the mode is written first so the watchdog's guard applies immediately and it cannot see blah2 stopped mid-transition and trigger a spurious stack restart. Returning to radar, the mode is written only once the stack is up.
 
@@ -51,12 +51,26 @@ Leaving radar, the mode is written first so the watchdog's guard applies immedia
 
 ### Returning to radar
 
-- `enforce_radar_mode` stops spectrum and SDRconnect, restarts the SDRplay service and force-recreates the radar containers. It is called on wizard completion, so the node is always left in radar mode whatever happened during the wizard, and by the Mender install path to recover a failed install from a background thread, where nothing else coordinates it with a concurrent apply. It takes the restart lock and swallows every error, including failing to get the lock: whoever holds the lock is already restarting the stack.
+- `enforce_radar_mode` stops spectrum, SDRconnect and blah2, restarts the SDRplay service and force-recreates the radar containers. It is called on wizard completion, so the node is always left in radar mode whatever happened during the wizard, and by the Mender install path to recover a failed install from a background thread, where nothing else coordinates it with a concurrent apply. It takes the restart lock and swallows every error, including failing to get the lock: whoever holds the lock is already restarting the stack.
 - `POST /api/mode/release-spectrum` is sent by `navigator.sendBeacon` when the user leaves the wizard's location step mid-flow. It stops and removes retina-spectrum and writes `radar`, returning 204. It uses the opportunistic lock timeout: nobody waits on a beacon, and every restart path already stops retina-spectrum defensively, so giving up when the lock is busy loses nothing.
 
 ## Restarting sdrplay_apiService
 
-`restart_sdrplay_service` restarts `sdrplay.service` so the USB device is re-initialised before blah2 or SDRconnect claims it. It mirrors what the watchdog does.
+`restart_sdrplay_service` restarts `sdrplay.service` so the USB device is re-initialised before blah2 or SDRconnect claims it. Every caller first makes sure nothing holds the device, as the watchdog does by stopping the stack.
+
+### Stop blah2 first
+
+Stopping `sdrplay_apiService` while blah2 is streaming from the RSPduo makes the service segfault on the way down (`status=11/SEGV` in `journalctl -u sdrplay`). systemd restarts it within a second, and usually the new service works. Sometimes it never hands the device out: every API client hangs before device enumeration, blah2 stops after `Setting up device RspDuo`, and the radar is down until the watchdog's next run. The apply cannot tell, and reports `done`.
+
+Measured on a test node with an apply-shaped sequence (restart, 30 s settle, recreate): with blah2 streaming for a couple of minutes the service segfaulted in 4 of 4 rounds; with blah2 stopped first, 0 of 4. None of those rounds left the device unavailable, but in the field the segfault was followed by an outage after applies on 2026-08-25 (two of three) and 2026-10-07 (6.5 minutes).
+
+So every path that calls `restart_sdrplay_service` stops blah2 first, through `_stop_blah2` (`docker compose stop blah2`):
+
+- the config apply restart path, as its own `stopping_radar` phase
+- switching to radar, including selecting radar while already in radar mode, when blah2 is running
+- `enforce_radar_mode`.
+
+Switching to SDRconnect already stops the blah2 containers before its restart, and switching to spectrum does not restart the service. `_stop_blah2` is best effort and never raises: if the stop fails, the restart goes ahead as before. It costs no radar time, because restarting the service stops blah2's data anyway. blah2 releases the device on SIGTERM; a wedged blah2 is killed by Docker after its 10 s stop timeout.
 
 ### Why a plain restart is not enough
 
@@ -99,6 +113,7 @@ Phases reported through `on_phase(phase, detail)`:
 | `waiting_for_lock` | Waiting for the restart lock |
 | `merging` | `docker compose run --rm config-merger`. Stops here in spectrum or SDRconnect mode |
 | `stopping_spectrum` | Defensive stop and remove of retina-spectrum, non-fatal |
+| `stopping_radar` | Stop blah2 so nothing holds the device ([Stop blah2 first](#stop-blah2-first)), non-fatal |
 | `restarting_sdr`, `resetting_sdr` | `restart_sdrplay_service` |
 | `settling` | Settle window, `detail` is the seconds remaining |
 | `recreating` | `docker compose up -d --force-recreate` |
