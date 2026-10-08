@@ -280,7 +280,7 @@ Without the preflight, the wedged case was near invisible: every retune failed, 
 
 | Constant | Value | Why |
 | --- | --- | --- |
-| `PREFLIGHT_RECOVERY_APPLY_TIMEOUT_SECONDS` | 180 | Covers config-merger, stopping blah2 (up to 10 s), the `sdrplay_apiService` restart, `routes.mode`'s own 30 s settle and a container recreate measured at about 47 s, with headroom so a slow node is not declared dead. |
+| `PREFLIGHT_RECOVERY_APPLY_TIMEOUT_SECONDS` | 180 | Covers config-merger, stopping blah2 (up to 10 s), the `sdrplay_apiService` restart, `routes.sdr`'s own 30 s settle and a container recreate measured at about 47 s, with headroom so a slow node is not declared dead. |
 | `PREFLIGHT_RECOVERY_PROBE_SECONDS` | 60 | Covers blah2 coming up and claiming the device. SDRplay hardware needs a real 20-60 s settle before it answers again; anything shorter reports a false failure on a device about to recover. |
 
 The preflight runs **before** the run budget clock starts, so a recovery (about 90 s) is not charged against every tower's

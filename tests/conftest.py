@@ -65,11 +65,11 @@ def clear_owl_os_release_cache():
 
 @pytest.fixture(autouse=True)
 def fast_sdrplay_settle(monkeypatch):
-    """SDRPLAY_RESTART_SETTLE_SECONDS (see routes/mode.py) is a real
+    """SDRPLAY_RESTART_SETTLE_SECONDS (see routes/sdr.py) is a real
     sleep in production — shrink it to 0 for every test so none of them
     pay that cost, the same way test_calibrate.py's `fast` fixture
     shrinks calibrator.py's own protocol-timing constants."""
-    import routes.mode as mode_module
+    import routes.sdr as mode_module
     monkeypatch.setattr(mode_module, "SDRPLAY_RESTART_SETTLE_SECONDS", 0)
 
 

@@ -16,7 +16,7 @@ requests are gated, and the machinery that keeps stack restarts from colliding.
 | [src/stack_reconcile.py](../src/stack_reconcile.py) | Repairs a compose project left half-recreated |
 | [src/restart_lock.py](../src/restart_lock.py) | Cross-process `flock` mutex around anything that drives the stack |
 | [src/routes/home.py](../src/routes/home.py) | `/` (home page) and `/eula` |
-| [src/routes/mode.py](../src/routes/mode.py) | `run_config_merger_and_restart`, the restart body that `ApplyService` runs (see [sdr-mode.md](features/sdr-mode.md)) |
+| [src/routes/sdr.py](../src/routes/sdr.py) | `run_config_merger_and_restart`, the restart body that `ApplyService` runs (see [sdr-mode.md](features/sdr-mode.md)) |
 | [templates/base.html](../templates/base.html) | Page shell: fleet bar, node sub-nav, footer, CSRF meta tag |
 | [templates/index.html](../templates/index.html) | Home page |
 | [templates/summary.html](../templates/summary.html) | Fleet summary page, including the flight-path diagram |
@@ -173,7 +173,7 @@ Route modules are imported at the bottom of `app.py`, after the app exists, beca
 | `mender` | [routes/mender_routes.py](../src/routes/mender_routes.py) | [ota-updates.md](features/ota-updates.md) |
 | `setup` | [routes/setup.py](../src/routes/setup.py) | [setup-wizard.md](features/setup-wizard.md) |
 | `towers` | [routes/towers.py](../src/routes/towers.py) | [towers.md](features/towers.md) |
-| `mode` | [routes/mode.py](../src/routes/mode.py) | [sdr-mode.md](features/sdr-mode.md) |
+| `mode` | [routes/sdr.py](../src/routes/sdr.py) | [sdr-mode.md](features/sdr-mode.md) |
 | `network` | [routes/network.py](../src/routes/network.py) | [sdr-mode.md](features/sdr-mode.md) |
 | `calibrate` | [routes/calibrate.py](../src/routes/calibrate.py) | [auto-calibrate.md](features/auto-calibrate.md) |
 | `tracker`, `tracker_legacy` | [routes/tracker.py](../src/routes/tracker.py) | [tracker.md](features/tracker.md) |
@@ -317,7 +317,7 @@ the browser dropped the session cookie, and a reload fixes both.
 ## The apply service
 
 `ApplyService` runs config apply (`run_config_merger_and_restart` in
-[routes/mode.py](../src/routes/mode.py)) on a background thread and coalesces repeat requests.
+[routes/sdr.py](../src/routes/sdr.py)) on a background thread and coalesces repeat requests.
 Every route that restarts the stack for a config change goes through `apply_service.request()`:
 `/config/apply`, `/towers/select`, `/calibrate/apply`, and the home page's Restart services
 button (which posts to `/config/apply`). Progress is read from `/config/apply/status`
@@ -394,8 +394,8 @@ search with. There the calibration is the caller and holds the lock itself. No r
 pass it. See [auto-calibrate.md](features/auto-calibrate.md).
 
 `ApplyService` takes an optional `restart_fn` so tests can pass a fake instead of monkeypatching
-`routes.mode`, which conftest's `importlib.reload(app)` would swap out anyway. `None` resolves the
-real function lazily, because `routes.mode` imports `app`, which constructs this class.
+`routes.sdr`, which conftest's `importlib.reload(app)` would swap out anyway. `None` resolves the
+real function lazily, because `routes.sdr` imports `app`, which constructs this class.
 
 ## Stack reconcile
 
@@ -430,7 +430,7 @@ Two things interrupt a recreate:
   stack (spectrum or SDRconnect mode, where blah2 is deliberately stopped). Returns
   `(removed, error)` and never raises. Callers must already hold the restart lock.
 
-It runs in two places: `_repair` in [routes/mode.py](../src/routes/mode.py), after a recreate
+It runs in two places: `_repair` in [routes/sdr.py](../src/routes/sdr.py), after a recreate
 times out or fails on a name conflict, and at startup, because after a GUI restart the process
 that could have cleaned up is gone.
 
@@ -487,7 +487,7 @@ enforces that they stay in step:
 | Restart lock path | `DATA_DIR/restart.lock` (`LOCK_FILENAME` in `restart_lock.py`) | `RESTART_LOCK=/data/retina-gui/restart.lock`, taken with `flock -n` around its `down`/`up` |
 | Calibration lock path | `DATA_DIR/calibrate.lock` (`DeviceState.calibrate_lock_file`) | `CALIBRATE_LOCK=/data/retina-gui/calibrate.lock`; the watchdog skips while it is fresh |
 | Calibration lock staleness | `CALIBRATE_LOCK_TIMEOUT` = 20 min in `device_state.py` | `CALIBRATE_LOCK_TIMEOUT_SECONDS=1200` |
-| Mode file | `DATA_DIR/mode.txt` (`routes/mode.py`) | `MODE_FILE=/data/retina-gui/mode.txt`; skips in spectrum or SDRconnect mode |
+| Mode file | `DATA_DIR/mode.txt` (`routes/sdr.py`) | `MODE_FILE=/data/retina-gui/mode.txt`; skips in spectrum or SDRconnect mode |
 
 The watchdog used to guard with `pgrep -f "docker compose"`, which could not work: an apply
 spends about 30 s in the SDRplay settle window with no compose process running, so the

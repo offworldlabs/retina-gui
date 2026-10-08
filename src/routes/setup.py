@@ -172,7 +172,7 @@ def complete():
     See docs/features/setup-wizard.md#completion.
     """
     from app import RETINA_NODE_PATH, config_mgr
-    from routes.mode import _write_mode, enforce_radar_mode
+    from routes.sdr import _write_mode, enforce_radar_mode
 
     # Write radar to mode.txt before docker ops so the home page cannot race
     # and see spectrum mode while enforce_radar_mode is still running.

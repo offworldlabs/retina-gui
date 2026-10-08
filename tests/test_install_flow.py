@@ -282,7 +282,7 @@ class TestGuiInstallLeavesTheStackToTheUpdateModule:
         import app as app_module
         import mender as mender_module
         import routes.mender_routes as routes_module
-        import routes.mode as mode_module
+        import routes.sdr as mode_module
 
         class InlineThread:
             def __init__(self, target, args=(), daemon=None):

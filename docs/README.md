@@ -39,7 +39,7 @@ Use this to find the doc to update when you change a file.
 | `src/mdns_peers.py`, `src/routes/fleet.py`, `src/node_name.py`, `templates/_fleet_bar.html` | [features/fleet-and-naming.md](features/fleet-and-naming.md) |
 | `src/config_schema.py`, `src/config_manager.py`, `src/form_utils.py`, `src/routes/config.py`, `templates/config.html` | [features/config-editor.md](features/config-editor.md) |
 | `src/mender.py`, `src/routes/mender_routes.py` | [features/ota-updates.md](features/ota-updates.md) |
-| `src/routes/mode.py` | [features/sdr-mode.md](features/sdr-mode.md) |
+| `src/routes/sdr.py` | [features/sdr-mode.md](features/sdr-mode.md) |
 | `src/network_manager.py`, `src/routes/network.py` | No doc yet: the prose is short and stays in code. Write `features/network.md` if it grows. |
 | `src/routes/towers.py` | [features/towers.md](features/towers.md) |
 | `src/routes/tracker.py`, `src/retina_tracker_client.py`, `templates/tracker.html` | [features/tracker.md](features/tracker.md) |
