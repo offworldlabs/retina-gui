@@ -261,3 +261,49 @@ class TestTheAxesComeFromTheNode:
         axes = json.loads(rendered)
         assert axes["doppler"] == [-300, 300]
         assert axes["delay"][1] == pytest.approx(59.96, abs=0.01)
+
+
+# ── the Doppler view ────────────────────────────────────────────────────────
+
+class TestTheDopplerViewIsPresentationOnly:
+    """The node processes its whole span; the page chooses how much to draw.
+    The behaviour lives in the page's script, so these pin the contract the
+    rendered page carries. See docs/features/tracker.md#doppler-view."""
+
+    @pytest.fixture
+    def page(self, app_client):
+        config = {"process": {"ambiguity": {"dopplerMin": -1000, "dopplerMax": 1000}}}
+        merged = MagicMock()
+        merged.load_merged_config.return_value = config
+        with patch.dict('sys.modules', {'app': MagicMock(config_mgr=merged)}):
+            return app_client.get('/tracker').get_data(as_text=True)
+
+    def test_the_toggle_offers_narrow_and_full_with_narrow_first(self, page):
+        narrow = re.search(r'<button[^>]*data-dop="narrow"[^>]*>', page).group(0)
+        full = re.search(r'<button[^>]*data-dop="full"[^>]*>', page).group(0)
+        assert 'aria-pressed="true"' in narrow
+        assert 'aria-pressed="false"' in full
+
+    def test_narrow_defaults_to_300_hz(self, page):
+        assert re.search(r'var DEFAULT_NARROW_HZ = 300;', page)
+
+    def test_the_full_view_is_the_nodes_span_not_a_constant(self, page):
+        """Full draws AXES.doppler, so a node at another span is drawn at its own."""
+        assert json.loads(re.search(r'var AXES = (.+?);\n', page).group(1))["doppler"] == [-1000, 1000]
+        assert "state.dopView === 'narrow' ? narrowRange() : AXES.doppler" in page
+
+    def test_the_gear_opens_a_settings_dialog_for_the_narrow_range(self, page):
+        assert 'id="settingsBtn"' in page and 'aria-haspopup="dialog"' in page
+        field = re.search(r'<input[^>]*id="narrowHzInput"[^>]*>', page).group(0)
+        assert 'type="number"' in field and 'min="1"' in field
+
+    def test_the_setting_is_kept_in_the_browser_and_never_posted(self, page):
+        assert "remember('narrowHz', n)" in page
+        assert "remember('dopView', v)" in page
+        # The only request the page makes besides the stream is Clear buffer.
+        assert re.findall(r"fetch\('([^']+)'", page) == ['/tracker/clear']
+
+    def test_the_out_of_view_alert_is_on_the_page_and_hidden_until_needed(self, page):
+        alert = re.search(r'<span[^>]*id="oovAlert"[^>]*>', page).group(0)
+        assert 'hidden' in alert
+        assert 'id="oovShowBtn"' in page

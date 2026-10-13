@@ -177,7 +177,56 @@ what the node can see, which is not knowable from what it happened to see. Plotl
 `uirevision` keeps a viewer's own zoom across updates, so the node's range is where the axis
 starts rather than somewhere it is dragged back to.
 
+The Doppler bounds are the Full setting of the Doppler view below. By default the page draws a
+narrower band inside them.
+
 `SPEED_OF_LIGHT` is mirrored rather than imported for the same reason as the window bounds.
+
+## Doppler view
+
+Every node processes ±1000 Hz of Doppler (retina-node's config-merger enforces it), so that
+activity outside the band where ordinary air traffic sits can still be detected and reported.
+Drawn at that scale, the traffic people calibrate against fills the middle 30% of the plot. The
+Doppler control in the toolbar therefore switches what is drawn between two ranges:
+
+| Setting | Draws | Label |
+| --- | --- | --- |
+| Narrow (the default) | ±300 Hz, or whatever the gear sets, clipped to the node's span | `±300` |
+| Full | The node's own bounds from [Axis bounds](#axis-bounds), or autoscale if the config does not state them | `±1000` |
+
+This is presentation only. Nothing is written to config and nothing changes on the node:
+blah2, retina-tracker and the stream carry the full span whichever view is drawn. The buttons
+are labelled with the ranges they draw, so they stay truthful on a node with a different span or
+after the narrow range is changed.
+
+The gear in the page header opens Tracker settings, a native `<dialog>` (the page does not load
+Bootstrap's JavaScript), with one field: the narrow range as a whole number of hertz, from 1 to
+half the node's span (or up to 100,000 when the span is unknown). Saving switches the view to
+narrow, since setting a range is asking to see it. Reset to ±300 refills the field without
+saving.
+
+Narrow is clipped to the node's span so it never draws Doppler the node cannot see. If the span
+lies wholly to one side of the narrow band, narrow falls back to the node's bounds.
+
+The plot's `uirevision` includes the view and the narrow range. A viewer's zoom survives stream
+updates as before, but switching view or saving a new range redraws at the new range rather than
+keeping the old zoom (the delay axis included). Double-click resets to the current view's range.
+
+## Out-of-view alert
+
+Narrowing the plot must not hide activity, so when the narrow view is on, the toolbar shows a
+warning pill such as "1 track outside ±300 Hz" with a Show full span button that switches to
+Full. Each such track also gets an Outside view chip in the rail.
+
+A track counts when any of its points in the current view window lies beyond the narrow range.
+Removed tracks never count. Hidden and filtered-out tracks do, because the alert reports what
+the node saw rather than what the rail happens to list. The alert never fires in Full, where
+nothing can be outside.
+
+It counts tracks, not raw detections. Widening the processed span from ±300 to ±1000 Hz gives
+CFAR about 3.3 times as many cells, and most of the extra detections are false alarms spread
+evenly across the band, so an alert on raw detections would be lit permanently. A track needs
+repeated detections that line up, which is the evidence worth interrupting someone for.
 
 ## What is plotted
 
@@ -260,8 +309,9 @@ The rail beside the scope lists every track in the window.
 
 - **Sort:** newest (last seen), longest (duration), strongest (peak SNR), most points.
 - **Filter:** All, ADS-B (has `adsb_hex`), Flagged (`is_anomalous`), Unmatched (no `adsb_hex`).
-- **Row:** colour swatch, id, duration, point count, peak SNR, age ("live" under 15 s), and an
-  ADS-B chip with the hex when matched.
+- **Row:** colour swatch, id, duration, point count, peak SNR, age ("live" under 15 s), an
+  ADS-B chip with the hex when matched, and an Outside view chip when the narrow Doppler view
+  cannot show all of the track (see [Out-of-view alert](#out-of-view-alert)).
 - **Flagged tracks get a dot, not a badge.** retina-tracker's anomaly detector is not trusted
   yet, and a solid label would be read as a verdict. The expanded row lists the anomaly types
   marked "(provisional)".
@@ -270,8 +320,10 @@ The rail beside the scope lists every track in the window.
 - **Hide** (eye) removes a track from the scope but keeps its row. **Remove** (bin) drops the row
   too; removals are per browser and can be undone with Restore in the rail footer.
 
-View window, layer, track overlay, sort and filter are remembered in `localStorage`
-(`tracker.*` keys) and restored into the controls before connecting.
+View window, layer, track overlay, sort, filter, Doppler view (`tracker.dopView`) and the
+narrow range (`tracker.narrowHz`) are remembered in `localStorage` (`tracker.*` keys) and
+restored into the controls before connecting. They are per browser: nothing about the page's
+presentation is stored on the node.
 
 The page is full width with a viewport-clamped height, since both the plot and the rail want
 every pixel; below 900 px the rail stacks under the plot.
