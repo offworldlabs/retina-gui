@@ -21,12 +21,23 @@
     var aim = -Math.PI / 2, half = Math.PI / 3;      // 120° across, pointing up
     var BASE = Math.hypot(T.x - N.x, T.y - N.y);
 
-    // The scale is chosen so the picture cannot reach its own axes. Drawn into
-    // the furthest corner this scene tops out at 51 km and 242 Hz, inside a
-    // plot that goes to 60 km and 300 Hz, so a track curves away from the edge
-    // instead of flattening along it. A track pinned to a bound is a lie: it
-    // says the aircraft stopped changing when really the plot ran out.
-    var KM = 0.15;                       // 1 unit ≈ 0.15 km, baseline ≈ 27 km
+    // How far the node hears, and how wide the beam can be opened. The sky's
+    // viewBox in summary.html is sized from these two, so the whole wedge is
+    // in the picture at its widest with sky to spare: change them and it has
+    // to follow.
+    // See docs/architecture.md#flight-simulator
+    var BEAM_R = 200, WIDEST = 1.35, NARROWEST = 0.2;
+    // The sky's viewBox, less a margin: where a path may be drawn.
+    var SKY = { left: -54, right: 478, top: -54, bottom: 247 };
+    // The plot's box, as drawn in summary.html.
+    var PLOT = { x: 46, w: 356, mid: 98, h: 84 };
+
+    // The scale is chosen so the picture cannot reach its own axes. Heard at
+    // the far end of the beam this scene tops out at 50 km and 242 Hz, inside
+    // a plot that goes to 60 km and 300 Hz, so a track curves away from the
+    // edge instead of flattening along it. A track pinned to a bound is a lie:
+    // it says the aircraft stopped changing when really the plot ran out.
+    var KM = 0.125;                      // 1 unit = 0.125 km: baseline ≈ 22 km, beam ≈ 25 km
     var RANGE_MAX = 60;                  // km, the full width of the plot
     var DOPPLER_MAX = 300;               // Hz, top and bottom of the plot
 
@@ -40,7 +51,7 @@
         var pts = [];
         for (var i = 0; i <= 40; i++) {
             var t = i / 40;
-            pts.push({ x: 20 + t * 265, y: 150 - Math.sin(t * Math.PI) * 96 });
+            pts.push({ x: 20 + t * 380, y: 150 - Math.sin(t * Math.PI) * 118 });
         }
         return pts;
     })();
@@ -57,6 +68,14 @@
         }
     }
 
+    // The direction of travel through point k: from the point before it to
+    // the point after.
+    function tangent(k) {
+        var a = path[Math.max(0, k - 1)], b = path[Math.min(path.length - 1, k + 1)];
+        var x = b.x - a.x, y = b.y - a.y, h = Math.hypot(x, y) || 1;
+        return { x: x / h, y: y / h };
+    }
+
     function at(d) {
         // Position and heading a distance d along the drawn path.
         if (total <= 0) return null;
@@ -66,11 +85,18 @@
         var a = path[i - 1], b = path[i] || path[i - 1];
         var span = (lengths[i] || total) - lengths[i - 1];
         var f = span > 0 ? (d - lengths[i - 1]) / span : 0;
-        var hx = b.x - a.x, hy = b.y - a.y, h = Math.hypot(hx, hy) || 1;
-        return { x: a.x + hx * f, y: a.y + hy * f, hx: hx / h, hy: hy / h };
+        // The heading turns steadily from one point to the next. Taken from
+        // each straight piece instead, it would jump at every point, and
+        // Doppler with it: the track came out as a sawtooth.
+        var ta = tangent(i - 1), tb = tangent(Math.min(i, path.length - 1));
+        var hx = ta.x + (tb.x - ta.x) * f, hy = ta.y + (tb.y - ta.y) * f, h = Math.hypot(hx, hy) || 1;
+        return { x: a.x + (b.x - a.x) * f, y: a.y + (b.y - a.y) * f, hx: hx / h, hy: hy / h };
     }
 
+    // Inside the wedge as it is drawn: within its angle and within its reach.
+    // The arc is in the picture, so an aircraft beyond it must not be heard.
     function inBeam(p) {
+        if (Math.hypot(p.x - N.x, p.y - N.y) > BEAM_R) return false;
         var delta = Math.atan2(p.y - N.y, p.x - N.x) - aim;
         while (delta > Math.PI) delta -= 2 * Math.PI;
         while (delta < -Math.PI) delta += 2 * Math.PI;
@@ -98,7 +124,7 @@
     }
 
     function drawBeam() {
-        var a1 = aim - half, a2 = aim + half, R = 200;
+        var a1 = aim - half, a2 = aim + half, R = BEAM_R;
         var p1 = { x: N.x + Math.cos(a1) * R, y: N.y + Math.sin(a1) * R };
         var p2 = { x: N.x + Math.cos(a2) * R, y: N.y + Math.sin(a2) * R };
         var d = "M" + N.x + " " + N.y + " L" + p1.x.toFixed(1) + " " + p1.y.toFixed(1) +
@@ -126,9 +152,9 @@
     // coordinate, not a working part: the scale above keeps every reachable
     // reading well inside the box.
     function place(r) {
-        var x = 46 + Math.max(0, Math.min(RANGE_MAX, r.km)) / RANGE_MAX * 240;
+        var x = PLOT.x + Math.max(0, Math.min(RANGE_MAX, r.km)) / RANGE_MAX * PLOT.w;
         var hz = Math.max(-DOPPLER_MAX, Math.min(DOPPLER_MAX, r.hz));
-        return { x: x, y: 98 - hz / DOPPLER_MAX * 84 };
+        return { x: x, y: PLOT.mid - hz / DOPPLER_MAX * PLOT.h };
     }
 
     function paint(p) {
@@ -207,7 +233,7 @@
 
     // ── Drawing a path ────────────────────────────────────────
     function inside(p) {
-        return { x: Math.max(4, Math.min(296, p.x)), y: Math.max(4, Math.min(216, p.y)) };
+        return { x: Math.max(SKY.left, Math.min(SKY.right, p.x)), y: Math.max(SKY.top, Math.min(SKY.bottom, p.y)) };
     }
 
     function svgPoint(svg, evt) {
@@ -241,7 +267,7 @@
         map.releasePointerCapture(evt.pointerId);
         if (path.length < 3) { path = []; drawPath(); hint.textContent = "That was a dot. Drag a line across the sky."; return; }
         measure();
-        hint.textContent = "Drag the blue ring to steer the beam. The track breaks where the aircraft leaves it.";
+        hint.textContent = "Grab the blue ring to aim the beam. The track breaks where the aircraft leaves it.";
         play();
     });
 
@@ -265,10 +291,10 @@
     });
 
     document.getElementById("fs-narrow").addEventListener("click", function () {
-        half = Math.max(0.2, half - 0.26); drawBeam(); resetTrack();
+        half = Math.max(NARROWEST, half - 0.26); drawBeam(); resetTrack();
     });
     document.getElementById("fs-wide").addEventListener("click", function () {
-        half = Math.min(1.35, half + 0.26); drawBeam(); resetTrack();
+        half = Math.min(WIDEST, half + 0.26); drawBeam(); resetTrack();
     });
     clearBtn.addEventListener("click", function () {
         pause(); resetTrack(); path = []; drawPath();
@@ -278,6 +304,9 @@
     // ── First paint, standing still ───────────────────────────
     var controls = document.getElementById("fs-controls");
     if (controls) controls.hidden = false;
+    // The knob can be grabbed now, so it may say so.
+    var aimLabel = document.getElementById("fs-aim-label");
+    if (aimLabel) aimLabel.removeAttribute("display");
 
     measure(); drawBeam(); drawPath();
     var start = at(0);
