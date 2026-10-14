@@ -9,7 +9,7 @@ Every owl node on a LAN finds the others over mDNS (DNS-SD), and every page reti
 | [mdns_peers.py](../../src/mdns_peers.py) | `PeerDirectory`: runs `avahi-browse`, parses its output, probes each peer's `/healthz`, and holds the live peer list. Also `sort_key`, the fleet order. |
 | [routes/fleet.py](../../src/routes/fleet.py) | `/summary`, `/api/fleet/peers` and `/healthz`. Builds the banner tabs (`banner_nodes`) and Summary cards (`card_view`, `telemetry_view`). |
 | [node_name.py](../../src/node_name.py) | `NodeName`: reads, validates and writes the friendly name, then asks owl-os to re-advertise it. |
-| [templates/_fleet_bar.html](../../templates/_fleet_bar.html) | The `fleet_bar` macro: brand block, Summary tab, one tab per node, outbound links. |
+| [templates/_fleet_bar.html](../../templates/_fleet_bar.html) | The `fleet_bar` macro: brand block, Summary tab, one tab per node, the outbound link. |
 | [services.py](../../src/services.py) | Constructs the single `PeerDirectory` (`peers`) and `NodeName` (stored at `node-name` in the data directory). |
 | [routes/config.py](../../src/routes/config.py) | `POST /node-name`, the rename endpoint behind the name field on `/config`. |
 | owl-mdns-identity (owl-os) | Writes the `_owl-node._tcp` service file at boot and again on rename. |
@@ -114,7 +114,7 @@ Display rules:
 | Tab tooltip | The node_id, plus the IPv4 address when known. |
 | Tab link | The node's absolute `http://ret<node_id>.local/` URL (see [Node addresses](#node-addresses)). |
 | Active tab | This node's tab, unless the Summary tab is active. The page is always served by the node you are looking at, so there is nothing to track: the macro compares against the `node_id` passed in. |
-| Outbound links | Retina Network Map and Retina Dashboard. Both leave the app, so both carry the outbound arrow. |
+| Outbound link | Network Map and Dashboard (`app.retina.fm`). It leaves the app, so it carries the outbound arrow. |
 
 `discovered_nodes` guarantees this node is in the list. Discovery takes a second or two to populate, and it can come back empty on a network that blocks multicast; neither is a reason to draw a banner with no tabs. If the peer list does not already include this node, a stand-in entry is added (hostname `<node_id>.local`, no address, no friendly name) and the list is re-sorted rather than prepended, so the tab does not sit first for a second and then move. The banner and the Summary cards share this function deliberately: two answers to "which nodes are there" would disagree during exactly the seconds after boot when someone is most likely to be looking.
 
@@ -148,8 +148,8 @@ For peers, the card's telemetry comes from the last good `/healthz` payload. For
 
 The Summary page also carries fixed outbound links, defined in `routes/fleet.py`:
 
-- `RESOURCES`, ordered by distance from the node: the company site, the manual (owl-os wiki), then the two live views of the wider network (map and dashboard).
-- `HELP`: the blah2 Discord and a support email address. The Discord is the blah2 project's own community server and is labelled as such. Calling it ours would send an owner with a hardware or account problem into a volunteer channel expecting Offworld Labs support, and land that community with questions it cannot answer.
+- `RESOURCES`, ordered by distance from the node: the company site, the manual (owl-os wiki), the live view of the wider network (Network Map and Dashboard), then two outside ones: Passive Radar News, a site about the field (written as `passiveradar.com`, without the `www.` it redirects to, because the card shows the host as written), and the blah2 Discord, the community around the radar software the node runs. The network's map and dashboard used to be two sites with a link each; they are one now, at `app.retina.fm`, and the banner's button goes to the same address (`_fleet_bar.html` writes it out, and `tests/test_fleet.py` holds the two together).
+- `HELP`: our own channels only, the Retina Discord and a support email address. The blah2 Discord is not here. It is the blah2 project's own community server, and listing it as help would send an owner with a hardware or account problem into a volunteer channel expecting Offworld Labs support, and land that community with questions it cannot answer; as a resource, named for whose it is, it reads as somewhere to learn more. The two Discord cards show the same host (`discord.gg`), so the names are what tell them apart. A Discord invite can be made to expire; the Retina one has to be a permanent invite, or the card on every node goes dead with it.
 - `BUY_URL`: where "Add another node" sends an owner with only one node.
 - `PRIMER_URL`: empty until the full primer is published. A dead link on an owner's node is worse than no link, so the template omits the line while this is blank; turning it on is one string.
 
