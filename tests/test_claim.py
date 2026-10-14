@@ -133,7 +133,7 @@ class TestWhatTheSectionShows:
         page = app_client.get('/config').data.decode()
 
         assert 'id="claim"' in page
-        assert 'Node claim' in page
+        assert 'Node Claim' in page
 
     def test_the_stored_address_is_prefilled(self, app_client):
         post(app_client, {"email": ADDRESS})
@@ -213,7 +213,7 @@ class TestTheWizardStep:
         assert page.index('data-step="contact"') < page.index('data-step="claim"') \
             < page.index('data-step="system"')
         assert 'wizClaimSkipBtn' in page, "skipping must be offered, not just possible"
-        assert 'Node claim on the Configuration page' in page
+        assert 'Node Claim on the Configuration page' in page
 
     def test_the_wizard_prefills_the_stored_address(self, app_client):
         post(app_client, {"email": ADDRESS})
