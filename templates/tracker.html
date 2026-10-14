@@ -118,6 +118,27 @@
 .trk-detail div { font-family: var(--font-mono, monospace); font-size: 10.5px; color: var(--color-muted); }
 .trk-detail b { color: var(--color-text); font-weight: 600; }
 
+.chip.oov { color: var(--warn-ink); background: var(--warn-soft); border-color: oklch(0.87 0.06 75); }
+
+/* Tracks the narrow Doppler view cannot show. Warning colours, because it is
+   a prompt to look, not a fault. */
+.oov-alert { display: inline-flex; align-items: center; gap: 7px; font-family: var(--font-mono, monospace);
+             font-size: 11px; color: var(--warn-ink); background: var(--warn-soft);
+             border: 1px solid oklch(0.87 0.06 75); border-radius: 999px; padding: 2px 4px 2px 9px; }
+.oov-alert[hidden] { display: none; }
+.oov-alert .linkbtn { font-size: 11px; color: var(--warn-ink); padding: 0 5px; }
+
+.trk-dlg { border: 1px solid var(--color-border); border-radius: var(--radius); padding: 0;
+           width: min(420px, calc(100vw - 32px)); background: var(--color-card); color: var(--color-text); }
+.trk-dlg::backdrop { background: rgba(20, 22, 28, 0.35); }
+.trk-dlg h2 { margin: 0; font-size: 1.05rem; }
+.dlg-head { padding: 14px 16px 0; }
+.dlg-body { padding: 12px 16px 4px; }
+.dlg-input-row { display: flex; align-items: center; gap: 8px; font-family: var(--font-mono, monospace); }
+.dlg-input-row .ds-input { width: 120px; }
+.dlg-err { font-size: 12px; color: var(--color-danger); }
+.dlg-foot { display: flex; align-items: center; gap: 8px; padding: 12px 16px 14px; }
+
 .rail-foot { padding: 8px 11px; border-top: 1px solid var(--color-border-light);
              font-family: var(--font-mono, monospace); font-size: 10.5px; color: var(--color-muted);
              display: flex; align-items: center; gap: 8px; min-height: 36px; }
@@ -130,12 +151,32 @@
   <div class="trk-head">
     <h1>Tracker</h1>
     <span class="beta-chip">Beta</span>
+    <span class="trk-spacer"></span>
+    <button type="button" class="ic-btn" id="settingsBtn" aria-haspopup="dialog"
+            aria-label="Tracker settings" title="Tracker settings">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.87l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.7 1.7 0 0 0-1.87-.34 1.7 1.7 0 0 0-1.03 1.56V21a2 2 0 1 1-4 0v-.09a1.7 1.7 0 0 0-1.11-1.56 1.7 1.7 0 0 0-1.87.34l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.7 1.7 0 0 0 .34-1.87 1.7 1.7 0 0 0-1.56-1.03H3a2 2 0 1 1 0-4h.09a1.7 1.7 0 0 0 1.56-1.11 1.7 1.7 0 0 0-.34-1.87l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.7 1.7 0 0 0 1.87.34H9a1.7 1.7 0 0 0 1.03-1.56V3a2 2 0 1 1 4 0v.09a1.7 1.7 0 0 0 1.03 1.56 1.7 1.7 0 0 0 1.87-.34l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.7 1.7 0 0 0-.34 1.87V9a1.7 1.7 0 0 0 1.56 1.03H21a2 2 0 1 1 0 4h-.09a1.7 1.7 0 0 0-1.56 1.03z"/></svg>
+    </button>
   </div>
 
   <div class="trk-panel">
     <div class="trk-bar">
       <span class="trk-status" id="trkStatus"><span class="dot"></span>connecting&hellip;</span>
+      <span class="oov-alert" id="oovAlert" role="status" hidden
+            title="Tracks in this window with a point outside the narrow Doppler range. The node processes its full span; only the plot is narrowed.">
+        <span id="oovText"></span>
+        <button type="button" class="linkbtn" id="oovShowBtn">Show full span</button>
+      </span>
       <span class="trk-spacer"></span>
+
+      <div class="trk-ctl">
+        <span class="trk-lab">Doppler</span>
+        <div class="seg" role="group" aria-label="Doppler range">
+          <button type="button" data-dop="narrow" aria-pressed="true" id="dopNarrowBtn"
+                  title="The narrow range, set with the gear. Where ordinary air traffic sits.">&plusmn;300</button>
+          <button type="button" data-dop="full" aria-pressed="false" id="dopFullBtn"
+                  title="Everything the node processes.">Full</button>
+        </div>
+      </div>
 
       <div class="trk-ctl">
         <span class="trk-lab">View</span>
@@ -212,6 +253,35 @@
       </aside>
     </div>
   </div>
+
+  <dialog class="trk-dlg" id="settingsDlg" aria-labelledby="settingsTitle">
+    <form id="settingsForm" novalidate>
+      <div class="dlg-head"><h2 id="settingsTitle">Tracker settings</h2></div>
+      <div class="dlg-body">
+        <div class="ds-field">
+          <label class="ds-field-label" for="narrowHzInput">Narrow Doppler range</label>
+          <div class="dlg-input-row">
+            <span>&plusmn;</span>
+            <input class="ds-input mono" id="narrowHzInput" type="number" min="1" step="1"
+                   inputmode="numeric" aria-describedby="narrowHzHelp narrowHzErr">
+            <span>Hz</span>
+          </div>
+          <div class="ds-field-help" id="narrowHzHelp">
+            What the Doppler toggle's narrow setting shows. The node processes
+            <span id="fullSpanText">its full span</span> either way, so this changes the plot
+            only. Saved in this browser.
+          </div>
+          <div class="dlg-err" id="narrowHzErr" role="alert" hidden></div>
+        </div>
+      </div>
+      <div class="dlg-foot">
+        <button type="button" class="linkbtn" id="narrowResetBtn">Reset to &plusmn;300</button>
+        <span class="trk-spacer"></span>
+        <button type="button" class="ds-btn ghost sm" id="settingsCancel">Cancel</button>
+        <button type="submit" class="ds-btn primary sm">Save</button>
+      </div>
+    </form>
+  </dialog>
 </div>
 {% endblock %}
 
@@ -227,6 +297,8 @@
     var railFoot = document.getElementById('railFoot');
     var railCount = document.getElementById('railCount');
     var detCount = document.getElementById('detCount');
+    var oovAlert = document.getElementById('oovAlert');
+    var oovText = document.getElementById('oovText');
 
     // The node's own ambiguity bounds; null axes autoscale. Never guess a range.
     // See docs/features/tracker.md#axis-bounds
@@ -300,6 +372,48 @@
     state.tracks = recall('tracks', 'on');
     state.sort = recall('sort', 'recent');
     state.filter = recall('filter', 'all');
+
+    // ── Doppler view ─────────────────────────────────────────────────────
+
+    // Presentation only: the node processes its whole span (AXES.doppler)
+    // whichever view is drawn. Narrow is where ordinary air traffic sits, so it
+    // is the default. See docs/features/tracker.md#doppler-view
+    var DEFAULT_NARROW_HZ = 300;
+    var MAX_NARROW_HZ = 100000;    // a sanity cap, used only when the span is unknown
+
+    // Half the node's span, the widest narrow range worth having.
+    function spanHalfWidth() {
+        return AXES.doppler ? Math.max(Math.abs(AXES.doppler[0]), Math.abs(AXES.doppler[1])) : null;
+    }
+
+    function validNarrow(n) {
+        var cap = spanHalfWidth() || MAX_NARROW_HZ;
+        return Number.isInteger(n) && n >= 1 && n <= cap ? n : null;
+    }
+
+    state.dopView = recall('dopView', 'narrow') === 'full' ? 'full' : 'narrow';
+    state.narrowHz = validNarrow(parseInt(recall('narrowHz', DEFAULT_NARROW_HZ), 10)) || DEFAULT_NARROW_HZ;
+
+    // Clipped to the node's span, so narrow never draws Doppler it cannot see.
+    // A span lying wholly to one side of the band leaves nothing to narrow to.
+    function narrowRange() {
+        var lo = -state.narrowHz, hi = state.narrowHz;
+        if (AXES.doppler) {
+            lo = Math.max(lo, AXES.doppler[0]);
+            hi = Math.min(hi, AXES.doppler[1]);
+            if (lo >= hi) return AXES.doppler.slice();
+        }
+        return [lo, hi];
+    }
+
+    // null autoscales, as the full view always has when the span is unknown.
+    function dopplerRange() {
+        return state.dopView === 'narrow' ? narrowRange() : AXES.doppler;
+    }
+
+    function fmtHzRange(r) {
+        return r[0] === -r[1] ? '±' + r[1] : r[0] + '…' + r[1];
+    }
 
     // ── Column helpers ───────────────────────────────────────────────────
 
@@ -472,13 +586,19 @@
         return Object.keys(store.tracks).map(function (id) {
             var trk = store.tracks[id];
             var meta = trk.meta || {};
-            var peak = 0;
-            for (var i = 0; i < trk.snr.length; i++) if (trk.snr[i] > peak) peak = trk.snr[i];
+            var peak = 0, dmin = Infinity, dmax = -Infinity;
+            for (var i = 0; i < trk.snr.length; i++) {
+                if (trk.snr[i] > peak) peak = trk.snr[i];
+                if (trk.doppler[i] < dmin) dmin = trk.doppler[i];
+                if (trk.doppler[i] > dmax) dmax = trk.doppler[i];
+            }
             return {
                 id: id,
                 meta: meta,
                 n: trk.t.length,
                 peak: peak,
+                dmin: dmin,
+                dmax: dmax,
                 first: trk.t.length ? trk.t[0] : 0,
                 last: trk.t.length ? trk.t[trk.t.length - 1] : 0,
                 dur: trk.t.length ? (trk.t[trk.t.length - 1] - trk.t[0]) / 1000 : 0
@@ -544,6 +664,16 @@
         return out;
     }
 
+    function chipsHtml(r) {
+        var chips = '';
+        if (r.meta.adsb_hex) chips += '<span class="chip ok">ADS-B ' + esc(r.meta.adsb_hex) + '</span>';
+        if (outside[r.id]) {
+            chips += '<span class="chip oov" title="Has a point outside the narrow Doppler range.">'
+                   + 'Outside view</span>';
+        }
+        return chips ? '<div class="trk-chips">' + chips + '</div>' : '';
+    }
+
     function rowHtml(r) {
         var cls = 'trk-row' + (state.hidden[r.id] ? ' hid' : '') + (state.expanded === r.id ? ' sel' : '');
         var html = '<div class="' + cls + '" data-id="' + esc(r.id) + '">'
@@ -554,7 +684,7 @@
             + '</div>'
             + '<div class="trk-meta">' + fmtDur(r.dur) + ' &middot; ' + r.n + ' pts &middot; '
             + r.peak.toFixed(1) + ' dB &middot; ' + fmtAgo(r.last) + '</div>'
-            + (r.meta.adsb_hex ? '<div class="trk-chips"><span class="chip ok">ADS-B ' + esc(r.meta.adsb_hex) + '</span></div>' : '')
+            + chipsHtml(r)
             + '</div>'
             + '<div class="trk-acts">'
             + '<button type="button" class="ic-btn" data-act="vis" aria-label="'
@@ -604,8 +734,36 @@
         });
     }
 
+    // Track ids with a point beyond the narrow range, set by render(). Removed
+    // tracks never count; hidden and filtered-out ones do, because the alert is
+    // about what the node saw, not what this rail is listing.
+    var outside = {};
+
+    function markOutside(all) {
+        outside = {};
+        if (state.dopView !== 'narrow') return 0;
+        var r = narrowRange(), n = 0;
+        all.forEach(function (row) {
+            if (state.removed[row.id] || !(row.dmin < r[0] || row.dmax > r[1])) return;
+            outside[row.id] = true;
+            n++;
+        });
+        return n;
+    }
+
+    // See docs/features/tracker.md#out-of-view-alert
+    function renderOutsideAlert(n) {
+        oovAlert.hidden = n === 0;
+        if (n) {
+            oovText.textContent = n + (n === 1 ? ' track' : ' tracks') + ' outside '
+                + fmtHzRange(narrowRange()) + ' Hz';
+        }
+    }
+
     function render() {
-        var rows = ordered(summarise());
+        var all = summarise();
+        renderOutsideAlert(markOutside(all));
+        var rows = ordered(all);
         renderRail(rows);
 
         var traces = [];
@@ -663,17 +821,18 @@
             }
         }
 
-        // react (not newPlot) with a stable uirevision so zoom, pan and the
-        // viewer's axis ranges survive every update. The legend is off: the
-        // rail owns identity now, which is what lets the plot keep its full
-        // height and the SNR scale sit under it instead of fighting for the
-        // right-hand strip.
+        // react (not newPlot) with a uirevision so zoom, pan and the viewer's
+        // axis ranges survive every update. It changes with the Doppler view,
+        // so switching views redraws at the new range rather than keeping the
+        // old zoom. The legend is off: the rail owns identity now, which is
+        // what lets the plot keep its full height and the SNR scale sit under
+        // it instead of fighting for the right-hand strip.
         Plotly.react(plotDiv, traces, {
-            uirevision: 'tracker',
+            uirevision: 'tracker:' + state.dopView + ':' + state.narrowHz,
             showlegend: false,
             margin: { t: 12, r: 14, b: 44, l: 58 },
             xaxis: axis('Bistatic range (km)', AXES.delay),
-            yaxis: axis('Doppler (Hz)', AXES.doppler)
+            yaxis: axis('Doppler (Hz)', dopplerRange())
         }, { displayModeBar: false, responsive: true });
 
         detCount.textContent = shown.toLocaleString() + ' detections shown'
@@ -784,6 +943,76 @@
         state.tracks = v;
         remember('tracks', v);
         scheduleRender();
+    });
+
+    function setDopView(v) {
+        state.dopView = v;
+        remember('dopView', v);
+        document.querySelectorAll('.seg [data-dop]').forEach(function (b) {
+            b.setAttribute('aria-pressed', String(b.getAttribute('data-dop') === v));
+        });
+        scheduleRender();
+    }
+
+    wireSeg('dop', setDopView);
+    document.getElementById('oovShowBtn').addEventListener('click', function () { setDopView('full'); });
+
+    // The buttons name the ranges they draw, so the toggle reads "±300 / ±1000"
+    // on a node at ±1000 and stays truthful after the gear changes narrow.
+    function labelDopButtons() {
+        document.getElementById('dopNarrowBtn').textContent = fmtHzRange(narrowRange());
+        document.getElementById('dopFullBtn').textContent = AXES.doppler ? fmtHzRange(AXES.doppler) : 'Full';
+    }
+
+    // ── Settings ─────────────────────────────────────────────────────────
+
+    var settingsDlg = document.getElementById('settingsDlg');
+    var narrowInput = document.getElementById('narrowHzInput');
+    var narrowErr = document.getElementById('narrowHzErr');
+
+    function showNarrowError(text) {
+        narrowErr.textContent = text;
+        narrowErr.hidden = !text;
+        narrowInput.classList.toggle('is-invalid', !!text);
+    }
+
+    document.getElementById('settingsBtn').addEventListener('click', function () {
+        narrowInput.value = state.narrowHz;
+        var half = spanHalfWidth();
+        if (half) narrowInput.max = half;
+        document.getElementById('fullSpanText').textContent =
+            AXES.doppler ? fmtHzRange(AXES.doppler) + ' Hz' : 'its full span';
+        showNarrowError('');
+        settingsDlg.showModal();
+        narrowInput.select();
+    });
+
+    document.getElementById('narrowResetBtn').addEventListener('click', function () {
+        narrowInput.value = DEFAULT_NARROW_HZ;
+        showNarrowError('');
+    });
+
+    document.getElementById('settingsCancel').addEventListener('click', function () { settingsDlg.close(); });
+
+    // A click on the backdrop lands on the dialog element itself.
+    settingsDlg.addEventListener('click', function (e) { if (e.target === settingsDlg) settingsDlg.close(); });
+
+    document.getElementById('settingsForm').addEventListener('submit', function (e) {
+        e.preventDefault();
+        var n = Number(narrowInput.value);
+        if (validNarrow(n) === null) {
+            var half = spanHalfWidth();
+            showNarrowError(half
+                ? 'Enter a whole number from 1 to ' + half + ', the most the node processes.'
+                : 'Enter a whole number of Hz, 1 or more.');
+            return;
+        }
+        state.narrowHz = n;
+        remember('narrowHz', n);
+        labelDopButtons();
+        settingsDlg.close();
+        // Saving a narrow range is asking to see it.
+        setDopView('narrow');
     });
 
     document.querySelectorAll('.fchip').forEach(function (b) {
@@ -899,6 +1128,10 @@
         b.setAttribute('aria-pressed', String(b.getAttribute('data-filter') === state.filter));
     });
     document.getElementById('sortSel').value = state.sort;
+    document.querySelectorAll('.seg [data-dop]').forEach(function (b) {
+        b.setAttribute('aria-pressed', String(b.getAttribute('data-dop') === state.dopView));
+    });
+    labelDopButtons();
 
     render();
     connect();
