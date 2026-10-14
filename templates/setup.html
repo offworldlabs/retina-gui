@@ -124,8 +124,11 @@
             </div>
 
             {# Complete #}
+            {# Complete. The tutorial is the recommended way out on a first run;
+               see docs/features/tutorial.md#starting-a-run #}
             <div id="stepBtns-complete" class="step-foot-btns" style="display:none;">
-                <a href="/" class="ds-btn primary">Go to dashboard →</a>
+                <a href="/" class="ds-btn ghost">Go to dashboard</a>
+                <a href="/tutorial{% if demo_mode %}?demo=1{% endif %}" class="ds-btn primary" id="startTutorialBtn">Start tutorial →</a>
             </div>
         </div>
     </div>

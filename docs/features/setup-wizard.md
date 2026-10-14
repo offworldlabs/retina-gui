@@ -27,7 +27,8 @@ re-consent path, and most steps then become informational.
 | [src/device_state.py](../../src/device_state.py) | Wizard step file, completion flag, towers cache, consent/contact/claim records |
 
 Related docs: [auto-calibrate.md](auto-calibrate.md), [device-state-and-telemetry.md](device-state-and-telemetry.md),
-[towers.md](towers.md), [ota-updates.md](ota-updates.md), [remote-access.md](remote-access.md).
+[towers.md](towers.md), [ota-updates.md](ota-updates.md), [remote-access.md](remote-access.md),
+[tutorial.md](tutorial.md).
 
 ## Step order
 
@@ -521,6 +522,12 @@ race and see spectrum mode while `enforce_radar_mode` is still running, then cal
 `enforce_radar_mode` if retina-node is installed. That recreates the stack, which is why the
 calibrate step saves its tuning and waits for the restart before letting the owner reach this
 step.
+
+The step also invites the owner to the guided tutorial, saying it is recommended for anyone
+setting up a node for the first time. The footer offers **Start tutorial** (a link to
+`/tutorial`, the primary button) and **Go to dashboard**. Both are plain links, so neither
+waits on `/set-up/complete`. The tour is covered in [tutorial.md](tutorial.md); in demo mode
+the link carries `demo=1` so the tour runs in demo mode too.
 
 ## Demo and dev modes
 

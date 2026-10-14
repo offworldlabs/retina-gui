@@ -16,7 +16,7 @@ LAYOUT = [
               ("network", "Network")]),
     ("Radar", [("cached-towers", "Cached Towers"), ("tower", "Tower"), ("capture", "Capture")]),
     ("ADS-B", [("truth", "ADS-B Truth"), ("tar1090", "tar1090")]),
-    ("Other", [("ssh", "SSH Access"), ("wizard", "Setup Wizard")]),
+    ("Other", [("ssh", "SSH Access"), ("wizard", "Setup Wizard"), ("tutorial", "Tutorial")]),
     ("Support", [("cloud", "Cloud Services"), ("remote", "Remote Support"),
                  ("contact", "How We Reach You")]),
 ]
