@@ -623,6 +623,31 @@ h1, h2, h3, h4, h5, h6 {
 /* Footer button groups */
 .step-foot-btns { display: flex; align-items: center; gap: 8px; }
 
+/* The complete step's invitation to the guided tutorial.
+   See docs/features/tutorial.md#starting-a-run */
+.wiz-tutorial {
+    margin-top: 14px;
+    display: flex;
+    gap: 14px;
+    align-items: flex-start;
+    padding: 16px 18px;
+    border: 1px solid var(--accent-edge);
+    background: var(--accent-soft);
+    border-radius: var(--r-md);
+}
+.wiz-tutorial-icon {
+    width: 32px;
+    height: 32px;
+    border-radius: var(--r-pill);
+    background: var(--accent);
+    color: #fff;
+    display: grid;
+    place-items: center;
+    flex-shrink: 0;
+}
+.wiz-tutorial-title { font-weight: 600; font-size: 14px; color: var(--ink); }
+.wiz-tutorial-text  { font-size: 13px; color: var(--ink-2); margin-top: 2px; }
+
 @media (max-width: 600px) {
     .wiz { --wiz-pad: 16px; }
     .wiz-body { padding-top: 24px; }

@@ -7,7 +7,9 @@
 {% endblock %}
 
 {# ── Macro: render a single form field as a cfg-row ─────────────────────── #}
-{% macro render_field(field, section, prefix='') %}
+{# tutorial names the row as a guided-tutorial target (plain inputs and switches).
+   See docs/features/tutorial.md#targets #}
+{% macro render_field(field, section, prefix='', tutorial='') %}
     {% set field_name = section ~ '.' ~ (prefix ~ field.name if prefix else field.name) %}
     {% set field_id   = field_name | replace('.', '_') %}
     {% set field_err  = config_errors.get(field_name) if config_errors else none %}
@@ -36,7 +38,7 @@
             </div>
         </div>
     {% elif field.type == 'checkbox' %}
-        <div class="toggle-row">
+        <div class="toggle-row"{% if tutorial %} data-tutorial="{{ tutorial }}"{% endif %}>
             <label class="ds-switch">
                 <input type="checkbox" name="{{ field_name }}" id="{{ field_id }}"
                        {% if field.value %}checked{% endif %}
@@ -53,7 +55,7 @@
             </div>
         </div>
     {% else %}
-        <div class="cfg-row">
+        <div class="cfg-row"{% if tutorial %} data-tutorial="{{ tutorial }}"{% endif %}>
             <div class="label-col">
                 <label for="{{ field_id }}">{{ field.title }}</label>
                 {% if field.description %}<span class="help">{{ field.description }}</span>{% endif %}
@@ -83,24 +85,27 @@
 <div class="shell">
 
     {# ── Side nav ──
-       Groups and order match the page. See docs/features/config-editor.md#page-layout #}
-    <aside class="side">
+       Groups and order match the page. See docs/features/config-editor.md#page-layout
+       data-tutorial names what the guided tutorial points at; a step's target
+       must keep its token. See docs/features/tutorial.md#targets #}
+    <aside class="side" data-tutorial="cfg-side">
         <h3>Node</h3>
         <a href="#identifiers">Identifiers</a>
-        <a href="#mode">Mode</a>
+        <a href="#mode" data-tutorial="cfg-mode-nav">Mode</a>
         <a href="#claim">Node Claim</a>
-        <a href="#network">Network</a>
+        <a href="#network" data-tutorial="cfg-network-nav">Network</a>
         <h3>Radar</h3>
-        <a href="#cached-towers">Cached Towers</a>
-        <a href="#tower">Tower</a>
-        <a href="#capture">Capture</a>
-        <a href="#tracking">Tracking</a>
+        <a href="#cached-towers" data-tutorial="cfg-cached-nav">Cached Towers</a>
+        <a href="#tower" data-tutorial="cfg-tower-nav">Tower</a>
+        <a href="#capture" data-tutorial="cfg-capture-nav">Capture</a>
+        <a href="#tracking" data-tutorial="cfg-tracking-nav">Tracking</a>
         <h3>ADS-B</h3>
-        <a href="#truth">ADS-B Truth</a>
-        <a href="#tar1090">tar1090</a>
+        <a href="#truth" data-tutorial="cfg-adsb-nav">ADS-B Truth</a>
+        <a href="#tar1090" data-tutorial="cfg-adsb-nav">tar1090</a>
         <h3>Other</h3>
-        <a href="#ssh">SSH Access</a>
+        <a href="#ssh" data-tutorial="cfg-ssh-nav">SSH Access</a>
         <a href="#wizard">Setup Wizard</a>
+        <a href="#tutorial">Tutorial</a>
         <h3>Support</h3>
         <a href="#cloud">Cloud Services</a>
         <a href="#remote">Remote Support</a>
@@ -110,7 +115,7 @@
     {# ── Main ── #}
     <main>
         <div class="config-page-head">
-            <div>
+            <div data-tutorial="cfg-head">
                 <h1>Configuration</h1>
                 <div class="sub">Tune the radar pipeline and manage the device. Changes apply on save.</div>
             </div>
@@ -214,7 +219,7 @@
         </section>
 
         {# ── Mode ── #}
-        <section id="mode" class="cfg-section">
+        <section id="mode" class="cfg-section" data-tutorial="cfg-mode">
             <div class="cfg-section-head">
                 <h2>Mode</h2>
                 <span class="desc">Switch the node between passive radar, spectrum analysis, and SDRconnect.</span>
@@ -330,7 +335,7 @@
         </section>
 
         {# ── Network ── #}
-        <section id="network" class="cfg-section">
+        <section id="network" class="cfg-section" data-tutorial="cfg-network">
             <div class="cfg-section-head">
                 <h2>Network</h2>
                 <span class="desc">Connect or switch this node's WiFi network.</span>
@@ -403,7 +408,7 @@
 
         {# ── Cached Towers ── #}
         {% set towers = towers_cache.towers if towers_cache else [] %}
-        <section id="cached-towers" class="cfg-section">
+        <section id="cached-towers" class="cfg-section" data-tutorial="cfg-cached">
             <div class="cfg-section-head">
                 <h2>Cached Towers</h2>
                 <span class="desc">Pick a broadcast tower from your setup wizard's search results to fill in the Tower section below. Add or remove towers from this cached list manually.</span>
@@ -464,7 +469,7 @@
         {% for f in location_fields %}{% set _ = loc.update({f.name: f}) %}{% endfor %}
         {% set cap = {} %}
         {% for f in capture_fields %}{% set _ = cap.update({f.name: f}) %}{% endfor %}
-        <section id="tower" class="cfg-section">
+        <section id="tower" class="cfg-section" data-tutorial="cfg-tower">
             <div class="cfg-section-head">
                 <h2>Tower</h2>
                 <span class="desc">The broadcast tower this node listens to and where the receiver stands. The geometry solver uses both positions.</span>
@@ -589,17 +594,17 @@
                    different questions and take very different amounts of time.
                    Quick Calibrate is the same run the setup wizard performs -
                    see RetinaCalibrate.QUICK_RUN. #}
-                <div style="display:grid;grid-template-columns:auto 1fr;align-items:center;gap:6px 10px;margin-bottom:4px;">
+                <div style="display:grid;grid-template-columns:auto 1fr;align-items:center;gap:6px 10px;margin-bottom:4px;" data-tutorial="cfg-calibrate">
                     <button type="button" class="ds-btn ghost" id="autoCalibrateBtn">Auto-Calibrate</button>
                     <span class="help" style="margin:0;">Automatically tune tower and gain until a confirmed aircraft track appears (~10 min).</span>
                     <button type="button" class="ds-btn ghost" id="quickCalibrateBtn">Quick Calibrate</button>
                     <span class="help" style="margin:0;">Current tower only: find the best gain, then check it holds without overloading. No aircraft needed (~4 min).</span>
                 </div>
                 <div class="divider"></div>
-                <div class="cfg-row" style="padding:6px 0 2px;">
+                <div class="cfg-row" style="padding:6px 0 2px;" data-tutorial="cfg-peak">
                     <div class="label-col"><label>Signal peak</label><span class="help">Live peak level relative to clipping. 0 dBFS = saturated.</span></div>
                 </div>
-                <div class="peak-meter">
+                <div class="peak-meter" data-tutorial="cfg-peak">
                     <div class="ladder-row">
                         <div class="ladder-name">Reference<span class="sub">Tuner A</span></div>
                         <div class="ladder-track" id="peakTrackA"></div>
@@ -648,8 +653,10 @@
                 </div>
                 <div class="divider"></div>
                 {# Center frequency is in the Tower section, with its tower. #}
+                {% set manual_fields = ('device_gainReductionA', 'device_gainReductionB', 'device_lnaState',
+                                        'device_dabNotch', 'device_rfNotch') %}
                 {% for field in capture_fields if field.name != 'fc' %}
-                    {{ render_field(field, 'capture') }}
+                    {{ render_field(field, 'capture', tutorial='cfg-manual' if field.name in manual_fields else '') }}
                 {% endfor %}
             </div>
         </section>
@@ -658,7 +665,7 @@
            Its own section, not part of Capture: this is what is done with the
            detections afterwards, not how the signal is captured.
            See docs/features/config-editor.md#sections-and-schema-models #}
-        <section id="tracking" class="cfg-section">
+        <section id="tracking" class="cfg-section" data-tutorial="cfg-tracking">
             <div class="cfg-section-head">
                 <h2>Tracking</h2>
                 <span class="desc">How detections are turned into tracks after capture.</span>
@@ -673,7 +680,7 @@
         {# ════ ADS-B ════ #}
         <h2 class="cfg-group">ADS-B</h2>
         {# ── ADS-B truth ── #}
-        <section id="truth" class="cfg-section">
+        <section id="truth" class="cfg-section" data-tutorial="cfg-adsb">
             <div class="cfg-section-head">
                 <h2>ADS-B Truth</h2>
                 <span class="desc">Match radar detections against known aircraft to validate accuracy.</span>
@@ -689,7 +696,7 @@
         {# Build field lookup for tar1090 #}
         {% set t = {} %}
         {% for f in tar1090_fields %}{% set _ = t.update({f.name: f}) %}{% endfor %}
-        <section id="tar1090" class="cfg-section">
+        <section id="tar1090" class="cfg-section" data-tutorial="cfg-adsb">
             <div class="cfg-section-head">
                 <h2>tar1090</h2>
                 <span class="desc">ADS-B viewer configuration.</span>
@@ -737,7 +744,7 @@
 
         {# ════ Other ════ #}
         <h2 class="cfg-group">Other</h2>
-        <section id="ssh" class="cfg-section">
+        <section id="ssh" class="cfg-section" data-tutorial="cfg-ssh">
             <div class="cfg-section-head">
                 <h2>SSH Access</h2>
                 <span class="desc">Public keys allowed to SSH into this node. To add SSH keys for use, please review the related GitHub file: <a href="https://github.com/offworldlabs/owl-os/blob/main/ssh_pub_keys/README.txt" target="_blank" rel="noopener">owl-os/ssh_pub_keys/README.txt</a></span>
@@ -788,6 +795,22 @@
                 <a href="/set-up" class="ds-btn ghost">
                     <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="M13 5l7 7-7 7"/></svg>
                     Launch setup wizard
+                </a>
+            </div>
+        </section>
+
+        {# ── Tutorial ──
+           The guided tour on its own, without re-running setup.
+           See docs/features/tutorial.md#starting-a-run #}
+        <section id="tutorial" class="cfg-section">
+            <div class="cfg-section-head">
+                <h2>Tutorial</h2>
+                <span class="desc">A guided tour of the Summary, Home and Configuration pages.</span>
+            </div>
+            <div class="cfg-body" style="display:flex;align-items:center;gap:14px;">
+                <a href="/tutorial" class="ds-btn ghost" id="launchTutorialBtn">
+                    <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M3 11l18-8-8 18-2-8z"/></svg>
+                    Launch tutorial
                 </a>
             </div>
         </section>
@@ -959,7 +982,7 @@
             <div class="right">
                 <span id="applyStatus" style="font-size:13px;"></span>
                 <button type="button" class="ds-btn ghost" id="discardBtn">Discard</button>
-                <button type="submit" form="configForm" class="ds-btn primary" id="applyBtn">Apply changes</button>
+                <button type="submit" form="configForm" class="ds-btn primary" id="applyBtn" data-tutorial="cfg-apply">Apply changes</button>
             </div>
         </div>
         {% endif %}
@@ -1803,7 +1826,7 @@ if (discardBtn) discardBtn.addEventListener('click', () => location.reload());
 (function() {
     // Page order: the first of these on screen is the one marked active.
     var sectionIds = ['identifiers','mode','claim','network','cached-towers','tower','capture','tracking',
-                      'truth','tar1090','ssh','wizard','cloud','remote','contact'];
+                      'truth','tar1090','ssh','wizard','tutorial','cloud','remote','contact'];
     var links = {};
     sectionIds.forEach(function(id) {
         var a = document.querySelector('.side a[href="#' + id + '"]');

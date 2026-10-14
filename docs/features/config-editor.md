@@ -123,7 +123,7 @@ The side nav and the page share one order, in five groups:
 | Node | Identifiers, Mode, Node Claim, Network | Each on its own (Mode on Apply changes, see [Mode switch](#mode-switch)) |
 | Radar | Cached Towers, Tower, Capture, Tracking | Apply changes |
 | ADS-B | ADS-B Truth, tar1090 | Apply changes |
-| Other | SSH Access, Setup Wizard | Each on its own |
+| Other | SSH Access, Setup Wizard, Tutorial | Each on its own |
 | Support | Cloud Services, Remote Support, How We Reach You | Each on its own |
 
 The groups are how an owner thinks about the node (what it is, what it listens to, what it is
@@ -548,6 +548,7 @@ Apply changes. These sections are spread across the Node, Support and Other grou
 | Network | Node | (page script) | Status, scan, manual entry, connect. |
 | SSH Access | Other | `POST /ssh-keys`, `/ssh-keys/delete` | Form posts that redirect back to `/config`. |
 | Setup Wizard | Other | link to `/set-up` | |
+| Tutorial | Other | link to `/tutorial` | Runs the guided tutorial alone. See [tutorial.md](tutorial.md). |
 | Cloud Services | Support | (page script) | Disabling also switches off Remote Support. |
 | Remote Support | Support | `/remote-access/toggle`, `/remote-access/shell` | Two independent toggles. |
 | How We Reach You | Support | `POST /set-up/contact` | Optional owner contact details. |

@@ -229,6 +229,7 @@ def inject_globals():
     # Imported here rather than at module scope: the route modules are
     # deliberately imported at the bottom of this file, after the app exists.
     from routes.fleet import banner_nodes
+    from routes.tutorial import tutorial_context
 
     owl_os_version, retina_node_version = mender.get_versions()
 
@@ -245,6 +246,8 @@ def inject_globals():
         'retina_node_version': retina_node_version,
         # The banner is in base.html, so the node list comes from here.
         'fleet_nodes': banner_nodes(),
+        # None except on a page a tour step lives on. See docs/features/tutorial.md
+        'tutorial': tutorial_context(),
     }
 
 
@@ -261,6 +264,7 @@ from routes.setup import bp as setup_bp
 from routes.towers import bp as towers_bp
 from routes.tracker import bp as tracker_bp
 from routes.tracker import legacy_bp as tracker_legacy_bp
+from routes.tutorial import bp as tutorial_bp
 
 app.register_blueprint(home_bp)
 app.register_blueprint(config_bp)
@@ -274,6 +278,7 @@ app.register_blueprint(tracker_bp)
 app.register_blueprint(tracker_legacy_bp)
 app.register_blueprint(fleet_bp)
 app.register_blueprint(remote_access_bp)
+app.register_blueprint(tutorial_bp)
 
 
 # Reachable on the owner pathway without a session: the login page itself, the
