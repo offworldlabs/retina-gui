@@ -115,6 +115,7 @@ Display rules:
 | Tab link | The node's absolute `http://ret<node_id>.local/` URL (see [Node addresses](#node-addresses)). |
 | Active tab | This node's tab, unless the Summary tab is active. The page is always served by the node you are looking at, so there is nothing to track: the macro compares against the `node_id` passed in. |
 | Outbound link | Network Map and Dashboard (`app.retina.fm`). It leaves the app, so it carries the outbound arrow. |
+| `data-tutorial` | Every tab carries `data-tutorial="fleet-tabs"`, and this node's tab also `fleet-this-tab`, which are what the guided tutorial lights up. On the tabs rather than the row so the row's markup is unchanged. See [tutorial.md](tutorial.md#targets). |
 
 `discovered_nodes` guarantees this node is in the list. Discovery takes a second or two to populate, and it can come back empty on a network that blocks multicast; neither is a reason to draw a banner with no tabs. If the peer list does not already include this node, a stand-in entry is added (hostname `<node_id>.local`, no address, no friendly name) and the list is re-sorted rather than prepended, so the tab does not sit first for a second and then move. The banner and the Summary cards share this function deliberately: two answers to "which nodes are there" would disagree during exactly the seconds after boot when someone is most likely to be looking.
 

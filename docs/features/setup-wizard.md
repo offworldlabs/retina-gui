@@ -27,7 +27,8 @@ re-consent path, and most steps then become informational.
 | [src/device_state.py](../../src/device_state.py) | Wizard step file, completion flag, towers cache, consent/contact/claim records |
 
 Related docs: [auto-calibrate.md](auto-calibrate.md), [device-state-and-telemetry.md](device-state-and-telemetry.md),
-[towers.md](towers.md), [ota-updates.md](ota-updates.md), [remote-access.md](remote-access.md).
+[towers.md](towers.md), [ota-updates.md](ota-updates.md), [remote-access.md](remote-access.md),
+[tutorial.md](tutorial.md).
 
 ## Step order
 
@@ -197,7 +198,7 @@ Optional name, email, phone and a two-letter phone country, placed straight afte
 so it is asked while the owner is still answering questions about themselves rather than about
 the radar. Nothing downstream blocks on it.
 
-- **Save and continue** posts to `/set-up/contact`, the same route the "How we reach you"
+- **Save and continue** posts to `/set-up/contact`, the same route the "How We Reach You"
   section on the Configuration page uses, so the two surfaces cannot drift into storing
   different shapes.
 - **Skip** writes nothing and moves on. Skipping is an answer, not an abandonment, and anything
@@ -222,7 +223,7 @@ the radar. Nothing downstream blocks on it.
 Asks for an email address to send a claim link to. Opening the link binds the node to the
 account behind that address, creating one if needed.
 
-- Posts to `/set-up/claim`, the same route as the Node claim section on the Configuration page.
+- Posts to `/set-up/claim`, the same route as the Node Claim section on the Configuration page.
 - An empty box is filled with the contact email from the previous step as a suggestion only.
   Nothing is sent until **Send link and continue** is pressed.
 - Send with an empty box is refused on the page ("Enter an email address, or skip this step"),
@@ -521,6 +522,12 @@ race and see spectrum mode while `enforce_radar_mode` is still running, then cal
 `enforce_radar_mode` if retina-node is installed. That recreates the stack, which is why the
 calibrate step saves its tuning and waits for the restart before letting the owner reach this
 step.
+
+The step also invites the owner to the guided tutorial, saying it is recommended for anyone
+setting up a node for the first time. The footer offers **Start tutorial** (a link to
+`/tutorial`, the primary button) and **Go to dashboard**. Both are plain links, so neither
+waits on `/set-up/complete`. The tour is covered in [tutorial.md](tutorial.md); in demo mode
+the link carries `demo=1` so the tour runs in demo mode too.
 
 ## Demo and dev modes
 

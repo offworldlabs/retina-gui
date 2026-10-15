@@ -1,0 +1,170 @@
+/* The guided tutorial overlay. Loaded only while a tour step lives on the page.
+   See docs/features/tutorial.md */
+
+.tut {
+    position: fixed;
+    inset: 0;
+    /* Above the wizard's session notice (2000) and Bootstrap modals (1055). */
+    z-index: 3000;
+    font-family: var(--font-body);
+    /* Swallows every click on the page underneath: the tour is look-only. */
+    pointer-events: auto;
+}
+
+.tut-svg {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    display: block;
+}
+.tut-dim { fill: oklch(0.20 0.012 260 / 0.66); }
+
+/* The highlight: a bright ring on each lit region, with a slow pulse so the
+   eye finds it without the page having to move. */
+.tut-ring {
+    fill: none;
+    stroke: var(--accent);
+    stroke-width: 2.5;
+    filter: drop-shadow(0 0 6px oklch(0.75 0.15 250 / 0.9));
+    animation: tut-pulse 1.8s ease-in-out infinite;
+}
+/* A click-through step: the ring is what to click, so it asks louder. */
+.tut-clickable .tut-ring { stroke-width: 3.5; animation-duration: 1.1s; }
+@keyframes tut-pulse {
+    0%, 100% { stroke-opacity: 1; }
+    50%      { stroke-opacity: 0.55; }
+}
+
+.tut-arrow-halo { fill: none; stroke: #fff; stroke-width: 6; stroke-linecap: round; opacity: 0.95; }
+.tut-arrow      { fill: none; stroke: var(--accent); stroke-width: 3; stroke-linecap: round; }
+.tut-arrow-head-halo { fill: #fff; stroke: #fff; stroke-width: 3; stroke-linejoin: round; opacity: 0.95; }
+.tut-arrow-head { fill: var(--accent); }
+
+.tut-card {
+    position: absolute;
+    top: 0;
+    left: 0;
+    /* Narrow enough to stand in the Configuration page's side column without
+       covering the section it is describing. */
+    width: 324px;
+    max-width: calc(100vw - 24px);
+    background: var(--surface);
+    color: var(--ink);
+    border: 1px solid var(--line);
+    border-radius: var(--r-lg);
+    box-shadow: 0 12px 40px oklch(0.20 0.012 260 / 0.35);
+    padding: 16px 18px 14px;
+    font-size: 14px;
+    line-height: 1.5;
+}
+
+/* Hidden while the page scrolls to a step, then faded in where it belongs.
+   See holdUntilStill in tutorial.js. */
+.tut-card, .tut-arrows { transition: opacity .16s ease-out; }
+.tut-moving .tut-card, .tut-moving .tut-arrows { opacity: 0; transition: none; }
+
+.tut-meta {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--ink-3);
+}
+.tut-bar {
+    flex: 1;
+    height: 3px;
+    border-radius: var(--r-pill);
+    background: var(--line);
+    overflow: hidden;
+}
+.tut-bar-fill { height: 100%; background: var(--accent); border-radius: var(--r-pill); transition: width .2s; }
+
+.tut-title {
+    font-size: 17px;
+    font-weight: 600;
+    letter-spacing: -0.01em;
+    margin: 10px 0 6px;
+}
+.tut-body { margin: 0; color: var(--ink-2); }
+
+/* A step with an example image: the picture has to be big enough to read, so
+   the card is too, and it stands over the page rather than in the margin. */
+.tut-card.tut-wide { width: 720px; }
+
+.tut-figure { margin: 10px 0 10px; }
+.tut-frame { position: relative; }
+.tut-marks { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; }
+/* White on a dark edge, so a mark reads on the plot's purple and over a dot
+   of either colour. Widths are in screen pixels whatever the image's size. */
+.tut-mark, .tut-mark-shadow { fill: none; stroke-linecap: round; vector-effect: non-scaling-stroke; }
+.tut-mark { stroke: #fff; stroke-width: 2.5; }
+.tut-mark-shadow { stroke: oklch(0.20 0.012 260); stroke-width: 5.5; }
+.tut-mark-tip { fill: #fff; }
+.tut-mark-tip-shadow { fill: oklch(0.20 0.012 260); stroke: oklch(0.20 0.012 260); stroke-width: 3; stroke-linejoin: round; vector-effect: non-scaling-stroke; }
+.tut-figure img {
+    display: block;
+    /* The img carries its own width and height, so this keeps its shape and
+       the card's height is known before the image arrives. */
+    width: 100%;
+    height: auto;
+    border-radius: var(--r-md);
+    border: 1px solid var(--line);
+    background: var(--surface-2);
+}
+.tut-figure figcaption { font-size: 11.5px; color: var(--ink-3); margin-top: 4px; }
+
+.tut-link {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    margin-top: 8px;
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--accent);
+    text-decoration: none;
+}
+.tut-link:hover { text-decoration: underline; }
+
+.tut-note { margin: 8px 0 0; font-size: 12.5px; color: var(--ink-3); }
+
+.tut-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-top: 14px;
+    padding-top: 12px;
+    border-top: 1px solid var(--line);
+}
+.tut-actions { flex-wrap: wrap; row-gap: 8px; }
+.tut-nav { display: flex; gap: 8px; margin-left: auto; }
+.tut-skip {
+    background: none;
+    border: 0;
+    padding: 6px 2px;
+    font: inherit;
+    font-size: 13px;
+    color: var(--ink-3);
+    cursor: pointer;
+    white-space: nowrap;
+    text-decoration: underline;
+    text-underline-offset: 3px;
+}
+.tut-skip:hover { color: var(--ink); }
+/* `hidden` loses to any display rule above, so say it again. */
+.tut [hidden] { display: none !important; }
+.tut-card:focus { outline: none; }
+.tut-card :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+@media (max-width: 640px) {
+    .tut-card, .tut-card.tut-wide { width: calc(100vw - 24px); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .tut-ring { animation: none; }
+    .tut-bar-fill { transition: none; }
+    .tut-card, .tut-arrows { transition: none; }
+}

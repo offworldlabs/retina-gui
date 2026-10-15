@@ -7,7 +7,9 @@
 {% endblock %}
 
 {# ── Macro: render a single form field as a cfg-row ─────────────────────── #}
-{% macro render_field(field, section, prefix='') %}
+{# tutorial names the row as a guided-tutorial target (plain inputs and switches).
+   See docs/features/tutorial.md#targets #}
+{% macro render_field(field, section, prefix='', tutorial='') %}
     {% set field_name = section ~ '.' ~ (prefix ~ field.name if prefix else field.name) %}
     {% set field_id   = field_name | replace('.', '_') %}
     {% set field_err  = config_errors.get(field_name) if config_errors else none %}
@@ -36,7 +38,7 @@
             </div>
         </div>
     {% elif field.type == 'checkbox' %}
-        <div class="toggle-row">
+        <div class="toggle-row"{% if tutorial %} data-tutorial="{{ tutorial }}"{% endif %}>
             <label class="ds-switch">
                 <input type="checkbox" name="{{ field_name }}" id="{{ field_id }}"
                        {% if field.value %}checked{% endif %}
@@ -53,7 +55,7 @@
             </div>
         </div>
     {% else %}
-        <div class="cfg-row">
+        <div class="cfg-row"{% if tutorial %} data-tutorial="{{ tutorial }}"{% endif %}>
             <div class="label-col">
                 <label for="{{ field_id }}">{{ field.title }}</label>
                 {% if field.description %}<span class="help">{{ field.description }}</span>{% endif %}
@@ -82,32 +84,38 @@
 {% block content %}
 <div class="shell">
 
-    {# ── Side nav ── #}
-    <aside class="side">
+    {# ── Side nav ──
+       Groups and order match the page. See docs/features/config-editor.md#page-layout
+       data-tutorial names what the guided tutorial points at; a step's target
+       must keep its token. See docs/features/tutorial.md#targets #}
+    <aside class="side" data-tutorial="cfg-side">
         <h3>Node</h3>
-        <a href="#mode">Mode</a>
+        <a href="#identifiers">Identifiers</a>
+        <a href="#mode" data-tutorial="cfg-mode-nav">Mode</a>
+        <a href="#claim">Node Claim</a>
+        <a href="#network" data-tutorial="cfg-network-nav">Network</a>
         <h3>Radar</h3>
-        <a href="#tower">Tower</a>
-        <a href="#location">Location</a>
-        <a href="#capture">Capture</a>
-        <a href="#truth">ADS-B truth</a>
-        <a href="#tar1090">tar1090</a>
-        <a href="#retina-tracker">Retina Tracker</a>
-        <h3>Administration</h3>
-        <a href="#this-node">This node</a>
-        <a href="#ssh">SSH access</a>
-        <a href="#remote">Remote access</a>
-        <a href="#contact">How we reach you</a>
-        <a href="#claim">Node claim</a>
-        <a href="#cloud">Cloud services</a>
-        <a href="#wizard">Setup wizard</a>
-        <a href="#network">Network</a>
+        <a href="#cached-towers" data-tutorial="cfg-cached-nav">Cached Towers</a>
+        <a href="#tower" data-tutorial="cfg-tower-nav">Tower</a>
+        <a href="#capture" data-tutorial="cfg-capture-nav">Capture</a>
+        <a href="#tracking" data-tutorial="cfg-tracking-nav">Tracking</a>
+        <h3>ADS-B</h3>
+        <a href="#truth" data-tutorial="cfg-adsb-nav">ADS-B Truth</a>
+        <a href="#tar1090" data-tutorial="cfg-adsb-nav">tar1090</a>
+        <h3>Other</h3>
+        <a href="#ssh" data-tutorial="cfg-ssh-nav">SSH Access</a>
+        <a href="#wizard">Setup Wizard</a>
+        <a href="#tutorial">Tutorial</a>
+        <h3>Support</h3>
+        <a href="#cloud">Cloud Services</a>
+        <a href="#remote">Remote Support</a>
+        <a href="#contact">How We Reach You</a>
     </aside>
 
     {# ── Main ── #}
     <main>
         <div class="config-page-head">
-            <div>
+            <div data-tutorial="cfg-head">
                 <h1>Configuration</h1>
                 <div class="sub">Tune the radar pipeline and manage the device. Changes apply on save.</div>
             </div>
@@ -119,9 +127,6 @@
         </div>
         {% endif %}
 
-        <form action="/config/save" method="post" id="configForm" novalidate>
-        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-
         {% if config_errors %}
         <div style="background:oklch(0.96 0.04 25);border:1px solid var(--danger);border-radius:var(--r-md);padding:12px 16px;margin-bottom:18px;font-size:13px;color:var(--danger);">
             {# A form-level refusal (e.g. a calibration holding the SDR) has no
@@ -131,344 +136,18 @@
         </div>
         {% endif %}
 
-        {# ── Mode ── #}
-        <section id="mode" class="cfg-section">
+        {# ════ Node ════ #}
+        {# Group titles match the side nav's.
+           See docs/features/config-editor.md#page-layout #}
+        <h2 class="cfg-group">Node</h2>
+        {# ── Identifiers ──
+           Outside #configForm: the name saves on its own rather than on Apply,
+           and the rest is read-only.
+           See docs/features/config-editor.md#identifiers #}
+        <section id="identifiers" class="cfg-section">
             <div class="cfg-section-head">
-                <h2>Mode</h2>
-                <span class="desc">Switch the node between passive radar, spectrum analysis, and SDRconnect.</span>
-            </div>
-            <div class="cfg-body">
-                <div class="toggle-row" style="padding:0;border:0;">
-                    <div class="ds-segmented" id="modeSegmented" role="group" aria-label="Mode">
-                        <button type="button" class="ds-segmented-btn" data-mode="radar">Radar</button>
-                        <button type="button" class="ds-segmented-btn" data-mode="spectrum">Spectrum</button>
-                        <button type="button" class="ds-segmented-btn" data-mode="sdrconnect">SDRconnect</button>
-                    </div>
-                    <div class="body">
-                        <div class="name" id="modeLabel">Radar</div>
-                        <div class="desc">Radar runs the blah2 passive radar pipeline. Spectrum stops blah2 and starts retina-spectrum. SDRconnect stops both and starts the SDRconnect server for a remote desktop client.</div>
-                    </div>
-                    <span class="spinner-border spinner-border-sm" id="modeSpinner" style="display:none;width:.9em;height:.9em;border-width:1.5px;flex-shrink:0;"></span>
-                </div>
-                <div id="modeErrorMsg" style="font-size:13px;color:var(--danger);display:none;margin-top:6px;"></div>
-            </div>
-        </section>
-
-        {# ── Tower ── #}
-        {% set towers = towers_cache.towers if towers_cache else [] %}
-        <section id="tower" class="cfg-section">
-            <div class="cfg-section-head">
-                <h2>Tower</h2>
-                <span class="desc">Pick a broadcast tower from your setup wizard's search results to set the transmitter location and center frequency below. Add or remove towers from this cached list manually.</span>
-            </div>
-            <div class="cfg-body" {% if not retina_installed %}style="opacity:.5;pointer-events:none;"{% endif %}>
-                <div class="cfg-row" id="towerPresetRow" style="padding:0;border:0;{% if not towers %}display:none;{% endif %}">
-                    <div class="label-col">
-                        <label for="towerPresetSelect">Tower preset</label>
-                        <span class="help" id="towerPresetHelp">{% if towers_cache and towers_cache.cached_at %}From your setup wizard's tower search (cached {{ towers_cache.cached_at[:10] }}).{% endif %}</span>
-                    </div>
-                    <div>
-                        <select id="towerPresetSelect" class="ds-input">
-                            <option value="">Select a tower…</option>
-                            {% for tower in towers %}
-                            <option value="{{ loop.index0 }}"
-                                    data-callsign="{{ tower.get('callsign') or '' }}"
-                                    data-name="{{ tower.get('name') or '' }}"
-                                    data-lat="{{ tower.get('latitude') if tower.get('latitude') is not none else '' }}"
-                                    data-lon="{{ tower.get('longitude') if tower.get('longitude') is not none else '' }}"
-                                    data-altitude="{{ tower.get('altitude_m') if tower.get('altitude_m') is not none else 0 }}"
-                                    data-frequency="{{ tower.get('frequency_mhz') if tower.get('frequency_mhz') is not none else '' }}">{{ tower.get('callsign') or tower.get('name') or 'Tower' }} - {{ tower.get('frequency_mhz') }} MHz{% if tower.get('distance_km') is not none %} ({{ tower.get('distance_km') }} km{% if tower.get('distance_class') %}, {{ tower.get('distance_class') }}{% endif %}){% endif %}</option>
-                            {% endfor %}
-                        </select>
-                    </div>
-                </div>
-                <div class="help" id="towerEmptyMsg" {% if towers %}style="display:none;"{% endif %}>No cached tower search results yet. Run the Location step of the Setup Wizard to search for towers near you, or add one manually below.</div>
-
-                <div class="divider"></div>
-
-                <div class="ds-label-micro" style="margin-bottom:10px;">Manage cached towers</div>
-                <div class="ssh-list" id="towerManageList">
-                    {% for tower in towers %}
-                    <div class="ssh-item" data-index="{{ loop.index0 }}"
-                         data-lat="{{ tower.get('latitude') if tower.get('latitude') is not none else '' }}"
-                         data-lon="{{ tower.get('longitude') if tower.get('longitude') is not none else '' }}"
-                         data-frequency="{{ tower.get('frequency_mhz') if tower.get('frequency_mhz') is not none else '' }}">
-                        <div class="ssh-meta">
-                            <div class="ssh-key">{{ tower.get('callsign') or tower.get('name') or 'Tower' }} - {{ tower.get('frequency_mhz') }} MHz</div>
-                        </div>
-                        <button type="button" class="ds-btn danger-ghost sm tower-remove-btn" data-index="{{ loop.index0 }}">Remove</button>
-                    </div>
-                    {% endfor %}
-                </div>
-
-                <button type="button" class="ds-btn ghost" style="margin-top:12px;" data-bs-toggle="modal" data-bs-target="#addTowerModal">
-                    <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M12 5v14M5 12h14"></path></svg>
-                    Add tower
-                </button>
-                <div id="towerManageError" style="font-size:13px;color:var(--danger);display:none;margin-top:8px;"></div>
-            </div>
-        </section>
-
-        {# ── Location ── #}
-        {# Build field lookup for location #}
-        {% set loc = {} %}
-        {% for f in location_fields %}{% set _ = loc.update({f.name: f}) %}{% endfor %}
-        <section id="location" class="cfg-section">
-            <div class="cfg-section-head">
-                <h2>Location</h2>
-                <span class="desc">Receiver and transmitter coordinates used by the geometry solver.</span>
-            </div>
-            <div class="cfg-body" {% if not retina_installed %}style="opacity:.5;pointer-events:none;"{% endif %}>
-                {# Hand-built, not render_field, so every input looks up its own
-                   config_errors key. Keep all eight wired.
-                   See docs/features/config-editor.md#validation #}
-                {% set rx_name_err = config_errors.get('location.rx_name') if config_errors else none %}
-                {% set rx_lat_err  = config_errors.get('location.rx_latitude') if config_errors else none %}
-                {% set rx_lon_err  = config_errors.get('location.rx_longitude') if config_errors else none %}
-                {% set rx_alt_err  = config_errors.get('location.rx_altitude') if config_errors else none %}
-                {% set tx_name_err = config_errors.get('location.tx_name') if config_errors else none %}
-                {% set tx_lat_err  = config_errors.get('location.tx_latitude') if config_errors else none %}
-                {% set tx_lon_err  = config_errors.get('location.tx_longitude') if config_errors else none %}
-                {% set tx_alt_err  = config_errors.get('location.tx_altitude') if config_errors else none %}
-                <div class="ds-label-micro" style="margin-bottom:10px;">Receiver</div>
-                <div class="cfg-grid" style="margin-bottom:0;">
-                    <div style="grid-column:1/-1;" class="cfg-row" style="padding:0;border:0;">
-                        <div class="label-col"><label>Name</label><span class="help">{{ loc.rx_name.description if loc.rx_name else '' }}</span></div>
-                        <div>
-                            <input type="text" name="location.rx_name" class="ds-input{% if rx_name_err %} is-invalid{% endif %}" value="{{ loc.rx_name.value or '' if loc.rx_name else '' }}">
-                            {% if rx_name_err %}<div style="color:var(--danger);font-size:12px;margin-top:4px;">{{ rx_name_err }}</div>{% endif %}
-                        </div>
-                    </div>
-                    {% if loc.rx_latitude %}
-                    <div class="cfg-row" style="padding:0;border:0;">
-                        <div class="label-col"><label>Latitude</label><span class="help">{{ loc.rx_latitude.description }}</span></div>
-                        <div>
-                            <input type="number" name="location.rx_latitude" class="ds-input mono{% if rx_lat_err %} is-invalid{% endif %}" step="any" min="-90" max="90" value="{{ loc.rx_latitude.value if loc.rx_latitude.value is not none else '' }}">
-                            {% if rx_lat_err %}<div style="color:var(--danger);font-size:12px;margin-top:4px;">{{ rx_lat_err }}</div>{% endif %}
-                        </div>
-                    </div>
-                    {% endif %}
-                    {% if loc.rx_longitude %}
-                    <div class="cfg-row" style="padding:0;border:0;">
-                        <div class="label-col"><label>Longitude</label><span class="help">{{ loc.rx_longitude.description }}</span></div>
-                        <div>
-                            <input type="number" name="location.rx_longitude" class="ds-input mono{% if rx_lon_err %} is-invalid{% endif %}" step="any" min="-180" max="180" value="{{ loc.rx_longitude.value if loc.rx_longitude.value is not none else '' }}">
-                            {% if rx_lon_err %}<div style="color:var(--danger);font-size:12px;margin-top:4px;">{{ rx_lon_err }}</div>{% endif %}
-                        </div>
-                    </div>
-                    {% endif %}
-                    {% if loc.rx_altitude %}
-                    <div class="cfg-row" style="padding:0;border:0;">
-                        <div class="label-col"><label>Altitude</label><span class="help">{{ loc.rx_altitude.description }}</span></div>
-                        <div>
-                            <div class="cfg-input-row"><input type="number" name="location.rx_altitude" class="ds-input mono{% if rx_alt_err %} is-invalid{% endif %}" step="any" value="{{ loc.rx_altitude.value if loc.rx_altitude.value is not none else '' }}"><span class="unit">m</span></div>
-                            {% if rx_alt_err %}<div style="color:var(--danger);font-size:12px;margin-top:4px;">{{ rx_alt_err }}</div>{% endif %}
-                        </div>
-                    </div>
-                    {% endif %}
-                </div>
-
-                <div class="divider"></div>
-
-                <div class="ds-label-micro" style="margin-bottom:10px;">Transmitter</div>
-                <div class="cfg-grid">
-                    <div style="grid-column:1/-1;" class="cfg-row" style="padding:0;border:0;">
-                        <div class="label-col"><label>Name</label><span class="help">{{ loc.tx_name.description if loc.tx_name else '' }}</span></div>
-                        <div>
-                            <input type="text" name="location.tx_name" class="ds-input{% if tx_name_err %} is-invalid{% endif %}" maxlength="32" value="{{ loc.tx_name.value or '' if loc.tx_name else '' }}">
-                            {% if tx_name_err %}<div style="color:var(--danger);font-size:12px;margin-top:4px;">{{ tx_name_err }}</div>{% endif %}
-                        </div>
-                    </div>
-                    {% if loc.tx_latitude %}
-                    <div class="cfg-row" style="padding:0;border:0;">
-                        <div class="label-col"><label>Latitude</label><span class="help">{{ loc.tx_latitude.description }}</span></div>
-                        <div>
-                            <input type="number" name="location.tx_latitude" class="ds-input mono{% if tx_lat_err %} is-invalid{% endif %}" step="any" min="-90" max="90" value="{{ loc.tx_latitude.value if loc.tx_latitude.value is not none else '' }}">
-                            {% if tx_lat_err %}<div style="color:var(--danger);font-size:12px;margin-top:4px;">{{ tx_lat_err }}</div>{% endif %}
-                        </div>
-                    </div>
-                    {% endif %}
-                    {% if loc.tx_longitude %}
-                    <div class="cfg-row" style="padding:0;border:0;">
-                        <div class="label-col"><label>Longitude</label><span class="help">{{ loc.tx_longitude.description }}</span></div>
-                        <div>
-                            <input type="number" name="location.tx_longitude" class="ds-input mono{% if tx_lon_err %} is-invalid{% endif %}" step="any" min="-180" max="180" value="{{ loc.tx_longitude.value if loc.tx_longitude.value is not none else '' }}">
-                            {% if tx_lon_err %}<div style="color:var(--danger);font-size:12px;margin-top:4px;">{{ tx_lon_err }}</div>{% endif %}
-                        </div>
-                    </div>
-                    {% endif %}
-                    {% if loc.tx_altitude %}
-                    <div class="cfg-row" style="padding:0;border:0;">
-                        <div class="label-col"><label>Altitude</label><span class="help">{{ loc.tx_altitude.description }}</span></div>
-                        <div>
-                            <div class="cfg-input-row"><input type="number" name="location.tx_altitude" class="ds-input mono{% if tx_alt_err %} is-invalid{% endif %}" step="any" value="{{ loc.tx_altitude.value if loc.tx_altitude.value is not none else '' }}"><span class="unit">m</span></div>
-                            {% if tx_alt_err %}<div style="color:var(--danger);font-size:12px;margin-top:4px;">{{ tx_alt_err }}</div>{% endif %}
-                        </div>
-                    </div>
-                    {% endif %}
-                </div>
-            </div>
-        </section>
-
-        {# ── Capture ── #}
-        <section id="capture" class="cfg-section">
-            <div class="cfg-section-head">
-                <h2>Capture</h2>
-                <span class="desc">SDR sampling and gain. Touch with care, as it affects data quality.</span>
-            </div>
-            <div class="cfg-body" {% if not retina_installed %}style="opacity:.5;pointer-events:none;"{% endif %}>
-                {# Two run shapes, deliberately separate buttons: they answer
-                   different questions and take very different amounts of time.
-                   Quick Calibrate is the same run the setup wizard performs -
-                   see RetinaCalibrate.QUICK_RUN. #}
-                <div style="display:grid;grid-template-columns:auto 1fr;align-items:center;gap:6px 10px;margin-bottom:4px;">
-                    <button type="button" class="ds-btn ghost" id="autoCalibrateBtn">Auto-Calibrate</button>
-                    <span class="help" style="margin:0;">Automatically tune tower and gain until a confirmed aircraft track appears (~10 min).</span>
-                    <button type="button" class="ds-btn ghost" id="quickCalibrateBtn">Quick Calibrate</button>
-                    <span class="help" style="margin:0;">Current tower only: find the best gain, then check it holds without overloading. No aircraft needed (~4 min).</span>
-                </div>
-                <div class="divider"></div>
-                <div class="cfg-row" style="padding:6px 0 2px;">
-                    <div class="label-col"><label>Signal peak</label><span class="help">Live peak level relative to clipping. 0 dBFS = saturated.</span></div>
-                </div>
-                <div class="peak-meter">
-                    <div class="ladder-row">
-                        <div class="ladder-name">Reference<span class="sub">Tuner A</span></div>
-                        <div class="ladder-track" id="peakTrackA"></div>
-                        <div class="ladder-value" id="peakValA">-</div>
-                    </div>
-                    <div class="ladder-row">
-                        <div class="ladder-name">Surveillance<span class="sub">Tuner B</span></div>
-                        <div class="ladder-track" id="peakTrackB"></div>
-                        <div class="ladder-value" id="peakValB">-</div>
-                    </div>
-                    <div class="ladder-scale-row">
-                        <div class="ladder-name-spacer"></div>
-                        <div class="ladder-ticks" id="peakTicks"></div>
-                        <div class="ladder-value-spacer"></div>
-                    </div>
-                </div>
-                {# Shown by the meter script once "no signal" has lasted a minute.
-                   See docs/features/config-editor.md#no-signal-help #}
-                <div id="noSignalHelp" style="display:none;margin-top:12px;padding:12px 14px;border-radius:var(--r-md);background:var(--warn-soft);border:1px solid oklch(0.87 0.06 75);font-size:13px;color:var(--ink-2);">
-                    <div style="font-weight:600;font-size:14px;color:var(--warn-ink);margin-bottom:6px;">The radio has stopped sending data</div>
-                    <ol style="margin:0 0 8px;padding-left:20px;">
-                        <li>Check the USB cable between the SDR and the Pi is plugged in.</li>
-                        <li>Restart the radar. This resets the SDR and starts it again on the current settings.</li>
-                        <li>If there is still no signal, restart on the safest settings: gain reduction 59 dB on both tuners and LNA state 9. Once the meter shows a signal again, run Quick Calibrate to find better settings.</li>
-                    </ol>
-                    <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
-                        <button type="button" class="ds-btn" id="restartRadarBtn">Restart radar</button>
-                        <button type="button" class="ds-btn ghost" data-safe-settings>Use safe settings</button>
-                        <span>If nothing helps, contact support.</span>
-                    </div>
-                </div>
-                {# Shown by the meter script while a tuner stays overloaded.
-                   See docs/features/config-editor.md#overload-help #}
-                <div id="overloadHelp" style="display:none;margin-top:12px;padding:12px 14px;border-radius:var(--r-md);background:var(--warn-soft);border:1px solid oklch(0.87 0.06 75);font-size:13px;color:var(--ink-2);">
-                    <div style="font-weight:600;font-size:14px;color:var(--warn-ink);margin-bottom:6px;">The radio is overloaded</div>
-                    <p style="margin:0 0 6px;">The signal on <span id="overloadHelpTuners">the receiver</span> is too strong for the current settings, so it is clipping. The radar keeps running, but it detects less.</p>
-                    <ol style="margin:0 0 8px;padding-left:20px;">
-                        <li>Run Quick Calibrate to find the most sensitive settings that do not overload.</li>
-                        <li>To stop the overload straight away instead, restart on the safest settings: gain reduction 59 dB on both tuners and LNA state 9. The radar hears very little on them, so run Quick Calibrate afterwards.</li>
-                    </ol>
-                    <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
-                        <button type="button" class="ds-btn" id="overloadQuickCalBtn">Quick Calibrate</button>
-                        <button type="button" class="ds-btn ghost" data-safe-settings>Use safe settings</button>
-                        <span>If it overloads even on the safest settings, contact support.</span>
-                    </div>
-                </div>
-                <div class="divider"></div>
-                {% for field in capture_fields %}
-                    {{ render_field(field, 'capture') }}
-                {% endfor %}
-            </div>
-        </section>
-
-        {# ── ADS-B truth ── #}
-        <section id="truth" class="cfg-section">
-            <div class="cfg-section-head">
-                <h2>ADS-B truth</h2>
-                <span class="desc">Match radar detections against known aircraft to validate accuracy.</span>
-            </div>
-            <div class="cfg-body" {% if not retina_installed %}style="opacity:.5;pointer-events:none;"{% endif %}>
-                {% for field in truth_fields %}
-                    {{ render_field(field, 'truth') }}
-                {% endfor %}
-            </div>
-        </section>
-
-        {# ── tar1090 ── #}
-        {# Build field lookup for tar1090 #}
-        {% set t = {} %}
-        {% for f in tar1090_fields %}{% set _ = t.update({f.name: f}) %}{% endfor %}
-        <section id="tar1090" class="cfg-section">
-            <div class="cfg-section-head">
-                <h2>tar1090</h2>
-                <span class="desc">ADS-B viewer configuration.</span>
-            </div>
-            <div class="cfg-body" {% if not retina_installed %}style="opacity:.5;pointer-events:none;"{% endif %}>
-                <div class="cfg-grid three">
-                    {% for fname in ['adsb_source_host', 'adsb_source_port', 'adsb_source_protocol'] %}
-                    {% if fname in t %}
-                    {# Hand-built, so it looks config_errors up itself.
-                       See docs/features/config-editor.md#validation #}
-                    {% set t_err = config_errors.get('tar1090.' ~ fname) if config_errors else none %}
-                    <div>
-                        <div class="ds-label-micro" style="margin-bottom:6px;">{{ t[fname].title }}</div>
-                        <input type="{{ t[fname].type }}" name="tar1090.{{ fname }}" class="ds-input mono{% if t_err %} is-invalid{% endif %}" value="{{ t[fname].value if t[fname].value is not none else '' }}">
-                        {% if t_err %}<div style="color:var(--danger);font-size:12px;margin-top:4px;">{{ t_err }}</div>{% endif %}
-                    </div>
-                    {% endif %}
-                    {% endfor %}
-                </div>
-                <div class="divider"></div>
-                {% if 'adsblol_fallback' in t %}
-                <div class="toggle-row" style="border:0;padding:0;">
-                    <label class="ds-switch">
-                        <input type="checkbox" name="tar1090.adsblol_fallback" {% if t['adsblol_fallback'].value %}checked{% endif %}>
-                        <span class="ds-switch-track"></span>
-                    </label>
-                    <div class="body">
-                        <div class="name">{{ t['adsblol_fallback'].title }}</div>
-                        <div class="desc">Use the public adsb.lol feed if no local ADS-B receiver is reachable.</div>
-                    </div>
-                    {% if 'adsblol_radius' in t %}
-                    {% set radius_err = config_errors.get('tar1090.adsblol_radius') if config_errors else none %}
-                    <div class="cfg-input-row" style="width:180px;flex-shrink:0;">
-                        <input type="number" name="tar1090.adsblol_radius" class="ds-input mono{% if radius_err %} is-invalid{% endif %}" min="1" max="500" value="{{ t['adsblol_radius'].value if t['adsblol_radius'].value is not none else '' }}">
-                        <span class="unit">nm</span>
-                    </div>
-                    {% if radius_err %}<div style="color:var(--danger);font-size:12px;margin-top:4px;">{{ radius_err }}</div>{% endif %}
-                    {% endif %}
-                </div>
-                {% endif %}
-            </div>
-        </section>
-
-        {# ── Retina Tracker ── #}
-        <section id="retina-tracker" class="cfg-section">
-            <div class="cfg-section-head">
-                <h2>Retina Tracker</h2>
-                <span class="desc">Tuning for the retina-tracker sidecar's track confirmation.</span>
-            </div>
-            <div class="cfg-body" {% if not retina_installed %}style="opacity:.5;pointer-events:none;"{% endif %}>
-                {% for field in retina_tracker_fields %}
-                    {{ render_field(field, 'retina_tracker') }}
-                {% endfor %}
-            </div>
-        </section>
-
-        </form>
-
-        {# ── SSH access ── #}
-        {# ── This node ──
-           Deliberately outside #configForm, which closes above: like the rest
-           of Administration, this saves on its own rather than on Apply. #}
-        <section id="this-node" class="cfg-section" style="margin-top:12px;">
-            <div class="cfg-section-head">
-                <h2>This node</h2>
-                <span class="desc">What this node is called, and the address that always reaches it.</span>
+                <h2>Identifiers</h2>
+                <span class="desc">What this node is called, the address that always reaches it, and the two IDs it is known by.</span>
             </div>
             <div class="cfg-body">
                 <div class="cfg-row">
@@ -504,183 +183,61 @@
                         <div class="cfg-readonly mono">http://{{ node_id }}.local</div>
                     </div>
                 </div>
-            </div>
-        </section>
-
-        <section id="ssh" class="cfg-section" style="margin-top:12px;">
-            <div class="cfg-section-head">
-                <h2>SSH access</h2>
-                <span class="desc">Public keys allowed to SSH into this node. To add SSH keys for use, please review the related GitHub file: <a href="https://github.com/offworldlabs/owl-os/blob/main/ssh_pub_keys/README.txt" target="_blank" rel="noopener">owl-os/ssh_pub_keys/README.txt</a></span>
-            </div>
-            <div class="cfg-body">
-                <form action="/ssh-keys" method="post">
-                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                    <div style="display:flex;gap:8px;">
-                        <input type="text" name="ssh_key" class="ds-input mono" placeholder="ssh-ed25519 AAAA…" style="min-width:0;" />
-                        <button type="submit" class="ds-btn primary" style="flex-shrink:0;">
-                            <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M12 5v14M5 12h14"></path></svg>
-                            Add key
-                        </button>
+                <div class="cfg-row">
+                    <div class="label-col">
+                        <label>Node local identifier</label>
+                        <span class="help">
+                            Identifies this node on your own network. It comes from the
+                            hardware and never changes: it is the name in the address
+                            above, and what the node is listed by until you name it.
+                        </span>
                     </div>
-                </form>
-
-                {% if ssh_keys %}
-                <div class="ssh-list">
-                    {% for key in ssh_keys %}
-                    <div class="ssh-item">
-                        <div class="ssh-fp">
-                            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path></svg>
-                        </div>
-                        <div class="ssh-meta">
-                            <div class="ssh-key">{{ key }}</div>
-                        </div>
-                        <form action="/ssh-keys/delete" method="post" style="flex-shrink:0;">
-                            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                            <input type="hidden" name="ssh_key" value="{{ key }}">
-                            <button type="submit" class="ds-btn danger-ghost sm">Remove</button>
-                        </form>
+                    <div>
+                        <div class="cfg-readonly mono" id="nodeLocalId">{{ node_id }}</div>
                     </div>
-                    {% endfor %}
                 </div>
-                {% else %}
-                <p style="color:var(--ink-3);font-size:13px;margin:14px 0 0;">No SSH keys configured.</p>
-                {% endif %}
+                <div class="cfg-row">
+                    <div class="label-col">
+                        <label>Node server identifier</label>
+                        <span class="help">
+                            Identifies this node on the Retina server, which assigns it
+                            when the node registers. Use it to find this node's data on
+                            the Retina dashboard, and quote it to support.
+                        </span>
+                    </div>
+                    <div>
+                        {# Absent until the node has registered, and on a node with
+                           no telemetry package. See docs/features/config-editor.md#identifiers #}
+                        {% if server_node_ref %}
+                        <div class="cfg-readonly mono" id="nodeServerId">{{ server_node_ref }}</div>
+                        {% else %}
+                        <div class="cfg-readonly" id="nodeServerId" style="color:var(--ink-3);">Not assigned yet. One is assigned once this node registers.</div>
+                        {% endif %}
+                    </div>
+                </div>
             </div>
         </section>
 
-        {# ── Remote support ── #}
-        <section id="remote" class="cfg-section" style="margin-top:12px;">
+        {# ── Mode ── #}
+        <section id="mode" class="cfg-section" data-tutorial="cfg-mode">
             <div class="cfg-section-head">
-                <h2>Remote support</h2>
-                <span class="desc">What our support team may do with this node when they are not at your location. Both settings are yours to change at any time, and neither affects how the node works day to day.</span>
+                <h2>Mode</h2>
+                <span class="desc">Switch the node between passive radar, spectrum analysis, and SDRconnect.</span>
             </div>
             <div class="cfg-body">
                 <div class="toggle-row" style="padding:0;border:0;">
-                    <label class="ds-switch">
-                        <input type="checkbox" id="remoteToggle" {% if remote_access.enabled %}checked{% endif %}>
-                        <span class="ds-switch-track"></span>
-                    </label>
+                    <div class="ds-segmented" id="modeSegmented" role="group" aria-label="Mode">
+                        <button type="button" class="ds-segmented-btn" data-mode="radar">Radar</button>
+                        <button type="button" class="ds-segmented-btn" data-mode="spectrum">Spectrum</button>
+                        <button type="button" class="ds-segmented-btn" data-mode="sdrconnect">SDRconnect</button>
+                    </div>
                     <div class="body">
-                        <div class="name">Let support open this node&rsquo;s interface</div>
-                        <div class="desc" id="remoteToggleStatus">
-                            {% if not remote_access.enabled %}Off. Support can only reach this node from your own network.
-                            {% elif remote_tunnel == 'up' %}On and connected.
-                            {% elif remote_tunnel == 'waiting' %}On. The connection is not live yet.
-                            {% elif remote_tunnel == 'down' %}On, but the connection has dropped. It should recover on its own.
-                            {% else %}On.{% endif %}
-                        </div>
+                        <div class="name" id="modeLabel">Radar</div>
+                        <div class="desc">Radar runs the blah2 passive radar pipeline. Spectrum stops blah2 and starts retina-spectrum. SDRconnect stops both and starts the SDRconnect server for a remote desktop client.</div>
                     </div>
+                    <span class="spinner-border spinner-border-sm" id="modeSpinner" style="display:none;width:.9em;height:.9em;border-width:1.5px;flex-shrink:0;"></span>
                 </div>
-                <div class="help" style="margin:2px 0 16px 52px;">
-                    They see the same pages you see and can change the same settings. They cannot
-                    open a command line or add an SSH key this way.
-                </div>
-
-                <div class="toggle-row" style="padding:0;border:0;border-top:1px solid var(--line);padding-top:16px;">
-                    <label class="ds-switch">
-                        <input type="checkbox" id="shellToggle" {% if remote_access.shell_allowed %}checked{% endif %}>
-                        <span class="ds-switch-track"></span>
-                    </label>
-                    <div class="body">
-                        <div class="name">Let support open a command line</div>
-                        <div class="desc" id="shellToggleStatus">
-                            {% if shell_enforced is none %}On this node&rsquo;s settings, but we could not confirm it is applied.
-                            {% elif shell_enforced != remote_access.shell_allowed %}Not applied. This node is still set to
-                                {% if shell_enforced %}allow{% else %}refuse{% endif %} sessions. Try again, or ask support.
-                            {% elif remote_access.shell_allowed %}On.
-                            {% else %}Off. No session can be opened, from anywhere.{% endif %}
-                        </div>
-                    </div>
-                </div>
-                <div class="help" style="margin:2px 0 0 52px;">
-                    This is how we diagnose problems the interface cannot show, and it is the
-                    deepest access anyone can have to your node. Turning it off does not affect
-                    the setting above.
-                </div>
-
-                <div id="remoteMsg" style="font-size:12.5px;margin-top:14px;display:none;"></div>
-
-                <div class="help" style="margin-top:16px;padding-top:14px;border-top:1px solid var(--line);">
-                    Software updates and registration continue whichever way these are set. What
-                    you are choosing here is whether a person can reach the node, not whether it
-                    stays up to date.
-                </div>
-            </div>
-        </section>
-
-        {# ── How we reach you ── #}
-        {# Optional throughout; empty means the node never calls the contact
-           endpoint. See docs/features/config-editor.md#how-we-reach-you #}
-        <section id="contact" class="cfg-section" style="margin-top:12px;">
-            <div class="cfg-section-head">
-                <h2>How we reach you</h2>
-                <span class="desc">Never published, and only used to support you with your device.</span>
-            </div>
-            <div class="cfg-body">
-                <p style="font-size:13px;color:var(--ink-2);margin:0 0 16px;max-width:70ch;">
-                    If we can see a problem with your node and you cannot, this is where we get in
-                    touch. Every box is optional: leave them all empty and we hold nothing at all.
-                </p>
-
-                <div class="cfg-row">
-                    <div class="label-col">
-                        <label for="contactFirstName">Name</label>
-                        <span class="help">Who to ask for when we get in touch.</span>
-                    </div>
-                    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
-                        <div class="ds-field">
-                            <label class="ds-field-label" for="contactFirstName">First name</label>
-                            <input type="text" class="ds-input" id="contactFirstName" value="{{ contact.get('first_name', '') }}" maxlength="64" autocomplete="given-name">
-                        </div>
-                        <div class="ds-field">
-                            <label class="ds-field-label" for="contactLastName">Last name</label>
-                            <input type="text" class="ds-input" id="contactLastName" value="{{ contact.get('last_name', '') }}" maxlength="64" autocomplete="family-name">
-                        </div>
-                    </div>
-                </div>
-
-                <div class="cfg-row">
-                    <div class="label-col">
-                        <label for="contactEmail">Email</label>
-                        <span class="help">The first thing we try.</span>
-                    </div>
-                    <div>
-                        <input type="email" class="ds-input" id="contactEmail" value="{{ contact.get('email', '') }}" maxlength="255" autocomplete="email" style="width:100%;">
-                    </div>
-                </div>
-
-                <div class="cfg-row">
-                    <div class="label-col">
-                        <label for="contactPhone">Phone</label>
-                        <span class="help">
-                            For when email cannot reach you. The country is the two-letter code the
-                            number belongs to, for example US or GB.
-                        </span>
-                    </div>
-                    <div style="display:grid;grid-template-columns:2fr 1fr;gap:12px;">
-                        <div class="ds-field">
-                            <label class="ds-field-label" for="contactPhone">Number</label>
-                            <input type="tel" class="ds-input" id="contactPhone" value="{{ contact.get('phone', '') }}" maxlength="32" autocomplete="tel">
-                        </div>
-                        <div class="ds-field">
-                            <label class="ds-field-label" for="contactCountry">Country</label>
-                            <input type="text" class="ds-input mono" id="contactCountry" value="{{ contact.get('country', '') }}" maxlength="2" placeholder="US" autocomplete="country" style="text-transform:uppercase;">
-                        </div>
-                    </div>
-                </div>
-
-                <div class="cfg-row">
-                    <div class="label-col">
-                        <span class="help">
-                            Clearing a box and saving removes that detail. Emptying every box
-                            removes the record entirely.
-                        </span>
-                    </div>
-                    <div style="display:flex;align-items:center;gap:12px;">
-                        <button type="button" class="ds-btn primary" id="contactSaveBtn">Save</button>
-                        <span id="contactMsg" style="font-size:12.5px;display:none;"></span>
-                    </div>
-                </div>
+                <div id="modeErrorMsg" style="font-size:13px;color:var(--danger);display:none;margin-top:6px;"></div>
             </div>
         </section>
 
@@ -689,9 +246,9 @@
            node to its account, so nothing copies the contact email in here.
            One button, every press asks for a link.
            See docs/features/config-editor.md#node-claim #}
-        <section id="claim" class="cfg-section" style="margin-top:12px;">
+        <section id="claim" class="cfg-section">
             <div class="cfg-section-head">
-                <h2>Node claim</h2>
+                <h2>Node Claim</h2>
                 <span class="desc">Links this node to your account, so it appears as yours.</span>
             </div>
             <div class="cfg-body">
@@ -777,42 +334,8 @@
             </div>
         </section>
 
-        {# ── Cloud services ── #}
-        <section id="cloud" class="cfg-section">
-            <div class="cfg-section-head">
-                <h2>Cloud services</h2>
-                <span class="desc">This node's link to Offworld: software updates and registration.</span>
-            </div>
-            <div class="cfg-body">
-                <div class="toggle-row" style="padding:0;border:0;">
-                    <label class="ds-switch">
-                        <input type="checkbox" id="cloudServicesToggle" disabled>
-                        <span class="ds-switch-track"></span>
-                    </label>
-                    <div class="body">
-                        <div class="name">Enable cloud services</div>
-                        <div class="desc" id="cloudServicesStatus">Software updates and registration. The Remote support settings above need this too.</div>
-                    </div>
-                </div>
-            </div>
-        </section>
-
-        {# ── Setup wizard ── #}
-        <section id="wizard" class="cfg-section">
-            <div class="cfg-section-head">
-                <h2>Setup wizard</h2>
-                <span class="desc">Re-run the first-boot wizard to reconfigure the node.</span>
-            </div>
-            <div class="cfg-body" style="display:flex;align-items:center;gap:14px;">
-                <a href="/set-up" class="ds-btn ghost">
-                    <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="M13 5l7 7-7 7"/></svg>
-                    Launch setup wizard
-                </a>
-            </div>
-        </section>
-
         {# ── Network ── #}
-        <section id="network" class="cfg-section">
+        <section id="network" class="cfg-section" data-tutorial="cfg-network">
             <div class="cfg-section-head">
                 <h2>Network</h2>
                 <span class="desc">Connect or switch this node's WiFi network.</span>
@@ -876,6 +399,580 @@
             </div>
         </section>
 
+        {# ════ Radar ════ #}
+        <h2 class="cfg-group">Radar</h2>
+        {# Apply changes submits this form: the Radar and ADS-B groups.
+           See docs/features/config-editor.md#page-layout #}
+        <form action="/config/save" method="post" id="configForm" novalidate>
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+
+        {# ── Cached Towers ── #}
+        {% set towers = towers_cache.towers if towers_cache else [] %}
+        <section id="cached-towers" class="cfg-section" data-tutorial="cfg-cached">
+            <div class="cfg-section-head">
+                <h2>Cached Towers</h2>
+                <span class="desc">Pick a broadcast tower from your setup wizard's search results to fill in the Tower section below. Add or remove towers from this cached list manually.</span>
+            </div>
+            <div class="cfg-body" {% if not retina_installed %}style="opacity:.5;pointer-events:none;"{% endif %}>
+                <div class="cfg-row" id="towerPresetRow" style="padding:0;border:0;{% if not towers %}display:none;{% endif %}">
+                    <div class="label-col">
+                        <label for="towerPresetSelect">Tower preset</label>
+                        <span class="help" id="towerPresetHelp">{% if towers_cache and towers_cache.cached_at %}From your setup wizard's tower search (cached {{ towers_cache.cached_at[:10] }}).{% endif %}</span>
+                    </div>
+                    <div>
+                        <select id="towerPresetSelect" class="ds-input">
+                            <option value="">Select a tower…</option>
+                            {% for tower in towers %}
+                            <option value="{{ loop.index0 }}"
+                                    data-callsign="{{ tower.get('callsign') or '' }}"
+                                    data-name="{{ tower.get('name') or '' }}"
+                                    data-lat="{{ tower.get('latitude') if tower.get('latitude') is not none else '' }}"
+                                    data-lon="{{ tower.get('longitude') if tower.get('longitude') is not none else '' }}"
+                                    data-altitude="{{ tower.get('altitude_m') if tower.get('altitude_m') is not none else 0 }}"
+                                    data-frequency="{{ tower.get('frequency_mhz') if tower.get('frequency_mhz') is not none else '' }}">{{ tower.get('callsign') or tower.get('name') or 'Tower' }} - {{ tower.get('frequency_mhz') }} MHz{% if tower.get('distance_km') is not none %} ({{ tower.get('distance_km') }} km{% if tower.get('distance_class') %}, {{ tower.get('distance_class') }}{% endif %}){% endif %}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                </div>
+                <div class="help" id="towerEmptyMsg" {% if towers %}style="display:none;"{% endif %}>No cached tower search results yet. Run the Location step of the Setup Wizard to search for towers near you, or add one manually below.</div>
+
+                <div class="divider"></div>
+
+                <div class="ds-label-micro" style="margin-bottom:10px;">Manage cached towers</div>
+                <div class="ssh-list" id="towerManageList">
+                    {% for tower in towers %}
+                    <div class="ssh-item" data-index="{{ loop.index0 }}"
+                         data-lat="{{ tower.get('latitude') if tower.get('latitude') is not none else '' }}"
+                         data-lon="{{ tower.get('longitude') if tower.get('longitude') is not none else '' }}"
+                         data-frequency="{{ tower.get('frequency_mhz') if tower.get('frequency_mhz') is not none else '' }}">
+                        <div class="ssh-meta">
+                            <div class="ssh-key">{{ tower.get('callsign') or tower.get('name') or 'Tower' }} - {{ tower.get('frequency_mhz') }} MHz</div>
+                        </div>
+                        <button type="button" class="ds-btn danger-ghost sm tower-remove-btn" data-index="{{ loop.index0 }}">Remove</button>
+                    </div>
+                    {% endfor %}
+                </div>
+
+                <button type="button" class="ds-btn ghost" style="margin-top:12px;" data-bs-toggle="modal" data-bs-target="#addTowerModal">
+                    <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M12 5v14M5 12h14"></path></svg>
+                    Add tower
+                </button>
+                <div id="towerManageError" style="font-size:13px;color:var(--danger);display:none;margin-top:8px;"></div>
+            </div>
+        </section>
+
+        {# ── Tower ──
+           The location form model's fields, plus capture.fc.
+           See docs/features/config-editor.md#tower-section #}
+        {# Build field lookups for location and capture #}
+        {% set loc = {} %}
+        {% for f in location_fields %}{% set _ = loc.update({f.name: f}) %}{% endfor %}
+        {% set cap = {} %}
+        {% for f in capture_fields %}{% set _ = cap.update({f.name: f}) %}{% endfor %}
+        <section id="tower" class="cfg-section" data-tutorial="cfg-tower">
+            <div class="cfg-section-head">
+                <h2>Tower</h2>
+                <span class="desc">The broadcast tower this node listens to and where the receiver stands. The geometry solver uses both positions.</span>
+            </div>
+            <div class="cfg-body" {% if not retina_installed %}style="opacity:.5;pointer-events:none;"{% endif %}>
+                {# Hand-built, not render_field, so every input looks up its own
+                   config_errors key. Keep all nine wired.
+                   See docs/features/config-editor.md#validation #}
+                {% set rx_name_err = config_errors.get('location.rx_name') if config_errors else none %}
+                {% set rx_lat_err  = config_errors.get('location.rx_latitude') if config_errors else none %}
+                {% set rx_lon_err  = config_errors.get('location.rx_longitude') if config_errors else none %}
+                {% set rx_alt_err  = config_errors.get('location.rx_altitude') if config_errors else none %}
+                {% set tx_name_err = config_errors.get('location.tx_name') if config_errors else none %}
+                {% set tx_lat_err  = config_errors.get('location.tx_latitude') if config_errors else none %}
+                {% set tx_lon_err  = config_errors.get('location.tx_longitude') if config_errors else none %}
+                {% set tx_alt_err  = config_errors.get('location.tx_altitude') if config_errors else none %}
+                {% set fc_err      = config_errors.get('capture.fc') if config_errors else none %}
+                <div class="ds-label-micro" style="margin-bottom:10px;">Receiver</div>
+                <div class="cfg-grid" style="margin-bottom:0;">
+                    <div style="grid-column:1/-1;" class="cfg-row" style="padding:0;border:0;">
+                        {# Not edited here: the receiver is this node, so it goes by
+                           the node's name. Posted so the radar config follows it.
+                           See docs/features/config-editor.md#receiver-name #}
+                        <div class="label-col"><label>Name</label><span class="help">This node's name. Change it under <a href="#identifiers">Identifiers</a>.</span></div>
+                        <div>
+                            <div class="cfg-readonly" id="rxNameDisplay">{{ node_name or node_id }}</div>
+                            <input type="hidden" name="location.rx_name" id="rxNameValue" value="{{ node_name or node_id }}">
+                            {% if rx_name_err %}<div style="color:var(--danger);font-size:12px;margin-top:4px;">{{ rx_name_err }}</div>{% endif %}
+                        </div>
+                    </div>
+                    {% if loc.rx_latitude %}
+                    <div class="cfg-row" style="padding:0;border:0;">
+                        <div class="label-col"><label>Latitude</label><span class="help">{{ loc.rx_latitude.description }}</span></div>
+                        <div>
+                            <input type="number" name="location.rx_latitude" class="ds-input mono{% if rx_lat_err %} is-invalid{% endif %}" step="any" min="-90" max="90" value="{{ loc.rx_latitude.value if loc.rx_latitude.value is not none else '' }}">
+                            {% if rx_lat_err %}<div style="color:var(--danger);font-size:12px;margin-top:4px;">{{ rx_lat_err }}</div>{% endif %}
+                        </div>
+                    </div>
+                    {% endif %}
+                    {% if loc.rx_longitude %}
+                    <div class="cfg-row" style="padding:0;border:0;">
+                        <div class="label-col"><label>Longitude</label><span class="help">{{ loc.rx_longitude.description }}</span></div>
+                        <div>
+                            <input type="number" name="location.rx_longitude" class="ds-input mono{% if rx_lon_err %} is-invalid{% endif %}" step="any" min="-180" max="180" value="{{ loc.rx_longitude.value if loc.rx_longitude.value is not none else '' }}">
+                            {% if rx_lon_err %}<div style="color:var(--danger);font-size:12px;margin-top:4px;">{{ rx_lon_err }}</div>{% endif %}
+                        </div>
+                    </div>
+                    {% endif %}
+                    {% if loc.rx_altitude %}
+                    <div class="cfg-row" style="padding:0;border:0;">
+                        <div class="label-col"><label>Altitude</label><span class="help">{{ loc.rx_altitude.description }}</span></div>
+                        <div>
+                            <div class="cfg-input-row"><input type="number" name="location.rx_altitude" class="ds-input mono{% if rx_alt_err %} is-invalid{% endif %}" step="any" value="{{ loc.rx_altitude.value if loc.rx_altitude.value is not none else '' }}"><span class="unit">m</span></div>
+                            {% if rx_alt_err %}<div style="color:var(--danger);font-size:12px;margin-top:4px;">{{ rx_alt_err }}</div>{% endif %}
+                        </div>
+                    </div>
+                    {% endif %}
+                </div>
+
+                <div class="divider"></div>
+
+                <div class="ds-label-micro" style="margin-bottom:10px;">Transmitter</div>
+                <div class="cfg-grid">
+                    <div style="grid-column:1/-1;" class="cfg-row" style="padding:0;border:0;">
+                        <div class="label-col"><label>Name</label><span class="help">{{ loc.tx_name.description if loc.tx_name else '' }}</span></div>
+                        <div>
+                            <input type="text" name="location.tx_name" class="ds-input{% if tx_name_err %} is-invalid{% endif %}" maxlength="32" value="{{ loc.tx_name.value or '' if loc.tx_name else '' }}">
+                            {% if tx_name_err %}<div style="color:var(--danger);font-size:12px;margin-top:4px;">{{ tx_name_err }}</div>{% endif %}
+                        </div>
+                    </div>
+                    {# A capture setting shown with the tower it belongs to: still
+                       posted and stored as capture.fc.
+                       See docs/features/config-editor.md#tower-section #}
+                    {% if cap.fc %}
+                    <div style="grid-column:1/-1;" class="cfg-row" style="padding:0;border:0;">
+                        <div class="label-col"><label for="capture_fc">{{ cap.fc.title }}</label><span class="help">{{ cap.fc.description }}</span></div>
+                        <div>
+                            <div class="cfg-input-row"><input type="number" name="capture.fc" id="capture_fc" class="ds-input mono{% if fc_err %} is-invalid{% endif %}" value="{{ cap.fc.value if cap.fc.value is not none else '' }}"><span class="unit">Hz</span></div>
+                            {% if fc_err %}<div style="color:var(--danger);font-size:12px;margin-top:4px;">{{ fc_err }}</div>{% endif %}
+                        </div>
+                    </div>
+                    {% endif %}
+                    {% if loc.tx_latitude %}
+                    <div class="cfg-row" style="padding:0;border:0;">
+                        <div class="label-col"><label>Latitude</label><span class="help">{{ loc.tx_latitude.description }}</span></div>
+                        <div>
+                            <input type="number" name="location.tx_latitude" class="ds-input mono{% if tx_lat_err %} is-invalid{% endif %}" step="any" min="-90" max="90" value="{{ loc.tx_latitude.value if loc.tx_latitude.value is not none else '' }}">
+                            {% if tx_lat_err %}<div style="color:var(--danger);font-size:12px;margin-top:4px;">{{ tx_lat_err }}</div>{% endif %}
+                        </div>
+                    </div>
+                    {% endif %}
+                    {% if loc.tx_longitude %}
+                    <div class="cfg-row" style="padding:0;border:0;">
+                        <div class="label-col"><label>Longitude</label><span class="help">{{ loc.tx_longitude.description }}</span></div>
+                        <div>
+                            <input type="number" name="location.tx_longitude" class="ds-input mono{% if tx_lon_err %} is-invalid{% endif %}" step="any" min="-180" max="180" value="{{ loc.tx_longitude.value if loc.tx_longitude.value is not none else '' }}">
+                            {% if tx_lon_err %}<div style="color:var(--danger);font-size:12px;margin-top:4px;">{{ tx_lon_err }}</div>{% endif %}
+                        </div>
+                    </div>
+                    {% endif %}
+                    {% if loc.tx_altitude %}
+                    <div class="cfg-row" style="padding:0;border:0;">
+                        <div class="label-col"><label>Altitude</label><span class="help">{{ loc.tx_altitude.description }}</span></div>
+                        <div>
+                            <div class="cfg-input-row"><input type="number" name="location.tx_altitude" class="ds-input mono{% if tx_alt_err %} is-invalid{% endif %}" step="any" value="{{ loc.tx_altitude.value if loc.tx_altitude.value is not none else '' }}"><span class="unit">m</span></div>
+                            {% if tx_alt_err %}<div style="color:var(--danger);font-size:12px;margin-top:4px;">{{ tx_alt_err }}</div>{% endif %}
+                        </div>
+                    </div>
+                    {% endif %}
+                </div>
+            </div>
+        </section>
+
+        {# ── Capture ── #}
+        <section id="capture" class="cfg-section">
+            <div class="cfg-section-head">
+                <h2>Capture</h2>
+                <span class="desc">SDR sampling and gain. Touch with care, as it affects data quality.</span>
+            </div>
+            <div class="cfg-body" {% if not retina_installed %}style="opacity:.5;pointer-events:none;"{% endif %}>
+                {# Two run shapes, deliberately separate buttons: they answer
+                   different questions and take very different amounts of time.
+                   Quick Calibrate is the same run the setup wizard performs -
+                   see RetinaCalibrate.QUICK_RUN. #}
+                <div style="display:grid;grid-template-columns:auto 1fr;align-items:center;gap:6px 10px;margin-bottom:4px;" data-tutorial="cfg-calibrate">
+                    <button type="button" class="ds-btn ghost" id="autoCalibrateBtn">Auto-Calibrate</button>
+                    <span class="help" style="margin:0;">Automatically tune tower and gain until a confirmed aircraft track appears (~10 min).</span>
+                    <button type="button" class="ds-btn ghost" id="quickCalibrateBtn">Quick Calibrate</button>
+                    <span class="help" style="margin:0;">Current tower only: find the best gain, then check it holds without overloading. No aircraft needed (~4 min).</span>
+                </div>
+                <div class="divider"></div>
+                <div class="cfg-row" style="padding:6px 0 2px;" data-tutorial="cfg-peak">
+                    <div class="label-col"><label>Signal peak</label><span class="help">Live peak level relative to clipping. 0 dBFS = saturated.</span></div>
+                </div>
+                <div class="peak-meter" data-tutorial="cfg-peak">
+                    <div class="ladder-row">
+                        <div class="ladder-name">Reference<span class="sub">Tuner A</span></div>
+                        <div class="ladder-track" id="peakTrackA"></div>
+                        <div class="ladder-value" id="peakValA">-</div>
+                    </div>
+                    <div class="ladder-row">
+                        <div class="ladder-name">Surveillance<span class="sub">Tuner B</span></div>
+                        <div class="ladder-track" id="peakTrackB"></div>
+                        <div class="ladder-value" id="peakValB">-</div>
+                    </div>
+                    <div class="ladder-scale-row">
+                        <div class="ladder-name-spacer"></div>
+                        <div class="ladder-ticks" id="peakTicks"></div>
+                        <div class="ladder-value-spacer"></div>
+                    </div>
+                </div>
+                {# Shown by the meter script once "no signal" has lasted a minute.
+                   See docs/features/config-editor.md#no-signal-help #}
+                <div id="noSignalHelp" style="display:none;margin-top:12px;padding:12px 14px;border-radius:var(--r-md);background:var(--warn-soft);border:1px solid oklch(0.87 0.06 75);font-size:13px;color:var(--ink-2);">
+                    <div style="font-weight:600;font-size:14px;color:var(--warn-ink);margin-bottom:6px;">The radio has stopped sending data</div>
+                    <ol style="margin:0 0 8px;padding-left:20px;">
+                        <li>Check the USB cable between the SDR and the Pi is plugged in.</li>
+                        <li>Restart the radar. This resets the SDR and starts it again on the current settings.</li>
+                        <li>If there is still no signal, restart on the safest settings: gain reduction 59 dB on both tuners and LNA state 9. Once the meter shows a signal again, run Quick Calibrate to find better settings.</li>
+                    </ol>
+                    <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
+                        <button type="button" class="ds-btn" id="restartRadarBtn">Restart radar</button>
+                        <button type="button" class="ds-btn ghost" data-safe-settings>Use safe settings</button>
+                        <span>If nothing helps, contact support.</span>
+                    </div>
+                </div>
+                {# Shown by the meter script while a tuner stays overloaded.
+                   See docs/features/config-editor.md#overload-help #}
+                <div id="overloadHelp" style="display:none;margin-top:12px;padding:12px 14px;border-radius:var(--r-md);background:var(--warn-soft);border:1px solid oklch(0.87 0.06 75);font-size:13px;color:var(--ink-2);">
+                    <div style="font-weight:600;font-size:14px;color:var(--warn-ink);margin-bottom:6px;">The radio is overloaded</div>
+                    <p style="margin:0 0 6px;">The signal on <span id="overloadHelpTuners">the receiver</span> is too strong for the current settings, so it is clipping. The radar keeps running, but it detects less.</p>
+                    <ol style="margin:0 0 8px;padding-left:20px;">
+                        <li>Run Quick Calibrate to find the most sensitive settings that do not overload.</li>
+                        <li>To stop the overload straight away instead, restart on the safest settings: gain reduction 59 dB on both tuners and LNA state 9. The radar hears very little on them, so run Quick Calibrate afterwards.</li>
+                    </ol>
+                    <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
+                        <button type="button" class="ds-btn" id="overloadQuickCalBtn">Quick Calibrate</button>
+                        <button type="button" class="ds-btn ghost" data-safe-settings>Use safe settings</button>
+                        <span>If it overloads even on the safest settings, contact support.</span>
+                    </div>
+                </div>
+                <div class="divider"></div>
+                {# Center frequency is in the Tower section, with its tower. #}
+                {% set manual_fields = ('device_gainReductionA', 'device_gainReductionB', 'device_lnaState',
+                                        'device_dabNotch', 'device_rfNotch') %}
+                {% for field in capture_fields if field.name != 'fc' %}
+                    {{ render_field(field, 'capture', tutorial='cfg-manual' if field.name in manual_fields else '') }}
+                {% endfor %}
+            </div>
+        </section>
+
+        {# ── Tracking ──
+           Its own section, not part of Capture: this is what is done with the
+           detections afterwards, not how the signal is captured.
+           See docs/features/config-editor.md#sections-and-schema-models #}
+        <section id="tracking" class="cfg-section" data-tutorial="cfg-tracking">
+            <div class="cfg-section-head">
+                <h2>Tracking</h2>
+                <span class="desc">How detections are turned into tracks after capture.</span>
+            </div>
+            <div class="cfg-body" {% if not retina_installed %}style="opacity:.5;pointer-events:none;"{% endif %}>
+                {% for field in retina_tracker_fields %}
+                    {{ render_field(field, 'retina_tracker') }}
+                {% endfor %}
+            </div>
+        </section>
+
+        {# ════ ADS-B ════ #}
+        <h2 class="cfg-group">ADS-B</h2>
+        {# ── ADS-B truth ── #}
+        <section id="truth" class="cfg-section" data-tutorial="cfg-adsb">
+            <div class="cfg-section-head">
+                <h2>ADS-B Truth</h2>
+                <span class="desc">Match radar detections against known aircraft to validate accuracy.</span>
+            </div>
+            <div class="cfg-body" {% if not retina_installed %}style="opacity:.5;pointer-events:none;"{% endif %}>
+                {% for field in truth_fields %}
+                    {{ render_field(field, 'truth') }}
+                {% endfor %}
+            </div>
+        </section>
+
+        {# ── tar1090 ── #}
+        {# Build field lookup for tar1090 #}
+        {% set t = {} %}
+        {% for f in tar1090_fields %}{% set _ = t.update({f.name: f}) %}{% endfor %}
+        <section id="tar1090" class="cfg-section" data-tutorial="cfg-adsb">
+            <div class="cfg-section-head">
+                <h2>tar1090</h2>
+                <span class="desc">ADS-B viewer configuration.</span>
+            </div>
+            <div class="cfg-body" {% if not retina_installed %}style="opacity:.5;pointer-events:none;"{% endif %}>
+                <div class="cfg-grid three">
+                    {% for fname in ['adsb_source_host', 'adsb_source_port', 'adsb_source_protocol'] %}
+                    {% if fname in t %}
+                    {# Hand-built, so it looks config_errors up itself.
+                       See docs/features/config-editor.md#validation #}
+                    {% set t_err = config_errors.get('tar1090.' ~ fname) if config_errors else none %}
+                    <div>
+                        <div class="ds-label-micro" style="margin-bottom:6px;">{{ t[fname].title }}</div>
+                        <input type="{{ t[fname].type }}" name="tar1090.{{ fname }}" class="ds-input mono{% if t_err %} is-invalid{% endif %}" value="{{ t[fname].value if t[fname].value is not none else '' }}">
+                        {% if t_err %}<div style="color:var(--danger);font-size:12px;margin-top:4px;">{{ t_err }}</div>{% endif %}
+                    </div>
+                    {% endif %}
+                    {% endfor %}
+                </div>
+                <div class="divider"></div>
+                {% if 'adsblol_fallback' in t %}
+                <div class="toggle-row" style="border:0;padding:0;">
+                    <label class="ds-switch">
+                        <input type="checkbox" name="tar1090.adsblol_fallback" {% if t['adsblol_fallback'].value %}checked{% endif %}>
+                        <span class="ds-switch-track"></span>
+                    </label>
+                    <div class="body">
+                        <div class="name">{{ t['adsblol_fallback'].title }}</div>
+                        <div class="desc">Use the public adsb.lol feed if no local ADS-B receiver is reachable.</div>
+                    </div>
+                    {% if 'adsblol_radius' in t %}
+                    {% set radius_err = config_errors.get('tar1090.adsblol_radius') if config_errors else none %}
+                    <div class="cfg-input-row" style="width:180px;flex-shrink:0;">
+                        <input type="number" name="tar1090.adsblol_radius" class="ds-input mono{% if radius_err %} is-invalid{% endif %}" min="1" max="500" value="{{ t['adsblol_radius'].value if t['adsblol_radius'].value is not none else '' }}">
+                        <span class="unit">nm</span>
+                    </div>
+                    {% if radius_err %}<div style="color:var(--danger);font-size:12px;margin-top:4px;">{{ radius_err }}</div>{% endif %}
+                    {% endif %}
+                </div>
+                {% endif %}
+            </div>
+        </section>
+
+        </form>
+
+        {# ════ Other ════ #}
+        <h2 class="cfg-group">Other</h2>
+        <section id="ssh" class="cfg-section" data-tutorial="cfg-ssh">
+            <div class="cfg-section-head">
+                <h2>SSH Access</h2>
+                <span class="desc">Public keys allowed to SSH into this node. To add SSH keys for use, please review the related GitHub file: <a href="https://github.com/offworldlabs/owl-os/blob/main/ssh_pub_keys/README.txt" target="_blank" rel="noopener">owl-os/ssh_pub_keys/README.txt</a></span>
+            </div>
+            <div class="cfg-body">
+                <form action="/ssh-keys" method="post">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <div style="display:flex;gap:8px;">
+                        <input type="text" name="ssh_key" class="ds-input mono" placeholder="ssh-ed25519 AAAA…" style="min-width:0;" />
+                        <button type="submit" class="ds-btn primary" style="flex-shrink:0;">
+                            <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M12 5v14M5 12h14"></path></svg>
+                            Add key
+                        </button>
+                    </div>
+                </form>
+
+                {% if ssh_keys %}
+                <div class="ssh-list">
+                    {% for key in ssh_keys %}
+                    <div class="ssh-item">
+                        <div class="ssh-fp">
+                            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path></svg>
+                        </div>
+                        <div class="ssh-meta">
+                            <div class="ssh-key">{{ key }}</div>
+                        </div>
+                        <form action="/ssh-keys/delete" method="post" style="flex-shrink:0;">
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                            <input type="hidden" name="ssh_key" value="{{ key }}">
+                            <button type="submit" class="ds-btn danger-ghost sm">Remove</button>
+                        </form>
+                    </div>
+                    {% endfor %}
+                </div>
+                {% else %}
+                <p style="color:var(--ink-3);font-size:13px;margin:14px 0 0;">No SSH keys configured.</p>
+                {% endif %}
+            </div>
+        </section>
+
+        {# ── Setup wizard ── #}
+        <section id="wizard" class="cfg-section">
+            <div class="cfg-section-head">
+                <h2>Setup Wizard</h2>
+                <span class="desc">Re-run the first-boot wizard to reconfigure the node.</span>
+            </div>
+            <div class="cfg-body" style="display:flex;align-items:center;gap:14px;">
+                <a href="/set-up" class="ds-btn ghost">
+                    <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="M13 5l7 7-7 7"/></svg>
+                    Launch setup wizard
+                </a>
+            </div>
+        </section>
+
+        {# ── Tutorial ──
+           The guided tour on its own, without re-running setup.
+           See docs/features/tutorial.md#starting-a-run #}
+        <section id="tutorial" class="cfg-section">
+            <div class="cfg-section-head">
+                <h2>Tutorial</h2>
+                <span class="desc">A guided tour of the Summary, Home and Configuration pages.</span>
+            </div>
+            <div class="cfg-body" style="display:flex;align-items:center;gap:14px;">
+                <a href="/tutorial" class="ds-btn ghost" id="launchTutorialBtn">
+                    <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M3 11l18-8-8 18-2-8z"/></svg>
+                    Launch tutorial
+                </a>
+            </div>
+        </section>
+
+        {# ════ Support ════ #}
+        <h2 class="cfg-group">Support</h2>
+        {# ── Cloud services ── #}
+        <section id="cloud" class="cfg-section">
+            <div class="cfg-section-head">
+                <h2>Cloud Services</h2>
+                <span class="desc">This node's link to Offworld: software updates and registration.</span>
+            </div>
+            <div class="cfg-body">
+                <div class="toggle-row" style="padding:0;border:0;">
+                    <label class="ds-switch">
+                        <input type="checkbox" id="cloudServicesToggle" disabled>
+                        <span class="ds-switch-track"></span>
+                    </label>
+                    <div class="body">
+                        <div class="name">Enable Cloud Services</div>
+                        <div class="desc" id="cloudServicesStatus">Software updates and registration. The Remote Support settings below need this too.</div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        {# ── Remote support ── #}
+        <section id="remote" class="cfg-section">
+            <div class="cfg-section-head">
+                <h2>Remote Support</h2>
+                <span class="desc">What our support team may do with this node when they are not at your location. Both settings are yours to change at any time, and neither affects how the node works day to day.</span>
+            </div>
+            <div class="cfg-body">
+                <div class="toggle-row" style="padding:0;border:0;">
+                    <label class="ds-switch">
+                        <input type="checkbox" id="remoteToggle" {% if remote_access.enabled %}checked{% endif %}>
+                        <span class="ds-switch-track"></span>
+                    </label>
+                    <div class="body">
+                        <div class="name">Let support open this node&rsquo;s interface</div>
+                        <div class="desc" id="remoteToggleStatus">
+                            {% if not remote_access.enabled %}Off. Support can only reach this node from your own network.
+                            {% elif remote_tunnel == 'up' %}On and connected.
+                            {% elif remote_tunnel == 'waiting' %}On. The connection is not live yet.
+                            {% elif remote_tunnel == 'down' %}On, but the connection has dropped. It should recover on its own.
+                            {% else %}On.{% endif %}
+                        </div>
+                    </div>
+                </div>
+                <div class="help" style="margin:2px 0 16px 52px;">
+                    They see the same pages you see and can change the same settings. They cannot
+                    open a command line or add an SSH key this way.
+                </div>
+
+                <div class="toggle-row" style="padding:0;border:0;border-top:1px solid var(--line);padding-top:16px;">
+                    <label class="ds-switch">
+                        <input type="checkbox" id="shellToggle" {% if remote_access.shell_allowed %}checked{% endif %}>
+                        <span class="ds-switch-track"></span>
+                    </label>
+                    <div class="body">
+                        <div class="name">Let support open a command line</div>
+                        <div class="desc" id="shellToggleStatus">
+                            {% if shell_enforced is none %}On this node&rsquo;s settings, but we could not confirm it is applied.
+                            {% elif shell_enforced != remote_access.shell_allowed %}Not applied. This node is still set to
+                                {% if shell_enforced %}allow{% else %}refuse{% endif %} sessions. Try again, or ask support.
+                            {% elif remote_access.shell_allowed %}On.
+                            {% else %}Off. No session can be opened, from anywhere.{% endif %}
+                        </div>
+                    </div>
+                </div>
+                <div class="help" style="margin:2px 0 0 52px;">
+                    This is how we diagnose problems the interface cannot show, and it is the
+                    deepest access anyone can have to your node. Turning it off does not affect
+                    the setting above.
+                </div>
+
+                <div id="remoteMsg" style="font-size:12.5px;margin-top:14px;display:none;"></div>
+
+                <div class="help" style="margin-top:16px;padding-top:14px;border-top:1px solid var(--line);">
+                    Software updates and registration continue whichever way these are set. What
+                    you are choosing here is whether a person can reach the node, not whether it
+                    stays up to date.
+                </div>
+            </div>
+        </section>
+
+        {# ── How we reach you ── #}
+        {# Optional throughout; empty means the node never calls the contact
+           endpoint. See docs/features/config-editor.md#how-we-reach-you #}
+        <section id="contact" class="cfg-section">
+            <div class="cfg-section-head">
+                <h2>How We Reach You</h2>
+                <span class="desc">Never published, and only used to support you with your device.</span>
+            </div>
+            <div class="cfg-body">
+                <p style="font-size:13px;color:var(--ink-2);margin:0 0 16px;max-width:70ch;">
+                    If we can see a problem with your node and you cannot, this is where we get in
+                    touch. Every box is optional: leave them all empty and we hold nothing at all.
+                </p>
+
+                <div class="cfg-row">
+                    <div class="label-col">
+                        <label for="contactFirstName">Name</label>
+                        <span class="help">Who to ask for when we get in touch.</span>
+                    </div>
+                    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+                        <div class="ds-field">
+                            <label class="ds-field-label" for="contactFirstName">First name</label>
+                            <input type="text" class="ds-input" id="contactFirstName" value="{{ contact.get('first_name', '') }}" maxlength="64" autocomplete="given-name">
+                        </div>
+                        <div class="ds-field">
+                            <label class="ds-field-label" for="contactLastName">Last name</label>
+                            <input type="text" class="ds-input" id="contactLastName" value="{{ contact.get('last_name', '') }}" maxlength="64" autocomplete="family-name">
+                        </div>
+                    </div>
+                </div>
+
+                <div class="cfg-row">
+                    <div class="label-col">
+                        <label for="contactEmail">Email</label>
+                        <span class="help">The first thing we try.</span>
+                    </div>
+                    <div>
+                        <input type="email" class="ds-input" id="contactEmail" value="{{ contact.get('email', '') }}" maxlength="255" autocomplete="email" style="width:100%;">
+                    </div>
+                </div>
+
+                <div class="cfg-row">
+                    <div class="label-col">
+                        <label for="contactPhone">Phone</label>
+                        <span class="help">
+                            For when email cannot reach you. The country is the two-letter code the
+                            number belongs to, for example US or GB.
+                        </span>
+                    </div>
+                    <div style="display:grid;grid-template-columns:2fr 1fr;gap:12px;">
+                        <div class="ds-field">
+                            <label class="ds-field-label" for="contactPhone">Number</label>
+                            <input type="tel" class="ds-input" id="contactPhone" value="{{ contact.get('phone', '') }}" maxlength="32" autocomplete="tel">
+                        </div>
+                        <div class="ds-field">
+                            <label class="ds-field-label" for="contactCountry">Country</label>
+                            <input type="text" class="ds-input mono" id="contactCountry" value="{{ contact.get('country', '') }}" maxlength="2" placeholder="US" autocomplete="country" style="text-transform:uppercase;">
+                        </div>
+                    </div>
+                </div>
+
+                <div class="cfg-row">
+                    <div class="label-col">
+                        <span class="help">
+                            Clearing a box and saving removes that detail. Emptying every box
+                            removes the record entirely.
+                        </span>
+                    </div>
+                    <div style="display:flex;align-items:center;gap:12px;">
+                        <button type="button" class="ds-btn primary" id="contactSaveBtn">Save</button>
+                        <span id="contactMsg" style="font-size:12.5px;display:none;"></span>
+                    </div>
+                </div>
+            </div>
+        </section>
+
         {# ── Save bar (bottom of all sections) ── #}
         {% if retina_installed %}
         <div class="savebar">
@@ -885,7 +982,7 @@
             <div class="right">
                 <span id="applyStatus" style="font-size:13px;"></span>
                 <button type="button" class="ds-btn ghost" id="discardBtn">Discard</button>
-                <button type="submit" form="configForm" class="ds-btn primary" id="applyBtn">Apply changes</button>
+                <button type="submit" form="configForm" class="ds-btn primary" id="applyBtn" data-tutorial="cfg-apply">Apply changes</button>
             </div>
         </div>
         {% endif %}
@@ -944,7 +1041,7 @@
             </div>
             <div class="modal-body" style="font-size:13.5px;color:var(--ink-2);">
                 <p>This stops automatic software updates and registration with Offworld.</p>
-                <p>It also switches off everything under Remote support, whatever those two settings say.</p>
+                <p>It also switches off everything under Remote Support, whatever those two settings say.</p>
                 <p class="mb-0">You can re-enable at any time.</p>
             </div>
             <div class="modal-footer">
@@ -1023,8 +1120,9 @@
 <script src="/static/calibrate.js"></script>
 <script>
 // This node's own address, deliberately not owl.local (answered by every node).
-// See docs/features/config-editor.md#this-node
+// See docs/features/config-editor.md#identifiers
 var NODE_URL = 'http://{{ node_id }}.local';
+var NODE_ID = {{ node_id | tojson }};
 
 // This node: rename. Saves on its own, not with the config form, so the button
 // is type=button and posts by itself.
@@ -1057,6 +1155,11 @@ var NODE_URL = 'http://{{ node_id }}.local';
                 if (result.ok && result.d.ok) {
                     input.value = result.d.name;
                     show(result.d.name ? 'Saved.' : 'Saved. This node will be listed by identifier.', true);
+                    // Location shows the same name, and posts it with the next Apply.
+                    // See docs/features/config-editor.md#receiver-name
+                    var shown = result.d.name || NODE_ID;
+                    document.getElementById('rxNameDisplay').textContent = shown;
+                    document.getElementById('rxNameValue').value = shown;
                 } else {
                     show(result.d.error || 'Could not save the name.', false);
                 }
@@ -1679,7 +1782,7 @@ if (discardBtn) discardBtn.addEventListener('click', () => location.reload());
                     setTimeout(loadCloudStatus, 10000);
                 } else {
                     toggle.disabled = false;
-                    status.textContent = 'Software updates and registration. The Remote support settings above need this too.';
+                    status.textContent = 'Software updates and registration. The Remote Support settings below need this too.';
                 }
             })
             .catch(() => { toggle.checked = true; toggle.disabled = false; });
@@ -1711,7 +1814,7 @@ if (discardBtn) discardBtn.addEventListener('click', () => location.reload());
         })
         .then(r => r.json().then(data => ({ok: r.ok, data})))
         .then(({ok, data}) => {
-            if (ok && data.success) { status.textContent = 'Settings applied'; setTimeout(() => { status.textContent = 'Software updates and registration. The Remote support settings above need this too.'; }, 3000); }
+            if (ok && data.success) { status.textContent = 'Settings applied'; setTimeout(() => { status.textContent = 'Software updates and registration. The Remote Support settings below need this too.'; }, 3000); }
             else { status.textContent = data.error; toggle.checked = !toggle.checked; }
         })
         .catch(e => { status.textContent = 'Error: ' + e.message; toggle.checked = !toggle.checked; })
@@ -1721,7 +1824,9 @@ if (discardBtn) discardBtn.addEventListener('click', () => location.reload());
 
 // Side-nav scrollspy
 (function() {
-    var sectionIds = ['mode','tower','location','capture','truth','tar1090','ssh','cloud','wizard','network'];
+    // Page order: the first of these on screen is the one marked active.
+    var sectionIds = ['identifiers','mode','claim','network','cached-towers','tower','capture','tracking',
+                      'truth','tar1090','ssh','wizard','tutorial','cloud','remote','contact'];
     var links = {};
     sectionIds.forEach(function(id) {
         var a = document.querySelector('.side a[href="#' + id + '"]');
@@ -1745,11 +1850,22 @@ if (discardBtn) discardBtn.addEventListener('click', () => location.reload());
             if (e.isIntersecting) { visibleSet.add(e.target.id); }
             else { visibleSet.delete(e.target.id); }
         });
+        // A link that was just clicked stays the active one until the owner
+        // scrolls. The last sections are short, so the page cannot bring them
+        // to the top and the topmost visible section would be an earlier one.
+        if (chosen) return;
         // Highlight the first (topmost) visible section
         var top = null;
         sectionIds.forEach(function(id) { if (!top && visibleSet.has(id)) top = id; });
         if (top) setActive(top);
     }, { rootMargin: '-10% 0px -60% 0px', threshold: 0 });
+
+    // Set by a click on a link, cleared by the owner scrolling by hand. The
+    // smooth scroll the click starts fires none of these.
+    var chosen = null;
+    ['wheel', 'touchmove', 'keydown'].forEach(function(type) {
+        window.addEventListener(type, function() { chosen = null; }, { passive: true });
+    });
 
     var visibleSet = new Set();
     sectionIds.forEach(function(id) {
@@ -1762,6 +1878,7 @@ if (discardBtn) discardBtn.addEventListener('click', () => location.reload());
         var id = entry[0], a = entry[1];
         a.addEventListener('click', function(e) {
             e.preventDefault();
+            chosen = id;
             setActive(id);
             var el = document.getElementById(id);
             if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
