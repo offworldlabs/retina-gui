@@ -82,26 +82,29 @@
 {% block content %}
 <div class="shell">
 
-    {# ── Side nav ── #}
+    {# ── Side nav ──
+       Groups and order match the page. See docs/features/config-editor.md#page-layout #}
     <aside class="side">
         <h3>Node</h3>
+        <a href="#identifiers">Identifiers</a>
         <a href="#mode">Mode</a>
-        <h3>Radar</h3>
-        <a href="#tower">Tower</a>
-        <a href="#location">Location</a>
-        <a href="#capture">Capture</a>
-        <a href="#truth">ADS-B truth</a>
-        <a href="#tar1090">tar1090</a>
-        <a href="#retina-tracker">Retina Tracker</a>
-        <h3>Administration</h3>
-        <a href="#this-node">This node</a>
-        <a href="#ssh">SSH access</a>
-        <a href="#remote">Remote access</a>
-        <a href="#contact">How we reach you</a>
-        <a href="#claim">Node claim</a>
-        <a href="#cloud">Cloud services</a>
-        <a href="#wizard">Setup wizard</a>
+        <a href="#claim">Node Claim</a>
         <a href="#network">Network</a>
+        <h3>Radar</h3>
+        <a href="#cached-towers">Cached Towers</a>
+        <a href="#tower">Tower</a>
+        <a href="#capture">Capture</a>
+        <a href="#tracking">Tracking</a>
+        <h3>ADS-B</h3>
+        <a href="#truth">ADS-B Truth</a>
+        <a href="#tar1090">tar1090</a>
+        <h3>Other</h3>
+        <a href="#ssh">SSH Access</a>
+        <a href="#wizard">Setup Wizard</a>
+        <h3>Support</h3>
+        <a href="#cloud">Cloud Services</a>
+        <a href="#remote">Remote Support</a>
+        <a href="#contact">How We Reach You</a>
     </aside>
 
     {# ── Main ── #}
@@ -119,9 +122,6 @@
         </div>
         {% endif %}
 
-        <form action="/config/save" method="post" id="configForm" novalidate>
-        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-
         {% if config_errors %}
         <div style="background:oklch(0.96 0.04 25);border:1px solid var(--danger);border-radius:var(--r-md);padding:12px 16px;margin-bottom:18px;font-size:13px;color:var(--danger);">
             {# A form-level refusal (e.g. a calibration holding the SDR) has no
@@ -130,6 +130,88 @@
                else 'Please fix the highlighted fields below.' }}
         </div>
         {% endif %}
+
+        {# ════ Node ════ #}
+        {# Group titles match the side nav's.
+           See docs/features/config-editor.md#page-layout #}
+        <h2 class="cfg-group">Node</h2>
+        {# ── Identifiers ──
+           Outside #configForm: the name saves on its own rather than on Apply,
+           and the rest is read-only.
+           See docs/features/config-editor.md#identifiers #}
+        <section id="identifiers" class="cfg-section">
+            <div class="cfg-section-head">
+                <h2>Identifiers</h2>
+                <span class="desc">What this node is called, the address that always reaches it, and the two IDs it is known by.</span>
+            </div>
+            <div class="cfg-body">
+                <div class="cfg-row">
+                    <div class="label-col">
+                        <label for="nodeNameInput">Name</label>
+                        <span class="help">
+                            Shown on the Nodes page when there is more than one node
+                            on the network. Leave it empty to be listed by
+                            identifier. This is only a label, so changing it never
+                            affects how the node is reached.
+                        </span>
+                    </div>
+                    <div>
+                        <div class="cfg-input-row">
+                            <input class="ds-input" id="nodeNameInput" type="text"
+                                   value="{{ node_name }}" maxlength="{{ node_name_max_length }}"
+                                   placeholder="{{ node_id }}">
+                            <button type="button" class="ds-btn primary" id="nodeNameSave" style="flex-shrink:0;">Save</button>
+                        </div>
+                        <div id="nodeNameStatus" style="font-size:12px;margin-top:6px;"></div>
+                    </div>
+                </div>
+                <div class="cfg-row">
+                    <div class="label-col">
+                        <label>Address</label>
+                        <span class="help">
+                            This node's own address. It comes from the hardware and
+                            never changes, so it is the one to bookmark. owl.local is
+                            shared by every node on the network and may reach any of them.
+                        </span>
+                    </div>
+                    <div>
+                        <div class="cfg-readonly mono">http://{{ node_id }}.local</div>
+                    </div>
+                </div>
+                <div class="cfg-row">
+                    <div class="label-col">
+                        <label>Node local identifier</label>
+                        <span class="help">
+                            Identifies this node on your own network. It comes from the
+                            hardware and never changes: it is the name in the address
+                            above, and what the node is listed by until you name it.
+                        </span>
+                    </div>
+                    <div>
+                        <div class="cfg-readonly mono" id="nodeLocalId">{{ node_id }}</div>
+                    </div>
+                </div>
+                <div class="cfg-row">
+                    <div class="label-col">
+                        <label>Node server identifier</label>
+                        <span class="help">
+                            Identifies this node on the Retina server, which assigns it
+                            when the node registers. Use it to find this node's data on
+                            the Retina dashboard, and quote it to support.
+                        </span>
+                    </div>
+                    <div>
+                        {# Absent until the node has registered, and on a node with
+                           no telemetry package. See docs/features/config-editor.md#identifiers #}
+                        {% if server_node_ref %}
+                        <div class="cfg-readonly mono" id="nodeServerId">{{ server_node_ref }}</div>
+                        {% else %}
+                        <div class="cfg-readonly" id="nodeServerId" style="color:var(--ink-3);">Not assigned yet. One is assigned once this node registers.</div>
+                        {% endif %}
+                    </div>
+                </div>
+            </div>
+        </section>
 
         {# ── Mode ── #}
         <section id="mode" class="cfg-section">
@@ -154,12 +236,177 @@
             </div>
         </section>
 
-        {# ── Tower ── #}
-        {% set towers = towers_cache.towers if towers_cache else [] %}
-        <section id="tower" class="cfg-section">
+        {# ── Node claim ──
+           Not the contact email: this address is mailed a link that binds the
+           node to its account, so nothing copies the contact email in here.
+           One button, every press asks for a link.
+           See docs/features/config-editor.md#node-claim #}
+        <section id="claim" class="cfg-section">
             <div class="cfg-section-head">
-                <h2>Tower</h2>
-                <span class="desc">Pick a broadcast tower from your setup wizard's search results to set the transmitter location and center frequency below. Add or remove towers from this cached list manually.</span>
+                <h2>Node Claim</h2>
+                <span class="desc">Links this node to your account, so it appears as yours.</span>
+            </div>
+            <div class="cfg-body">
+                <p style="font-size:13px;color:var(--ink-2);margin:0 0 16px;max-width:70ch;">
+                    We email the address below a link. Opening it claims this node for whoever
+                    owns that address, so use one you own. Nothing here changes how the node
+                    runs: an unclaimed node records and reports exactly as a claimed one does.
+                </p>
+
+                <div class="cfg-row">
+                    <div class="label-col">
+                        <label>Status</label>
+                        <span class="help">Reported by the node itself, about once a minute.</span>
+                    </div>
+                    <div>
+                        {% if not claim_reported %}
+                            <span style="color:var(--ink-3);">
+                                The telemetry service is not reporting, so we cannot say.
+                            </span>
+                        {% elif not claim_state %}
+                            <span style="color:var(--ink-3);">Not reported yet.</span>
+                        {% elif claim_state.state == 'owned' %}
+                            <span style="color:var(--ok);font-weight:600;">Claimed</span>
+                            <div class="help">
+                                Owned by {{ claim_state.email }}. To hand it to somebody else,
+                                release it from your dashboard: it cannot be done from here.
+                            </div>
+                        {% elif claim_state.state == 'pending' %}
+                            <span style="color:var(--warn);font-weight:600;">Link sent</span>
+                            <div class="help">Waiting for {{ claim_state.email }} to open it.</div>
+                        {% elif claim_state.state == 'unclaimed' %}
+                            <span style="color:var(--ink-3);font-weight:600;">Not claimed</span>
+                            {% if claim_state.email %}
+                            {# The state a declined or expired link leaves: the address is
+                               still on file and nothing more will arrive unless asked. #}
+                            <div class="help">
+                                No link is waiting. Press Send link for another one to
+                                {{ claim_state.email }}.
+                            </div>
+                            {% endif %}
+                        {% else %}
+                            <span style="font-weight:600;">{{ claim_state.state }}</span>
+                        {% endif %}
+
+                        {% if claim_state and claim_state.undeliverable %}
+                        <div style="color:var(--danger);font-size:12.5px;margin-top:6px;max-width:60ch;">
+                            The last email bounced, so that address cannot be reached. Correct it
+                            below and send. Sending to the same address again will not help.
+                        </div>
+                        {% endif %}
+                    </div>
+                </div>
+
+                <div class="cfg-row">
+                    <div class="label-col">
+                        <label for="claimEmail">Email</label>
+                        <span class="help">The address that will own this node.</span>
+                    </div>
+                    <div>
+                        <input type="email" class="ds-input" id="claimEmail" value="{{ claim.get('email', '') }}" maxlength="255" autocomplete="email" style="width:100%;">
+                    </div>
+                </div>
+
+                <div class="cfg-row">
+                    <div class="label-col">
+                        <span class="help">
+                            {% if claim_state and claim_state.state == 'owned' %}
+                            This node is claimed. Release it from your dashboard first.
+                            {% else %}
+                            Emails a link to the address above. Press it again if a link never
+                            arrived or was turned down. Empty the box and send to remove the address.
+                            {% endif %}
+                        </span>
+                    </div>
+                    <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
+                        {# Disabled while owned: a resend is refused there, and a new
+                           address would be offering somebody else's node. #}
+                        <button type="button" class="ds-btn primary" id="claimSendBtn"
+                                {% if claim_state and claim_state.state == 'owned' %}disabled{% endif %}>Send link</button>
+                        <span id="claimMsg" style="font-size:12.5px;display:none;"></span>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        {# ── Network ── #}
+        <section id="network" class="cfg-section">
+            <div class="cfg-section-head">
+                <h2>Network</h2>
+                <span class="desc">Connect or switch this node's WiFi network.</span>
+            </div>
+            <div class="cfg-body">
+                <div class="cfg-row" style="padding:0;border:0;margin-bottom:14px;">
+                    <div class="label-col"><label>Ethernet</label></div>
+                    <div id="netEthernetStatus" class="desc">Checking…</div>
+                </div>
+                <div class="cfg-row" style="padding:0;border:0;margin-bottom:14px;">
+                    <div class="label-col"><label>WiFi</label></div>
+                    <div id="netWifiStatus" class="desc">Checking…</div>
+                </div>
+
+                <div style="display:flex;align-items:center;gap:10px;margin-bottom:14px;">
+                    <button type="button" class="ds-btn ghost" id="netRecheckBtn">Re-run network check</button>
+                    <span class="spinner-border spinner-border-sm" id="netRecheckSpinner" style="display:none;width:.9em;height:.9em;border-width:1.5px;"></span>
+                </div>
+
+                <div class="divider"></div>
+
+                <div class="ds-label-micro" style="margin-bottom:10px;">What are you trying to do?</div>
+                <div style="display:flex;flex-direction:column;gap:8px;margin-bottom:10px;">
+                    <label style="display:flex;align-items:flex-start;gap:8px;font-size:13.5px;cursor:pointer;">
+                        <input type="radio" name="netMode" id="netModeSame" value="same_network" checked style="margin-top:3px;">
+                        <span>
+                            <strong>Use this network's WiFi</strong>: I'm wired into a router and want this node on its WiFi too, then I'll unplug the cable.
+                            <span id="netModeSameDisabledHint" style="display:none;color:var(--ink-3);"> (connect an Ethernet cable to use this)</span>
+                        </span>
+                    </label>
+                    <label style="display:flex;align-items:flex-start;gap:8px;font-size:13.5px;cursor:pointer;">
+                        <input type="radio" name="netMode" id="netModeDifferent" value="different_network" style="margin-top:3px;">
+                        <span><strong>Switch to a different network</strong>: I'm moving this node to a new router entirely.</span>
+                    </label>
+                </div>
+
+                <div id="netMode2Warning" style="display:none;background:var(--accent-soft);border:1px solid var(--accent-edge);border-radius:var(--r-md);padding:10px 14px;margin-bottom:14px;font-size:13px;"></div>
+
+                <div class="divider"></div>
+
+                <div id="netScanRow" style="display:flex;gap:8px;align-items:flex-start;margin-bottom:10px;">
+                    <select id="netSsidSelect" class="ds-select" style="flex:1;min-width:0;">
+                        <option value="">Scanning…</option>
+                    </select>
+                    <button type="button" class="ds-btn ghost" id="netRescanBtn" title="Rescan">
+                        <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M21 2v6h-6"/><path d="M3 11a9 9 0 0 1 15-6.7L21 8"/><path d="M3 22v-6h6"/><path d="M21 13a9 9 0 0 1-15 6.7L3 16"/></svg>
+                    </button>
+                </div>
+                <div id="netManualRow" style="display:none;margin-bottom:10px;">
+                    <input type="text" id="netSsidManual" class="ds-input" placeholder="Network name (SSID)">
+                </div>
+                <a href="#" id="netManualToggle" style="font-size:12.5px;display:inline-block;margin-bottom:14px;">Enter network name manually</a>
+
+                <input type="password" id="netPassword" class="ds-input" placeholder="Password" style="margin-bottom:10px;display:none;">
+
+                <div style="display:flex;align-items:center;gap:10px;">
+                    <button type="button" class="ds-btn primary" id="netConnectBtn">Connect</button>
+                    <span class="spinner-border spinner-border-sm" id="netConnectSpinner" style="display:none;width:.9em;height:.9em;border-width:1.5px;"></span>
+                    <span id="netConnectStatus" style="font-size:13px;"></span>
+                </div>
+            </div>
+        </section>
+
+        {# ════ Radar ════ #}
+        <h2 class="cfg-group">Radar</h2>
+        {# Apply changes submits this form: the Radar and ADS-B groups.
+           See docs/features/config-editor.md#page-layout #}
+        <form action="/config/save" method="post" id="configForm" novalidate>
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+
+        {# ── Cached Towers ── #}
+        {% set towers = towers_cache.towers if towers_cache else [] %}
+        <section id="cached-towers" class="cfg-section">
+            <div class="cfg-section-head">
+                <h2>Cached Towers</h2>
+                <span class="desc">Pick a broadcast tower from your setup wizard's search results to fill in the Tower section below. Add or remove towers from this cached list manually.</span>
             </div>
             <div class="cfg-body" {% if not retina_installed %}style="opacity:.5;pointer-events:none;"{% endif %}>
                 <div class="cfg-row" id="towerPresetRow" style="padding:0;border:0;{% if not towers %}display:none;{% endif %}">
@@ -209,18 +456,22 @@
             </div>
         </section>
 
-        {# ── Location ── #}
-        {# Build field lookup for location #}
+        {# ── Tower ──
+           The location form model's fields, plus capture.fc.
+           See docs/features/config-editor.md#tower-section #}
+        {# Build field lookups for location and capture #}
         {% set loc = {} %}
         {% for f in location_fields %}{% set _ = loc.update({f.name: f}) %}{% endfor %}
-        <section id="location" class="cfg-section">
+        {% set cap = {} %}
+        {% for f in capture_fields %}{% set _ = cap.update({f.name: f}) %}{% endfor %}
+        <section id="tower" class="cfg-section">
             <div class="cfg-section-head">
-                <h2>Location</h2>
-                <span class="desc">Receiver and transmitter coordinates used by the geometry solver.</span>
+                <h2>Tower</h2>
+                <span class="desc">The broadcast tower this node listens to and where the receiver stands. The geometry solver uses both positions.</span>
             </div>
             <div class="cfg-body" {% if not retina_installed %}style="opacity:.5;pointer-events:none;"{% endif %}>
                 {# Hand-built, not render_field, so every input looks up its own
-                   config_errors key. Keep all eight wired.
+                   config_errors key. Keep all nine wired.
                    See docs/features/config-editor.md#validation #}
                 {% set rx_name_err = config_errors.get('location.rx_name') if config_errors else none %}
                 {% set rx_lat_err  = config_errors.get('location.rx_latitude') if config_errors else none %}
@@ -230,12 +481,17 @@
                 {% set tx_lat_err  = config_errors.get('location.tx_latitude') if config_errors else none %}
                 {% set tx_lon_err  = config_errors.get('location.tx_longitude') if config_errors else none %}
                 {% set tx_alt_err  = config_errors.get('location.tx_altitude') if config_errors else none %}
+                {% set fc_err      = config_errors.get('capture.fc') if config_errors else none %}
                 <div class="ds-label-micro" style="margin-bottom:10px;">Receiver</div>
                 <div class="cfg-grid" style="margin-bottom:0;">
                     <div style="grid-column:1/-1;" class="cfg-row" style="padding:0;border:0;">
-                        <div class="label-col"><label>Name</label><span class="help">{{ loc.rx_name.description if loc.rx_name else '' }}</span></div>
+                        {# Not edited here: the receiver is this node, so it goes by
+                           the node's name. Posted so the radar config follows it.
+                           See docs/features/config-editor.md#receiver-name #}
+                        <div class="label-col"><label>Name</label><span class="help">This node's name. Change it under <a href="#identifiers">Identifiers</a>.</span></div>
                         <div>
-                            <input type="text" name="location.rx_name" class="ds-input{% if rx_name_err %} is-invalid{% endif %}" value="{{ loc.rx_name.value or '' if loc.rx_name else '' }}">
+                            <div class="cfg-readonly" id="rxNameDisplay">{{ node_name or node_id }}</div>
+                            <input type="hidden" name="location.rx_name" id="rxNameValue" value="{{ node_name or node_id }}">
                             {% if rx_name_err %}<div style="color:var(--danger);font-size:12px;margin-top:4px;">{{ rx_name_err }}</div>{% endif %}
                         </div>
                     </div>
@@ -279,6 +535,18 @@
                             {% if tx_name_err %}<div style="color:var(--danger);font-size:12px;margin-top:4px;">{{ tx_name_err }}</div>{% endif %}
                         </div>
                     </div>
+                    {# A capture setting shown with the tower it belongs to: still
+                       posted and stored as capture.fc.
+                       See docs/features/config-editor.md#tower-section #}
+                    {% if cap.fc %}
+                    <div style="grid-column:1/-1;" class="cfg-row" style="padding:0;border:0;">
+                        <div class="label-col"><label for="capture_fc">{{ cap.fc.title }}</label><span class="help">{{ cap.fc.description }}</span></div>
+                        <div>
+                            <div class="cfg-input-row"><input type="number" name="capture.fc" id="capture_fc" class="ds-input mono{% if fc_err %} is-invalid{% endif %}" value="{{ cap.fc.value if cap.fc.value is not none else '' }}"><span class="unit">Hz</span></div>
+                            {% if fc_err %}<div style="color:var(--danger);font-size:12px;margin-top:4px;">{{ fc_err }}</div>{% endif %}
+                        </div>
+                    </div>
+                    {% endif %}
                     {% if loc.tx_latitude %}
                     <div class="cfg-row" style="padding:0;border:0;">
                         <div class="label-col"><label>Latitude</label><span class="help">{{ loc.tx_latitude.description }}</span></div>
@@ -379,16 +647,35 @@
                     </div>
                 </div>
                 <div class="divider"></div>
-                {% for field in capture_fields %}
+                {# Center frequency is in the Tower section, with its tower. #}
+                {% for field in capture_fields if field.name != 'fc' %}
                     {{ render_field(field, 'capture') }}
                 {% endfor %}
             </div>
         </section>
 
+        {# ── Tracking ──
+           Its own section, not part of Capture: this is what is done with the
+           detections afterwards, not how the signal is captured.
+           See docs/features/config-editor.md#sections-and-schema-models #}
+        <section id="tracking" class="cfg-section">
+            <div class="cfg-section-head">
+                <h2>Tracking</h2>
+                <span class="desc">How detections are turned into tracks after capture.</span>
+            </div>
+            <div class="cfg-body" {% if not retina_installed %}style="opacity:.5;pointer-events:none;"{% endif %}>
+                {% for field in retina_tracker_fields %}
+                    {{ render_field(field, 'retina_tracker') }}
+                {% endfor %}
+            </div>
+        </section>
+
+        {# ════ ADS-B ════ #}
+        <h2 class="cfg-group">ADS-B</h2>
         {# ── ADS-B truth ── #}
         <section id="truth" class="cfg-section">
             <div class="cfg-section-head">
-                <h2>ADS-B truth</h2>
+                <h2>ADS-B Truth</h2>
                 <span class="desc">Match radar detections against known aircraft to validate accuracy.</span>
             </div>
             <div class="cfg-body" {% if not retina_installed %}style="opacity:.5;pointer-events:none;"{% endif %}>
@@ -446,70 +733,13 @@
             </div>
         </section>
 
-        {# ── Retina Tracker ── #}
-        <section id="retina-tracker" class="cfg-section">
-            <div class="cfg-section-head">
-                <h2>Retina Tracker</h2>
-                <span class="desc">Tuning for the retina-tracker sidecar's track confirmation.</span>
-            </div>
-            <div class="cfg-body" {% if not retina_installed %}style="opacity:.5;pointer-events:none;"{% endif %}>
-                {% for field in retina_tracker_fields %}
-                    {{ render_field(field, 'retina_tracker') }}
-                {% endfor %}
-            </div>
-        </section>
-
         </form>
 
-        {# ── SSH access ── #}
-        {# ── This node ──
-           Deliberately outside #configForm, which closes above: like the rest
-           of Administration, this saves on its own rather than on Apply. #}
-        <section id="this-node" class="cfg-section" style="margin-top:12px;">
+        {# ════ Other ════ #}
+        <h2 class="cfg-group">Other</h2>
+        <section id="ssh" class="cfg-section">
             <div class="cfg-section-head">
-                <h2>This node</h2>
-                <span class="desc">What this node is called, and the address that always reaches it.</span>
-            </div>
-            <div class="cfg-body">
-                <div class="cfg-row">
-                    <div class="label-col">
-                        <label for="nodeNameInput">Name</label>
-                        <span class="help">
-                            Shown on the Nodes page when there is more than one node
-                            on the network. Leave it empty to be listed by
-                            identifier. This is only a label, so changing it never
-                            affects how the node is reached.
-                        </span>
-                    </div>
-                    <div>
-                        <div class="cfg-input-row">
-                            <input class="ds-input" id="nodeNameInput" type="text"
-                                   value="{{ node_name }}" maxlength="{{ node_name_max_length }}"
-                                   placeholder="{{ node_id }}">
-                            <button type="button" class="ds-btn primary" id="nodeNameSave" style="flex-shrink:0;">Save</button>
-                        </div>
-                        <div id="nodeNameStatus" style="font-size:12px;margin-top:6px;"></div>
-                    </div>
-                </div>
-                <div class="cfg-row">
-                    <div class="label-col">
-                        <label>Address</label>
-                        <span class="help">
-                            This node's own address. It comes from the hardware and
-                            never changes, so it is the one to bookmark. owl.local is
-                            shared by every node on the network and may reach any of them.
-                        </span>
-                    </div>
-                    <div>
-                        <div class="cfg-readonly mono">http://{{ node_id }}.local</div>
-                    </div>
-                </div>
-            </div>
-        </section>
-
-        <section id="ssh" class="cfg-section" style="margin-top:12px;">
-            <div class="cfg-section-head">
-                <h2>SSH access</h2>
+                <h2>SSH Access</h2>
                 <span class="desc">Public keys allowed to SSH into this node. To add SSH keys for use, please review the related GitHub file: <a href="https://github.com/offworldlabs/owl-os/blob/main/ssh_pub_keys/README.txt" target="_blank" rel="noopener">owl-os/ssh_pub_keys/README.txt</a></span>
             </div>
             <div class="cfg-body">
@@ -548,10 +778,46 @@
             </div>
         </section>
 
-        {# ── Remote support ── #}
-        <section id="remote" class="cfg-section" style="margin-top:12px;">
+        {# ── Setup wizard ── #}
+        <section id="wizard" class="cfg-section">
             <div class="cfg-section-head">
-                <h2>Remote support</h2>
+                <h2>Setup Wizard</h2>
+                <span class="desc">Re-run the first-boot wizard to reconfigure the node.</span>
+            </div>
+            <div class="cfg-body" style="display:flex;align-items:center;gap:14px;">
+                <a href="/set-up" class="ds-btn ghost">
+                    <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="M13 5l7 7-7 7"/></svg>
+                    Launch setup wizard
+                </a>
+            </div>
+        </section>
+
+        {# ════ Support ════ #}
+        <h2 class="cfg-group">Support</h2>
+        {# ── Cloud services ── #}
+        <section id="cloud" class="cfg-section">
+            <div class="cfg-section-head">
+                <h2>Cloud Services</h2>
+                <span class="desc">This node's link to Offworld: software updates and registration.</span>
+            </div>
+            <div class="cfg-body">
+                <div class="toggle-row" style="padding:0;border:0;">
+                    <label class="ds-switch">
+                        <input type="checkbox" id="cloudServicesToggle" disabled>
+                        <span class="ds-switch-track"></span>
+                    </label>
+                    <div class="body">
+                        <div class="name">Enable Cloud Services</div>
+                        <div class="desc" id="cloudServicesStatus">Software updates and registration. The Remote Support settings below need this too.</div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        {# ── Remote support ── #}
+        <section id="remote" class="cfg-section">
+            <div class="cfg-section-head">
+                <h2>Remote Support</h2>
                 <span class="desc">What our support team may do with this node when they are not at your location. Both settings are yours to change at any time, and neither affects how the node works day to day.</span>
             </div>
             <div class="cfg-body">
@@ -611,9 +877,9 @@
         {# ── How we reach you ── #}
         {# Optional throughout; empty means the node never calls the contact
            endpoint. See docs/features/config-editor.md#how-we-reach-you #}
-        <section id="contact" class="cfg-section" style="margin-top:12px;">
+        <section id="contact" class="cfg-section">
             <div class="cfg-section-head">
-                <h2>How we reach you</h2>
+                <h2>How We Reach You</h2>
                 <span class="desc">Never published, and only used to support you with your device.</span>
             </div>
             <div class="cfg-body">
@@ -680,198 +946,6 @@
                         <button type="button" class="ds-btn primary" id="contactSaveBtn">Save</button>
                         <span id="contactMsg" style="font-size:12.5px;display:none;"></span>
                     </div>
-                </div>
-            </div>
-        </section>
-
-        {# ── Node claim ──
-           Not the contact email: this address is mailed a link that binds the
-           node to its account, so nothing copies the contact email in here.
-           One button, every press asks for a link.
-           See docs/features/config-editor.md#node-claim #}
-        <section id="claim" class="cfg-section" style="margin-top:12px;">
-            <div class="cfg-section-head">
-                <h2>Node claim</h2>
-                <span class="desc">Links this node to your account, so it appears as yours.</span>
-            </div>
-            <div class="cfg-body">
-                <p style="font-size:13px;color:var(--ink-2);margin:0 0 16px;max-width:70ch;">
-                    We email the address below a link. Opening it claims this node for whoever
-                    owns that address, so use one you own. Nothing here changes how the node
-                    runs: an unclaimed node records and reports exactly as a claimed one does.
-                </p>
-
-                <div class="cfg-row">
-                    <div class="label-col">
-                        <label>Status</label>
-                        <span class="help">Reported by the node itself, about once a minute.</span>
-                    </div>
-                    <div>
-                        {% if not claim_reported %}
-                            <span style="color:var(--ink-3);">
-                                The telemetry service is not reporting, so we cannot say.
-                            </span>
-                        {% elif not claim_state %}
-                            <span style="color:var(--ink-3);">Not reported yet.</span>
-                        {% elif claim_state.state == 'owned' %}
-                            <span style="color:var(--ok);font-weight:600;">Claimed</span>
-                            <div class="help">
-                                Owned by {{ claim_state.email }}. To hand it to somebody else,
-                                release it from your dashboard: it cannot be done from here.
-                            </div>
-                        {% elif claim_state.state == 'pending' %}
-                            <span style="color:var(--warn);font-weight:600;">Link sent</span>
-                            <div class="help">Waiting for {{ claim_state.email }} to open it.</div>
-                        {% elif claim_state.state == 'unclaimed' %}
-                            <span style="color:var(--ink-3);font-weight:600;">Not claimed</span>
-                            {% if claim_state.email %}
-                            {# The state a declined or expired link leaves: the address is
-                               still on file and nothing more will arrive unless asked. #}
-                            <div class="help">
-                                No link is waiting. Press Send link for another one to
-                                {{ claim_state.email }}.
-                            </div>
-                            {% endif %}
-                        {% else %}
-                            <span style="font-weight:600;">{{ claim_state.state }}</span>
-                        {% endif %}
-
-                        {% if claim_state and claim_state.undeliverable %}
-                        <div style="color:var(--danger);font-size:12.5px;margin-top:6px;max-width:60ch;">
-                            The last email bounced, so that address cannot be reached. Correct it
-                            below and send. Sending to the same address again will not help.
-                        </div>
-                        {% endif %}
-                    </div>
-                </div>
-
-                <div class="cfg-row">
-                    <div class="label-col">
-                        <label for="claimEmail">Email</label>
-                        <span class="help">The address that will own this node.</span>
-                    </div>
-                    <div>
-                        <input type="email" class="ds-input" id="claimEmail" value="{{ claim.get('email', '') }}" maxlength="255" autocomplete="email" style="width:100%;">
-                    </div>
-                </div>
-
-                <div class="cfg-row">
-                    <div class="label-col">
-                        <span class="help">
-                            {% if claim_state and claim_state.state == 'owned' %}
-                            This node is claimed. Release it from your dashboard first.
-                            {% else %}
-                            Emails a link to the address above. Press it again if a link never
-                            arrived or was turned down. Empty the box and send to remove the address.
-                            {% endif %}
-                        </span>
-                    </div>
-                    <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
-                        {# Disabled while owned: a resend is refused there, and a new
-                           address would be offering somebody else's node. #}
-                        <button type="button" class="ds-btn primary" id="claimSendBtn"
-                                {% if claim_state and claim_state.state == 'owned' %}disabled{% endif %}>Send link</button>
-                        <span id="claimMsg" style="font-size:12.5px;display:none;"></span>
-                    </div>
-                </div>
-            </div>
-        </section>
-
-        {# ── Cloud services ── #}
-        <section id="cloud" class="cfg-section">
-            <div class="cfg-section-head">
-                <h2>Cloud services</h2>
-                <span class="desc">This node's link to Offworld: software updates and registration.</span>
-            </div>
-            <div class="cfg-body">
-                <div class="toggle-row" style="padding:0;border:0;">
-                    <label class="ds-switch">
-                        <input type="checkbox" id="cloudServicesToggle" disabled>
-                        <span class="ds-switch-track"></span>
-                    </label>
-                    <div class="body">
-                        <div class="name">Enable cloud services</div>
-                        <div class="desc" id="cloudServicesStatus">Software updates and registration. The Remote support settings above need this too.</div>
-                    </div>
-                </div>
-            </div>
-        </section>
-
-        {# ── Setup wizard ── #}
-        <section id="wizard" class="cfg-section">
-            <div class="cfg-section-head">
-                <h2>Setup wizard</h2>
-                <span class="desc">Re-run the first-boot wizard to reconfigure the node.</span>
-            </div>
-            <div class="cfg-body" style="display:flex;align-items:center;gap:14px;">
-                <a href="/set-up" class="ds-btn ghost">
-                    <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="M13 5l7 7-7 7"/></svg>
-                    Launch setup wizard
-                </a>
-            </div>
-        </section>
-
-        {# ── Network ── #}
-        <section id="network" class="cfg-section">
-            <div class="cfg-section-head">
-                <h2>Network</h2>
-                <span class="desc">Connect or switch this node's WiFi network.</span>
-            </div>
-            <div class="cfg-body">
-                <div class="cfg-row" style="padding:0;border:0;margin-bottom:14px;">
-                    <div class="label-col"><label>Ethernet</label></div>
-                    <div id="netEthernetStatus" class="desc">Checking…</div>
-                </div>
-                <div class="cfg-row" style="padding:0;border:0;margin-bottom:14px;">
-                    <div class="label-col"><label>WiFi</label></div>
-                    <div id="netWifiStatus" class="desc">Checking…</div>
-                </div>
-
-                <div style="display:flex;align-items:center;gap:10px;margin-bottom:14px;">
-                    <button type="button" class="ds-btn ghost" id="netRecheckBtn">Re-run network check</button>
-                    <span class="spinner-border spinner-border-sm" id="netRecheckSpinner" style="display:none;width:.9em;height:.9em;border-width:1.5px;"></span>
-                </div>
-
-                <div class="divider"></div>
-
-                <div class="ds-label-micro" style="margin-bottom:10px;">What are you trying to do?</div>
-                <div style="display:flex;flex-direction:column;gap:8px;margin-bottom:10px;">
-                    <label style="display:flex;align-items:flex-start;gap:8px;font-size:13.5px;cursor:pointer;">
-                        <input type="radio" name="netMode" id="netModeSame" value="same_network" checked style="margin-top:3px;">
-                        <span>
-                            <strong>Use this network's WiFi</strong>: I'm wired into a router and want this node on its WiFi too, then I'll unplug the cable.
-                            <span id="netModeSameDisabledHint" style="display:none;color:var(--ink-3);"> (connect an Ethernet cable to use this)</span>
-                        </span>
-                    </label>
-                    <label style="display:flex;align-items:flex-start;gap:8px;font-size:13.5px;cursor:pointer;">
-                        <input type="radio" name="netMode" id="netModeDifferent" value="different_network" style="margin-top:3px;">
-                        <span><strong>Switch to a different network</strong>: I'm moving this node to a new router entirely.</span>
-                    </label>
-                </div>
-
-                <div id="netMode2Warning" style="display:none;background:var(--accent-soft);border:1px solid var(--accent-edge);border-radius:var(--r-md);padding:10px 14px;margin-bottom:14px;font-size:13px;"></div>
-
-                <div class="divider"></div>
-
-                <div id="netScanRow" style="display:flex;gap:8px;align-items:flex-start;margin-bottom:10px;">
-                    <select id="netSsidSelect" class="ds-select" style="flex:1;min-width:0;">
-                        <option value="">Scanning…</option>
-                    </select>
-                    <button type="button" class="ds-btn ghost" id="netRescanBtn" title="Rescan">
-                        <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M21 2v6h-6"/><path d="M3 11a9 9 0 0 1 15-6.7L21 8"/><path d="M3 22v-6h6"/><path d="M21 13a9 9 0 0 1-15 6.7L3 16"/></svg>
-                    </button>
-                </div>
-                <div id="netManualRow" style="display:none;margin-bottom:10px;">
-                    <input type="text" id="netSsidManual" class="ds-input" placeholder="Network name (SSID)">
-                </div>
-                <a href="#" id="netManualToggle" style="font-size:12.5px;display:inline-block;margin-bottom:14px;">Enter network name manually</a>
-
-                <input type="password" id="netPassword" class="ds-input" placeholder="Password" style="margin-bottom:10px;display:none;">
-
-                <div style="display:flex;align-items:center;gap:10px;">
-                    <button type="button" class="ds-btn primary" id="netConnectBtn">Connect</button>
-                    <span class="spinner-border spinner-border-sm" id="netConnectSpinner" style="display:none;width:.9em;height:.9em;border-width:1.5px;"></span>
-                    <span id="netConnectStatus" style="font-size:13px;"></span>
                 </div>
             </div>
         </section>
@@ -944,7 +1018,7 @@
             </div>
             <div class="modal-body" style="font-size:13.5px;color:var(--ink-2);">
                 <p>This stops automatic software updates and registration with Offworld.</p>
-                <p>It also switches off everything under Remote support, whatever those two settings say.</p>
+                <p>It also switches off everything under Remote Support, whatever those two settings say.</p>
                 <p class="mb-0">You can re-enable at any time.</p>
             </div>
             <div class="modal-footer">
@@ -1023,8 +1097,9 @@
 <script src="/static/calibrate.js"></script>
 <script>
 // This node's own address, deliberately not owl.local (answered by every node).
-// See docs/features/config-editor.md#this-node
+// See docs/features/config-editor.md#identifiers
 var NODE_URL = 'http://{{ node_id }}.local';
+var NODE_ID = {{ node_id | tojson }};
 
 // This node: rename. Saves on its own, not with the config form, so the button
 // is type=button and posts by itself.
@@ -1057,6 +1132,11 @@ var NODE_URL = 'http://{{ node_id }}.local';
                 if (result.ok && result.d.ok) {
                     input.value = result.d.name;
                     show(result.d.name ? 'Saved.' : 'Saved. This node will be listed by identifier.', true);
+                    // Location shows the same name, and posts it with the next Apply.
+                    // See docs/features/config-editor.md#receiver-name
+                    var shown = result.d.name || NODE_ID;
+                    document.getElementById('rxNameDisplay').textContent = shown;
+                    document.getElementById('rxNameValue').value = shown;
                 } else {
                     show(result.d.error || 'Could not save the name.', false);
                 }
@@ -1679,7 +1759,7 @@ if (discardBtn) discardBtn.addEventListener('click', () => location.reload());
                     setTimeout(loadCloudStatus, 10000);
                 } else {
                     toggle.disabled = false;
-                    status.textContent = 'Software updates and registration. The Remote support settings above need this too.';
+                    status.textContent = 'Software updates and registration. The Remote Support settings below need this too.';
                 }
             })
             .catch(() => { toggle.checked = true; toggle.disabled = false; });
@@ -1711,7 +1791,7 @@ if (discardBtn) discardBtn.addEventListener('click', () => location.reload());
         })
         .then(r => r.json().then(data => ({ok: r.ok, data})))
         .then(({ok, data}) => {
-            if (ok && data.success) { status.textContent = 'Settings applied'; setTimeout(() => { status.textContent = 'Software updates and registration. The Remote support settings above need this too.'; }, 3000); }
+            if (ok && data.success) { status.textContent = 'Settings applied'; setTimeout(() => { status.textContent = 'Software updates and registration. The Remote Support settings below need this too.'; }, 3000); }
             else { status.textContent = data.error; toggle.checked = !toggle.checked; }
         })
         .catch(e => { status.textContent = 'Error: ' + e.message; toggle.checked = !toggle.checked; })
@@ -1721,7 +1801,9 @@ if (discardBtn) discardBtn.addEventListener('click', () => location.reload());
 
 // Side-nav scrollspy
 (function() {
-    var sectionIds = ['mode','tower','location','capture','truth','tar1090','ssh','cloud','wizard','network'];
+    // Page order: the first of these on screen is the one marked active.
+    var sectionIds = ['identifiers','mode','claim','network','cached-towers','tower','capture','tracking',
+                      'truth','tar1090','ssh','wizard','cloud','remote','contact'];
     var links = {};
     sectionIds.forEach(function(id) {
         var a = document.querySelector('.side a[href="#' + id + '"]');
@@ -1745,11 +1827,22 @@ if (discardBtn) discardBtn.addEventListener('click', () => location.reload());
             if (e.isIntersecting) { visibleSet.add(e.target.id); }
             else { visibleSet.delete(e.target.id); }
         });
+        // A link that was just clicked stays the active one until the owner
+        // scrolls. The last sections are short, so the page cannot bring them
+        // to the top and the topmost visible section would be an earlier one.
+        if (chosen) return;
         // Highlight the first (topmost) visible section
         var top = null;
         sectionIds.forEach(function(id) { if (!top && visibleSet.has(id)) top = id; });
         if (top) setActive(top);
     }, { rootMargin: '-10% 0px -60% 0px', threshold: 0 });
+
+    // Set by a click on a link, cleared by the owner scrolling by hand. The
+    // smooth scroll the click starts fires none of these.
+    var chosen = null;
+    ['wheel', 'touchmove', 'keydown'].forEach(function(type) {
+        window.addEventListener(type, function() { chosen = null; }, { passive: true });
+    });
 
     var visibleSet = new Set();
     sectionIds.forEach(function(id) {
@@ -1762,6 +1855,7 @@ if (discardBtn) discardBtn.addEventListener('click', () => location.reload());
         var id = entry[0], a = entry[1];
         a.addEventListener('click', function(e) {
             e.preventDefault();
+            chosen = id;
             setActive(id);
             var el = document.getElementById(id);
             if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
