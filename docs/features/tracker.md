@@ -3,7 +3,9 @@
 The Tracker page (`/tracker`, formerly Tracker Preview) plots what a node's radar has detected
 and which of those detections retina-tracker has built into tracks. retina-gui holds no tracker
 data: the record lives in the retina-tracker sidecar container, which serves it over a loopback
-SSE endpoint, and retina-gui proxies that stream to the browser and draws it with Plotly.
+SSE endpoint, and retina-gui proxies that stream to the browser and draws it with Plotly. A
+second display, the [wedge view](#wedge-view), draws the node's ADS-B-proven coverage and its
+tracks on a map with Leaflet.
 Separately, `RetinaTrackerClient` tails the sidecar's track-event file and drives its control
 surface for Auto-Calibrate.
 
@@ -11,8 +13,9 @@ surface for Auto-Calibrate.
 
 | File | Role |
 | --- | --- |
-| [src/routes/tracker.py](../../src/routes/tracker.py) | The `/tracker` blueprint (page, SSE proxy, one-shot snapshot, clear) and the `/tracker-preview` redirect. Computes the plot's axis bounds from the merged config. |
-| [templates/tracker.html](../../templates/tracker.html) | The page: controls, the Plotly scope, the track rail, and the EventSource client. |
+| [src/routes/tracker.py](../../src/routes/tracker.py) | The `/tracker` blueprint (page, SSE proxy, one-shot snapshot, clear, and the coverage proxies) and the `/tracker-preview` redirect. Computes the plot's axis bounds from the merged config. |
+| [templates/tracker.html](../../templates/tracker.html) | The page: controls, the Plotly scope, the wedge view's container and reset dialog, the track rail, and the EventSource client. |
+| [static/tracker-wedge.js](../../static/tracker-wedge.js) | The wedge view: the Leaflet map, the wedge, trails and arcs, and the replay. |
 | [src/retina_tracker_client.py](../../src/retina_tracker_client.py) | `RetinaTrackerClient`: JSONL event tailer plus HTTP control client (`reset`). |
 | [src/services.py](../../src/services.py) | `RETINA_TRACKER_CONTROL_URL` and `RETINA_TRACKER_EVENTS_PATH`, and the single shared client instance. |
 | [src/calibrator.py](../../src/calibrator.py) | The client's listener and `reset()` caller. See [auto-calibrate.md](auto-calibrate.md). |
@@ -30,6 +33,8 @@ blah2 -> blah2_api --(network.tracker_forward, TCP)--> retina-tracker sidecar
                                                                |
    RetinaTrackerClient.reset() --- HTTP POST /reset ---------->+
    /tracker/clear             --- HTTP POST /history/clear --->+
+   /tracker/coverage*         --- HTTP GET  /coverage* ------->+
+   /tracker/coverage/reset    --- HTTP POST /coverage/reset -->+
 ```
 
 Detections travel from blah2 through blah2_api straight to retina-tracker
@@ -81,7 +86,8 @@ this one cannot, so callers that care whether the tracker really is clear can te
 
 ## Why the page is proxied
 
-The page talks only to retina-gui (`/tracker/events`), never to the sidecar's port. Proxying
+The page talks only to retina-gui (`/tracker/events` and the `/tracker/coverage` routes), never to
+the sidecar's port. Proxying
 keeps the page behind the same session and Cloudflare Access checks as every other page, and
 makes it work over the support tunnel, which routes paths on the GUI's hostname and not
 arbitrary ports. It is also nearly free: bytes pass through without being parsed, buffered or
@@ -117,9 +123,13 @@ The page listens for named events rather than `onmessage`:
 | `delta` | Append: everything added since this connection's last message. |
 
 Each message carries `detections`, keyed by class, and `tracks`, keyed by track id. Both use
-parallel columns `t` (ms), `delay`, `doppler` and `snr`, in timestamp order. Each track also has
-`meta`: `adsb_hex`, `is_anomalous`, `anomaly_types`, `length`, `max_velocity_ms` and
-`shadow_fraction`. On a delta, a known track's columns are appended and its `meta` replaced.
+parallel columns `t` (ms), `delay`, `doppler` and `snr`, in timestamp order. Tracks also carry
+`lat` and `lon`: the ADS-B position blah2 matched to that detection, or `null` where there is no
+verified one (retina-tracker's `docs/coverage-wedge.md` says what counts as verified). Only the
+wedge view reads them; `appendCols` and `sliceCols` carry them when present, so a sidecar that
+does not send them is still drawn. Each track also has `meta`: `adsb_hex`, `is_anomalous`,
+`anomaly_types`, `length`, `max_velocity_ms` and `shadow_fraction`. On a delta, a known track's
+columns are appended and its `meta` replaced.
 
 ## View window
 
@@ -316,17 +326,88 @@ The rail beside the scope lists every track in the window.
   yet, and a solid label would be read as a verdict. The expanded row lists the anomaly types
   marked "(provisional)".
 - **Clicking a row** expands a detail panel: first and last seen, length, peak velocity and
-  shadow fraction.
+  shadow fraction. In the wedge view it also [replays the track](#replaying-a-track).
 - **Hide** (eye) removes a track from the scope but keeps its row. **Remove** (bin) drops the row
   too; removals are per browser and can be undone with Restore in the rail footer.
 
-View window, layer, track overlay, sort, filter, Doppler view (`tracker.dopView`) and the
-narrow range (`tracker.narrowHz`) are remembered in `localStorage` (`tracker.*` keys) and
+View window, layer, track overlay, sort, filter, Doppler view (`tracker.dopView`), the
+narrow range (`tracker.narrowHz`) and the display (`tracker.display`) are remembered in `localStorage` (`tracker.*` keys) and
 restored into the controls before connecting. They are per browser: nothing about the page's
 presentation is stored on the node.
 
 The page is full width with a viewport-clamped height, since both the plot and the rail want
 every pixel; below 900 px the rail stacks under the plot.
+
+## Wedge view
+
+The Display control in the page header switches the panel between the Delay / Doppler scope and
+the wedge view: a map of where this node is **proven** to see, built only from ADS-B-verified
+detections, with the tracks drawn on it. Nothing in it comes from a declared antenna aim. The
+rail, the view window and the Tracks on/off control are shared by both displays; the Doppler,
+Detections and Clear buffer controls belong to the scope and are hidden in the wedge view, and
+the wedge view adds a "24 h max-hold" chip and Reset wedge. The panel's `data-display`
+attribute drives which controls and which body show (`.dd-only`, `.wedge-only`). The scope is
+not redrawn while hidden, since a Plotly redraw costs the same whether or not it is seen.
+
+Every shape arrives ready made from retina-tracker, which owns the maths
+(retina-tracker's `docs/coverage-wedge.md`). The page draws what it is given:
+
+| Layer | Source | Drawn as |
+| --- | --- | --- |
+| The wedge | `GET /tracker/coverage`, polled every 30 s | Green lobes, each 5 degree slice drawn edge to edge at its held range |
+| Receiver, transmitter, baseline | the same | RX ring, TX triangle, dashed line |
+| Labelled tracks | the stream's `lat`/`lon` columns | A trail through the verified positions, broken where they stop for over 15 s; an aircraft glyph with the hex while live (newest point under 15 s old), a small ring at the end otherwise |
+| Unlabelled tracks | `GET /tracker/coverage/arcs?window=`, polled every 5 s | The delay ellipse at the newest point: solid inside the wedge, faint and dashed outside it |
+
+A slice holds the second-furthest range that two different aircraft reached in the last 24
+hours, so one wrong ADS-B match cannot push the wedge out, and the hold slides rather than
+resetting on a schedule. An unlabelled arc is solid where it crosses proven coverage, which is
+where the node is known to see, not where the target is known to be: the target can be anywhere
+on the arc. Arcs are flat (target altitude is ignored), so a labelled aircraft sits a few
+kilometres off its own arc, more at altitude and close in.
+
+The footer has the legend and the wedge's evidence: "Last 24 h", or "Since reset at ..." or
+"Since ..." when the record is younger than the hold (judged on the node's clock, `now_ms`),
+with the number of aircraft and proven slices.
+
+A notice over the map explains an empty or missing wedge rather than showing a bare map:
+before any slice is proven, after a reset (manual, or because the receiver or transmitter
+moved), when the node has no receiver and transmitter position, when the sidecar answers 404 or
+503 (a retina-tracker without the wedge), and when it is unreachable (502). The proxies relay
+the sidecar's status so the page can tell these apart.
+
+The basemap is CARTO's light tiles with the same key handling as the setup wizard
+(`withCartoKey` is duplicated in `static/tracker-wedge.js` and must match `static/setup.js`; see
+[setup-wizard.md](setup-wizard.md#basemap-key)). The map fits the receiver, transmitter and wedge
+(at least 60 km around the receiver) the first time it has a geometry, and keeps the viewer's
+pan and zoom after that.
+
+### Replaying a track
+
+In the wedge view, clicking a track's row expands it and replays its travel through the wedge
+over a fixed 10 s, whatever its length, so a short pass and a long one are both watchable.
+Clicking the row again stops a running replay, or replays a finished one; clicking another
+track switches to it. There are no other controls. A panel over the map gives the track, the
+replay clock (node time), progress, and elapsed against total.
+
+The page fetches `GET /tracker/coverage/track/<id>` once per replay: at most 240 arcs spread
+evenly over the track, about 3 KB each. A labelled track's aircraft moves along its trail, drawn
+solid behind it and dashed ahead, with the measured arc at that moment. An unlabelled track's arc
+sweeps with an afterglow of four fading earlier arcs. Every other track fades while a replay
+runs. The replay draws on its own Leaflet canvas, so a frame repaints only the replay.
+
+Switching to the scope stops the replay. The Delay / Doppler view has no replay cursor: Plotly
+redraws the whole scene on every call (see [Drawing performance](#drawing-performance)), which
+an animation would do every frame.
+
+### Resetting the wedge
+
+Reset wedge opens a confirm dialog and POSTs `/tracker/coverage/reset`, which calls the
+sidecar's `/coverage/reset`. It clears the wedge only: tracking, the history and the tracks on the
+page are untouched, which is why it is separate from Clear buffer. Use it after moving or
+re-aiming the antenna; otherwise the old lobe would hold for up to a day. The sidecar also
+restarts the wedge by itself when the receiver or transmitter position changes. If the sidecar
+does not confirm, the dialog says nothing was cleared and stays open.
 
 ## Clearing the buffer
 
