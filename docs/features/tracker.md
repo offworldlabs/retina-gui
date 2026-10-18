@@ -356,6 +356,7 @@ Every shape arrives ready made from retina-tracker, which owns the maths
 | --- | --- | --- |
 | The wedge | `GET /tracker/coverage`, polled every 30 s | Green lobes, each 5 degree slice drawn edge to edge at its held range |
 | Receiver, transmitter, baseline | the same | RX ring, TX triangle, dashed line |
+| Processed range limit | the same (`span_ring`) | A grey dashed ellipse: the furthest bistatic range blah2 processes (`delayMax`). Absent when the node does not state one |
 | Labelled tracks | the stream's `lat`/`lon` columns | A trail through the verified positions, broken where they stop for over 15 s; an aircraft glyph with the hex while live (newest point under 15 s old), a small ring at the end otherwise |
 | Unlabelled tracks | `GET /tracker/coverage/arcs?window=`, polled every 5 s | The delay ellipse at the newest point: solid inside the wedge, faint and dashed outside it |
 
@@ -368,7 +369,11 @@ kilometres off its own arc, more at altitude and close in.
 
 The footer has the legend and the wedge's evidence: "Last 24 h", or "Since reset at ..." or
 "Since ..." when the record is younger than the hold (judged on the node's clock, `now_ms`),
-with the number of aircraft and proven slices.
+with the number of aircraft and proven slices, and how many slices reach the processed range
+limit ("3 at the processed range limit"). Those slices reach as far as the node's delay setting
+lets anything reach, so their range says nothing about the antenna; on a short-baseline node the
+main lobe sat there. retina-tracker decides which slices count (`limited`), see its
+`docs/coverage-wedge.md`.
 
 A notice over the map explains an empty or missing wedge rather than showing a bare map:
 before any slice is proven, after a reset (manual, or because the receiver or transmitter
@@ -379,8 +384,10 @@ the sidecar's status so the page can tell these apart.
 The basemap is CARTO's light tiles with the same key handling as the setup wizard
 (`withCartoKey` is duplicated in `static/tracker-wedge.js` and must match `static/setup.js`; see
 [setup-wizard.md](setup-wizard.md#basemap-key)). The map fits the receiver, transmitter and wedge
-(at least 60 km around the receiver) the first time it has a geometry, and keeps the viewer's
-pan and zoom after that.
+the first time it has a geometry. Before any slice is proven it fits a 120 km box around the
+receiver instead, and it refits once, to the lobes, when the first ones appear. After that it
+keeps the viewer's pan and zoom. Fitting the box alone left a short-range wedge small in the
+middle of the map.
 
 ### Replaying a track
 

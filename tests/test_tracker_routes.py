@@ -379,4 +379,5 @@ def test_the_page_carries_the_wedge_view(app_client):
     assert 'leaflet@1.9.4/dist/leaflet.js' in body
     assert '/static/tracker-wedge.js' in body
     assert 'data-display="wedge"' in body
+    assert 'Processed range limit' in body
     assert re.search(r'cartoKey: "[^"]*",', body)

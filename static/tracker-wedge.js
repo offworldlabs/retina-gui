@@ -27,6 +27,7 @@
     var WEDGE_EDGE = '#15803d';
     var WEDGE_FILL = '#16a34a';
     var SITE_INK = '#22252c';
+    var SPAN_INK = '#6f6c65';
 
     function esc(s) {
         return String(s).replace(/[&<>"]/g, function (c) {
@@ -92,7 +93,7 @@
         var latestArcs = {};
         var timers = [];
         var visible = false;
-        var fitted = false;
+        var fittedTo = null;
         var replay = null;
         var rows = [];
         var view = { hidden: {}, hover: null, tracksOn: true };
@@ -138,6 +139,10 @@
             layers.sites.clearLayers();
             var g = coverage && coverage.enabled ? coverage.geometry : null;
             if (g) {
+                if ((coverage.span_ring || []).length) {
+                    L.polyline(coverage.span_ring, { color: SPAN_INK, weight: 1.2, opacity: 0.7, dashArray: '6 5', interactive: false })
+                        .addTo(layers.wedge);
+                }
                 (coverage.lobes || []).forEach(function (ring) {
                     L.polygon(ring, { color: WEDGE_EDGE, weight: 1.4, fillColor: WEDGE_FILL, fillOpacity: 0.12, interactive: false })
                         .addTo(layers.wedge);
@@ -146,18 +151,27 @@
                            { color: '#9a978f', weight: 1, dashArray: '2 4', interactive: false }).addTo(layers.sites);
                 siteMarker(g.rx, 'RX').addTo(layers.sites);
                 siteMarker(g.tx, 'TX').addTo(layers.sites);
-                if (!fitted) fit(g);
+                fit(g);
             }
             renderNotice();
             renderStat();
         }
 
+        // Fit to the lobes once there are any, else a default box around the
+        // receiver; refit only on that change, so the viewer's own pan and
+        // zoom are kept. See docs/features/tracker.md#wedge-view
         function fit(g) {
-            var bounds = L.latLng(g.rx.lat, g.rx.lon).toBounds(DEFAULT_VIEW_M);
-            bounds.extend([g.tx.lat, g.tx.lon]);
-            (coverage.lobes || []).forEach(function (ring) { bounds.extend(L.latLngBounds(ring)); });
+            var lobes = coverage.lobes || [];
+            var target = lobes.length ? 'lobes' : 'default';
+            if (fittedTo === target || fittedTo === 'lobes') return;
+            var bounds = L.latLngBounds([[g.rx.lat, g.rx.lon], [g.tx.lat, g.tx.lon]]);
+            if (lobes.length) {
+                lobes.forEach(function (ring) { bounds.extend(L.latLngBounds(ring)); });
+            } else {
+                bounds.extend(L.latLng(g.rx.lat, g.rx.lon).toBounds(DEFAULT_VIEW_M));
+            }
             map.fitBounds(bounds, { padding: [24, 24] });
-            fitted = true;
+            fittedTo = target;
         }
 
         function renderNotice() {
@@ -194,7 +208,8 @@
                       : (coverage.reset_ms && coverage.reset_ms >= coverage.since_ms ? 'Since reset at ' : 'Since ')
                         + hhmm(coverage.since_ms);
             opts.statEl.textContent = label + ' · ' + coverage.aircraft + ' aircraft · '
-                + coverage.proven_bins + ' of ' + coverage.held_km.length + ' slices proven';
+                + coverage.proven_bins + ' of ' + coverage.held_km.length + ' slices proven'
+                + (coverage.limited_bins ? ' \u00b7 ' + coverage.limited_bins + ' at the processed range limit' : '');
         }
 
         // ── Tracks ──────────────────────────────────────────────────────
