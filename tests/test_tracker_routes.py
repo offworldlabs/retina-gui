@@ -300,10 +300,85 @@ class TestTheDopplerViewIsPresentationOnly:
     def test_the_setting_is_kept_in_the_browser_and_never_posted(self, page):
         assert "remember('narrowHz', n)" in page
         assert "remember('dopView', v)" in page
-        # The only request the page makes besides the stream is Clear buffer.
-        assert re.findall(r"fetch\('([^']+)'", page) == ['/tracker/clear']
+        # The only requests the page makes besides the stream are Reset wedge
+        # and Clear buffer; the wedge view's reads live in static/tracker-wedge.js.
+        assert re.findall(r"fetch\('([^']+)'", page) == ['/tracker/coverage/reset', '/tracker/clear']
 
     def test_the_out_of_view_alert_is_on_the_page_and_hidden_until_needed(self, page):
         alert = re.search(r'<span[^>]*id="oovAlert"[^>]*>', page).group(0)
         assert 'hidden' in alert
         assert 'id="oovShowBtn"' in page
+
+
+# ── the coverage wedge ──────────────────────────────────────────────────────
+
+def fake_reply(body, status=200):
+    response = MagicMock()
+    response.status_code = status
+    response.content = json.dumps(body).encode()
+    return response
+
+
+def test_the_wedge_is_relayed_with_its_status(app_client):
+    """A 404 or 503 from the sidecar means "no coverage on this tracker",
+    which the page words differently from unreachable, so it is not masked."""
+    body = {"enabled": True, "lobes": [], "held_km": [0.0] * 72}
+    with patch.object(tracker_routes.requests, "get", return_value=fake_reply(body)) as mock_get:
+        response = app_client.get('/tracker/coverage')
+    assert response.status_code == 200
+    assert response.get_json() == body
+    assert mock_get.call_args.args[0].endswith("/coverage")
+
+    with patch.object(tracker_routes.requests, "get",
+                      return_value=fake_reply({"error": "not found"}, status=404)):
+        assert app_client.get('/tracker/coverage').status_code == 404
+
+
+def test_an_unreachable_sidecar_is_a_502_for_the_wedge(app_client):
+    with patch.object(tracker_routes.requests, "get",
+                      side_effect=requests.ConnectionError("refused")):
+        response = app_client.get('/tracker/coverage')
+    assert response.status_code == 502
+    assert "unreachable" in response.get_json()["error"]
+
+
+def test_the_arcs_window_is_clamped_and_forwarded(app_client):
+    with patch.object(tracker_routes.requests, "get",
+                      return_value=fake_reply({"arcs": []})) as mock_get:
+        app_client.get('/tracker/coverage/arcs?window=999999')
+    assert mock_get.call_args.kwargs["params"] == {"window": 4 * 3600}
+
+
+def test_a_replay_is_fetched_for_the_named_track(app_client):
+    with patch.object(tracker_routes.requests, "get",
+                      return_value=fake_reply({"id": "261017-00012C", "arcs": []})) as mock_get:
+        response = app_client.get('/tracker/coverage/track/261017-00012C')
+    assert response.status_code == 200
+    assert mock_get.call_args.args[0].endswith("/coverage/track/261017-00012C")
+
+
+@pytest.mark.parametrize("track_id", ["a.b", "a%2F..%2Fb", "x" * 41])
+def test_a_track_id_that_could_reach_another_path_is_refused(app_client, track_id):
+    with patch.object(tracker_routes.requests, "get") as mock_get:
+        response = app_client.get('/tracker/coverage/track/' + track_id)
+    assert response.status_code in (400, 404)
+    mock_get.assert_not_called()
+
+
+def test_resetting_the_wedge_is_forwarded(app_client):
+    with patch.object(tracker_routes.requests, "post",
+                      return_value=fake_reply({"ok": True})) as mock_post:
+        response = app_client.post('/tracker/coverage/reset')
+    assert response.status_code == 200
+    assert response.get_json() == {"ok": True}
+    assert mock_post.call_args.args[0].endswith("/coverage/reset")
+
+
+def test_the_page_carries_the_wedge_view(app_client):
+    body = app_client.get('/tracker').get_data(as_text=True)
+    assert 'leaflet@1.9.4/dist/leaflet.js' in body
+    assert '/static/tracker-wedge.js' in body
+    assert 'data-display="wedge"' in body
+    assert 'Processed range limit' in body
+    assert 'Close-in, overhead' in body
+    assert re.search(r'cartoKey: "[^"]*",', body)

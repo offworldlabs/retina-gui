@@ -5,6 +5,7 @@ See docs/features/tracker.md#why-the-page-is-proxied.
 """
 
 import json
+import re
 
 import requests
 from flask import Blueprint, Response, jsonify, redirect, render_template, request, stream_with_context
@@ -24,6 +25,10 @@ CONTROL_TIMEOUT_S = 5
 
 # For turning blah2's delay bins into kilometres.
 SPEED_OF_LIGHT = 299792458.0
+
+# The sidecar mints ids like 261017-00012C. Checked here as well as there,
+# because the id is spliced into the upstream path.
+TRACK_ID = re.compile(r"[A-Za-z0-9-]{1,40}")
 
 
 def _axis_bounds():
@@ -99,9 +104,10 @@ def moved(path):
 
 @bp.route("")
 def index():
-    """The Tracker page. Everything it draws arrives on /tracker/events,
-    except the axis bounds, which come from config."""
-    return render_template("tracker.html", axes=_axis_bounds())
+    """The Tracker page. Everything it draws arrives on /tracker/events and
+    /tracker/coverage, except the axis bounds, which come from config."""
+    from services import CARTO_API_KEY
+    return render_template("tracker.html", axes=_axis_bounds(), carto_api_key=CARTO_API_KEY)
 
 
 @bp.route("/events")
@@ -167,3 +173,45 @@ def clear():
         return jsonify({"success": bool(response.json().get("ok"))})
     except (requests.RequestException, ValueError):
         return jsonify({"success": False, "error": "tracker unreachable"}), 502
+
+
+def _proxy_json(path, method="get", params=None):
+    """Relay one JSON reply from the sidecar, status included, so the page can
+    tell "this tracker has no coverage" (404, 503) from "unreachable" (502)."""
+    try:
+        response = getattr(requests, method)(_tracker_url(path), params=params,
+                                             timeout=CONTROL_TIMEOUT_S)
+        return Response(response.content, status=response.status_code,
+                        content_type="application/json")
+    except requests.RequestException as e:
+        return jsonify({"error": f"tracker unreachable: {e.__class__.__name__}"}), 502
+
+
+@bp.route("/coverage")
+def coverage():
+    """The node's ADS-B-proven coverage wedge. See docs/features/tracker.md#wedge-view."""
+    return _proxy_json("/coverage")
+
+
+@bp.route("/coverage/arcs")
+def coverage_arcs():
+    """The newest delay arc of each unlabelled track in the view window."""
+    window_s = _view_window()
+    return _proxy_json("/coverage/arcs", params={"window": window_s} if window_s else None)
+
+
+@bp.route("/coverage/track/<track_id>")
+def coverage_track(track_id):
+    """Arcs spread over one track, for the replay."""
+    if not TRACK_ID.fullmatch(track_id):
+        return jsonify({"error": "bad track id"}), 400
+    return _proxy_json(f"/coverage/track/{track_id}")
+
+
+@bp.route("/coverage/reset", methods=["POST"])
+def coverage_reset():
+    """Clear the wedge on the node; tracking and the history are untouched.
+
+    See docs/features/tracker.md#resetting-the-wedge.
+    """
+    return _proxy_json("/coverage/reset", method="post")
