@@ -446,7 +446,6 @@ class TestLocationSave:
             'location.rx_latitude': '40.7128',
             'location.rx_longitude': '-74.0060',
             'location.rx_altitude': '10',
-            'location.rx_name': 'NYC',
             'location.tx_latitude': '40.0',
             'location.tx_longitude': '-74.0',
             'location.tx_altitude': '100',
@@ -457,7 +456,9 @@ class TestLocationSave:
         with open(user_config_file) as f:
             saved = yaml.safe_load(f)
         assert saved['location']['rx']['latitude'] == 40.7128
-        assert saved['location']['rx']['name'] == 'NYC'
+        # Not posted: the server names the receiver after the node, and this
+        # node is unnamed. See docs/features/config-editor.md#receiver-name
+        assert saved['location']['rx']['name'] == 'ret7a000001'
 
     def test_save_invalid_latitude(self, app_client):
         """An out-of-range latitude marks its own box and says why.
@@ -712,35 +713,38 @@ class TestTruthSave:
         assert b'is-invalid' in response.data
 
 
-class TestRetinaTrackerSave:
-    """Test saving retina_tracker config.
+class TestRetinaTrackerKeyIsDropped:
+    """retina-tracker stopped reading min_snr in v0.5.0, so the page no longer
+    offers it. A node that still has the key in user.yml is cleaned up by the
+    next save. See docs/features/config-editor.md#no-tracking-section."""
 
-    Note: retina_tracker fields use 'retina_tracker.' prefix directly
-    (e.g., 'retina_tracker.min_snr') since RetinaTrackerConfig is a flat
-    schema, same as AdsbTruthConfig.
+    def test_a_save_drops_a_stale_retina_tracker_block(self, app_client, user_config_file):
+        """Nothing writes the key now, and an old one does not survive."""
+        with open(user_config_file, 'w') as f:
+            yaml.safe_dump({'retina_tracker': {'min_snr': 4.5},
+                            'tar1090': {'adsblol_radius': 77}}, f)
 
-    With layered config, only values that differ from merged config are saved.
-    """
-
-    def test_save_valid_retina_tracker_config(self, app_client, user_config_file):
-        """Valid retina_tracker config should save changed values."""
         response = app_client.post('/config/save', data={
-            'retina_tracker.min_snr': '4.5',  # Different from merged (was 7.0)
+            'tar1090.adsblol_fallback': 'on',
+            'tar1090.adsblol_radius': '55',
         }, follow_redirects=False)
-
         assert response.status_code == 302
 
         with open(user_config_file) as f:
             saved = yaml.safe_load(f)
-        assert saved['retina_tracker']['min_snr'] == 4.5
+        assert 'retina_tracker' not in saved
 
-    def test_invalid_min_snr(self, app_client):
-        """min_snr <= 0 should show error."""
+    def test_a_posted_min_snr_is_ignored_rather_than_stored(self, app_client, user_config_file):
+        """The field is gone from the page; a hand-crafted POST must not
+        resurrect it."""
         response = app_client.post('/config/save', data={
-            'retina_tracker.min_snr': '0',  # Invalid: must be > 0
-        })
-        assert response.status_code == 200
-        assert b'is-invalid' in response.data
+            'retina_tracker.min_snr': '4.5',
+        }, follow_redirects=False)
+        assert response.status_code == 302
+
+        with open(user_config_file) as f:
+            saved = yaml.safe_load(f) or {}
+        assert 'retina_tracker' not in saved
 
 
 class TestApplyConfigRoute:
@@ -1212,7 +1216,7 @@ class TestParseFlatFormData:
         """Flat capture fields should be parsed correctly."""
         from config_manager import ConfigManager
 
-        capture, location, truth, tar1090, retina_tracker = ConfigManager.parse_flat_form_data({
+        capture, location, truth, tar1090 = ConfigManager.parse_flat_form_data({
             'capture.fs': '2000000',
             'capture.fc': '503000000',
             'capture.device_type': 'RspDuo',
@@ -1230,7 +1234,7 @@ class TestParseFlatFormData:
         """Flat location fields should be parsed correctly."""
         from config_manager import ConfigManager
 
-        capture, location, truth, tar1090, retina_tracker = ConfigManager.parse_flat_form_data({
+        capture, location, truth, tar1090 = ConfigManager.parse_flat_form_data({
             'location.rx_latitude': '37.7749',
             'location.rx_longitude': '-122.4194',
             'location.rx_altitude': '23',
@@ -1246,7 +1250,7 @@ class TestParseFlatFormData:
         """String integers should be converted to int."""
         from config_manager import ConfigManager
 
-        capture, _, _, _, _ = ConfigManager.parse_flat_form_data({
+        capture, _, _, _ = ConfigManager.parse_flat_form_data({
             'capture.fs': '12345'
         })
         assert capture['fs'] == 12345
@@ -1256,7 +1260,7 @@ class TestParseFlatFormData:
         """String floats should be converted to float."""
         from config_manager import ConfigManager
 
-        _, location, _, _, _ = ConfigManager.parse_flat_form_data({
+        _, location, _, _ = ConfigManager.parse_flat_form_data({
             'location.rx_latitude': '37.7749'
         })
         assert location['rx_latitude'] == 37.7749
@@ -1266,7 +1270,7 @@ class TestParseFlatFormData:
         """Negative values should be parsed correctly."""
         from config_manager import ConfigManager
 
-        capture, location, _, _, _ = ConfigManager.parse_flat_form_data({
+        capture, location, _, _ = ConfigManager.parse_flat_form_data({
             'capture.device_agcSetPoint': '-50',
             'location.rx_longitude': '-122.4194'
         })
@@ -1277,7 +1281,7 @@ class TestParseFlatFormData:
         """Boolean true values should be converted."""
         from config_manager import ConfigManager
 
-        capture, _, _, _, _ = ConfigManager.parse_flat_form_data({
+        capture, _, _, _ = ConfigManager.parse_flat_form_data({
             'capture.device_dabNotch': 'on'
         })
         assert capture['device_dabNotch'] is True
@@ -1286,7 +1290,7 @@ class TestParseFlatFormData:
         """Empty strings should be skipped."""
         from config_manager import ConfigManager
 
-        capture, _, _, _, _ = ConfigManager.parse_flat_form_data({
+        capture, _, _, _ = ConfigManager.parse_flat_form_data({
             'capture.fs': '123',
             'capture.fc': ''
         })
@@ -1297,7 +1301,7 @@ class TestParseFlatFormData:
         """Non-numeric strings should stay as strings."""
         from config_manager import ConfigManager
 
-        capture, _, _, _, _ = ConfigManager.parse_flat_form_data({
+        capture, _, _, _ = ConfigManager.parse_flat_form_data({
             'capture.device_type': 'RspDuo'
         })
         assert capture['device_type'] == 'RspDuo'

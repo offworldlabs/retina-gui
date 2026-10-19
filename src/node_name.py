@@ -22,6 +22,17 @@ _FORBIDDEN = re.compile(r'[\x00-\x1f\x7f<>&"\']')
 IDENTITY_SCRIPT = "/usr/local/sbin/owl-mdns-identity"
 
 
+def receiver_name(name, node_id):
+    """The radar config's `rx.name`: the node's name, or its id when unnamed.
+
+    The one rule for every writer, so /config/save and /towers/select cannot
+    disagree about what the receiver is called. Always a string: a node named
+    "1234" or "true" must not reach the config as an int or a bool.
+    See docs/features/config-editor.md#receiver-name.
+    """
+    return str(name or "").strip() or str(node_id or "")
+
+
 class NodeName:
     """Reads and writes the operator-assigned name for this node."""
 

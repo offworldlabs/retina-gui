@@ -11,7 +11,7 @@ automatically by an apply, which runs retina-node's config-merger and restarts t
 
 | File | Role |
 | --- | --- |
-| [src/config_schema.py](../../src/config_schema.py) | Pydantic form models (`CaptureFormConfig`, `LocationFormConfig`, `AdsbTruthConfig`, `Tar1090Config`, `RetinaTrackerConfig`, plus `ContactFormConfig` and `ClaimFormConfig` used by the setup routes), length caps, YAML load/save and dict helpers. |
+| [src/config_schema.py](../../src/config_schema.py) | Pydantic form models (`CaptureFormConfig`, `LocationFormConfig`, `AdsbTruthConfig`, `Tar1090Config`, plus `ContactFormConfig` and `ClaimFormConfig` used by the setup routes), length caps, YAML load/save and dict helpers. |
 | [src/config_manager.py](../../src/config_manager.py) | `ConfigManager`: reads `config.yml` and `user.yml`, flattens nested YAML into form fields and back, parses the posted form, computes the overrides to write. |
 | [src/form_utils.py](../../src/form_utils.py) | `schema_to_form_fields`: turns a Pydantic model plus current values into the field dicts the template renders. Works on Pydantic v1 and v2. |
 | [src/routes/config.py](../../src/routes/config.py) | Blueprint: `/config`, `/config/save`, `/config/apply`, `/config/apply/status`, `/config/rf-status`, plus `/ssh-keys`, `/ssh-keys/delete` and `/node-name`. Cross-field validation (location, ADS-B source). |
@@ -56,8 +56,9 @@ config-merger lives in retina-node and runs as part of every apply. Relevant beh
   migrations that recognise an unchanged first-boot copy of an old default and move it forward.
 - `migrate_gain_reduction` converts a legacy scalar `capture.device.gainReduction` into a
   `[reference, surveillance]` pair after the merge. See [Per-tuner gain and LNA](#per-tuner-gain-and-lna).
-- It also generates `tar1090.env` from the `tar1090` section and `retina-tracker.yaml` from the
-  `retina_tracker` section, which is how those two form sections reach their containers.
+- It also generates `tar1090.env` from the `tar1090` section, which is how that form section
+  reaches its container. It still generates `retina-tracker.yaml`, but no longer from anything
+  this page writes: see [No tracking section](#no-tracking-section).
 
 ## Form generation
 
@@ -70,7 +71,6 @@ it with the matching model to `form_utils.schema_to_form_fields`:
 | `location` | `location.rx`, `location.tx` | `ConfigManager.flatten_location_for_form` | `LocationFormConfig` |
 | `truth` | `truth.adsb` | (used as is) | `AdsbTruthConfig` |
 | `tar1090` | `tar1090` | `ConfigManager.parse_tar1090_adsb_source` | `Tar1090Config` |
-| `retina_tracker` | `retina_tracker` | (used as is) | `RetinaTrackerConfig` |
 
 The models are flat on purpose: nested YAML such as `capture.device.lnaState` becomes a flat field
 (`device_lnaState`) so one model maps to one form section.
@@ -121,7 +121,7 @@ The side nav and the page share one order, in five groups:
 | Group | Sections | Saved by |
 | --- | --- | --- |
 | Node | Identifiers, Mode, Node Claim, Network | Each on its own (Mode on Apply changes, see [Mode switch](#mode-switch)) |
-| Radar | Cached Towers, Tower, Capture, Tracking | Apply changes |
+| Radar | Cached Towers, Tower, Capture | Apply changes |
 | ADS-B | ADS-B Truth, tar1090 | Apply changes |
 | Other | SSH Access, Setup Wizard | Each on its own |
 | Support | Cloud Services, Remote Support, How We Reach You | Each on its own |
@@ -164,7 +164,6 @@ A group's first section stops a little lower still, so its group title stays in 
 | Capture | `fs`, `device_type` (readonly), `device_agcSetPoint`, `device_gainReductionA/B`, `device_lnaState`, `device_dabNotch`, `device_rfNotch`, `device_bandwidthNumber` | `fs` and `device_bandwidthNumber` are `Literal` selects. `fc` belongs to this model but is shown in the Tower section. |
 | ADS-B Truth | `enabled`, `tar1090`, `adsb2dd`, `delay_tolerance`, `doppler_tolerance` | Stored under `truth.adsb`. |
 | tar1090 | `adsb_source_host/port/protocol`, `adsblol_fallback`, `adsblol_radius` | See [ADS-B source](#ads-b-source). |
-| Tracking | `min_snr` | Tunes the retina-tracker sidecar, not blah2's built-in tracker (`process.tracker`). Reaches the sidecar via config-merger's `retina-tracker.yaml`. Its own section, straight after Capture: it governs what is done with detections afterwards, not how the signal is captured. Posted as `retina_tracker.min_snr`. |
 
 ### Tower section
 
@@ -184,15 +183,41 @@ The section that lists the wizard's search results, and was called Tower before,
 
 ### Receiver name
 
-The receiver is the node, so `location.rx.name` is not a second name to keep. The Tower
-section shows the node's name (set under Identifiers) read-only, and posts it as
-`location.rx_name` in a hidden field, so Apply changes writes it to the radar config. An unnamed
-node goes by its node ID, which is also what the setup wizard writes (`/towers/select`).
+The receiver is the node, so `location.rx.name` is not a second name to keep. One rule decides
+it everywhere: the node's name as set under Identifiers, falling back to the node ID when the
+node is unnamed, always as a string. `node_name.receiver_name` is that rule, and both writers
+call it: `/config/save` and the wizard's tower step (`/towers/select`).
 
-Renaming the node under Identifiers saves at once and updates what Tower shows and will post,
-but the radar config's copy only changes with the next Apply changes. Nothing reads that copy to
-address the node, so the lag is harmless; it is not worth a stack restart on every rename, which
-is what keeping the two in step immediately would cost.
+It is decided on the server, not posted. The Tower section shows the name read-only and sends no
+copy of it, so a crafted POST cannot set a different one, and a node named `1234` or `true` stays
+a string rather than being typed by `parse_flat_form_data` into an int or a bool. On pydantic v2
+a coerced name fails `LocationFormConfig` on every Apply, which is how the typing bug showed up.
+
+Before this, the page posted the name in a hidden field and the wizard wrote the node ID
+unconditionally, so the two disagreed: an Apply wrote the name, then running the tower step wrote
+the ID back over it.
+
+Renaming under Identifiers saves at once and updates what Tower shows, but the radar config's
+copy only changes with the next Apply changes or tower selection. **Home's subtitle is drawn from
+that copy** (`routes/home.py` reads `location.rx.name`), so a rename does not reach Home until
+one of those runs. That lag is deliberate: keeping the two in step immediately would mean a stack
+restart on every rename.
+
+Because this rule is the only writer, a receiver name an owner set by hand before it existed is
+replaced the next time either endpoint writes the location.
+
+### No tracking section
+
+The page had a Tracking section whose only field was `retina_tracker.min_snr`. retina-tracker
+stopped reading it in v0.5.0 (`ed9bbea`, "Track every detection: no per-site SNR threshold"), so
+the field tuned nothing, and the section is gone along with `RetinaTrackerConfig` and the
+`retina_tracker.` form prefix.
+
+config-merger still writes `retina-tracker.yaml`, just not from anything this page sets. A node
+whose `user.yml` still carries a `retina_tracker` block is cleaned up by the next save:
+`/config/save` keeps dropping the key when it rebuilds `user.yml`, even though nothing writes it
+back. A config that still sets `min_snr` is loaded and ignored by the tracker, so nothing breaks
+in the meantime.
 
 ### Transmitter name length
 
@@ -288,7 +313,7 @@ Apply changes (submit)
 ### Parsing the posted form
 
 `ConfigManager.parse_flat_form_data` splits `request.form` by prefix (`capture.`, `location.`,
-`truth.`, `tar1090.`, `retina_tracker.`). Values are typed by their shape, not by the schema:
+`truth.`, `tar1090.`). Values are typed by their shape, not by the schema:
 `true`/`false`/`on` become booleans, strings containing `.` are tried as floats, others as ints,
 and anything that fails stays a string. Empty strings are dropped. Unchecked checkboxes are not
 posted, so the parser fills `device_dabNotch`, `device_rfNotch`, `truth.enabled` and
@@ -537,8 +562,10 @@ save bar does not claim changes that are already on disk.
 
 ## Administration sections
 
-Everything that is not a radar field saves on its own endpoint, immediately, and is not part of
-Apply changes. These sections are spread across the Node, Support and Other groups (see
+Everything that is not a radar field saves on its own endpoint, immediately, rather than waiting
+for Apply changes. Mode is the exception: it posts to `/sdr/mode`, but the page stages the choice
+and sends it as part of the Apply changes flow, so a mode switch and a config change are applied
+together. These sections are spread across the Node, Support and Other groups (see
 [Page layout](#page-layout)); what they share is how they save.
 
 | Section | Group | Endpoint | Notes |

@@ -14,8 +14,7 @@ import pytest
 LAYOUT = [
     ("Node", [("identifiers", "Identifiers"), ("mode", "Mode"), ("claim", "Node Claim"),
               ("network", "Network")]),
-    ("Radar", [("cached-towers", "Cached Towers"), ("tower", "Tower"), ("capture", "Capture"),
-               ("tracking", "Tracking")]),
+    ("Radar", [("cached-towers", "Cached Towers"), ("tower", "Tower"), ("capture", "Capture")]),
     ("ADS-B", [("truth", "ADS-B Truth"), ("tar1090", "tar1090")]),
     ("Other", [("ssh", "SSH Access"), ("wizard", "Setup Wizard")]),
     ("Support", [("cloud", "Cloud Services"), ("remote", "Remote Support"),
@@ -132,10 +131,16 @@ def test_the_form_posts_every_radar_field_on_the_page(page):
     inside = {field_name(f) for f in named_fields(form_markup(page))}
 
     assert {n.split(".")[0] for n in radar} == {
-        "capture", "location", "truth", "tar1090", "retina_tracker"}
+        "capture", "location", "truth", "tar1090"}
     assert radar <= inside, sorted(radar - inside)
     # No field reaches into the form from outside it either.
     assert not [f for f in named_fields(main) if 'form="configForm"' in f]
+
+
+def test_the_form_holds_no_nested_form(page):
+    """A nested <form> is dropped by the parser, so the fields after it would
+    post on their own and Apply changes would save a subset of the page."""
+    assert "<form" not in form_markup(page)
 
 
 def test_a_save_stores_fields_from_every_group_in_the_form(app_client, user_config_file):
@@ -154,7 +159,18 @@ def test_a_save_stores_fields_from_every_group_in_the_form(app_client, user_conf
         "capture.device_dabNotch": "on",
         "capture.device_rfNotch": "on",
         "capture.device_bandwidthNumber": "5",
-        "retina_tracker.min_snr": "9.5",
+        "location.rx_latitude": "40.0",
+        "location.rx_longitude": "-75.0",
+        "location.rx_altitude": "30",
+        "location.tx_latitude": "40.5",
+        "location.tx_longitude": "-75.5",
+        "location.tx_altitude": "250",
+        "location.tx_name": "KTST-TV",
+        "truth.enabled": "on",
+        "truth.tar1090": "tar1090.example.com",
+        "truth.adsb2dd": "localhost:49155",
+        "truth.delay_tolerance": "3.5",
+        "truth.doppler_tolerance": "6.5",
         "tar1090.adsblol_fallback": "on",
         "tar1090.adsblol_radius": "77",
     }, follow_redirects=False)
@@ -162,7 +178,9 @@ def test_a_save_stores_fields_from_every_group_in_the_form(app_client, user_conf
 
     with open(user_config_file) as f:
         saved = yaml.safe_load(f)
-    assert saved["retina_tracker"]["min_snr"] == 9.5
+    assert saved["capture"]["device"]["lnaState"] == 5
+    assert saved["location"]["tx"]["name"] == "KTST-TV"
+    assert saved["truth"]["adsb"]["delay_tolerance"] == 3.5
     assert saved["tar1090"]["adsblol_radius"] == 77
 
 
@@ -193,17 +211,6 @@ def test_cached_towers_holds_the_tower_list_and_no_radar_field(page):
     assert not named_fields(cached)
 
 
-# ── Tracking ───────────────────────────────────────────────────
-
-
-def test_minimum_snr_has_its_own_section_after_capture(page):
-    """Tracking is what happens to detections afterwards, not part of how the
-    signal is captured, so it is not a Capture setting."""
-    assert 'name="retina_tracker.min_snr"' in section(page, "tracking")
-    assert 'name="retina_tracker.min_snr"' not in section(page, "capture")
-    assert SECTION_IDS[SECTION_IDS.index("capture") + 1] == "tracking"
-
-
 # ── The receiver goes by the node's name ───────────────────────
 
 
@@ -226,11 +233,12 @@ def test_the_tower_section_shows_the_node_s_name_and_cannot_change_it(app_client
     assert 'href="#identifiers"' in tower
 
 
-def test_the_tower_section_posts_the_node_s_name_as_the_receiver_name(app_client, telemetry, named):
-    """So the radar config follows the name rather than keeping a second one."""
+def test_the_tower_section_does_not_post_the_receiver_name(app_client, telemetry, named):
+    """The server decides it on every write, so the page posts no copy the
+    browser could change. See docs/features/config-editor.md#receiver-name."""
     named("Sample Rooftop")
     tower = section(app_client.get("/config").data.decode(), "tower")
-    assert '<input type="hidden" name="location.rx_name" id="rxNameValue" value="Sample Rooftop">' in tower
+    assert 'name="location.rx_name"' not in tower
 
 
 def test_an_unnamed_node_s_receiver_goes_by_its_id(app_client, telemetry, named):
@@ -238,7 +246,62 @@ def test_an_unnamed_node_s_receiver_goes_by_its_id(app_client, telemetry, named)
     named("")
     tower = section(app_client.get("/config").data.decode(), "tower")
     assert re.search(r'id="rxNameDisplay">\s*ret7a000001\s*<', tower)
-    assert 'name="location.rx_name" id="rxNameValue" value="ret7a000001"' in tower
+
+
+def test_a_save_writes_the_node_s_name_as_the_receiver_name(app_client, user_config_file, named):
+    """Decided server-side, so it lands even though the form posts no copy."""
+    import yaml
+
+    named("Sample Rooftop")
+    response = app_client.post("/config/save", data={
+        "location.rx_latitude": "40.0", "location.rx_longitude": "-75.0",
+        "location.rx_altitude": "30", "location.tx_latitude": "40.5",
+        "location.tx_longitude": "-75.5", "location.tx_altitude": "250",
+        "location.tx_name": "KTST-TV",
+    }, follow_redirects=False)
+    assert response.status_code == 302
+
+    with open(user_config_file) as f:
+        saved = yaml.safe_load(f)
+    assert saved["location"]["rx"]["name"] == "Sample Rooftop"
+
+
+def test_a_numeric_node_name_stays_a_string(app_client, user_config_file, named):
+    """parse_flat_form_data used to coerce the posted copy, so a node named
+    "1234" was stored as an int and "true" as a bool."""
+    import yaml
+
+    named("1234")
+    response = app_client.post("/config/save", data={
+        "location.rx_latitude": "40.0", "location.rx_longitude": "-75.0",
+        "location.rx_altitude": "30", "location.tx_latitude": "40.5",
+        "location.tx_longitude": "-75.5", "location.tx_altitude": "250",
+        "location.tx_name": "KTST-TV",
+    }, follow_redirects=False)
+    assert response.status_code == 302
+
+    with open(user_config_file) as f:
+        saved = yaml.safe_load(f)
+    assert saved["location"]["rx"]["name"] == "1234"
+
+
+def test_a_posted_receiver_name_is_ignored(app_client, user_config_file, named):
+    """The browser cannot set it, however the POST is crafted."""
+    import yaml
+
+    named("Sample Rooftop")
+    response = app_client.post("/config/save", data={
+        "location.rx_latitude": "40.0", "location.rx_longitude": "-75.0",
+        "location.rx_altitude": "30", "location.tx_latitude": "40.5",
+        "location.tx_longitude": "-75.5", "location.tx_altitude": "250",
+        "location.tx_name": "KTST-TV",
+        "location.rx_name": "Somewhere Else",
+    }, follow_redirects=False)
+    assert response.status_code == 302
+
+    with open(user_config_file) as f:
+        saved = yaml.safe_load(f)
+    assert saved["location"]["rx"]["name"] == "Sample Rooftop"
 
 
 # ── Identifiers ────────────────────────────────────────────────

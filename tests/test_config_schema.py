@@ -18,7 +18,6 @@ from config_schema import (
     AdsbTruthConfig,
     CaptureFormConfig,
     LocationFormConfig,
-    RetinaTrackerConfig,
     Tar1090Config,
     load_yaml_file,
     save_yaml_file,
@@ -278,22 +277,6 @@ class TestAdsbTruthConfig:
                 enabled=True, tar1090='x', adsb2dd='x',
                 delay_tolerance=-1, doppler_tolerance=5.0
             )
-
-
-class TestRetinaTrackerConfig:
-    """Test retina_tracker config validation."""
-
-    def test_valid_config(self):
-        """Valid config should pass."""
-        config = RetinaTrackerConfig(min_snr=4.5)
-        assert config.min_snr == 4.5
-
-    def test_min_snr_must_be_positive(self):
-        """min_snr must be > 0."""
-        with pytest.raises(ValidationError):
-            RetinaTrackerConfig(min_snr=0)
-        with pytest.raises(ValidationError):
-            RetinaTrackerConfig(min_snr=-1)
 
 
 class TestTar1090Config:

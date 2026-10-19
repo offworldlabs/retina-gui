@@ -94,7 +94,6 @@
         <a href="#cached-towers">Cached Towers</a>
         <a href="#tower">Tower</a>
         <a href="#capture">Capture</a>
-        <a href="#tracking">Tracking</a>
         <h3>ADS-B</h3>
         <a href="#truth">ADS-B Truth</a>
         <a href="#tar1090">tar1090</a>
@@ -485,13 +484,13 @@
                 <div class="ds-label-micro" style="margin-bottom:10px;">Receiver</div>
                 <div class="cfg-grid" style="margin-bottom:0;">
                     <div style="grid-column:1/-1;" class="cfg-row" style="padding:0;border:0;">
-                        {# Not edited here: the receiver is this node, so it goes by
-                           the node's name. Posted so the radar config follows it.
+                        {# Shown, never posted: the receiver is this node, so the
+                           server decides the name on every write and the browser
+                           cannot send a different one.
                            See docs/features/config-editor.md#receiver-name #}
                         <div class="label-col"><label>Name</label><span class="help">This node's name. Change it under <a href="#identifiers">Identifiers</a>.</span></div>
                         <div>
                             <div class="cfg-readonly" id="rxNameDisplay">{{ node_name or node_id }}</div>
-                            <input type="hidden" name="location.rx_name" id="rxNameValue" value="{{ node_name or node_id }}">
                             {% if rx_name_err %}<div style="color:var(--danger);font-size:12px;margin-top:4px;">{{ rx_name_err }}</div>{% endif %}
                         </div>
                     </div>
@@ -650,22 +649,6 @@
                 {# Center frequency is in the Tower section, with its tower. #}
                 {% for field in capture_fields if field.name != 'fc' %}
                     {{ render_field(field, 'capture') }}
-                {% endfor %}
-            </div>
-        </section>
-
-        {# ── Tracking ──
-           Its own section, not part of Capture: this is what is done with the
-           detections afterwards, not how the signal is captured.
-           See docs/features/config-editor.md#sections-and-schema-models #}
-        <section id="tracking" class="cfg-section">
-            <div class="cfg-section-head">
-                <h2>Tracking</h2>
-                <span class="desc">How detections are turned into tracks after capture.</span>
-            </div>
-            <div class="cfg-body" {% if not retina_installed %}style="opacity:.5;pointer-events:none;"{% endif %}>
-                {% for field in retina_tracker_fields %}
-                    {{ render_field(field, 'retina_tracker') }}
                 {% endfor %}
             </div>
         </section>
@@ -1132,11 +1115,11 @@ var NODE_ID = {{ node_id | tojson }};
                 if (result.ok && result.d.ok) {
                     input.value = result.d.name;
                     show(result.d.name ? 'Saved.' : 'Saved. This node will be listed by identifier.', true);
-                    // Location shows the same name, and posts it with the next Apply.
+                    // Tower's read-only copy follows at once. Nothing is staged:
+                    // the radar config's rx.name is written server-side by the
+                    // next Apply changes, not posted from this page.
                     // See docs/features/config-editor.md#receiver-name
-                    var shown = result.d.name || NODE_ID;
-                    document.getElementById('rxNameDisplay').textContent = shown;
-                    document.getElementById('rxNameValue').value = shown;
+                    document.getElementById('rxNameDisplay').textContent = result.d.name || NODE_ID;
                 } else {
                     show(result.d.error || 'Could not save the name.', false);
                 }
@@ -1802,7 +1785,7 @@ if (discardBtn) discardBtn.addEventListener('click', () => location.reload());
 // Side-nav scrollspy
 (function() {
     // Page order: the first of these on screen is the one marked active.
-    var sectionIds = ['identifiers','mode','claim','network','cached-towers','tower','capture','tracking',
+    var sectionIds = ['identifiers','mode','claim','network','cached-towers','tower','capture',
                       'truth','tar1090','ssh','wizard','cloud','remote','contact'];
     var links = {};
     sectionIds.forEach(function(id) {
