@@ -14,6 +14,7 @@
     --surface-2:   oklch(0.985 0.003 75);
     --line:        oklch(0.93 0.005 75);
     --line-2:      oklch(0.96 0.004 75);
+    --line-strong: oklch(0.86 0.006 75);
 
     --ink:         oklch(0.20 0.012 260);
     --ink-2:       oklch(0.42 0.012 260);
@@ -893,10 +894,14 @@ h1, h2, h3, h4, h5, h6 {
     flex-direction: column;
     gap: 2px;
 }
+/* Group titles carry a rule, as they do in the page (.cfg-group), so they
+   read as dividers and not as one more link in the list. */
 .side h3 {
+    display: flex; align-items: center; gap: 10px;
     font-size: 11.5px; text-transform: uppercase; letter-spacing: 0.08em;
-    color: var(--ink-3); font-weight: 600; margin: 14px 0 4px 10px;
+    color: var(--ink-3); font-weight: 600; margin: 18px 0 6px 10px;
 }
+.side h3::after { content: ""; flex: 1; height: 1px; background: var(--line-strong); }
 .side h3:first-child { margin-top: 0; }
 .side a {
     display: flex; align-items: center; gap: 10px;
@@ -920,8 +925,27 @@ h1, h2, h3, h4, h5, h6 {
     border-radius: var(--r-lg);
     overflow: hidden;
     box-shadow: var(--shadow-sm);
+    /* The banner is sticky, so a section scrolled to from the side nav would
+       otherwise stop with its heading underneath it. */
+    scroll-margin-top: 68px;
 }
 .cfg-section + .cfg-section { margin-top: 12px; }
+
+/* Group titles in the page: the side nav's headings again, each with a rule
+   running out to the right edge to mark where one group ends and the next
+   starts. See docs/features/config-editor.md#page-layout */
+.cfg-group {
+    display: flex; align-items: center; gap: 14px;
+    margin: 40px 0 14px;
+    font-size: 12.5px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.08em;
+    color: var(--ink-2);
+}
+.cfg-group::after { content: ""; flex: 1; height: 1px; background: var(--line-strong); }
+main > .cfg-group:first-of-type { margin-top: 0; }
+/* A group's first section stops lower when scrolled to from the side nav, so
+   its group title stays in view above it. */
+.cfg-group + .cfg-section,
+.cfg-group + form > .cfg-section:first-of-type { scroll-margin-top: 112px; }
 
 .cfg-section-head {
     display: flex; align-items: center; gap: 14px;
@@ -1038,7 +1062,7 @@ h1, h2, h3, h4, h5, h6 {
 .ssh-key  { font-family: var(--font-mono); font-size: 11.5px; color: var(--ink-3);
             white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
-/* Manage-list row matching the form's current transmitter (see Tower section JS) */
+/* Manage-list row matching the form's current transmitter (see Cached Towers section JS) */
 #towerManageList .ssh-item.selected {
     background: var(--accent-soft);
     border-color: var(--accent-edge);

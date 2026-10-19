@@ -427,9 +427,52 @@ class TestTowerSelect:
         with open(user_path) as f:
             saved = yaml.safe_load(f)
         assert saved['location']['rx']['latitude'] == -33.8688
-        assert saved['location']['rx']['name'] == 'ret7a000001'  # node_id
+        assert saved['location']['rx']['name'] == 'ret7a000001'  # unnamed node
         assert saved['location']['tx']['latitude'] == -33.820079
         assert saved['location']['tx']['name'] == 'ATN6'  # callsign
+
+    def test_select_writes_the_node_s_name_not_its_id(self, app_client, config_files, monkeypatch):
+        """The wizard used to write the id unconditionally, so running the
+        tower step undid a rename that Apply changes had written.
+        See docs/features/config-editor.md#receiver-name."""
+        import app as app_module
+        monkeypatch.setattr(app_module.node_name, 'get', lambda: 'Sample Rooftop')
+        user_path, _ = config_files
+
+        resp = app_client.post(
+            '/towers/select',
+            data=json.dumps({
+                "rx_latitude": 40.0, "rx_longitude": -75.0, "rx_altitude": 30.0,
+                "tx_latitude": 40.5, "tx_longitude": -75.5, "tx_altitude": 250.0,
+                "tx_callsign": "KTST-TV",
+            }),
+            content_type='application/json',
+        )
+        assert resp.status_code == 202
+
+        with open(user_path) as f:
+            saved = yaml.safe_load(f)
+        assert saved['location']['rx']['name'] == 'Sample Rooftop'
+
+    def test_select_keeps_a_numeric_node_name_a_string(self, app_client, config_files, monkeypatch):
+        """A node named "1234" must not reach the config as an int."""
+        import app as app_module
+        monkeypatch.setattr(app_module.node_name, 'get', lambda: '1234')
+        user_path, _ = config_files
+
+        app_client.post(
+            '/towers/select',
+            data=json.dumps({
+                "rx_latitude": 40.0, "rx_longitude": -75.0, "rx_altitude": 30.0,
+                "tx_latitude": 40.5, "tx_longitude": -75.5, "tx_altitude": 250.0,
+                "tx_callsign": "KTST-TV",
+            }),
+            content_type='application/json',
+        )
+
+        with open(user_path) as f:
+            saved = yaml.safe_load(f)
+        assert saved['location']['rx']['name'] == '1234'
 
     def test_select_missing_body(self, app_client):
         """Returns 400 when body is missing."""

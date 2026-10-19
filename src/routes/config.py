@@ -9,11 +9,11 @@ from config_schema import (
     AdsbTruthConfig,
     CaptureFormConfig,
     LocationFormConfig,
-    RetinaTrackerConfig,
     Tar1090Config,
 )
 from form_utils import schema_to_form_fields
 from node_name import MAX_LENGTH as NAME_MAX_LENGTH
+from node_name import receiver_name
 
 bp = Blueprint('config', __name__)
 
@@ -66,6 +66,9 @@ def _remote_access_context():
         'claim': device_state.get_telemetry_claim(),
         'claim_state': (telemetry or {}).get('claim'),
         'claim_reported': telemetry is not None and not (telemetry or {}).get('stale'),
+        # The server's name for this node, or None before it has registered.
+        # See docs/features/config-editor.md#identifiers
+        'server_node_ref': (telemetry or {}).get('node_ref'),
         # The *enforced* shell state, read back from mender-connect's config,
         # not what we recorded. None when that config cannot be read.
         'shell_enforced': mender_connect.is_shell_enabled(),
@@ -96,16 +99,12 @@ def config_page():
     tar1090_values = config_mgr.parse_tar1090_adsb_source(config)
     tar1090_fields = schema_to_form_fields(Tar1090Config, tar1090_values)
 
-    retina_tracker_values = (config.get('retina_tracker', {}) or {})
-    retina_tracker_fields = schema_to_form_fields(RetinaTrackerConfig, retina_tracker_values)
-
     return render_template("config.html",
                            retina_installed=retina_installed,
                            capture_fields=capture_fields,
                            location_fields=location_fields,
                            truth_fields=truth_fields,
                            tar1090_fields=tar1090_fields,
-                           retina_tracker_fields=retina_tracker_fields,
                            towers_cache=device_state.get_towers_cache(),
                            node_name=node_name.get(),
                            node_name_max_length=NAME_MAX_LENGTH,
@@ -160,7 +159,7 @@ def set_node_name():
     """Rename this node.
 
     Only a label (fleet page, DNS-SD TXT record): nothing addresses the node
-    by it. See docs/features/config-editor.md#this-node.
+    by it. See docs/features/config-editor.md#identifiers.
     """
     from app import node_name
 
@@ -218,10 +217,17 @@ def _adsb_source_errors(tar1090_data):
 @bp.route("/config/save", methods=["POST"])
 def save_config():
     """Save config form data to user.yml."""
-    from app import config_mgr
+    from app import config_mgr, get_node_id, node_name
     from config_manager import ConfigManager
 
-    capture_flat, location_flat, truth_data, tar1090_data, retina_tracker_data = ConfigManager.parse_flat_form_data(request.form.to_dict())
+    capture_flat, location_flat, truth_data, tar1090_data = ConfigManager.parse_flat_form_data(request.form.to_dict())
+
+    # The receiver is this node, so its name is decided here rather than posted:
+    # the browser cannot send a different one, and it stays a string. Only when
+    # the location is being written at all, so a save of another section is not
+    # turned into a location write. See docs/features/config-editor.md#receiver-name
+    if location_flat:
+        location_flat['rx_name'] = receiver_name(node_name.get(), get_node_id())
 
     all_errors = {}
 
@@ -261,21 +267,14 @@ def save_config():
             all_errors.update(ConfigManager.format_validation_errors(e, 'tar1090'))
         all_errors.update(_adsb_source_errors(tar1090_data))
 
-    if retina_tracker_data:
-        try:
-            RetinaTrackerConfig(**retina_tracker_data)
-        except ValidationError as e:
-            all_errors.update(ConfigManager.format_validation_errors(e, 'retina_tracker'))
-
     if all_errors:
-        from app import DEV_MODE, device_state, node_name, ssh_keys
+        from app import DEV_MODE, device_state, ssh_keys
         return render_template("config.html",
                                retina_installed=config_mgr.is_retina_node_installed() or DEV_MODE or request.args.get('demo') == '1',
                                capture_fields=schema_to_form_fields(CaptureFormConfig, capture_flat),
                                location_fields=schema_to_form_fields(LocationFormConfig, location_flat),
                                truth_fields=schema_to_form_fields(AdsbTruthConfig, truth_data),
                                tar1090_fields=schema_to_form_fields(Tar1090Config, tar1090_data),
-                               retina_tracker_fields=schema_to_form_fields(RetinaTrackerConfig, retina_tracker_data),
                                towers_cache=device_state.get_towers_cache(),
                                config_errors=all_errors,
                                node_name=node_name.get(),
@@ -301,6 +300,9 @@ def save_config():
 
     new_user_config = {}
     for key in existing_user:
+        # retina_tracker is still dropped though the page no longer writes it:
+        # the tracker stopped reading min_snr, so a stale key is cleared out on
+        # the next save. See docs/features/config-editor.md#no-tracking-section
         if key not in ('capture', 'location', 'truth', 'tar1090', 'retina_tracker'):
             new_user_config[key] = existing_user[key]
 
@@ -324,11 +326,6 @@ def save_config():
         tar1090_overrides = config_mgr.compute_user_overrides(tar1090_nested, merged_config, existing_user, 'tar1090')
         if tar1090_overrides:
             new_user_config['tar1090'] = tar1090_overrides
-
-    if retina_tracker_data:
-        retina_tracker_overrides = config_mgr.compute_user_overrides(retina_tracker_data, merged_config, existing_user, 'retina_tracker')
-        if retina_tracker_overrides:
-            new_user_config['retina_tracker'] = retina_tracker_overrides
 
     config_mgr.save_user_config(new_user_config)
     return redirect(url_for("config.config_page") + "?saved=1")

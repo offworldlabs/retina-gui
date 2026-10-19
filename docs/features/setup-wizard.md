@@ -197,7 +197,7 @@ Optional name, email, phone and a two-letter phone country, placed straight afte
 so it is asked while the owner is still answering questions about themselves rather than about
 the radar. Nothing downstream blocks on it.
 
-- **Save and continue** posts to `/set-up/contact`, the same route the "How we reach you"
+- **Save and continue** posts to `/set-up/contact`, the same route the "How We Reach You"
   section on the Configuration page uses, so the two surfaces cannot drift into storing
   different shapes.
 - **Skip** writes nothing and moves on. Skipping is an answer, not an abandonment, and anything
@@ -222,7 +222,7 @@ the radar. Nothing downstream blocks on it.
 Asks for an email address to send a claim link to. Opening the link binds the node to the
 account behind that address, creating one if needed.
 
-- Posts to `/set-up/claim`, the same route as the Node claim section on the Configuration page.
+- Posts to `/set-up/claim`, the same route as the Node Claim section on the Configuration page.
 - An empty box is filled with the contact email from the previous step as a suggestion only.
   Nothing is sent until **Send link and continue** is pressed.
 - Send with an empty box is refused on the page ("Enter an email address, or skip this step"),

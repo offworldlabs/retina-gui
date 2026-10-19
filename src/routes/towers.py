@@ -5,6 +5,7 @@ from pydantic import ValidationError
 from apply_service import ConfigChangeRefused
 from config_manager import ConfigManager
 from config_schema import TX_NAME_MAX_LENGTH, LocationFormConfig
+from node_name import receiver_name
 
 bp = Blueprint('towers', __name__, url_prefix='/towers')
 
@@ -310,7 +311,7 @@ def select():
     Returns 202 once queued; poll /config/apply/status for progress.
     See docs/features/towers.md#saving-a-tower-selection.
     """
-    from app import apply_service, config_mgr, device_state, get_node_id
+    from app import apply_service, config_mgr, device_state, get_node_id, node_name
 
     data = request.get_json()
     if not data:
@@ -321,7 +322,9 @@ def select():
         "rx_latitude": data.get("rx_latitude"),
         "rx_longitude": data.get("rx_longitude"),
         "rx_altitude": data.get("rx_altitude"),
-        "rx_name": node_id,
+        # Same rule as /config/save, so the wizard cannot write a different
+        # receiver name. See docs/features/config-editor.md#receiver-name
+        "rx_name": receiver_name(node_name.get(), node_id),
         "tx_latitude": data.get("tx_latitude"),
         "tx_longitude": data.get("tx_longitude"),
         "tx_altitude": data.get("tx_altitude"),

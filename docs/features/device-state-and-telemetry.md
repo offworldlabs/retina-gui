@@ -152,7 +152,7 @@ The checkbox wording and this constant are a matched pair across a template and 
 
 ## Contact details
 
-`telemetry-contact.json` records whom to contact about the node. It is written by one route, `/set-up/contact`, used by both the wizard step and the How we reach you section on the configuration page, so the two cannot drift into storing different shapes. The shape mirrors the wire's `NodeContact`.
+`telemetry-contact.json` records whom to contact about the node. It is written by one route, `/set-up/contact`, used by both the wizard step and the How We Reach You section on the configuration page, so the two cannot drift into storing different shapes. The shape mirrors the wire's `NodeContact`.
 
 - It is kept out of `telemetry-consent.json` on purpose. The consent records are versioned acceptances neither end may invent, and retina-telemetry refuses to register without all three. A mutable optional document sharing that file would let a malformed contact stop a node registering. The wire treats them as separate endpoints too.
 - Empty values are dropped rather than written as null, and a document with nothing left in it removes the file. The spec says a node with nothing to report never calls the endpoint, so no file is the honest way to say that. It is what an owner who skipped the step and an owner who cleared every box both mean, which is also why `get_telemetry_contact` returns `{}` rather than `None`: "never given" and "cleared" are the same downstream. Clearing is a real outcome rather than a no-op.
@@ -239,7 +239,7 @@ The GUI therefore keeps a last-known-good copy in `telemetry-node-ref`:
 | Surface | What it shows |
 | --- | --- |
 | Home page Telemetry card (`index.html`) | Absent entirely when `read()` returns `None` (not a fault, so no card rather than an empty one). Otherwise the node reference (or "no identifier yet"), a status pill (Not running when stale, else the state), and either the stale message using `last_report` or `detail` verbatim. |
-| Configuration page, Node claim section (`config.html`) | The stored claim address (`get_telemetry_claim`) alongside what the server has actually done with it (`claim` from the status document). The two disagree until the next heartbeat. When telemetry is not reporting the section says so rather than guessing. Send link is disabled once the node is owned. |
+| Configuration page, Node Claim section (`config.html`) | The stored claim address (`get_telemetry_claim`) alongside what the server has actually done with it (`claim` from the status document). The two disagree until the next heartbeat. When telemetry is not reporting the section says so rather than guessing. Send link is disabled once the node is owned. |
 | Configuration page, contact section | `get_telemetry_contact`. |
 | Setup wizard (`routes/setup.py`) | Prefills the claim step from the stored address, or, on an owned node (a wizard re-run), from the owner's address in the status document, and then only lets the step be skipped. |
 | Fleet `/healthz` (`routes/fleet.py`) | `telemetry_payload`: just `node_ref`, `state` and `stale`. Local file reads only, because peers use `/healthz` to decide whether this node exists, and anything slow would make a busy node look absent. |

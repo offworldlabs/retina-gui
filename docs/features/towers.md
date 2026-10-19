@@ -154,8 +154,11 @@ it clear of CSRF.
 
 `select()` is how the wizard commits a location. It:
 
-1. Builds a flat location from the request (`rx_name` is always the node ID, `tx_name` is the
-   tower's callsign) and validates it with `LocationFormConfig`.
+1. Builds a flat location from the request (`tx_name` is the tower's callsign) and validates it
+   with `LocationFormConfig`. `rx_name` is not taken from the request: it comes from
+   `node_name.receiver_name`, the same rule `/config/save` uses, so the wizard cannot write a
+   receiver name that disagrees with the one Apply changes writes. See
+   [Receiver name](config-editor.md#receiver-name).
 2. Refuses a location that is not fully sited (`is_located`). The model permits a wholly empty
    location because a node legitimately has none, but this endpoint is the one that sets one,
    so an empty POST must not silently unsite a configured node.
