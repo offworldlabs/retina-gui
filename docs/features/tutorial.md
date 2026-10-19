@@ -121,7 +121,6 @@ Summary and on Home is a [click-through step](#click-through-steps).
 | Configuration | Capture: overload | The Signal peak meter, with an example of the overload reading |
 | Configuration | Capture: automatic calibration | The two calibrate buttons |
 | Configuration | Capture: manual settings | The two gain reduction rows, the LNA state row and the two notch filter switches |
-| Configuration | Tracking: Minimum SNR | The Tracking section and its side-nav link |
 | Configuration | ADS-B settings | ADS-B Truth and tar1090, and their side-nav links |
 | Configuration | SSH Access | The SSH Access section and its side-nav link |
 | Summary | That's everything (closing) | The Resources and Help links again, with a link to the wiki |
@@ -134,7 +133,7 @@ The Support group is not toured: most of it is set during setup, and nothing in 
 the node performs.
 
 The body is held to a sentence or two so the card stays a caption rather than a manual, and
-`tests/test_tutorial.py` enforces it. Most are one. The Configuration welcome, the Minimum SNR step and the closing
+`tests/test_tutorial.py` enforces it. Most are one. The Configuration welcome and the closing
 step are two, because each has a second thing to say that is not about what is lit.
 
 The Configuration welcome says the tour skips the sections already completed during setup. That
@@ -143,16 +142,15 @@ an owner does not take a section the tour passes over for one that does not matt
 
 ### Tuning steps
 
-Capture gets four steps and Tracking a fifth because together they are the one piece of tuning
-an owner is expected to do, and it needs an order: what to watch (the Signal peak meter), what
-too far looks like, what to change (a calibration run, or the gain reduction, LNA and notch filter settings by
-hand), and then Minimum SNR. The first two show an example of the meter, because on a node that
-is not capturing, the meter on the page is empty.
+Capture gets four steps because it is the one piece of tuning an owner is expected to do, and it
+needs an order: what to watch (the Signal peak meter), what too far looks like, and what to
+change (a calibration run, or the gain reduction, LNA and notch filter settings by hand). The
+first two show an example of the meter, because on a node that is not capturing, the meter on the
+page is empty.
 
-The Minimum SNR step says the default is 7 even when the box is blank. The box is blank
-whenever the merged config carries no value, and the tracker then runs on its own default,
-which is set in retina-node, not in this repository. If that default changes, the step's
-wording has to change with it; nothing here can check it.
+There was a fifth step, Tracking: Minimum SNR. retina-tracker stopped reading `min_snr` in
+v0.5.0 and the field has gone from the Configuration page, so the step had nothing left to light
+up. See [No tracking section](config-editor.md#no-tracking-section).
 
 The overload step shows what the page does when the radio overloads: the tuner's reading turns
 to a red "overload" and the Overload help box appears under the meter (see

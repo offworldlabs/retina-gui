@@ -121,8 +121,8 @@ STEPS = (
                        "The ADS-B Map: aircraft drawn on a map around the node")),
     _step(HOME, "Tracker",
           "Opens the Tracker, which keeps up to 4 hours of data and lets you sort "
-          "by detections not associated with a track, tracks below the SNR "
-          "threshold, ADS-B verified tracks, and more.",
+          "by detections not associated with a track, ADS-B verified tracks, and "
+          "more.",
           ["svc-tracker"],
           image=_image("tracker.jpg", 1328, 547,
                        "The Tracker: tracks drawn across a delay-Doppler plot, with its filters")),
@@ -196,11 +196,6 @@ STEPS = (
           "Reduction settings, the Low Noise Amplifier State and the DAB and RF "
           "notch filters, applying each change and watching Signal peak.",
           ["cfg-manual", _target("cfg-capture-nav", arrow=False)]),
-    _step(CONFIG, "Tracking: Minimum SNR",
-          "Experiment with Minimum SNR too, which sets how strong a detection "
-          "must be before the tracker will use it. The default is 7, even when "
-          "the box is blank.",
-          ["cfg-tracking-nav", _target("cfg-tracking", arrow=False)]),
     _step(CONFIG, "ADS-B settings",
           "ADS-B Truth and tar1090 choose where aircraft positions come from, so "
           "radar detections can be matched against known flights.",
