@@ -143,6 +143,13 @@
                     L.polyline(coverage.span_ring, { color: SPAN_INK, weight: 1.2, opacity: 0.7, dashArray: '6 5', interactive: false })
                         .addTo(layers.wedge);
                 }
+                // Close-in slices are mostly aircraft overhead, not the antenna's
+                // pattern, so they are drawn lighter than the main lobes.
+                // See docs/features/tracker.md#wedge-view
+                (coverage.close_lobes || []).forEach(function (ring) {
+                    L.polygon(ring, { color: WEDGE_EDGE, weight: 1, opacity: 0.6, dashArray: '2 3', fillColor: WEDGE_FILL, fillOpacity: 0.05, interactive: false })
+                        .addTo(layers.wedge);
+                });
                 (coverage.lobes || []).forEach(function (ring) {
                     L.polygon(ring, { color: WEDGE_EDGE, weight: 1.4, fillColor: WEDGE_FILL, fillOpacity: 0.12, interactive: false })
                         .addTo(layers.wedge);
@@ -166,7 +173,7 @@
             if (fittedTo === target || fittedTo === 'lobes') return;
             var bounds = L.latLngBounds([[g.rx.lat, g.rx.lon], [g.tx.lat, g.tx.lon]]);
             if (lobes.length) {
-                lobes.forEach(function (ring) { bounds.extend(L.latLngBounds(ring)); });
+                lobes.concat(coverage.close_lobes || []).forEach(function (ring) { bounds.extend(L.latLngBounds(ring)); });
             } else {
                 bounds.extend(L.latLng(g.rx.lat, g.rx.lon).toBounds(DEFAULT_VIEW_M));
             }
@@ -209,6 +216,7 @@
                         + hhmm(coverage.since_ms);
             opts.statEl.textContent = label + ' · ' + coverage.aircraft + ' aircraft · '
                 + coverage.proven_bins + ' of ' + coverage.held_km.length + ' slices proven'
+                + (coverage.close_in_bins ? ' \u00b7 ' + coverage.close_in_bins + ' close-in' : '')
                 + (coverage.limited_bins ? ' \u00b7 ' + coverage.limited_bins + ' at the processed range limit' : '');
         }
 

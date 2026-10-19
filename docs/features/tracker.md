@@ -355,6 +355,7 @@ Every shape arrives ready made from retina-tracker, which owns the maths
 | Layer | Source | Drawn as |
 | --- | --- | --- |
 | The wedge | `GET /tracker/coverage`, polled every 30 s | Green lobes, each 5 degree slice drawn edge to edge at its held range |
+| Close-in slices | the same (`close_lobes`) | The same shape, much lighter with a dashed edge: slices held under `close_in_km` (10 km), which are mostly aircraft overhead rather than the antenna's pattern |
 | Receiver, transmitter, baseline | the same | RX ring, TX triangle, dashed line |
 | Processed range limit | the same (`span_ring`) | A grey dashed ellipse: the furthest bistatic range blah2 processes (`delayMax`). Absent when the node does not state one |
 | Labelled tracks | the stream's `lat`/`lon` columns | A trail through the verified positions, broken where they stop for over 15 s; an aircraft glyph with the hex while live (newest point under 15 s old), a small ring at the end otherwise |
@@ -369,11 +370,17 @@ kilometres off its own arc, more at altitude and close in.
 
 The footer has the legend and the wedge's evidence: "Last 24 h", or "Since reset at ..." or
 "Since ..." when the record is younger than the hold (judged on the node's clock, `now_ms`),
-with the number of aircraft and proven slices, and how many slices reach the processed range
-limit ("3 at the processed range limit"). Those slices reach as far as the node's delay setting
+with the number of aircraft and proven slices, how many of those are close-in ("30 close-in"),
+and how many slices reach the processed range limit ("3 at the processed range limit"). Those slices reach as far as the node's delay setting
 lets anything reach, so their range says nothing about the antenna; on a short-baseline node the
 main lobe sat there. retina-tracker decides which slices count (`limited`), see its
 `docs/coverage-wedge.md`.
+
+Close-in slices stay proven and counted; they are only drawn differently. On a test node they
+ringed the receiver in almost every direction at 1-8 km, from aircraft at a median 45 degrees
+elevation, which a flat map cannot tell from the horizontal pattern. retina-tracker's
+`docs/coverage-wedge.md` ("Close-in slices") has the measurement; drawing elevation properly is
+for the 3D wedge.
 
 A notice over the map explains an empty or missing wedge rather than showing a bare map:
 before any slice is proven, after a reset (manual, or because the receiver or transmitter
