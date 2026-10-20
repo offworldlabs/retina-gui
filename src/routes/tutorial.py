@@ -16,15 +16,28 @@ def _demo():
     return request.args.get("demo") == "1"
 
 
-def _include_summary():
-    """Whether this run tours the Summary page.
+def _starting_run_tours_summary():
+    """Whether a run started right now should tour the Summary page.
 
     Only with more than one node, or in demo mode so the whole tour can be
-    reviewed on a single node. See docs/features/tutorial.md#which-steps-run.
+    reviewed on a single node. Asked once, by `start`.
+    See docs/features/tutorial.md#which-steps-run.
     """
     from routes.fleet import discovered_nodes
 
     return _demo() or len(discovered_nodes()) > 1
+
+
+def _include_summary():
+    """Whether the run this request belongs to tours the Summary page.
+
+    Read from the URL rather than worked out again. A step number is a position
+    in the run's own step list, which is 28 steps long with Summary and 23
+    without, so asking the fleet again on every request would renumber a tour
+    under its owner the moment a peer appeared or dropped.
+    See docs/features/tutorial.md#which-steps-run.
+    """
+    return _demo() or request.args.get("summary") == "1"
 
 
 @bp.route("/tutorial")
@@ -39,7 +52,7 @@ def start():
     # tour started then would lose its place on the first page change.
     if device_state.is_setup_wizard_in_progress():
         return redirect("/set-up")
-    return redirect(tutorial.first_url(_include_summary(), _demo()))
+    return redirect(tutorial.first_url(_starting_run_tours_summary(), _demo()))
 
 
 def tutorial_context():

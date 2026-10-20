@@ -123,12 +123,17 @@
                 <button type="button" class="ds-btn primary" id="calWizNextBtn" style="display:none;">Continue →</button>
             </div>
 
-            {# Complete #}
             {# Complete. The tutorial is the recommended way out on a first run;
-               see docs/features/tutorial.md#starting-a-run #}
+               see docs/features/tutorial.md#starting-a-run.
+               Both ways out start hidden: until the completion save lands, Home,
+               Configuration and /tutorial all bounce back to this wizard, so a
+               link offered early sends the owner round in a circle.
+               See docs/features/setup-wizard.md#completion #}
             <div id="stepBtns-complete" class="step-foot-btns" style="display:none;">
-                <a href="/" class="ds-btn ghost">Go to dashboard</a>
-                <a href="/tutorial{% if demo_mode %}?demo=1{% endif %}" class="ds-btn primary" id="startTutorialBtn">Start tutorial →</a>
+                <span id="completeStatus" style="font-size:13px;color:var(--ink-3);"></span>
+                <button type="button" class="ds-btn ghost" id="completeRetryBtn" style="display:none;">Try again</button>
+                <a href="/" class="ds-btn ghost" id="completeHomeBtn" style="display:none;">Go to dashboard</a>
+                <a href="/tutorial{% if demo_mode %}?demo=1{% endif %}" class="ds-btn primary" id="startTutorialBtn" style="display:none;">Start tutorial →</a>
             </div>
         </div>
     </div>

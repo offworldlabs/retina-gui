@@ -156,11 +156,12 @@ def test_one_node_starts_on_home(app_client, fleet):
 
 def test_several_nodes_start_on_summary(app_client, fleet):
     two_nodes(fleet)
-    assert app_client.get("/tutorial").headers["Location"] == "/summary?tutorial=1"
+    assert app_client.get("/tutorial").headers["Location"] == "/summary?tutorial=1&summary=1"
 
 
 def test_demo_tours_summary_on_a_single_node_and_stays_in_demo(app_client, fleet):
-    assert app_client.get("/tutorial?demo=1").headers["Location"] == "/summary?tutorial=1&demo=1"
+    assert (app_client.get("/tutorial?demo=1").headers["Location"]
+            == "/summary?tutorial=1&summary=1&demo=1")
     body = app_client.get("/summary?tutorial=1&demo=1").data.decode()
     run = payload_in(body)
     assert all(step["url"].endswith("&demo=1") for step in run["steps"])
@@ -200,10 +201,56 @@ def test_step_numbers_follow_the_run_not_the_full_list(app_client, fleet):
     """With Summary toured, Home's first step is no longer step 1."""
     two_nodes(fleet)
     summary_steps = sum(1 for s in tutorial.STEPS if s["page"] == "/summary" and not s["closing"])
-    assert payload_in(app_client.get("/?tutorial=1").data.decode()) is None
-    run = payload_in(app_client.get(f"/?tutorial={summary_steps + 1}").data.decode())
+    assert payload_in(app_client.get("/?tutorial=1&summary=1").data.decode()) is None
+    run = payload_in(app_client.get(f"/?tutorial={summary_steps + 1}&summary=1").data.decode())
     assert run["current"] == summary_steps
     assert run["steps"][summary_steps]["title"] == "Welcome to your node"
+
+
+# ── A run keeps its shape ──────────────────────────────────────
+#
+# A step number is a position in the run's own step list, so the two are only
+# meaningful together and the run has to say which list it means. Working it
+# out again from the node count on every request renumbered a tour under its
+# owner the moment a peer appeared or dropped.
+# See docs/features/tutorial.md#which-steps-run.
+
+
+def test_every_step_url_carries_the_run_shape(app_client, fleet):
+    two_nodes(fleet)
+    run = payload_in(app_client.get("/summary?tutorial=1&summary=1").data.decode())
+    assert all("summary=1" in step["url"] for step in run["steps"])
+
+
+def test_a_peer_appearing_does_not_renumber_a_running_tour(app_client, fleet):
+    before = payload_in(app_client.get("/?tutorial=1").data.decode())
+    two_nodes(fleet)
+    assert payload_in(app_client.get("/?tutorial=1").data.decode()) == before
+
+
+def test_a_peer_dropping_does_not_renumber_a_running_tour(app_client, fleet):
+    two_nodes(fleet)
+    url = "/summary?tutorial=1&summary=1"
+    before = payload_in(app_client.get(url).data.decode())
+    fleet(node(SELF, is_self=True))
+    assert payload_in(app_client.get(url).data.decode()) == before
+
+
+def test_demo_tours_summary_without_being_told_twice(app_client, fleet):
+    """`demo=1` is the whole tour by definition, so it implies the shape and a
+    link that carries only `demo=1` still works."""
+    run = payload_in(app_client.get("/summary?tutorial=1&demo=1").data.decode())
+    assert run is not None and run["steps"][0]["page"] == "/summary"
+
+
+def test_the_tour_navigates_by_replacing_history(app_client, fleet):
+    """A whole run occupies the one history entry it started in. Pushing an
+    entry per step left Skip looking undone as soon as the owner pressed Back,
+    because the entry behind them still carried ?tutorial=.
+    See docs/features/tutorial.md#skip."""
+    js = (PROJECT_ROOT / "static" / "tutorial.js").read_text()
+    assert "window.location.replace(" in js
+    assert "window.location.assign(" not in js
 
 
 @pytest.mark.parametrize("url", [
@@ -268,6 +315,27 @@ def test_the_wizard_recommends_the_tour_on_its_last_step(app_client, fleet):
     assert 'href="/tutorial"' in body.split('id="stepBtns-complete"')[1].split("</div>")[0]
 
 
+def test_the_last_step_offers_no_way_out_until_completion_is_saved(app_client, fleet):
+    """Both ways out of the wizard start hidden, and there is a way to retry.
+
+    save-step {complete} is what clears the wizard state, and until it lands
+    Home, Configuration and /tutorial all redirect back into the wizard. A
+    Start tutorial link offered before it returned sent the owner round in a
+    circle. See docs/features/setup-wizard.md#completion.
+    """
+    body = app_client.get("/set-up").data.decode()
+    buttons = body.split('id="stepBtns-complete"')[1].split("</div>")[0]
+    links = re.findall(r"<a\s[^>]*>", buttons)
+    assert links, buttons
+    for link in links:
+        assert "display:none" in link, link
+    assert 'id="completeRetryBtn"' in buttons
+
+    js = (PROJECT_ROOT / "static" / "setup.js").read_text()
+    # The one save-step call that is not fire-and-forget.
+    assert "postJSON('/set-up/save-step', { step: 'complete' }).then(" in js
+
+
 def test_the_wizard_in_demo_mode_starts_the_tour_in_demo_mode(app_client, fleet):
     body = app_client.get("/set-up?demo=1").data.decode()
     assert 'href="/tutorial?demo=1"' in body
@@ -289,4 +357,5 @@ def test_the_closing_step_is_served_on_summary_at_the_end_of_either_run(app_clie
 
     two_nodes(fleet)
     last = len(tutorial.STEPS)
-    assert payload_in(app_client.get(f"/summary?tutorial={last}").data.decode())["current"] == last - 1
+    run = payload_in(app_client.get(f"/summary?tutorial={last}&summary=1").data.decode())
+    assert run["current"] == last - 1

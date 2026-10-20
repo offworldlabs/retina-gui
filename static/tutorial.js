@@ -582,17 +582,22 @@
         (step.click ? card : nextBtn).focus({ preventScroll: true });
     }
 
+    // replace(), never assign(): a whole run occupies the single history entry
+    // it started in, so Back leaves the tour instead of walking it backwards,
+    // and Skip has only that one entry to clean. Pushing an entry per step made
+    // Skip look undone the moment the owner pressed Back, because the entry
+    // behind them still carried ?tutorial=. See docs/features/tutorial.md#skip
     function go(index) {
         if (index < 0) return;
         if (index >= steps.length) {
-            window.location.assign(data.exit_url);
+            window.location.replace(data.exit_url);
             return;
         }
         var step = steps[index];
         // A step on another page is a real navigation; the server hands that
         // page the same run with this step current.
         if (step.page !== page) {
-            window.location.assign(step.url);
+            window.location.replace(step.url);
             return;
         }
         current = index;

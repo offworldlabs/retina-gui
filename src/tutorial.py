@@ -221,14 +221,25 @@ def steps_for(include_summary):
     return [s for s in STEPS if include_summary or s["page"] != SUMMARY or s["closing"]]
 
 
-def step_url(page, number, demo=False):
-    """Where step `number` (1-based) lives."""
-    return f"{page}?tutorial={number}" + ("&demo=1" if demo else "")
+def step_url(page, number, include_summary=False, demo=False):
+    """Where step `number` (1-based) lives.
+
+    The run's shape travels in the URL beside the step number, because the
+    number is a position in this run's step list and the two are only meaningful
+    together. See docs/features/tutorial.md#which-steps-run.
+    """
+    url = f"{page}?tutorial={number}"
+    if include_summary:
+        url += "&summary=1"
+    if demo:
+        url += "&demo=1"
+    return url
 
 
 def first_url(include_summary, demo=False):
     """Where a run starts."""
-    return step_url(steps_for(include_summary)[0]["page"], 1, demo)
+    return step_url(steps_for(include_summary)[0]["page"], 1,
+                    include_summary, demo)
 
 
 def payload(path, step_arg, include_summary, demo=False):
@@ -248,7 +259,7 @@ def payload(path, step_arg, include_summary, demo=False):
 
     return {
         "current": number - 1,
-        "steps": [dict(s, url=step_url(s["page"], i, demo))
+        "steps": [dict(s, url=step_url(s["page"], i, include_summary, demo))
                   for i, s in enumerate(steps, start=1)],
         # Finishing stays on Summary, whose links the closing step has just
         # pointed at.

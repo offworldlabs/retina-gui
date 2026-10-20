@@ -56,12 +56,27 @@ appear over it.
 
 `tutorial.js` moves between steps on the same page without a reload and rewrites the address
 with `history.replaceState`. When the next step is on another page it navigates to that step's
-URL, and the server hands the new page the same run. The server owns the order and the wording;
-the script only draws.
+URL with `location.replace`, and the server hands the new page the same run. The server owns the
+order and the wording; the script only draws.
 
 Finish, on the last step, drops the tour and stays on Summary, whose links that step has just
-pointed at. Skip tutorial (or Escape) closes the overlay where it
-is and removes the parameter from the address, so a reload does not bring the tour back.
+pointed at.
+
+### Skip
+
+Skip tutorial (or Escape) closes the overlay where it is and removes the `tutorial` parameter
+from the address with `history.replaceState`, so a reload does not bring the tour back.
+
+**A whole run occupies the single history entry it started in.** Every move, within a page or
+across one, replaces rather than pushes, so there is one entry to clean and Back leaves the tour
+rather than walking it backwards. It used to push an entry per page, which left Skip looking
+undone the moment the owner pressed Back: the entry behind them still carried `?tutorial=`, so
+the tour came straight back. `tests/test_tutorial.py` asserts the script holds no
+`location.assign`, which is how that regression would return.
+
+Nothing records the dismissal, and nothing needs to: Back now lands on the page the owner was on
+before the tour, which carries no parameter. The only way back in is Start tutorial, which is the
+point of it.
 
 ## Which steps run
 
@@ -69,9 +84,23 @@ is and removes the parameter from the address, so a reload does not bring the to
 step back on Summary.
 
 The Summary steps run only when there is more than one node. With a single node the Summary page
-has one card and nothing to choose between, so the run starts on Home. `_include_summary` in
-`routes/tutorial.py` asks `discovered_nodes`, the same list the banner and the Summary cards are
-drawn from, so the tour cannot disagree with the page about how many nodes there are.
+has one card and nothing to choose between, so the run starts on Home.
+`_starting_run_tours_summary` in `routes/tutorial.py` asks `discovered_nodes`, the same list the
+banner and the Summary cards are drawn from, so a starting tour cannot disagree with the page
+about how many nodes there are.
+
+**It is asked once, by `start`, and the answer then travels in the URL** as `summary=1`, which
+`step_url` puts on every step link beside `tutorial=`. `_include_summary` reads it back from the
+request rather than asking the fleet again, and `demo=1` implies it, since a demo run is the whole
+tour by definition.
+
+The answer has to be fixed for the length of a run because a step number means nothing without
+the list it indexes into: the same `tutorial=6` is Home's first step in a Summary-toured run and
+Configuration's welcome in a single node's. Asking `discovered_nodes` on every request meant a
+peer appearing or dropping mid-tour silently swapped the list and renumbered the tour under its
+owner. A hand-edited link that carries a step number without the shape is read as a single node's
+run; if the number does not name a step on that page, `payload` returns `None` and the page
+renders without a tour, as it does for any other stale link.
 
 The closing step is in every run (`closing=True`, which `steps_for` keeps whatever else it
 drops). It is on Summary because that is where the Resources and Help links are, and Summary is
