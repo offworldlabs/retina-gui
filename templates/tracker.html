@@ -244,8 +244,10 @@
           <button type="button" data-layer="all" aria-pressed="true">All</button>
           <button type="button" data-layer="unassociated" aria-pressed="false"
                   title="Considered by the tracker, and no confirmed track claimed it. Its miss list.">Unassoc</button>
-          <button type="button" data-layer="below_snr" aria-pressed="false"
-                  title="Dropped at the SNR gate before the tracker considered it at all.">Below SNR</button>
+          {# No Below SNR button: the class is always empty since retina-tracker
+             v0.5.0, which tracks every detection. The class itself is still
+             plotted under All, so an older tracker loses nothing.
+             See docs/features/tracker.md#what-is-plotted #}
           <button type="button" data-layer="off" aria-pressed="false">Off</button>
         </div>
       </div>
@@ -468,7 +470,12 @@
     }
 
     state.window = parseInt(recall('window', DEFAULT_WINDOW), 10) || DEFAULT_WINDOW;
+    // Only the layers that still have a button. A remembered 'below_snr' from
+    // before that button went, or anything a hand-edited localStorage carries,
+    // falls back to All rather than opening on a layer with no way to leave it.
+    var OFFERED_LAYERS = ['all', 'unassociated', 'off'];
     state.layer = recall('layer', 'all');
+    if (OFFERED_LAYERS.indexOf(state.layer) === -1) state.layer = 'all';
     state.tracks = recall('tracks', 'on');
     state.sort = recall('sort', 'recent');
     state.filter = recall('filter', 'all');
