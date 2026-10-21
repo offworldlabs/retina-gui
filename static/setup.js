@@ -158,8 +158,14 @@ function initSetupWizard(resumeStep, devMode, isRerun, demoMode) {
 
             // Best effort: a failed save only costs the resume point, and
             // postJSON already raises the session notice if that is the cause.
-            postJSON('/set-up/save-step', { step: steps[index].name })
-                .catch(function() {});
+            // The last step is the exception, because its save is what ends the
+            // wizard rather than just recording a place in it: enterHooks
+            // .complete sends that one itself and waits for it.
+            // See docs/features/setup-wizard.md#completion
+            if (steps[index].name !== 'complete') {
+                postJSON('/set-up/save-step', { step: steps[index].name })
+                    .catch(function() {});
+            }
 
             var enterFn = enterHooks[steps[index].name];
             if (enterFn) enterFn();
@@ -188,9 +194,12 @@ function initSetupWizard(resumeStep, devMode, isRerun, demoMode) {
     // Rejects on any non-2xx, since fetch() resolves for every status and a
     // .then()-only caller would treat a 400 as success.
     // See docs/features/setup-wizard.md#session-expiry
-    function postJSON(url, body) {
+    // `keepalive` lets the request outlive the page: a navigation cancels an
+    // ordinary fetch that has not left the browser yet.
+    function postJSON(url, body, keepalive) {
         return fetch(url, {
             method: 'POST',
+            keepalive: !!keepalive,
             headers: {
                 'Content-Type': 'application/json',
                 'X-CSRFToken': csrfToken
@@ -1888,10 +1897,52 @@ function initSetupWizard(resumeStep, devMode, isRerun, demoMode) {
     };
 
     // Complete. See docs/features/setup-wizard.md#completion
+    //
+    // save-step {complete} is the request that clears the wizard state and
+    // writes the completed flag, so until it lands Home, Configuration and
+    // /tutorial all redirect back here. Both ways out stay hidden until it
+    // succeeds: a Start tutorial button offered early sends the owner straight
+    // back into the wizard, which is what made this worth gating rather than
+    // firing and forgetting.
     enterHooks.complete = function() {
         window.removeEventListener('beforeunload', handleBeforeUnload);
-        postJSON('/set-up/complete').catch(function() {});
+        if (!hookInitialized.complete) {
+            hookInitialized.complete = true;
+            document.getElementById('completeRetryBtn')
+                .addEventListener('click', finishSetup);
+        }
+        finishSetup();
     };
+
+    function finishSetup() {
+        var status = document.getElementById('completeStatus');
+        var retry = document.getElementById('completeRetryBtn');
+        var ways = [document.getElementById('completeHomeBtn'),
+                    document.getElementById('startTutorialBtn')];
+
+        status.textContent = 'Finishing setup…';
+        retry.style.display = 'none';
+        ways.forEach(function(a) { a.style.display = 'none'; });
+
+        postJSON('/set-up/save-step', { step: 'complete' }).then(function() {
+            // Not awaited, and deliberately after the gate: /set-up/complete
+            // brings the radar stack up, which takes tens of seconds, and
+            // nothing on this step depends on it having finished. It also never
+            // raises on the node, so there is nothing here to report.
+            // Sent before the links appear and with keepalive, because a click
+            // on either one navigates away, and that cancelled it while it was
+            // still in the browser, leaving a node in Spectrum with no radar.
+            // See docs/features/setup-wizard.md#completion
+            postJSON('/set-up/complete', null, true).catch(function() {});
+            status.textContent = '';
+            ways.forEach(function(a) { a.style.display = ''; });
+        }).catch(function(err) {
+            status.textContent = err.message
+                ? 'Could not finish setup: ' + err.message
+                : 'Could not finish setup. Check this node’s connection.';
+            retry.style.display = '';
+        });
+    }
 
     // ── Init ─────────────────────────────────────────────
 

@@ -243,17 +243,27 @@ repeated detections that line up, which is the evidence worth interrupting someo
 The scope plots bistatic range (km) against Doppler (Hz).
 
 **Detections** come in three classes, all reported by retina-tracker. It knows which
-detections a confirmed track claimed and which it dropped at the SNR gate, so the page does not
-infer any of it. (An earlier version compared timestamps and delays to guess, which could only
-approximate an answer the tracker already had.)
+detections a confirmed track claimed, so the page does not infer any of it. (An earlier version
+compared timestamps and delays to guess, which could only approximate an answer the tracker
+already had.)
 
 | Class | Layer button | Meaning |
 | --- | --- | --- |
 | `associated` | (All only) | Claimed by a confirmed track. |
 | `unassociated` | Unassoc | Considered by the tracker, and no confirmed track claimed it: its miss list. |
-| `below_snr` | Below SNR | Dropped at the SNR gate before the tracker considered it. |
+| `below_snr` | (All only) | Dropped at an SNR gate before the tracker considered it. Always empty from retina-tracker v0.5.0 on — see below. |
 
-The Detections layer control shows All, one class, or Off. Detections are coloured by SNR on a
+`below_snr` has been empty since retina-tracker v0.5.0, which tracks every detection and has no
+per-site SNR gate (see [No tracking section](config-editor.md#no-tracking-section)). **It has no
+layer button**, because a filter that can only ever show nothing is worse than no filter: an
+owner who picks it sees an empty scope and has no way to tell that from a quiet sky.
+
+The class is still read from the stream, still counted against the untracked cap, and still
+drawn under All, so a node running an older tracker loses nothing — those detections just appear
+with the rest instead of behind their own button. A layer remembered in `localStorage` from
+before the button went falls back to All, so nobody opens the page stuck on it.
+
+The Detections layer control shows All, Unassoc, or Off. Detections are coloured by SNR on a
 fixed 0-20 dB blue ramp (clamped at both ends), drawn as a key in the plot's footer.
 
 **Tracks** are drawn as lines with markers over the detections, one colour per track. The

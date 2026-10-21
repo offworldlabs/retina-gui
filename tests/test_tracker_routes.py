@@ -163,7 +163,10 @@ def test_the_page_renders_without_the_sidecar(app_client):
     response = app_client.get('/tracker')
     assert response.status_code == 200
     assert b'railList' in response.data
-    assert b'data-layer="below_snr"' in response.data
+    assert b'data-layer="unassociated"' in response.data
+    # Below SNR has no button: the class is always empty on retina-tracker
+    # v0.5.0 and later. See docs/features/tracker.md#what-is-plotted.
+    assert b'data-layer="below_snr"' not in response.data
 
 
 def test_old_preview_urls_still_work(app_client):

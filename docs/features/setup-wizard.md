@@ -27,7 +27,8 @@ re-consent path, and most steps then become informational.
 | [src/device_state.py](../../src/device_state.py) | Wizard step file, completion flag, towers cache, consent/contact/claim records |
 
 Related docs: [auto-calibrate.md](auto-calibrate.md), [device-state-and-telemetry.md](device-state-and-telemetry.md),
-[towers.md](towers.md), [ota-updates.md](ota-updates.md), [remote-access.md](remote-access.md).
+[towers.md](towers.md), [ota-updates.md](ota-updates.md), [remote-access.md](remote-access.md),
+[tutorial.md](tutorial.md).
 
 ## Step order
 
@@ -512,15 +513,49 @@ wizard's use of them.
 
 ## Completion
 
-Entering the complete step removes the `beforeunload` guard and posts `/set-up/complete`. The
-step entry itself also posts `save-step` with `complete`, which clears the step file and writes
-the completion flag.
+Entering the complete step removes the `beforeunload` guard and runs `finishSetup`, which is the
+one place the wizard ends. Every other step posts `save-step` from `showStep` and ignores the
+result, because a failed save there only costs the resume point. The last step is excluded from
+that, because its save is what ends the wizard rather than recording a place in it: `save-step`
+with `complete` clears the step file and writes the completion flag.
 
-`/set-up/complete` writes `radar` to `mode.txt` before any docker work, so the home page cannot
-race and see spectrum mode while `enforce_radar_mode` is still running, then calls
-`enforce_radar_mode` if retina-node is installed. That recreates the stack, which is why the
-calibrate step saves its tuning and waits for the restart before letting the owner reach this
-step.
+### Nothing on the last step is clickable before the save lands
+
+`is_setup_wizard_in_progress` is true for any saved step other than `complete`, and both
+`home.index` and the config blueprint redirect to `/set-up` while it is, as does
+`routes/tutorial.start`. So until that save returns, **every way out of the wizard leads back
+into it.**
+
+`stepBtns-complete` therefore starts with both its links hidden and a status line reading
+"Finishing setup…". `finishSetup` awaits `save-step {complete}`; on success it reveals **Go to
+dashboard** and **Start tutorial**, and on failure it shows the server's reason and a **Try
+again** button that calls `finishSetup` again. Nothing is lost by a failure: the step file still
+holds the previous step, so a reload resumes there.
+
+This used to be two fire-and-forget posts with their failures swallowed (`.catch(function(){})`)
+while both links sat in the page from the moment the step rendered. An owner who clicked Start
+tutorial before the save landed — or at all, if it had failed — was sent straight back into the
+wizard they had just finished. `tests/test_tutorial.py` asserts both that the links start hidden
+and that the complete save is not fire-and-forget.
+
+`/set-up/complete` is still posted without being awaited, after the gate. It writes `radar` to
+`mode.txt` before any docker work, so the home page cannot race and see spectrum mode while
+`enforce_radar_mode` is still running, then calls `enforce_radar_mode` if retina-node is
+installed. That recreates the stack, which is why the calibrate step saves its tuning and waits
+for the restart before letting the owner reach this step, and why it is not what the buttons
+wait on. It takes tens of seconds, nothing on this step depends on it having finished, and
+`enforce_radar_mode` never raises, so there would be nothing to report.
+
+It is sent before the links appear and with `keepalive` (`postJSON`'s third argument). Both
+links navigate away, and a navigation cancels an ordinary `fetch` that has not left the browser
+yet. Posted plainly at the moment the links appeared, a slow request was cancelled by an
+immediate click on a test node that was still in Spectrum: the wizard finished, but the node
+stayed in Spectrum with no radar running. The wizard's spectrum release on unload uses
+`navigator.sendBeacon` for the same reason. `tests/test_tutorial.py` asserts the `keepalive`.
+
+The step also invites the owner to the guided tutorial, saying it is recommended for anyone
+setting up a node for the first time. The tour is covered in [tutorial.md](tutorial.md); in demo
+mode the link carries `demo=1` so the tour runs in demo mode too.
 
 ## Demo and dev modes
 
