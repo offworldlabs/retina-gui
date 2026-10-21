@@ -336,6 +336,21 @@ def test_the_last_step_offers_no_way_out_until_completion_is_saved(app_client, f
     assert "postJSON('/set-up/save-step', { step: 'complete' }).then(" in js
 
 
+def test_a_click_on_the_last_step_cannot_cancel_the_return_to_radar():
+    """/set-up/complete survives the page being left.
+
+    Both links on the last step navigate away, and a navigation cancels an
+    ordinary fetch still in the browser: a node left in Spectrum then finished
+    setup with no radar. keepalive lets the request outlive the page, and it is
+    sent before the links are shown. See docs/features/setup-wizard.md#completion.
+    """
+    js = (PROJECT_ROOT / "static" / "setup.js").read_text()
+    assert "keepalive: !!keepalive" in js
+    finish = js.split("function finishSetup()")[1].split("\n    }\n")[0]
+    send = finish.index("postJSON('/set-up/complete', null, true)")
+    assert send < finish.index("ways.forEach(function(a) { a.style.display = ''; })")
+
+
 def test_the_wizard_in_demo_mode_starts_the_tour_in_demo_mode(app_client, fleet):
     body = app_client.get("/set-up?demo=1").data.decode()
     assert 'href="/tutorial?demo=1"' in body

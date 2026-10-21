@@ -542,9 +542,16 @@ and that the complete save is not fire-and-forget.
 `mode.txt` before any docker work, so the home page cannot race and see spectrum mode while
 `enforce_radar_mode` is still running, then calls `enforce_radar_mode` if retina-node is
 installed. That recreates the stack, which is why the calibrate step saves its tuning and waits
-for the restart before letting the owner reach this step — and why it is not what the buttons
+for the restart before letting the owner reach this step, and why it is not what the buttons
 wait on. It takes tens of seconds, nothing on this step depends on it having finished, and
 `enforce_radar_mode` never raises, so there would be nothing to report.
+
+It is sent before the links appear and with `keepalive` (`postJSON`'s third argument). Both
+links navigate away, and a navigation cancels an ordinary `fetch` that has not left the browser
+yet. Posted plainly at the moment the links appeared, a slow request was cancelled by an
+immediate click on a test node that was still in Spectrum: the wizard finished, but the node
+stayed in Spectrum with no radar running. The wizard's spectrum release on unload uses
+`navigator.sendBeacon` for the same reason. `tests/test_tutorial.py` asserts the `keepalive`.
 
 The step also invites the owner to the guided tutorial, saying it is recommended for anyone
 setting up a node for the first time. The tour is covered in [tutorial.md](tutorial.md); in demo

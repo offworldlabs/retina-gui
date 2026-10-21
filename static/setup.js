@@ -194,9 +194,12 @@ function initSetupWizard(resumeStep, devMode, isRerun, demoMode) {
     // Rejects on any non-2xx, since fetch() resolves for every status and a
     // .then()-only caller would treat a 400 as success.
     // See docs/features/setup-wizard.md#session-expiry
-    function postJSON(url, body) {
+    // `keepalive` lets the request outlive the page: a navigation cancels an
+    // ordinary fetch that has not left the browser yet.
+    function postJSON(url, body, keepalive) {
         return fetch(url, {
             method: 'POST',
+            keepalive: !!keepalive,
             headers: {
                 'Content-Type': 'application/json',
                 'X-CSRFToken': csrfToken
@@ -1922,13 +1925,17 @@ function initSetupWizard(resumeStep, devMode, isRerun, demoMode) {
         ways.forEach(function(a) { a.style.display = 'none'; });
 
         postJSON('/set-up/save-step', { step: 'complete' }).then(function() {
-            status.textContent = '';
-            ways.forEach(function(a) { a.style.display = ''; });
             // Not awaited, and deliberately after the gate: /set-up/complete
             // brings the radar stack up, which takes tens of seconds, and
             // nothing on this step depends on it having finished. It also never
             // raises on the node, so there is nothing here to report.
-            postJSON('/set-up/complete').catch(function() {});
+            // Sent before the links appear and with keepalive, because a click
+            // on either one navigates away, and that cancelled it while it was
+            // still in the browser, leaving a node in Spectrum with no radar.
+            // See docs/features/setup-wizard.md#completion
+            postJSON('/set-up/complete', null, true).catch(function() {});
+            status.textContent = '';
+            ways.forEach(function(a) { a.style.display = ''; });
         }).catch(function(err) {
             status.textContent = err.message
                 ? 'Could not finish setup: ' + err.message
