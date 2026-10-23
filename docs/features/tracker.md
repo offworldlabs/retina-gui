@@ -127,9 +127,10 @@ parallel columns `t` (ms), `delay`, `doppler` and `snr`, in timestamp order. Tra
 `lat` and `lon`: the ADS-B position blah2 matched to that detection, or `null` where there is no
 verified one (retina-tracker's `docs/coverage-wedge.md` says what counts as verified). Only the
 wedge view reads them; `appendCols` and `sliceCols` carry them when present, so a sidecar that
-does not send them is still drawn. Each track also has `meta`: `adsb_hex`, `is_anomalous`,
-`anomaly_types`, `length`, `max_velocity_ms` and `shadow_fraction`. On a delta, a known track's
-columns are appended and its `meta` replaced.
+does not send them is still drawn. Each track also has `meta`: `adsb_hex`, `stitch_id`,
+`is_anomalous`, `anomaly_types`, `length`, `max_velocity_ms` and `shadow_fraction`. On a delta, a
+known track's columns are appended and its `meta` replaced. `stitch_id` says which aircraft the
+track belongs to; see [Stitched tracks](#stitched-tracks).
 
 ## View window
 
@@ -266,9 +267,11 @@ before the button went falls back to All, so nobody opens the page stuck on it.
 The Detections layer control shows All, Unassoc, or Off. Detections are coloured by SNR on a
 fixed 0-20 dB blue ramp (clamped at both ends), drawn as a key in the plot's footer.
 
-**Tracks** are drawn as lines with markers over the detections, one colour per track. The
-colour comes from a twelve-hue wheel indexed by a hash of the track id, so it is fixed on first
-sighting and never recomputed when an older track ages out. Collisions are expected past twelve
+**Tracks** are drawn as lines with markers over the detections, one colour per rail row, which
+is one aircraft (see [Stitched tracks](#stitched-tracks)). The colour comes from a twelve-hue
+wheel indexed by a hash of the row's id, so it is fixed on first sighting and never recomputed
+when an older track ages out. The tracks of a stitched aircraft share its colour and are drawn
+as separate lines, so the gap between them stays a gap. Collisions are expected past twelve
 live tracks and are tolerated: the rail names every track and hovering a row isolates it, so
 colour is a pointing device rather than the thing carrying identity.
 
@@ -325,18 +328,21 @@ cap below applies.
 
 ## The track rail
 
-The rail beside the scope lists every track in the window.
+The rail beside the scope lists every aircraft in the window: one row per stitched aircraft,
+and otherwise one per track (see [Stitched tracks](#stitched-tracks)).
 
 - **Sort:** newest (last seen), longest (duration), strongest (peak SNR), most points.
 - **Filter:** All, ADS-B (has `adsb_hex`), Flagged (`is_anomalous`), Unmatched (no `adsb_hex`).
 - **Row:** colour swatch, id, duration, point count, peak SNR, age ("live" under 15 s), an
-  ADS-B chip with the hex when matched, and an Outside view chip when the narrow Doppler view
-  cannot show all of the track (see [Out-of-view alert](#out-of-view-alert)).
+  ADS-B chip with the hex when matched, a "3 tracks joined" chip when the row is a stitched
+  aircraft, and an Outside view chip when the narrow Doppler view cannot show all of the track
+  (see [Out-of-view alert](#out-of-view-alert)).
 - **Flagged tracks get a dot, not a badge.** retina-tracker's anomaly detector is not trusted
   yet, and a solid label would be read as a verdict. The expanded row lists the anomaly types
   marked "(provisional)".
-- **Clicking a row** expands a detail panel: first and last seen, length, peak velocity and
-  shadow fraction. In the wedge view it also [replays the track](#replaying-a-track).
+- **Clicking a row** expands a detail panel: first and last seen, the tracks it was joined from
+  (with their start times) when stitched, length, peak velocity and shadow fraction. In the
+  wedge view it also [replays the track](#replaying-a-track).
 - **Hide** (eye) removes a track from the scope but keeps its row. **Remove** (bin) drops the row
   too; removals are per browser and can be undone with Restore in the rail footer.
 
@@ -347,6 +353,35 @@ presentation is stored on the node.
 
 The page is full width with a viewport-clamped height, since both the plot and the rail want
 every pixel; below 900 px the rail stacks under the plot.
+
+## Stitched tracks
+
+retina-tracker ends a track whenever it loses the target, for example while an aircraft crosses
+zero Doppler, where blah2 reports nothing, and starts another when it comes back. It then
+stitches those tracks: every track keeps its own id, and each carries `meta.stitch_id`, the id of
+the first track of the aircraft it belongs to (retina-tracker's `docs/stitching.md` says when
+tracks are joined). The page groups by it, so an aircraft is one row however many times the
+tracker broke it.
+
+`summarise()` builds one row per `stitch_id`, falling back to the track's own id when there is
+none, which is every track from a tracker older than stitching: the page then shows exactly one
+row per track, as it did before. A row's tracks are kept in time order in `ids`. Its figures
+cover all of them: first and last seen, duration between them, point count, peak SNR and Doppler
+extent, total length and the highest peak velocity. Shadow fraction is weighted by points, and
+the anomaly flag and types are those of any of its tracks.
+
+Everything that acts on a row acts on the aircraft: its colour, Hide, Remove, the detail panel,
+hover isolation, the out-of-view count and the replay. In the scope each track is pushed as its
+own line, so nothing is drawn across the gap between them. In the wedge view a labelled
+aircraft's trail runs through the verified positions of all its tracks in time order
+(`chainTrack()`), broken only where positions stop for over 15 s as any trail is; an unlabelled
+row's arc is its newest track's.
+
+A track's `stitch_id` can change once, from its own id to its aircraft's, when the tracker
+decides the link after first reporting the track. Its row then merges into the aircraft's on
+the next message. Hide, Remove and the expanded panel were keyed by the old row and do not carry
+over. On a test node over four hours, 254 tracks made 217 rows, 27 of them joined from 64
+tracks.
 
 ## Wedge view
 
@@ -414,8 +449,9 @@ Clicking the row again stops a running replay, or replays a finished one; clicki
 track switches to it. There are no other controls. A panel over the map gives the track, the
 replay clock (node time), progress, and elapsed against total.
 
-The page fetches `GET /tracker/coverage/track/<id>` once per replay: at most 240 arcs spread
-evenly over the track, about 3 KB each. A labelled track's aircraft moves along its trail, drawn
+The page fetches `GET /tracker/coverage/track/<id>` once per replay for each of the row's tracks
+(once for an aircraft that was never stitched) and replays their arcs as one, in time order: at
+most 240 arcs spread evenly over each track, about 3 KB each. A labelled track's aircraft moves along its trail, drawn
 solid behind it and dashed ahead, with the measured arc at that moment. An unlabelled track's arc
 sweeps with an afterglow of four fading earlier arcs. Every other track fades while a replay
 runs. The replay draws on its own Leaflet canvas, so a frame repaints only the replay.

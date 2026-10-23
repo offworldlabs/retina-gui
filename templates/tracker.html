@@ -696,28 +696,72 @@
 
     // ── Track summaries for the rail ─────────────────────────────────────
 
+    // One row per aircraft. retina-tracker gives every fragment of a stitched
+    // aircraft the same meta.stitch_id; an older tracker sends none, and then
+    // every track is its own row. See docs/features/tracker.md#stitched-tracks
+    function chainOf(id) {
+        var meta = store.tracks[id].meta;
+        return (meta && meta.stitch_id) || id;
+    }
+
+    var chains = {};   // stitch id -> its row, rebuilt by every summarise()
+
     function summarise() {
-        return Object.keys(store.tracks).map(function (id) {
+        var rows = {};
+        Object.keys(store.tracks).forEach(function (id) {
             var trk = store.tracks[id];
             var meta = trk.meta || {};
-            var peak = 0, dmin = Infinity, dmax = -Infinity;
+            var key = chainOf(id);
+            var r = rows[key] || (rows[key] = {
+                id: key, ids: [], n: 0, peak: 0, dmin: Infinity, dmax: -Infinity,
+                first: Infinity, last: 0, shadowPts: 0,
+                meta: { stitch_id: key, adsb_hex: null, is_anomalous: false, length: 0, max_velocity_ms: 0, anomaly_types: [] }
+            });
+            r.ids.push(id);
             for (var i = 0; i < trk.snr.length; i++) {
-                if (trk.snr[i] > peak) peak = trk.snr[i];
-                if (trk.doppler[i] < dmin) dmin = trk.doppler[i];
-                if (trk.doppler[i] > dmax) dmax = trk.doppler[i];
+                if (trk.snr[i] > r.peak) r.peak = trk.snr[i];
+                if (trk.doppler[i] < r.dmin) r.dmin = trk.doppler[i];
+                if (trk.doppler[i] > r.dmax) r.dmax = trk.doppler[i];
             }
-            return {
-                id: id,
-                meta: meta,
-                n: trk.t.length,
-                peak: peak,
-                dmin: dmin,
-                dmax: dmax,
-                first: trk.t.length ? trk.t[0] : 0,
-                last: trk.t.length ? trk.t[trk.t.length - 1] : 0,
-                dur: trk.t.length ? (trk.t[trk.t.length - 1] - trk.t[0]) / 1000 : 0
-            };
+            if (trk.t.length) {
+                r.first = Math.min(r.first, trk.t[0]);
+                r.last = Math.max(r.last, trk.t[trk.t.length - 1]);
+            }
+            r.n += trk.t.length;
+            r.shadowPts += (meta.shadow_fraction || 0) * trk.t.length;
+            var m = r.meta;
+            if (meta.adsb_hex) m.adsb_hex = meta.adsb_hex;
+            if (meta.is_anomalous) m.is_anomalous = true;
+            (meta.anomaly_types || []).forEach(function (a) {
+                if (m.anomaly_types.indexOf(a) < 0) m.anomaly_types.push(a);
+            });
+            m.length += meta.length != null ? meta.length : trk.t.length;
+            m.max_velocity_ms = Math.max(m.max_velocity_ms, meta.max_velocity_ms || 0);
         });
+        chains = rows;
+        return Object.keys(rows).map(function (key) {
+            var r = rows[key];
+            r.ids.sort(function (a, b) {
+                return (store.tracks[a].t[0] || 0) - (store.tracks[b].t[0] || 0);
+            });
+            if (r.first === Infinity) r.first = 0;
+            r.dur = (r.last - r.first) / 1000;
+            r.meta.shadow_fraction = r.n ? r.shadowPts / r.n : 0;
+            return r;
+        });
+    }
+
+    // A row's fragments as one record in time order, for the wedge view.
+    function chainTrack(key) {
+        var r = chains[key];
+        if (!r) return store.tracks[key];
+        var out = { t: [], delay: [], doppler: [], snr: [], lat: [], lon: [], meta: r.meta, ids: r.ids };
+        r.ids.forEach(function (id) {
+            var trk = store.tracks[id];
+            appendCols(out, trk);
+            if (!trk.lat) trk.t.forEach(function () { out.lat.push(null); out.lon.push(null); });
+        });
+        return out;
     }
 
     function ordered(rows) {
@@ -768,6 +812,12 @@
         var m = r.meta;
         var out = '<div class="trk-detail">';
         out += '<div>first <b>' + clockOf(r.first) + '</b> &middot; last <b>' + clockOf(r.last) + '</b></div>';
+        if (r.ids.length > 1) {
+            out += '<div>joined from <b>' + r.ids.length + ' tracks</b>: ' + r.ids.map(function (id) {
+                var t = store.tracks[id].t;
+                return esc(id) + ' (' + clockOf(t[0]) + ')';
+            }).join(', ') + '</div>';
+        }
         out += '<div>length <b>' + (m.length != null ? m.length : r.n) + '</b>'
              + ' &middot; peak velocity <b>' + (m.max_velocity_ms || 0).toFixed(0) + ' m/s</b></div>';
         out += '<div>shadow fraction <b>' + (m.shadow_fraction || 0).toFixed(2) + '</b></div>';
@@ -781,6 +831,11 @@
     function chipsHtml(r) {
         var chips = '';
         if (r.meta.adsb_hex) chips += '<span class="chip ok">ADS-B ' + esc(r.meta.adsb_hex) + '</span>';
+        if (r.ids.length > 1) {
+            chips += '<span class="chip" title="One aircraft that the tracker broke into '
+                   + r.ids.length + ' tracks and joined again by its ADS-B identity.">'
+                   + r.ids.length + ' tracks joined</span>';
+        }
         if (outside[r.id]) {
             chips += '<span class="chip oov" title="Has a point outside the narrow Doppler range.">'
                    + 'Outside view</span>';
@@ -929,8 +984,8 @@
             rows.forEach(function (r) {
                 if (state.hidden[r.id]) return;
                 if (r.id === state.hover) { hovered = r; return; }
-                var hue = hueFor(r.id);
-                pushTrack(bins[hue] || (bins[hue] = emptyBin()), r.id, store.tracks[r.id]);
+                var bin = bins[hueFor(r.id)] || (bins[hueFor(r.id)] = emptyBin());
+                r.ids.forEach(function (id) { pushTrack(bin, r.id, store.tracks[id]); });
             });
             Object.keys(bins).forEach(function (hue) {
                 traces.push(trackTrace(bins[hue], 'hsl(' + hue + ',58%,42%)', trackOpacity()));
@@ -939,7 +994,7 @@
             // one thing a shared trace cannot single out, so it gets its own.
             if (hovered) {
                 var solo = emptyBin();
-                pushTrack(solo, hovered.id, store.tracks[hovered.id]);
+                hovered.ids.forEach(function (id) { pushTrack(solo, hovered.id, store.tracks[id]); });
                 traces.push(trackTrace(solo, colorFor(hovered.id), 1));
             }
         }
@@ -1188,7 +1243,7 @@
         cartoKey: {{ carto_api_key|default('')|tojson }},
         colorFor: colorFor,
         fmtDur: fmtDur,
-        getTrack: function (id) { return store.tracks[id]; },
+        getTrack: chainTrack,
         nowMs: function () { return lastTs; },
         windowS: function () { return state.window; }
     });

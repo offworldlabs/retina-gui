@@ -285,7 +285,10 @@
                 if (view.hidden[r.id] || (replay && replay.id === r.id)) return;
                 var color = opts.colorFor(r.id), op = opacityFor(r.id);
                 if (r.meta.adsb_hex) drawTrail(r, color, op);
-                else drawArc(latestArcs[r.id] && latestArcs[r.id].arc, color, op, layers.tracks);
+                else {
+                    var newest = latestArcs[r.ids ? r.ids[r.ids.length - 1] : r.id];
+                    drawArc(newest && newest.arc, color, op, layers.tracks);
+                }
             });
         }
 
@@ -313,10 +316,20 @@
             var mine = replay;
             drawTracks();
             showHud(0, mine.t0);
-            getJson('/tracker/coverage/track/' + encodeURIComponent(id)).then(function (res) {
+            // A stitched aircraft is several tracks to the sidecar, so its arcs
+            // are fetched per track and replayed as one.
+            Promise.all((trk.ids || [id]).map(function (fid) {
+                return getJson('/tracker/coverage/track/' + encodeURIComponent(fid));
+            })).then(function (results) {
                 if (replay !== mine) return;
-                mine.arcs = res.status === 200 ? (res.body.arcs || []).filter(function (a) { return a.arc; }) : [];
-                mine.failed = res.status !== 200;
+                mine.arcs = [];
+                results.forEach(function (res) {
+                    if (res.status === 200) {
+                        mine.arcs = mine.arcs.concat((res.body.arcs || []).filter(function (a) { return a.arc; }));
+                    }
+                });
+                mine.arcs.sort(function (a, b) { return a.t - b.t; });
+                mine.failed = results.every(function (res) { return res.status !== 200; });
             }).catch(function () {
                 mine.failed = true;
             }).then(function () {

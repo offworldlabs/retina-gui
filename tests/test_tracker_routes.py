@@ -385,3 +385,12 @@ def test_the_page_carries_the_wedge_view(app_client):
     assert 'Processed range limit' in body
     assert 'Close-in, overhead' in body
     assert re.search(r'cartoKey: "[^"]*",', body)
+
+
+def test_the_page_groups_a_stitched_aircraft_into_one_row(app_client):
+    """retina-tracker links an aircraft's tracks by meta.stitch_id and the page keys its rows on it,
+    falling back to the track's own id for a tracker that sends none. The grouping lives in the
+    page's script, so this pins the contract it carries. See docs/features/tracker.md#stitched-tracks."""
+    body = app_client.get('/tracker').get_data(as_text=True)
+    assert "return (meta && meta.stitch_id) || id;" in body
+    assert "getTrack: chainTrack," in body
