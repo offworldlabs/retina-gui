@@ -34,11 +34,15 @@ def _radar(marks):
                   marks)
 
 
-def _step(page, title, body, targets, image=None, link=None, click=False, closing=False):
+def _step(page, title, body, targets, image=None, link=None, click=False, closing=False,
+          welcome=False):
     """One step. `click` makes it a hand-over: the owner clicks the lit thing
     itself to go on. See docs/features/tutorial.md#click-through-steps.
     `closing` marks the step every run ends on, whatever it toured.
-    See docs/features/tutorial.md#which-steps-run."""
+    See docs/features/tutorial.md#which-steps-run.
+    `welcome` marks the greeting every run opens with: it points at nothing,
+    stands in the middle of the page, and its title carries the owner's name.
+    See docs/features/tutorial.md#the-welcome."""
     return {
         "page": page,
         "title": title,
@@ -48,13 +52,33 @@ def _step(page, title, body, targets, image=None, link=None, click=False, closin
         "link": link,
         "click": click,
         "closing": closing,
+        "welcome": welcome,
     }
+
+
+# What the welcome says. The title is finished by `welcome_title` once the
+# owner's name is known; the body is the same for everyone.
+WELCOME_BODY = ("This short tour shows you around your node: what each page is for, "
+                "what the radar views mean, and where the settings live. "
+                "It takes a few minutes, and you can skip it at any time.")
+
+
+def welcome_title(name):
+    """"Welcome <name>!" from the first name on the contact record, or a plain
+    "Welcome!" when none was given."""
+    name = str(name or "").strip()
+    return f"Welcome {name}!" if name else "Welcome!"
 
 
 # Order is the tour. Each body is a sentence or two, and each target name must exist
 # as a data-tutorial token on its page: tests/test_tutorial.py checks both.
 # See docs/features/tutorial.md#steps.
 STEPS = (
+    # ── The welcome: every run opens with it, on whichever page the run
+    # starts. Its page here is Summary so STEPS stays in page order;
+    # steps_for moves it to Home for a single node. ──
+    _step(SUMMARY, "Welcome!", WELCOME_BODY, [], welcome=True),
+
     # ── Summary: only toured when there is more than one node ──
     _step(SUMMARY, "List of nodes",
           "Every node on your network is listed here and in the tabs at the top, "
@@ -217,8 +241,15 @@ STEPS = (
 
 def steps_for(include_summary):
     """The steps of one run: everything, or everything but Summary's opening
-    steps. The closing step, also on Summary, is in every run."""
-    return [s for s in STEPS if include_summary or s["page"] != SUMMARY or s["closing"]]
+    steps. The welcome opens every run, on the page the run starts on, and
+    the closing step, also on Summary, ends every run."""
+    steps = []
+    for s in STEPS:
+        if s["welcome"]:
+            steps.append(dict(s, page=SUMMARY if include_summary else HOME))
+        elif include_summary or s["page"] != SUMMARY or s["closing"]:
+            steps.append(s)
+    return steps
 
 
 def step_url(page, number, include_summary=False, demo=False):
@@ -242,12 +273,12 @@ def first_url(include_summary, demo=False):
                     include_summary, demo)
 
 
-def payload(path, step_arg, include_summary, demo=False):
+def payload(path, step_arg, include_summary, demo=False, owner_name=None):
     """What the page needs to run the tour from this request, or None.
 
     None unless `step_arg` names a step that lives on `path`, so a stale or
     hand-edited link renders the plain page instead of a tour pointing at
-    things that are not there.
+    things that are not there. `owner_name` finishes the welcome's title.
     """
     steps = steps_for(include_summary)
     try:
@@ -257,9 +288,12 @@ def payload(path, step_arg, include_summary, demo=False):
     if not 1 <= number <= len(steps) or steps[number - 1]["page"] != path:
         return None
 
+    def finished(s):
+        return dict(s, title=welcome_title(owner_name)) if s["welcome"] else s
+
     return {
         "current": number - 1,
-        "steps": [dict(s, url=step_url(s["page"], i, include_summary, demo))
+        "steps": [dict(finished(s), url=step_url(s["page"], i, include_summary, demo))
                   for i, s in enumerate(steps, start=1)],
         # Finishing stays on Summary, whose links the closing step has just
         # pointed at.

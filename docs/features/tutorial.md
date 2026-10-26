@@ -80,8 +80,24 @@ point of it.
 
 ## Which steps run
 
-`STEPS` lists every step in tour order: Summary, then Home, then Configuration, then one closing
-step back on Summary.
+`STEPS` lists every step in tour order: the welcome, then Summary, then Home, then Configuration,
+then one closing step back on Summary.
+
+### The welcome
+
+Every run opens with a greeting card that points at nothing: "Welcome <name>!" and two
+sentences on what the tour is and that it can be skipped. The step is marked `welcome=True` in
+`STEPS`, where it carries the Summary page so the list stays in page order; `steps_for` puts it
+on whichever page the run actually starts on (Summary when toured, Home otherwise), so it never
+costs a page change. Its title is finished in `payload` from `owner_name`, which
+`routes/tutorial._owner_name` takes from the contact record's first name; with none given it
+is a plain "Welcome!". The node's own name does not stand in: it names a place, not a person. The body is the same for everyone and is the
+one place in `WELCOME_BODY` rather than inline, since the title is built around it.
+
+On the page, `tutorial.js` gives the card the `tut-welcome` class (wider, larger title), keeps
+it out of the margin column (`margins` returns null for it, as for a picture step) so it sits in
+the middle of the dimmed page, and does not show the "nothing to point at" note, which is for a
+targeted region that happens to be off the page, not for a step that has no target by design.
 
 The Summary steps run only when there is more than one node. With a single node the Summary page
 has one card and nothing to choose between, so the run starts on Home.
@@ -107,8 +123,8 @@ drops). It is on Summary because that is where the Resources and Help links are,
 there to visit with one node as well as with several. So a single node's run starts on Home and
 still ends on Summary. Getting there is an ordinary Next from the last Configuration step.
 
-Step numbers are positions in the run, not in `STEPS`. Home's first step is step 1 on a single
-node and step 6 when Summary is toured.
+Step numbers are positions in the run, not in `STEPS`. The welcome is step 1 in every run;
+Home's first step is step 2 on a single node and step 7 when Summary is toured.
 
 ### Demo mode
 
@@ -125,6 +141,7 @@ Summary and on Home is a [click-through step](#click-through-steps).
 
 | Page | Step | Points at |
 | --- | --- | --- |
+| (first page of the run) | Welcome <name>! | Nothing: a centred greeting; see [The welcome](#the-welcome) |
 | Summary | List of nodes | The node cards and the tabs in the banner |
 | Summary | Resources | The Resources links |
 | Summary | If you need help | The Help links |

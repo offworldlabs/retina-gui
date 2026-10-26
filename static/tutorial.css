@@ -94,6 +94,11 @@
 /* A step with an example image: the picture has to be big enough to read, so
    the card is too, and it stands over the page rather than in the margin. */
 .tut-card.tut-wide { width: 720px; }
+/* The welcome: no region to stand beside, so it sits in the middle of the
+   page, a little wider and with a larger title. See docs/features/tutorial.md#the-welcome */
+.tut-card.tut-welcome { width: 420px; }
+.tut-card.tut-welcome .tut-title { font-size: 22px; margin-top: 14px; }
+.tut-card.tut-welcome .tut-body { font-size: 14px; }
 
 .tut-figure { margin: 10px 0 10px; }
 .tut-frame { position: relative; }
