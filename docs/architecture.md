@@ -527,8 +527,8 @@ redirects to `/set-up` while the setup wizard is in progress. Otherwise it shows
 - Service cards (Passive Radar, Max-Hold, ADS-B Map, Tracker, Controller), or the spectrum
   iframe or SDRconnect panel in those modes (see [sdr-mode.md](features/sdr-mode.md)).
   Controller is last because it is the way into every view the other cards do not cover. The
-  Tracker card says how much it keeps (up to 4 hours, the sidecar's limit; see
-  [tracker.md](features/tracker.md#view-window)).
+  Tracker card reads "Live & 4hr Track Data": the 4 hours is the sidecar's limit; see
+  [tracker.md](features/tracker.md#view-window).
 
 The page is host-agnostic: `owl.local` and the node's own `ret<node_id>.local` produce the same
 page. The shared alias is a way in, and the fleet banner moves you between nodes from there.
