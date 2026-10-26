@@ -129,7 +129,9 @@ search with and, with no Back button, no way to reach the location step again. `
 the towers cache to the template, and `setup.html` sets `_towerSearchParams` from the cached
 coordinates before `initSetupWizard` runs. RF measurements are not cached, so the rehydrated
 search is location-only, the same fallback used when the spectrum analyser is unavailable. The
-altitude is rehydrated as 0.
+altitude is rehydrated as 0. The location step reads the same cached position into its empty
+boxes on a reload (and refreshes the altitude from it), so an owner who reloads there finds the
+map and pin where they left them rather than blank boxes.
 
 ### Prefilled answers
 
@@ -469,14 +471,49 @@ constraint does not reach.
   different statuses, each with its own sentence, and both are shown as returned.
 - Enter in the address box runs the lookup, not the step. Find Towers is a deliberate second
   action once the coordinates look right.
-- Coordinates are written to six decimals (about 0.1 m, finer than any geocoder claims).
+- Coordinates are written as the finder returned them (it fixes the precision at six decimals,
+  about 0.1 m, finer than any geocoder claims) and never rounded here; see
+  [Coordinates](#coordinates).
 - A postcode-level or locality-level match shows a warning instead of "Matched: ...". These
   coordinates are not only a search input: `/towers/select` writes them to the radar config as
   the receiver position, and a city-centre fix can sit 10 km from the real receiver.
+- A ZIP in the typed address that the matched address does not carry is pointed out beside the
+  match, with a nudge to check the pin. The finder's second geocoder (OSM Nominatim, which
+  answers when the Census geocoder has no match) takes its postcode from the surrounding map
+  data, and that is sometimes the neighbouring town's; the coordinates can still be right, and
+  the map is where to tell.
+- The help text says a lookup is street-level and points at the map. Both geocoders place a
+  house number along its street segment, not on the roof, so a lookup is where to start and the
+  pin is where to finish.
 - Each lookup gets an `AbortController`, so a late answer cannot write coordinates into a step
   the owner has already left. An aborted request leaves the button label to whichever request
   replaced it.
 
+### Coordinates
+
+The latitude and longitude boxes are text (`inputmode="decimal"`), not `type=number`, and
+nothing in the step rounds a value the owner gave:
+
+- A pair pasted from a map ("38.8895, -77.0353", with a comma, semicolon, space or tab
+  between) lands in one box and is split across both (`splitPair`). Right-clicking a map
+  application gives such a pair at a dozen decimals, which `type=number` would have refused as
+  a whole and an earlier `toFixed(6)` would have cut.
+- `coordValue` parses a box (accepting a Unicode minus) and `coordsValid` is the one gate: both
+  present, in range. Find Towers reads nothing else, so no lookup or map failure can hold the
+  step shut, and an out-of-range figure is explained under the boxes rather than silently
+  disabling the button.
+- A map (`#rxMap`, Leaflet, the same CARTO tiles as the tower step) appears under the boxes
+  once there is a valid point, with a draggable pin. Clicking the map or dragging the pin writes
+  the boxes at seven decimals (about a centimetre), the one place the step rounds, and only
+  because a click has no precision of its own. Typing or pasting moves the pin; a lookup zooms to
+  the match. The pin is a `divIcon`, as the tower step's markers are, so nothing is fetched for
+  it. Without Leaflet (no internet on the LAN) `ensureMap` does nothing and the boxes work alone.
+- The map is created while its panel is hidden on a reload, so the enter hook calls
+  `invalidateSize` on every entry (`refreshLocationMap`).
+- The geocoder is pinned to the US, and the help text says so. A non-US address usually returns
+  "no match", which reads as a typo unless the page has already said otherwise. Worse, a foreign
+  place name that collides with a US one returns a confident street-level match in the wrong
+  country. That has been measured, so the owner still has to check the matched address.
 ### Altitude prefill
 
 Nothing used to fill the altitude box, which left `rx_altitude` at 0 in the radar config for
@@ -493,8 +530,8 @@ whole metres (a site altitude, not a survey figure).
 
 ### Leaving the step
 
-Find Towers stores the coordinates, altitude and RF measurements in `window._towerSearchParams`
-and advances. Skip jumps two steps,
+Find Towers stores the coordinates (parsed from the boxes, see [Coordinates](#coordinates)),
+altitude and RF measurements in `window._towerSearchParams` and advances. Skip jumps two steps,
 past both location and towers, to the calibrate step.
 
 ## Tower selection

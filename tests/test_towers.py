@@ -818,10 +818,15 @@ class TestSetupWizardAddressLookup:
         js = self._setup_js()
         start = js.index('function updateFindBtn()')
         body = js[start:js.index('}', js.index('findBtn.disabled', start))]
-        assert 'rxLat.value' in body
-        assert 'rxLon.value' in body
+        assert 'coordsValid()' in body
         assert 'rxAddress' not in body
         assert 'addressInput' not in body
+        # ...and coordsValid reads the two boxes and nothing else.
+        start = js.index('function coordsValid()')
+        valid = js[start:js.index('function sayCoords', start)]
+        assert 'coordValue(rxLat)' in valid
+        assert 'coordValue(rxLon)' in valid
+        assert 'rxAddress' not in valid
 
     def test_filling_coordinates_refreshes_the_gate(self, app_client):
         """Setting .value programmatically does not fire an input event, so
@@ -830,7 +835,7 @@ class TestSetupWizardAddressLookup:
         js = self._setup_js()
         start = js.index('function lookupAddress()')
         body = js[start:js.index('function fetchElevation', start)]
-        assert 'rxLat.value = Number(d.latitude)' in body
+        assert 'rxLat.value = String(d.latitude)' in body
         assert 'updateFindBtn();' in body
 
     def test_lookup_does_not_write_into_an_abandoned_step(self, app_client):
@@ -862,8 +867,12 @@ class TestSetupWizardAddressLookup:
         path that always has to work."""
         js = self._setup_js()
         assert 'function scheduleElevation()' in js
-        assert "rxLat.addEventListener('input', scheduleElevation);" in js
-        assert "rxLon.addEventListener('input', scheduleElevation);" in js
+        # Both boxes share one input handler, which schedules the lookup.
+        assert "rxLat.addEventListener('input', onCoordInput);" in js
+        assert "rxLon.addEventListener('input', onCoordInput);" in js
+        start = js.index('function onCoordInput(')
+        handler = js[start:js.index('if (demoMode)', start)]
+        assert 'scheduleElevation();' in handler
 
     def test_typed_altitude_is_never_overwritten(self, app_client):
         """We may replace a figure we put there when the coordinates move. We

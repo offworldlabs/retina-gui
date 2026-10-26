@@ -344,3 +344,38 @@ class TestCompletionSaysWhenItFallsShort:
                 enforce_radar_mode(temp_dir)
         run.assert_not_called()
         assert any('Return to radar skipped' in r.message for r in caplog.records)
+
+
+# ── Coordinates ────────────────────────────────────────────────
+
+
+class TestCoordinates:
+    def test_the_boxes_keep_what_was_pasted(self, app_client):
+        """A pair from a map carries a dozen decimals. Nothing rounds it: the
+        boxes are text, and the finder's fix is written back as returned."""
+        location = panel(page(app_client), 'location')
+        assert 'id="rxLat" inputmode="decimal"' in location
+        assert 'id="rxLon" inputmode="decimal"' in location
+        js = setup_js()
+        assert '.toFixed(6)' not in js
+        assert 'rxLat.value = String(d.latitude)' in js
+
+    def test_a_pasted_pair_is_split_across_the_boxes(self):
+        js = setup_js()
+        assert 'function splitPair(box)' in js
+        start = js.index('function splitPair(box)')
+        body = js[start:js.index('function onCoordInput', start)]
+        assert 'rxLat.value = m[1]' in body
+        assert 'rxLon.value = m[2]' in body
+
+    def test_the_map_lets_the_owner_place_the_pin(self, app_client):
+        location = panel(page(app_client), 'location')
+        assert 'id="rxMap"' in location
+        assert 'drag the pin' in location
+        js = setup_js()
+        assert "rxPin.on('dragend'" in js
+        assert "rxMap.on('click'" in js
+
+    def test_a_zip_the_match_does_not_carry_is_pointed_out(self):
+        js = setup_js()
+        assert 'typedZip !== matchedZip' in js
