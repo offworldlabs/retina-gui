@@ -2,7 +2,7 @@
 <div data-step="towers" class="step-panel" style="display:none;">
     <div class="wiz-title-row">
         <h1>Choose a tower</h1>
-        <p>Select a broadcast transmitter to use as the passive radar illuminator.</p>
+        <p>Select a broadcast transmitter to use as the passive radar illuminator, and choose which towers to keep on this node as presets.</p>
     </div>
 
     <!-- Loading -->
@@ -18,14 +18,33 @@
     <div id="towerResults" style="display:none;">
         <div class="scan-summary" id="towerSummary"></div>
 
+        {# What the sweep hid. The finder drops every tower the sweep did not
+           measure, so a strong tower the scan missed is simply absent; this
+           offers the location-only search that lists everything.
+           See docs/features/setup-wizard.md#towers-the-sweep-did-not-measure #}
+        <p id="towerScope" style="display:none;font-size:12.5px;color:var(--ink-3);margin:0 0 12px;"></p>
+
         <div id="towerMap" class="tower-map"></div>
 
-        <div style="overflow-x:auto;margin-top:14px;">
+        {# The Keep column. Ticked towers are what this node caches as presets
+           (Cached Towers on the Configuration page). The finder's best few are
+           ticked to begin with, the chosen tower is always kept, and every
+           change is saved at once. See docs/features/setup-wizard.md#cached-towers #}
+        <p id="towerCacheNote" style="font-size:12.5px;color:var(--ink-3);margin:12px 0 0;">
+            <strong>Keep</strong> marks the towers saved on this node as presets, so you can
+            switch between them later under Cached Towers on the Configuration page.
+            The best <span id="towerCacheDefault"></span> are kept to begin with; tick or
+            untick to change the list. <span id="towerCacheStatus"></span>
+        </p>
+
+        <div style="overflow-x:auto;margin-top:10px;">
             <table class="tower-table">
-                {# Columns follow tower-finder's results table; hide-mobile is ours.
+                {# Columns follow tower-finder's results table; Keep and
+                   hide-mobile are ours.
                    See docs/features/setup-wizard.md#tower-presentation #}
                 <thead>
                     <tr>
+                        <th title="Save this tower on the node as a preset">Keep</th>
                         <th>#</th>
                         <th>Detect Area (km&sup2;)</th>
                         <th>Point</th>

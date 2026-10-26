@@ -12,6 +12,9 @@ bp = Blueprint('towers', __name__, url_prefix='/towers')
 # The finder ranks best-first; only the best few back /config's preset picker.
 # See docs/features/towers.md#tower-search
 MAX_CACHED_TOWERS = 5
+# The most an owner may tick by hand on the wizard's tower step.
+# See docs/features/towers.md#choosing-what-to-cache
+MAX_CACHED_TOWERS_BY_HAND = 10
 
 # Covers the upstream's two geocoders at 10s each plus its Nominatim throttle.
 # See docs/features/towers.md#timeouts-and-limits
@@ -255,6 +258,43 @@ def cache_add():
     })
     cache = device_state.get_towers_cache()
     return jsonify({"success": True, "towers": cache["towers"], "cached_at": cache["cached_at"]})
+
+
+@bp.route("/cache/set", methods=["POST"])
+def cache_set():
+    """Replace the cached tower-preset list with the towers the owner ticked.
+
+    The wizard's tower step: the search cached the finder's best few on its
+    own, and this is how the owner changes that list by hand. The towers are
+    the finder's own records, screened as the search screens them, and capped
+    at MAX_CACHED_TOWERS_BY_HAND so the preset picker stays short.
+    See docs/features/towers.md#choosing-what-to-cache.
+    """
+    from app import device_state
+
+    body = request.get_json(silent=True)
+    if not body:
+        return jsonify({"success": False, "error": "Missing JSON body"}), 400
+
+    try:
+        lat = float(body.get("lat"))
+        lon = float(body.get("lon"))
+    except (TypeError, ValueError):
+        return jsonify({"success": False, "error": "lat and lon are required"}), 400
+    towers = body.get("towers")
+    if not isinstance(towers, list):
+        return jsonify({"success": False, "error": "towers must be a list"}), 400
+    if len(towers) > MAX_CACHED_TOWERS_BY_HAND:
+        return jsonify({
+            "success": False,
+            "error": f"Keep at most {MAX_CACHED_TOWERS_BY_HAND} towers",
+        }), 400
+
+    kept = _cacheable_towers(towers)
+    device_state.save_towers_cache(lat, lon, kept)
+    cache = device_state.get_towers_cache() or {}
+    return jsonify({"success": True, "towers": cache.get("towers", []),
+                    "cached_at": cache.get("cached_at")})
 
 
 @bp.route("/cache/remove", methods=["POST"])

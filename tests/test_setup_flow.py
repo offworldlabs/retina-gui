@@ -346,6 +346,71 @@ class TestCompletionSaysWhenItFallsShort:
         assert any('Return to radar skipped' in r.message for r in caplog.records)
 
 
+# ── Choosing what to cache ─────────────────────────────────────
+
+
+def tower(callsign, rank, freq=500.0 + 0.0):
+    return {"callsign": callsign, "name": callsign, "rank": rank,
+            "frequency_mhz": freq, "latitude": 40.0 + rank / 100,
+            "longitude": -75.0, "altitude_m": 100, "distance_km": 10.0 * rank}
+
+
+class TestChoosingWhatToCache:
+    def test_the_table_has_a_keep_column_and_says_what_it_means(self, app_client):
+        towers = panel(page(app_client), 'towers')
+        assert '<th title="Save this tower on the node as a preset">Keep</th>' in towers
+        assert 'Cached Towers on the Configuration page' in towers
+        js = setup_js()
+        assert "postJSON('/towers/cache/set'" in js
+
+    def test_setting_the_cache_replaces_it_with_the_ticked_towers(self, app_client):
+        import app as app_module
+        app_module.device_state.save_towers_cache(40.0, -75.0, [tower("KOLD-TV", 1)])
+
+        kept = [tower("KTST-TV", 2), tower("KNEW-TV", 5)]
+        resp = app_client.post('/towers/cache/set',
+                               data=json.dumps({"lat": 40.0, "lon": -75.0, "towers": kept}),
+                               content_type='application/json')
+        assert resp.status_code == 200
+        cache = app_module.device_state.get_towers_cache()
+        assert [t["callsign"] for t in cache["towers"]] == ["KTST-TV", "KNEW-TV"]
+        assert cache["lat"] == 40.0
+
+    def test_the_towers_are_screened_as_the_search_screens_them(self, app_client):
+        import app as app_module
+        bad = dict(tower("KBAD-TV", 3), latitude="north")
+        resp = app_client.post('/towers/cache/set',
+                               data=json.dumps({"lat": 40.0, "lon": -75.0,
+                                                "towers": [tower("KTST-TV", 1), bad]}),
+                               content_type='application/json')
+        assert resp.status_code == 200
+        assert [t["callsign"] for t in app_module.device_state.get_towers_cache()["towers"]] == ["KTST-TV"]
+
+    def test_there_is_a_ceiling_by_hand(self, app_client):
+        from routes.towers import MAX_CACHED_TOWERS_BY_HAND
+        too_many = [tower(f"K{i:03d}", i) for i in range(MAX_CACHED_TOWERS_BY_HAND + 1)]
+        resp = app_client.post('/towers/cache/set',
+                               data=json.dumps({"lat": 40.0, "lon": -75.0, "towers": too_many}),
+                               content_type='application/json')
+        assert resp.status_code == 400
+
+    def test_a_bad_body_is_refused(self, app_client):
+        for body in ({}, {"lat": 40.0}, {"lat": 40.0, "lon": -75.0, "towers": "KTST-TV"}):
+            resp = app_client.post('/towers/cache/set', data=json.dumps(body),
+                                   content_type='application/json')
+            assert resp.status_code == 400, body
+
+    def test_the_page_offers_the_location_only_search(self, app_client):
+        """The finder drops every tower the sweep did not measure, so a strong
+        tower the scan missed is simply absent. The way to see it is a search
+        by location alone."""
+        towers = panel(page(app_client), 'towers')
+        assert 'id="towerScope"' in towers
+        js = setup_js()
+        assert 'Show every tower near you' in js
+        assert 'search(false)' in js
+
+
 # ── Coordinates ────────────────────────────────────────────────
 
 

@@ -28,6 +28,7 @@ picker on `/config` and as Auto-Calibrate's alternate-tower list.
 | `/towers/elevation` | GET | tower-finder `/api/elevation` | Advisory altitude prefill. |
 | `/towers/cache/add` | POST | none | Manual tower into the cache. |
 | `/towers/cache/remove` | POST | none | Remove a cached tower by index. |
+| `/towers/cache/set` | POST | none | Replace the cache with the towers the wizard's owner ticked. |
 | `/towers/spectrum/events` | GET (SSE) | retina-spectrum `/api/events` | Byte-for-byte stream proxy for the wizard's RF scan. |
 | `/towers/select` | POST | none | Save location and centre frequency, then queue an apply. |
 
@@ -46,7 +47,25 @@ every tower the service found. Separately, the towers are screened (see
 [Screening cached towers](#screening-cached-towers)) and the first `MAX_CACHED_TOWERS` (5) are
 written to the cache. The service already ranks best-first, and the cache only backs a dropdown
 and a manage list, which stay usable only when short. A failed cache write is logged and does
-not fail the search.
+not fail the search. The wizard's tower step shows that list as its Keep column and lets the
+owner change it; see [Choosing what to cache](#choosing-what-to-cache).
+
+Note what the service does with `measurements`: it returns only the towers the sweep measured
+and drops the rest before ranking (its `process_and_rank`, the `measured` filter). A tower the
+sweep did not reach is not in the response at all, which is why the wizard offers a second,
+location-only search. See
+[setup-wizard.md](setup-wizard.md#towers-the-sweep-did-not-measure).
+
+## Choosing what to cache
+
+`cache_set()` replaces the whole cached list with the towers the owner ticked on the wizard's
+tower step: `lat`, `lon` (the search position, kept so `/set-up` can still rehydrate a reload)
+and `towers`, the finder's own records as the page received them. The route screens them with
+`_cacheable_towers`, exactly as the search does before it caches, and refuses more than
+`MAX_CACHED_TOWERS_BY_HAND` (10): the default of five is the finder's choice, ten is the most a
+preset picker stays readable at. It is a replacement, not a merge, so an owner who unticks a
+tower sees it go; a tower added by hand on the Configuration page before the wizard ran is
+replaced along with the rest, as the search itself already replaced it.
 
 Failures collapse to one message per kind: a timeout is 504, any other request failure is 502,
 and anything unexpected is 500.
@@ -187,4 +206,5 @@ the owner switches back to radar mode.
 | `ELEVATION_TIMEOUT_S` | 15 s | One cached upstream lookup, and nothing waits on the result. |
 | `GEOCODE_QUERY_MAX_LENGTH` | 200 | Mirrors the upstream's `AddressQuery` bound. |
 | `MAX_CACHED_TOWERS` | 5 | Keeps the preset dropdown and manage list usable. |
+| `MAX_CACHED_TOWERS_BY_HAND` | 10 | The most the wizard's Keep column accepts. |
 | Spectrum SSE | 5 s connect, no read timeout | The scan stream is long-lived. On failure the proxy emits one `{"type":"error"}` message. |

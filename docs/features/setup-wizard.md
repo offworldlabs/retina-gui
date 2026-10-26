@@ -44,7 +44,7 @@ the `[data-step]` elements in document order, so reordering the includes reorder
 | 3 | `system` | Update OWL-OS | No (waits for the update) | Nothing; reports a server-pushed update |
 | 4 | `radar` | RETINA packages | No on first run | Installs retina-node via `/mender/install` |
 | 5 | `location` | Where is your receiver? | Yes (skips towers too) | Nothing directly; switches the SDR to spectrum mode |
-| 6 | `towers` | Choose a tower | Yes | Receiver and transmitter location, frequency (`/towers/select`) |
+| 6 | `towers` | Choose a tower | Yes | Receiver and transmitter location, frequency (`/towers/select`); the cached tower list (`/towers/cache/set`) |
 | 7 | `calibrate` | Tune the receiver | Yes | Gain settings, persisted automatically |
 | 8 | `name` | Name your node | Yes | The node's name (`/node-name`), or nothing on Skip |
 | 9 | `account` | Connect your node to your account | Yes | Claim record, or nothing on Skip |
@@ -94,7 +94,7 @@ The progress label reads "Step N of M" and dots behind the current step are mark
 | --- | --- | --- | --- |
 | Current step and `started_at` | `setup-wizard.json` in the data dir | `/set-up/save-step` on every step entry | `/set-up` (resume, through `resume_point`), home and config redirects |
 | Completion flag | `setup-wizard-completed` | `/set-up/save-step` with `complete` | `/set-up` (`is_rerun`), `/mender/check`, `/mender/check-os`, retina-telemetry |
-| Last tower search | `towers-cache.json` | `/towers/search` | `/set-up` (rehydration), Auto-Calibrate |
+| Last tower search | `towers-cache.json` | `/towers/search`, `/towers/cache/set` | `/set-up` (rehydration), Auto-Calibrate, the Configuration page's presets |
 | Consent, contact, claim | See [device-state-and-telemetry.md](device-state-and-telemetry.md) | The step routes below | retina-telemetry, prefills |
 
 The step file holds the resume point, and because the wizard is forward-only it is also the
@@ -545,6 +545,39 @@ Tower search itself is covered in [towers.md](towers.md).
 Results render as a summary row, a Leaflet map and a table. Selecting a tower (map marker or
 table row) enables Save, shows the selected card and draws the antenna aiming guide.
 
+### Towers the sweep did not measure
+
+When the location step's sweep produced measurements, the search carries them, and the finder
+then returns **only towers the sweep measured**: it drops every tower without a matching
+measurement before ranking, on the grounds that the radar cannot see it (tower-finder-service's
+`process_and_rank`, the `measured` filter). A strong tower the sweep had not reached when Find
+Towers was pressed, or one whose channel the sweep's averaging ring had not yet exported, is
+therefore simply absent from the list, however well it would have ranked. An owner who knows
+their second-best tower is on 545 MHz and sees 509 in its place has met exactly this.
+
+The step says so above the map (`#towerScope`), and offers "Show every tower near you", which
+runs the same search by location alone (`search(false)`: no measurements, so nothing is
+dropped), with a link back to the swept list. The location-only list ranks by the model rather
+than by what the site heard, so the swept list stays the default. The frequency-match tick in
+the Freq column is the finder's `frequency_matched`, which only the swept search sets.
+
+Each search resets the results first (`resetResults`): Leaflet refuses to initialise a map on a
+container it already owns, and the second search on one entry is a real case now.
+
+### Cached towers
+
+The search caches the finder's best `MAX_CACHED_TOWERS` on the node (see
+[towers.md](towers.md#tower-search)); those are what the Configuration page's Cached Towers
+section offers as presets. The table's first column, **Keep**, shows that list and lets the
+owner change it: the best few start ticked, a tick or untick posts the whole ticked set to
+`/towers/cache/set` (debounced, so a run of ticks is one request), and the status beside the
+explanation says how many are kept or why a tick was refused. Two rules: the chosen tower is
+always kept (unticking it is refused, and choosing an unkept tower ticks it), because it is the
+one preset the node is about to run on; and at most `MAX_CACHED_TOWERS_BY_HAND` may be ticked,
+so the preset picker stays short. The list posted is the finder's own records, screened by the
+route as the search screens them. The tick is its own control: clicking it does not also select
+the row.
+
 ### Tower presentation
 
 The table columns and their order follow tower-finder's own results table, so a tower reads the
@@ -714,11 +747,11 @@ mode the link carries `demo=1` so the tour runs in demo mode too.
 
 | Mode | Trigger | Behaviour |
 | --- | --- | --- |
-| Demo | `/set-up?demo=1` | Treated as a re-run. Starts at the first step, pre-ticks the agreements, skips the consent write, prefills location with fixed example coordinates and seeds the tower search. `window.fetch` is wrapped to fake `/mender/cloud-services`, `/mender/check-os`, `/mender/check`, `/mender/install` (an install that finishes after 8 seconds), `/towers/select`, `/api/mode`, `/set-up/save-step`, `/set-up/complete`, `/node-name`, `/remote-access/toggle` and `/remote-access/shell`. Everything else goes to the real server. |
+| Demo | `/set-up?demo=1` | Treated as a re-run. Starts at the first step, pre-ticks the agreements, skips the consent write, prefills location with fixed example coordinates and seeds the tower search. `window.fetch` is wrapped to fake `/mender/cloud-services`, `/mender/check-os`, `/mender/check`, `/mender/install` (an install that finishes after 8 seconds), `/towers/select`, `/towers/cache/set`, `/api/mode`, `/set-up/save-step`, `/set-up/complete`, `/node-name`, `/remote-access/toggle` and `/remote-access/shell`. Everything else goes to the real server. |
 | Dev | `DEV_MODE` environment variable | Starts at the location step instead of the recorded one. |
 
 Demo mode is meant to be safe to show on a live node, which is why it skips the consent write
-and also fakes `/node-name` and the
+and also fakes `/towers/cache/set`, `/node-name` and the
 two `/remote-access/*` switches. Requests it does not fake still reach the node, so in demo mode
 Save on the contact step, Send on the claim step, the tower search, the address and elevation
 lookups, and Optimise reception are all real actions.

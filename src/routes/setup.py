@@ -48,6 +48,7 @@ def wizard():
         telemetry_status,
     )
     from routes.fleet import DASHBOARD_URL
+    from routes.towers import MAX_CACHED_TOWERS
 
     resume_step = resume_point(device_state.get_setup_wizard_step())
     owl_os_version, retina_node_version = mender.get_versions()
@@ -74,6 +75,7 @@ def wizard():
     return render_template("setup.html",
                            resume_step=resume_step,
                            towers_cache=towers_cache,
+                           max_cached_towers=MAX_CACHED_TOWERS,
                            contact=contact,
                            # The support switches, as the Configuration page
                            # shows them. See docs/features/setup-wizard.md#remote-support
