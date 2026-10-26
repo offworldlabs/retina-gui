@@ -19,7 +19,7 @@ is now).
 | [src/blah2_client.py](../../src/blah2_client.py) | `Blah2Client`: thin HTTP wrapper over blah2_api (retune, retune status, overload status, detections, ADS-B). Every getter returns `None` on failure so the engine can be tested against a fake. |
 | [src/retina_tracker_client.py](../../src/retina_tracker_client.py) | Shared client for the retina-tracker sidecar. The engine registers a listener for confirmed-track events and calls `reset()`. |
 | [static/calibrate.js](../../static/calibrate.js) | `window.RetinaCalibrate`: shared driver for all UI entry points (run shapes, phase and outcome labels, result interpretation, fetch and poll calls). |
-| [templates/setup/_calibrate.html](../../templates/setup/_calibrate.html) | The setup wizard's "Tune the receiver" step. |
+| [templates/setup/_calibrate.html](../../templates/setup/_calibrate.html) | The setup wizard's "Optimise reception" step: the two notch filters, then the run. |
 | `templates/config.html`, `static/setup.js` | The Configuration page modal and the wizard step's rendering. Both use `RetinaCalibrate`. |
 
 ## Entry points and run shapes

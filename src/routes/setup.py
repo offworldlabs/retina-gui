@@ -3,6 +3,7 @@ import re
 from flask import Blueprint, jsonify, render_template, request
 from pydantic import ValidationError
 
+from apply_service import ConfigChangeRefused
 from config_manager import ConfigManager
 from config_schema import (
     CLAIM_EMAIL_PATTERN,
@@ -40,6 +41,7 @@ def wizard():
     from app import (
         CARTO_API_KEY,
         DEV_MODE,
+        config_mgr,
         device_state,
         get_node_id,
         mender,
@@ -81,6 +83,10 @@ def wizard():
                            # The support switches, as the Configuration page
                            # shows them. See docs/features/setup-wizard.md#remote-support
                            remote_access=remote_access.status(),
+                           # The filters the calibrate step offers before a
+                           # run. See docs/features/setup-wizard.md#filters
+                           capture_filters=current_capture_filters(config_mgr),
+                           capture_fc_mhz=current_capture_fc_mhz(config_mgr),
                            node_name=node_name.get(),
                            node_name_max_length=NAME_MAX_LENGTH,
                            claim=claim,
@@ -95,6 +101,52 @@ def wizard():
                            dev_mode=DEV_MODE,
                            carto_api_key=CARTO_API_KEY,
                            demo_mode=demo_mode)
+
+
+def current_capture_fc_mhz(config_mgr):
+    """The configured centre frequency in MHz, or None when there is none.
+
+    user.yml first, since the tower step writes there and the merge may not
+    have run yet; then the merged config. The calibrate step's filter advice
+    starts from it on a reload.
+    """
+    for load in (config_mgr.load_user_config, config_mgr.load_merged_config):
+        try:
+            fc = ((load() or {}).get("capture") or {}).get("fc")
+        except Exception:
+            continue
+        try:
+            if fc is not None and float(fc) > 0:
+                return round(float(fc) / 1e6, 3)
+        except (TypeError, ValueError):
+            continue
+    return None
+
+
+def current_capture_filters(config_mgr):
+    """The receiver's two notch filters, as the running config has them.
+
+    The merged config is what blah2 reads; user.yml is consulted when there is
+    no merged config yet (retina-node not installed). Absent keys read as off,
+    matching what parse_flat_form_data assumes for an unticked box.
+    """
+    def read(nested):
+        device = ((nested or {}).get("capture") or {}).get("device") or {}
+        return {
+            "dab_notch": bool(device.get("dabNotch", False)),
+            "rf_notch": bool(device.get("rfNotch", False)),
+        }
+
+    try:
+        merged = config_mgr.load_merged_config()
+    except Exception:
+        merged = None
+    if merged and (merged.get("capture") or {}).get("device"):
+        return read(merged)
+    try:
+        return read(config_mgr.load_user_config())
+    except Exception:
+        return read(None)
 
 
 @bp.route("/set-up/save-step", methods=["POST"])
@@ -200,6 +252,53 @@ def _blank_to_none(value):
     if isinstance(value, str):
         value = value.strip()
     return value or None
+
+
+@bp.route("/set-up/filters", methods=["POST"])
+def filters():
+    """Set the receiver's two notch filters, then queue a config apply.
+
+    The calibrate step offers them before a run because changing either one
+    moves the signal level enough to need recalibrating. Writes only the two
+    keys, so nothing else in the capture section is touched, and returns 202
+    with the apply status when retina-node is installed, as /towers/select
+    does. See docs/features/setup-wizard.md#filters.
+    """
+    from app import apply_service, config_mgr, device_state
+
+    data = request.get_json(silent=True)
+    if data is None:
+        return jsonify({"success": False, "error": "Missing JSON body"}), 400
+    wanted = {}
+    for field, key in (("dab_notch", "dabNotch"), ("rf_notch", "rfNotch")):
+        if field in data:
+            if not isinstance(data[field], bool):
+                return jsonify({"success": False,
+                                "error": f"{field} must be true or false"}), 400
+            wanted[key] = data[field]
+    if not wanted:
+        return jsonify({"success": False, "error": "Nothing to set"}), 400
+
+    user_config = dict(config_mgr.load_user_config())
+    capture = dict(user_config.get("capture") or {})
+    device = dict(capture.get("device") or {})
+    device.update(wanted)
+    capture["device"] = device
+    user_config["capture"] = capture
+    config_mgr.save_user_config(user_config)
+
+    if not config_mgr.is_retina_node_installed():
+        return jsonify({"success": True, "applied": False})
+
+    in_progress, reason = device_state.is_any_update_in_progress()
+    if in_progress:
+        return jsonify({"success": False,
+                        "error": f"{reason}. Change the filters once it finishes."}), 409
+
+    try:
+        return jsonify({"success": True, "status": apply_service.request()}), 202
+    except ConfigChangeRefused as refused:
+        return jsonify({"success": False, "error": refused.reason}), 409
 
 
 @bp.route("/set-up/complete", methods=["POST"])

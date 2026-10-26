@@ -88,7 +88,7 @@ function initSetupWizard(resumeStep, devMode, isRerun, demoMode) {
         radar: 'Packages',
         location: 'Where is your receiver?',
         towers: 'Choose a tower',
-        calibrate: 'Tune the receiver',
+        calibrate: 'Optimise reception',
         name: 'Name your node',
         account: 'Connect your account',
         complete: 'You\'re all set'
@@ -301,6 +301,7 @@ function initSetupWizard(resumeStep, devMode, isRerun, demoMode) {
             if (path === '/set-up/complete')           return ok({ success: true });
             // Settings a demo must not change on a live node: the filters
             // (a stack restart), the support switches and the name.
+            if (path === '/set-up/filters')            return ok({ success: true, applied: false });
             if (path === '/remote-access/toggle')      return ok({ ok: true, enabled: /enabled=1/.test((opts && opts.body) || '') });
             if (path === '/remote-access/shell')       return ok({ ok: true, shell_allowed: /allowed=1/.test((opts && opts.body) || '') });
             if (path === '/node-name')                 return ok({ ok: true, name: 'demo' });
@@ -2131,6 +2132,9 @@ function initSetupWizard(resumeStep, devMode, isRerun, demoMode) {
                         skipBtn.style.display = '';
                         return;
                     }
+                    // The filter advice on the next step reads this.
+                    window._chosenFcMhz = isNum(selectedTower.frequency_mhz)
+                        ? selectedTower.frequency_mhz : null;
                     if (data.status) {
                         // Wait for the queued restart: later steps expect the
                         // radar to be back up.
@@ -2163,7 +2167,7 @@ function initSetupWizard(resumeStep, devMode, isRerun, demoMode) {
     // Auto-Calibrate against the tower just chosen, using CAL.QUICK_RUN (the
     // shape shared with Quick Calibrate lives in calibrate.js). The soak it
     // keeps is not optional; see calibrator.py's SOAK_SECONDS.
-    // See docs/features/setup-wizard.md#auto-calibrate-step
+    // See docs/features/setup-wizard.md#optimise-reception-step
     enterHooks.calibrate = (function() {
         var stopPoll = null;
         var listenersAdded = false;
@@ -2297,6 +2301,38 @@ function initSetupWizard(resumeStep, devMode, isRerun, demoMode) {
             window._calWizStopPoll = stopPoll;
         }
 
+        // The bands each notch blocks, as the capture schema describes them.
+        // A filter should be on unless the chosen frequency sits inside its
+        // band, in which case it would notch out the very signal the radar
+        // listens for. See docs/features/setup-wizard.md#filters
+        var FILTER_BANDS = {
+            dab: { lo: 155, hi: 235, what: 'DAB and VHF TV' },
+            rf:  { lo: 77,  hi: 115, what: 'FM radio' }
+        };
+
+        function renderFilterAdvice() {
+            var fc = window._chosenFcMhz;
+            var have = isNum(fc) && fc > 0;
+            el('calWizChosenFc').textContent = have ? fc.toFixed(3) + ' MHz' : '\u2014';
+            el('calWizChosenSub').textContent = have
+                ? 'The tower you picked. Each filter below is recommended on or off for it.'
+                : 'No tower has been chosen yet, so both filters are best left on.';
+            [['dab', 'calWizDabAdvice', 'calWizDabWhy'], ['rf', 'calWizRfAdvice', 'calWizRfWhy']]
+            .forEach(function(row) {
+                var band = FILTER_BANDS[row[0]];
+                var badge = el(row[1]);
+                var why = el(row[2]);
+                var inside = have && fc >= band.lo && fc <= band.hi;
+                badge.style.display = '';
+                badge.className = 'tower-badge ' + (inside ? 'rank-5' : 'rank-1');
+                badge.textContent = inside ? 'Recommended: off' : 'Recommended: on';
+                why.textContent = inside
+                    ? 'Your tower is inside this range, so leaving it on would block the signal the radar listens for.'
+                    : (have ? 'Your tower is outside this range, so keep it on to block ' + band.what + '.'
+                            : 'Leave on unless your tower is in this range.');
+            });
+        }
+
         return function() {
             var CAL = window.RetinaCalibrate;
             el('calWizResult').style.display = 'none';
@@ -2306,6 +2342,7 @@ function initSetupWizard(resumeStep, devMode, isRerun, demoMode) {
             el('calWizNext').style.display = 'none';
             el('calWizStatus').textContent = '';
             advancing = false;
+            renderFilterAdvice();
 
             // Never auto-start: this fires on every entry, including after a
             // reload. Reattach to the run on the node, which this tab does not own.
@@ -2327,7 +2364,62 @@ function initSetupWizard(resumeStep, devMode, isRerun, demoMode) {
             if (listenersAdded) return;
             listenersAdded = true;
 
+            // The filters. Each change is saved and applied on its own, with
+            // Optimise reception held back until the restart has finished:
+            // a run started mid-restart would measure the old filter.
+            // See docs/features/setup-wizard.md#filters
+            var filterMsg = el('calWizFilterMsg');
+            var filtersBusy = false;
+            function sayFilter(text, danger) {
+                filterMsg.textContent = text || '';
+                filterMsg.style.color = danger ? 'var(--danger)' : 'var(--ink-3)';
+                filterMsg.style.display = text ? '' : 'none';
+            }
+            function wireFilter(id, field) {
+                var box = el(id);
+                if (!box) return;
+                box.addEventListener('change', function() {
+                    var want = box.checked;
+                    var body = {};
+                    body[field] = want;
+                    filtersBusy = true;
+                    el('calWizDabNotch').disabled = true;
+                    el('calWizRfNotch').disabled = true;
+                    el('calWizStartBtn').disabled = true;
+                    sayFilter('Saving…');
+                    postJSON('/set-up/filters', body)
+                    .then(function(r) { return r.json(); })
+                    .then(function(d) {
+                        if (!d.status) {
+                            // retina-node not installed: saved, applied later.
+                            sayFilter('Saved. It takes effect when the radar starts.');
+                            return;
+                        }
+                        return CAL.pollApply(function(s) {
+                            var label = s.phase_label || 'Applying';
+                            if (s.phase === 'settling' && s.settle_remaining) {
+                                label += ' (' + s.settle_remaining + 's)';
+                            }
+                            sayFilter(label + '…');
+                        }).then(function() { sayFilter('Applied.'); });
+                    })
+                    .catch(function(err) {
+                        box.checked = !want;
+                        sayFilter('Could not change the filter: ' + err.message, true);
+                    })
+                    .then(function() {
+                        filtersBusy = false;
+                        el('calWizDabNotch').disabled = false;
+                        el('calWizRfNotch').disabled = false;
+                        el('calWizStartBtn').disabled = false;
+                    });
+                });
+            }
+            wireFilter('calWizDabNotch', 'dab_notch');
+            wireFilter('calWizRfNotch', 'rf_notch');
+
             el('calWizStartBtn').addEventListener('click', function() {
+                if (filtersBusy) return;
                 el('calWizStatus').textContent = '';
                 el('calWizResult').style.display = 'none';
                 el('calWizError').style.display = 'none';

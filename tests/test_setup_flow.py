@@ -223,6 +223,126 @@ class TestSystemUpdate:
         assert order.index('system') == order.index('agreements') + 2
 
 
+# ── Filters on the calibrate step ──────────────────────────────
+
+
+class TestFilters:
+    def test_the_filters_sit_before_the_run(self, app_client):
+        calibrate = panel(page(app_client), 'calibrate')
+        assert calibrate.index('id="calWizDabNotch"') < calibrate.index('>Auto-calibration<')
+        assert calibrate.index('id="calWizRfNotch"') < calibrate.index('>Auto-calibration<')
+        assert '<h1>Optimise reception</h1>' in calibrate
+
+    def test_the_boxes_show_the_running_config(self, app_client, config_files):
+        _, merged_path = config_files
+        with open(merged_path) as f:
+            merged = yaml.safe_load(f)
+        merged.setdefault('capture', {}).setdefault('device', {})
+        merged['capture']['device']['dabNotch'] = True
+        merged['capture']['device']['rfNotch'] = False
+        with open(merged_path, 'w') as f:
+            yaml.dump(merged, f)
+
+        calibrate = panel(page(app_client), 'calibrate')
+        dab = calibrate[calibrate.index('id="calWizDabNotch"'):calibrate.index('>', calibrate.index('id="calWizDabNotch"'))]
+        rf = calibrate[calibrate.index('id="calWizRfNotch"'):calibrate.index('>', calibrate.index('id="calWizRfNotch"'))]
+        assert 'checked' in dab
+        assert 'checked' not in rf
+
+    def test_setting_a_filter_writes_only_that_key_and_queues_an_apply(self, app_client, config_files, monkeypatch):
+        import app as app_module
+        user_path, _ = config_files
+        with open(user_path) as f:
+            before = yaml.safe_load(f)
+        # The queue itself is covered in test_apply_service.py; here only
+        # that it was asked, so no worker thread outlives the test.
+        queued = []
+        monkeypatch.setattr(app_module.apply_service, 'request',
+                            lambda **kw: queued.append(kw) or {'state': 'running'})
+
+        resp = app_client.post('/set-up/filters',
+                               data=json.dumps({"dab_notch": False}),
+                               content_type='application/json')
+        assert resp.status_code == 202
+        assert resp.get_json()['success'] is True
+        assert resp.get_json()['status'] == {'state': 'running'}
+        assert queued == [{}]
+
+        with open(user_path) as f:
+            after = yaml.safe_load(f)
+        assert after['capture']['device']['dabNotch'] is False
+        # Nothing else moved: the same file with that one key put back.
+        after['capture']['device'].pop('dabNotch')
+        if not after['capture']['device']:
+            after['capture'].pop('device')
+        if not after['capture']:
+            after.pop('capture')
+        expected = dict(before)
+        if expected.get('capture', {}).get('device', {}).get('dabNotch') is not None:
+            expected['capture']['device'].pop('dabNotch')
+        assert after == expected
+
+    def test_without_retina_node_the_filter_is_saved_for_later(self, app_client_no_retina, config_files):
+        user_path, _ = config_files
+        resp = app_client_no_retina.post('/set-up/filters',
+                                         data=json.dumps({"rf_notch": True}),
+                                         content_type='application/json')
+        assert resp.status_code == 200
+        assert resp.get_json() == {"success": True, "applied": False}
+        with open(user_path) as f:
+            assert yaml.safe_load(f)['capture']['device']['rfNotch'] is True
+
+    def test_a_filter_must_be_a_boolean(self, app_client):
+        resp = app_client.post('/set-up/filters',
+                               data=json.dumps({"dab_notch": "yes"}),
+                               content_type='application/json')
+        assert resp.status_code == 400
+        resp = app_client.post('/set-up/filters',
+                               data=json.dumps({}),
+                               content_type='application/json')
+        assert resp.status_code == 400
+
+    def test_the_chosen_frequency_is_shown_with_advice_for_each_filter(self, app_client, config_files):
+        """The filters are a decision about the tower just chosen, so the step
+        says which frequency that is and which way each filter should go."""
+        calibrate = panel(page(app_client), 'calibrate')
+        assert 'id="calWizChosenFc"' in calibrate
+        assert 'id="calWizDabAdvice"' in calibrate and 'id="calWizRfAdvice"' in calibrate
+        js = setup_js()
+        assert 'function renderFilterAdvice()' in js
+        advice = js[js.index('var FILTER_BANDS'):js.index('function renderFilterAdvice()')]
+        assert 'lo: 155, hi: 235' in advice and 'lo: 77,  hi: 115' in advice
+        assert "window._chosenFcMhz = isNum(selectedTower.frequency_mhz)" in js
+
+    def test_the_page_carries_the_configured_frequency_for_a_reload(self, app_client, config_files):
+        user_path, _ = config_files
+        with open(user_path) as f:
+            cfg = yaml.safe_load(f)
+        cfg.setdefault('capture', {})['fc'] = 545_000_000
+        with open(user_path, 'w') as f:
+            yaml.dump(cfg, f)
+        assert 'window._chosenFcMhz = 545.0;' in page(app_client)
+
+    def test_without_a_frequency_the_page_says_so(self, app_client, config_files):
+        user_path, merged_path = config_files
+        for path in (user_path, merged_path):
+            with open(path) as f:
+                cfg = yaml.safe_load(f)
+            (cfg.get('capture') or {}).pop('fc', None)
+            with open(path, 'w') as f:
+                yaml.dump(cfg, f)
+        assert 'window._chosenFcMhz = null;' in page(app_client)
+
+    def test_optimise_reception_waits_for_a_filter_change_to_apply(self):
+        """A run started mid-restart would measure the old filter."""
+        js = setup_js()
+        start = js.index("function wireFilter(")
+        body = js[start:js.index("wireFilter('calWizDabNotch'", start)]
+        assert "el('calWizStartBtn').disabled = true;" in body
+        assert 'CAL.pollApply(' in body
+        assert 'if (filtersBusy) return;' in js
+
+
 # ── Name your node ─────────────────────────────────────────────
 
 
