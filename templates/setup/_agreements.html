@@ -1,16 +1,41 @@
 <!-- Agreements step -->
+{# Two sections: the agreements themselves (one box and one document each),
+   then cloud services. Every box must be ticked. The documents are the PDFs
+   under static/legal/, opened in a new tab or downloaded.
+   See docs/features/setup-wizard.md#agreements #}
 <div data-step="agreements" class="step-panel">
     <div class="wiz-title-row">
-        <h1>Let's get started</h1>
-        <p>Before we begin, please review and accept the terms below.</p>
+        <h1>Agreements</h1>
+        <p>Before we begin, please read and accept the agreements below.</p>
     </div>
     <div class="step-stack">
+        <div class="wiz-section-label">Agreements</div>
+
         <label class="step-check">
             <input type="checkbox" id="eulaCheck">
             <div>
-                <div class="step-check-text">I accept the <a href="/eula" target="_blank" style="color:var(--accent);">End User Licence Agreement</a></div>
+                <div class="step-check-text">I accept the End User Licence Agreement</div>
+                <div class="step-check-help">
+                    <a href="/eula" target="_blank" rel="noopener" style="color:var(--accent);">Read the EULA</a>
+                    &middot;
+                    <a href="/eula?download=1" style="color:var(--accent);">Download PDF</a>
+                </div>
             </div>
         </label>
+
+        <label class="step-check">
+            <input type="checkbox" id="privacyCheck">
+            <div>
+                <div class="step-check-text">I have read the Privacy Policy</div>
+                <div class="step-check-help">
+                    <a href="/privacy-policy" target="_blank" rel="noopener" style="color:var(--accent);">Read the Privacy Policy</a>
+                    &middot;
+                    <a href="/privacy-policy?download=1" style="color:var(--accent);">Download PDF</a>
+                </div>
+            </div>
+        </label>
+
+        <div class="wiz-section-label" style="margin-top:8px;">Cloud Services</div>
 
         {# This wording is part of what TELEMETRY_CONSENT_VERSION identifies:
            changing it must bump that constant (device_state.py). Publication is
@@ -20,7 +45,7 @@
             <input type="checkbox" id="cloudCheck">
             <div>
                 <div class="step-check-text">Enable cloud services and data publication</div>
-                <div class="step-check-help">Required for automatic updates, and can be disabled later in Settings. Your radar detections are sent to Offworld Labs and published in a public archive, including the location of this receiver. Published data cannot be recalled once it has been copied.</div>
+                <div class="step-check-help">Required for automatic updates, including updates to this setup flow, and can be disabled later under Cloud Services on the Configuration page. Your radar detections are sent to Offworld Labs and published in a public archive, including the location of this receiver. Published data cannot be recalled once it has been copied.</div>
             </div>
         </label>
     </div>

@@ -22,7 +22,9 @@ bp = Blueprint('config', __name__)
 # exactly, not by prefix: /config/apply and /config/save must stay blocked.
 # Same rule as _CALIBRATION_ALLOWED_PREFIXES in app.py.
 # See docs/features/config-editor.md#guards
-_WIZARD_ALLOWED_PATHS = ('/config/apply/status',)
+# /config/apply/status because the tower and filter steps poll it; /node-name
+# because the naming step posts to it. See docs/features/setup-wizard.md#name-your-node
+_WIZARD_ALLOWED_PATHS = ('/config/apply/status', '/node-name')
 
 
 @bp.before_request

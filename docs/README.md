@@ -32,9 +32,9 @@ Use this to find the doc to update when you change a file.
 | Source | Doc |
 | --- | --- |
 | `src/app.py`, `src/services.py`, `src/apply_service.py`, `src/stack_reconcile.py`, `src/restart_lock.py`, `src/routes/home.py` | [architecture.md](architecture.md) |
-| `templates/base.html`, `templates/index.html`, `templates/summary.html`, `templates/eula.html`, `static/flight-sim.js`, `static/common.css` | [architecture.md](architecture.md) |
+| `templates/base.html`, `templates/index.html`, `templates/summary.html`, `static/flight-sim.js`, `static/common.css` | [architecture.md](architecture.md) |
 | `src/calibrator.py`, `src/routes/calibrate.py`, `src/blah2_client.py`, `static/calibrate.js`, `templates/setup/_calibrate.html` | [features/auto-calibrate.md](features/auto-calibrate.md) |
-| `src/routes/setup.py`, `static/setup.js`, `templates/setup.html`, `templates/setup/*` | [features/setup-wizard.md](features/setup-wizard.md) |
+| `src/routes/setup.py`, `static/setup.js`, `templates/setup.html`, `templates/setup/*`, `static/legal/*` | [features/setup-wizard.md](features/setup-wizard.md) |
 | `src/tutorial.py`, `src/routes/tutorial.py`, `static/tutorial.js`, `static/tutorial.css`, `static/tutorial/*` | [features/tutorial.md](features/tutorial.md) |
 | `src/device_state.py`, `src/telemetry_status.py` | [features/device-state-and-telemetry.md](features/device-state-and-telemetry.md) |
 | `src/remote_access.py`, `src/access_identity.py`, `src/mender_connect.py`, `src/ssh_keys.py`, `src/routes/remote_access.py`, `templates/login.html`, `templates/remote_denied.html` | [features/remote-access.md](features/remote-access.md) |

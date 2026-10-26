@@ -53,12 +53,13 @@
 
             {% include "setup/_agreements.html" %}
             {% include "setup/_contact.html" %}
-            {% include "setup/_claim.html" %}
             {% include "setup/_system.html" %}
             {% include "setup/_packages.html" %}
             {% include "setup/_location.html" %}
             {% include "setup/_towers.html" %}
             {% include "setup/_calibrate.html" %}
+            {% include "setup/_name.html" %}
+            {% include "setup/_claim.html" %}
             {% include "setup/_complete.html" %}
 
         </div>
@@ -74,18 +75,11 @@
                 <button type="button" class="ds-btn primary" id="agreementsContinueBtn" disabled>Continue</button>
             </div>
 
-            {# Contact. Optional: Skip is an answer, not an escape hatch. #}
+            {# Contact. Optional: Skip is an answer, not an escape hatch. The
+               support switches on the same step save themselves. #}
             <div id="stepBtns-contact" class="step-foot-btns" style="display:none;">
                 <button type="button" class="ds-btn ghost"   id="contactSkipBtn">Skip</button>
                 <button type="button" class="ds-btn primary" id="contactSaveBtn">Save and continue</button>
-            </div>
-
-            {# Claim. Optional in the same way; an owned node gets Skip only. #}
-            <div id="stepBtns-claim" class="step-foot-btns" style="display:none;">
-                <button type="button" class="ds-btn ghost"   id="wizClaimSkipBtn">Skip</button>
-                {% if not claim_owned %}
-                <button type="button" class="ds-btn primary" id="wizClaimSendBtn">Send link and continue</button>
-                {% endif %}
             </div>
 
             {# System update. Automatic: this page only reports progress. #}
@@ -121,6 +115,22 @@
                 <button type="button" class="ds-btn ghost"   id="calWizCancelBtn" style="display:none;">Cancel</button>
                 <button type="button" class="ds-btn primary" id="calWizStartBtn">Optimise reception</button>
                 <button type="button" class="ds-btn primary" id="calWizNextBtn" style="display:none;">Continue →</button>
+            </div>
+
+            {# Name. Optional: an empty box skipped leaves the node unnamed. #}
+            <div id="stepBtns-name" class="step-foot-btns" style="display:none;">
+                <button type="button" class="ds-btn ghost"   id="wizNodeNameSkipBtn">Skip</button>
+                <button type="button" class="ds-btn primary" id="wizNodeNameSaveBtn">Save and continue</button>
+            </div>
+
+            {# Claim. Optional in the same way; an owned node gets Skip only.
+               Last before completion, so the owner connects a node that is
+               already sited, tuned and named. #}
+            <div id="stepBtns-claim" class="step-foot-btns" style="display:none;">
+                <button type="button" class="ds-btn ghost"   id="wizClaimSkipBtn">Skip</button>
+                {% if not claim_owned %}
+                <button type="button" class="ds-btn primary" id="wizClaimSendBtn">Send link and continue</button>
+                {% endif %}
             </div>
 
             {# Complete. The tutorial is the recommended way out on a first run;

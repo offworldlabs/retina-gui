@@ -1,11 +1,16 @@
-<!-- Contact details step -->
-{# Optional; skipping writes nothing. See docs/features/setup-wizard.md#contact-details #}
+<!-- Contact details and support step -->
+{# Two sections. Contact is optional; skipping writes nothing. The two Support
+   switches post to the Configuration page's own routes the moment they are
+   flipped, so Skip leaves them as they stand.
+   See docs/features/setup-wizard.md#contact-details and #remote-support #}
 <div data-step="contact" class="step-panel" style="display:none;">
     <div class="wiz-title-row">
         <h1>How can we reach you?</h1>
         <p>If something goes wrong with your node that we can see and you cannot, this is how we get in touch. It is only used to support you with your device.</p>
     </div>
     <div class="step-stack">
+        <div class="wiz-section-label">Contact</div>
+
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;">
             <div class="ds-field">
                 <label class="ds-field-label" for="contactFirstName">First name</label>
@@ -36,13 +41,40 @@
             The two-letter country the phone number belongs to, for example US or GB.
         </p>
 
-        <p style="font-size:12.5px;color:var(--ink-3);margin:10px 0 0;">
+        <p style="font-size:12.5px;color:var(--ink-3);margin:0;">
             Every box is optional, and you can skip this step. Nothing here is published,
             none of it is checked, and it gives you no account or login. You can add or
             change it later under How We Reach You on the Configuration page.
         </p>
 
-        <p id="contactMsg" style="display:none;font-size:13px;margin:8px 0 0;"></p>
+        <p id="contactMsg" style="display:none;font-size:13px;margin:0;"></p>
+
+        <div class="wiz-section-label" style="margin-top:8px;">Support</div>
+        <p style="font-size:12.5px;color:var(--ink-3);margin:-8px 0 0;">
+            What our support team may do with this node when they are not at your
+            location. Both are yours to change at any time under Remote Support on the
+            Configuration page, and neither affects how the node works day to day.
+        </p>
+
+        {# Mirrors the Remote Support section of config.html: same ids' roles,
+           same routes, same enforce-then-record rule for the shell. #}
+        <label class="step-check">
+            <input type="checkbox" id="wizRemoteToggle" {% if remote_access.enabled %}checked{% endif %}>
+            <div>
+                <div class="step-check-text">Let support open this node&rsquo;s interface</div>
+                <div class="step-check-help">They see the same pages you see and can change the same settings. They cannot open a command line or add an SSH key this way.</div>
+            </div>
+        </label>
+
+        <label class="step-check">
+            <input type="checkbox" id="wizShellToggle" {% if remote_access.shell_allowed %}checked{% endif %}>
+            <div>
+                <div class="step-check-text">Let support open a command line</div>
+                <div class="step-check-help">This is how we diagnose problems the interface cannot show, and it is the deepest access anyone can have to your node. Turning it off does not affect the setting above.</div>
+            </div>
+        </label>
+
+        <p id="wizSupportMsg" style="display:none;font-size:13px;margin:0;"></p>
     </div>
 
 </div>

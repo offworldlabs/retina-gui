@@ -127,9 +127,9 @@ The file holds three records, mirroring the wire's `Agreements` object one-for-o
 
 ```json
 {
-  "licence":           {"version": "2026-08-15", "accepted_at": "2026-08-16T09:49:52Z"},
-  "publication":       {"version": "2026-08-15", "accepted_at": "2026-08-16T09:49:52Z", "choice": "public"},
-  "remote_management": {"version": "2026-08-15", "accepted_at": "2026-08-16T09:49:52Z"}
+  "licence":           {"version": "2026-10-26", "accepted_at": "2026-10-27T09:49:52Z"},
+  "publication":       {"version": "2026-10-26", "accepted_at": "2026-10-27T09:49:52Z", "choice": "public"},
+  "remote_management": {"version": "2026-10-26", "accepted_at": "2026-10-27T09:49:52Z"}
 }
 ```
 
@@ -140,7 +140,7 @@ The file holds three records, mirroring the wire's `Agreements` object one-for-o
 
 ### Consent version and wording
 
-`TELEMETRY_CONSENT_VERSION` identifies the terms the owner was actually shown, so it is possible later to say what a given owner agreed to. It must change whenever that text changes, and "that text" is the whole agreements screen: the two checkbox labels in `templates/setup/_agreements.html` as much as `templates/eula.html`, because the publication disclosure lives in the checkbox wording rather than in the EULA. A version that does not move when the wording does makes the record a lie.
+`TELEMETRY_CONSENT_VERSION` identifies the terms the owner was actually shown, so it is possible later to say what a given owner agreed to. It must change whenever that text changes, and "that text" is the whole agreements screen: the three checkbox labels in `templates/setup/_agreements.html` as much as the EULA and Privacy Policy PDFs under `static/legal/`, because the publication disclosure lives in the checkbox wording rather than in the EULA. A version that does not move when the wording does makes the record a lie. The version moved to `2026-10-26` when the Privacy Policy gained its own box and the real documents replaced the placeholder page; nothing re-prompts the nodes that accepted the earlier version, which is a fleet decision rather than a code one.
 
 Deferred deliberately: nothing re-prompts an owner whose stored version is older than the current one. Changing the text today leaves existing nodes holding their original record, which is correct but silent.
 

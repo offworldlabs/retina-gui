@@ -83,13 +83,14 @@ function initSetupWizard(resumeStep, devMode, isRerun, demoMode) {
 
     var stepNames = {
         agreements: 'Agreements',
-        contact: 'Contact details',
-        claim: 'Connect your account',
+        contact: 'Contact and support',
         system: 'System Update',
         radar: 'Packages',
         location: 'Where is your receiver?',
         towers: 'Choose a tower',
         calibrate: 'Tune the receiver',
+        name: 'Name your node',
+        claim: 'Connect your account',
         complete: 'You\'re all set'
     };
 
@@ -297,6 +298,11 @@ function initSetupWizard(resumeStep, devMode, isRerun, demoMode) {
             if (path === '/api/mode') return ok({ success: true, mode: 'spectrum' });
             if (path === '/set-up/save-step')          return ok({ success: true });
             if (path === '/set-up/complete')           return ok({ success: true });
+            // Settings a demo must not change on a live node: the filters
+            // (a stack restart), the support switches and the name.
+            if (path === '/remote-access/toggle')      return ok({ ok: true, enabled: /enabled=1/.test((opts && opts.body) || '') });
+            if (path === '/remote-access/shell')       return ok({ ok: true, shell_allowed: /allowed=1/.test((opts && opts.body) || '') });
+            if (path === '/node-name')                 return ok({ ok: true, name: 'demo' });
             return _realFetch(url, opts);
         };
 
@@ -318,9 +324,10 @@ function initSetupWizard(resumeStep, devMode, isRerun, demoMode) {
     var spectrumGating = false;    // true while scan is in progress; gates Find Towers
     var abortAddressLookups = null; // defined inside enterHooks.location on first entry
 
-    // Agreements. See docs/features/setup-wizard.md#agreements
+    // Agreements. Three boxes: the EULA, the Privacy Policy, then cloud
+    // services. See docs/features/setup-wizard.md#agreements
     enterHooks.agreements = function() {
-        var boxes = ['eulaCheck', 'cloudCheck'];
+        var boxes = ['eulaCheck', 'privacyCheck', 'cloudCheck'];
         var btn = document.getElementById('agreementsContinueBtn');
 
         function update() {
@@ -426,10 +433,123 @@ function initSetupWizard(resumeStep, devMode, isRerun, demoMode) {
 
         // Writes nothing: stored details are left alone, not withdrawn.
         skipBtn.addEventListener('click', function() { advance(); });
+
+        // The Support section. Each switch drives the Configuration page's own
+        // route the moment it is flipped, and reverts on failure, so neither
+        // Save nor Skip has anything to do with them. Form-encoded, as those
+        // routes read request.form. See docs/features/setup-wizard.md#remote-support
+        var supportMsg = document.getElementById('wizSupportMsg');
+        function saySupport(text, danger) {
+            supportMsg.textContent = text;
+            supportMsg.style.color = danger ? 'var(--danger)' : 'var(--ink-3)';
+            supportMsg.style.display = text ? '' : 'none';
+        }
+        function wireSwitch(id, url, field, describe) {
+            var input = document.getElementById(id);
+            if (!input) return;
+            input.addEventListener('change', function() {
+                var want = input.checked;
+                input.disabled = true;
+                saySupport('');
+                fetch(url, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/x-www-form-urlencoded',
+                               'X-CSRFToken': csrfToken },
+                    body: field + '=' + (want ? '1' : '0')
+                })
+                .then(function(r) {
+                    return r.json().then(function(j) { return { ok: r.ok, body: j || {} }; },
+                                         function() { return { ok: false, body: {} }; });
+                })
+                .then(function(res) {
+                    if (!res.ok) {
+                        input.checked = !want;
+                        saySupport(res.body.error || 'Could not change this setting.', true);
+                        return;
+                    }
+                    saySupport(describe(res.body));
+                })
+                .catch(function() {
+                    input.checked = !want;
+                    saySupport('Could not reach the node.', true);
+                })
+                .then(function() { input.disabled = false; });
+            });
+        }
+        wireSwitch('wizRemoteToggle', '/remote-access/toggle', 'enabled', function(b) {
+            return b.enabled
+                ? 'Support may open this node’s interface. The connection comes up on its own.'
+                : 'Support can only reach this node from your own network.';
+        });
+        // An ok response means enforced: the route enforces before it records.
+        wireSwitch('wizShellToggle', '/remote-access/shell', 'allowed', function(b) {
+            return b.shell_allowed
+                ? 'Support may open a command line on this node.'
+                : 'No command-line session can be opened, from anywhere.';
+        });
     };
 
-    // Node claim. Optional; skipping writes nothing.
-    // See docs/features/setup-wizard.md#node-claim
+    // Name your node. Optional; an empty box on Save, or Skip, leaves the
+    // name alone. Posts to /node-name, the Configuration page's rename route,
+    // form-encoded as it expects. See docs/features/setup-wizard.md#name-your-node
+    enterHooks.name = function() {
+        var box = document.getElementById('wizNodeName');
+        var saveBtn = document.getElementById('wizNodeNameSaveBtn');
+        var skipBtn = document.getElementById('wizNodeNameSkipBtn');
+        var msg = document.getElementById('wizNodeNameMsg');
+
+        function say(text, danger) {
+            msg.textContent = text;
+            msg.style.color = danger ? 'var(--danger)' : 'var(--ink-3)';
+            msg.style.display = text ? '' : 'none';
+        }
+
+        say('');
+        saveBtn.disabled = false;
+        saveBtn.textContent = 'Save and continue';
+
+        if (hookInitialized.name) return;
+        hookInitialized.name = true;
+
+        skipBtn.addEventListener('click', function() { advance(); });
+
+        saveBtn.addEventListener('click', function() {
+            var name = box.value.trim();
+            // Nothing typed is Skip by another name: the stored name, if any,
+            // is left alone rather than cleared.
+            if (!name) { advance(); return; }
+            saveBtn.disabled = true;
+            saveBtn.textContent = 'Saving...';
+            say('');
+            fetch('/node-name', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/x-www-form-urlencoded',
+                           'X-CSRFToken': csrfToken },
+                body: 'name=' + encodeURIComponent(name)
+            })
+            .then(function(r) {
+                return r.json().then(function(j) { return { ok: r.ok, body: j || {} }; },
+                                     function() { return { ok: false, body: {} }; });
+            })
+            .then(function(res) {
+                if (!res.ok) {
+                    say(res.body.error || 'Could not save the name.', true);
+                    saveBtn.disabled = false;
+                    saveBtn.textContent = 'Save and continue';
+                    return;
+                }
+                advance();
+            })
+            .catch(function() {
+                say('Could not save. Check the connection and try again.', true);
+                saveBtn.disabled = false;
+                saveBtn.textContent = 'Save and continue';
+            });
+        });
+    };
+
+    // Node claim. Optional; skipping writes nothing. The last step before
+    // completion. See docs/features/setup-wizard.md#node-claim
     enterHooks.claim = function() {
         var box = document.getElementById('wizClaimEmail');
         var sendBtn = document.getElementById('wizClaimSendBtn');

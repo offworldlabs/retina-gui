@@ -1,0 +1,24 @@
+<!-- Name your node step -->
+{# Optional. Posts to /node-name, the Configuration page's rename route, which
+   the wizard redirect lets through for this step.
+   See docs/features/setup-wizard.md#name-your-node #}
+<div data-step="name" class="step-panel" style="display:none;">
+    <div class="wiz-title-row">
+        <h1>Name your node</h1>
+        <p>A friendly name for this node. It is shown on the Summary page and in the tabs at the top, and it is how other nodes on your network list it.</p>
+    </div>
+    <div class="step-stack">
+        <div class="ds-field">
+            <label class="ds-field-label" for="wizNodeName">Name</label>
+            <input type="text" class="ds-input" id="wizNodeName" value="{{ node_name or '' }}"
+                   maxlength="{{ node_name_max_length }}" placeholder="e.g. Garage roof" autocomplete="off">
+        </div>
+        <p style="font-size:12.5px;color:var(--ink-3);margin:0;">
+            Up to {{ node_name_max_length }} characters. A label only: nothing addresses
+            the node by it, and it stays <span class="mono">{{ node_id or '-' }}</span>
+            underneath. You can change it later under Identifiers on the Configuration page.
+        </p>
+        <p id="wizNodeNameMsg" style="display:none;font-size:13px;margin:0;"></p>
+    </div>
+
+</div>

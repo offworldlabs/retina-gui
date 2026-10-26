@@ -1,10 +1,11 @@
 <!-- Node claim step -->
-{# Optional. Shares /set-up/claim with the configuration page. An owned node can
-   only be skipped past. See docs/features/setup-wizard.md#node-claim #}
+{# Optional, and the last thing before completion. Shares /set-up/claim with
+   the configuration page. An owned node can only be skipped past.
+   See docs/features/setup-wizard.md#node-claim #}
 <div data-step="claim" class="step-panel" style="display:none;">
     <div class="wiz-title-row">
         <h1>Connect your node to your account</h1>
-        <p>We will email you a link. Opening it connects this node to your account. If you do not have an account yet, that is fine: one will be made for you.</p>
+        <p>We will email you a link. Opening it connects this node to your account on the <a href="{{ dashboard_url }}" target="_blank" rel="noopener" style="color:var(--accent);">Network Map and Dashboard</a>. If you do not have an account yet, that is fine: one will be made for you.</p>
     </div>
     <div class="step-stack">
         <div class="ds-field">
@@ -16,17 +17,29 @@
         <p style="font-size:13px;margin:4px 0 0;">
             <span style="color:var(--ok);font-weight:600;">Already claimed.</span>
             This node is connected to the account above, so there is nothing to do here.
-            To hand it to somebody else, release it from your dashboard first.
+            To hand it to somebody else, release it from your
+            <a href="{{ dashboard_url }}" target="_blank" rel="noopener" style="color:var(--accent);">dashboard</a> first.
         </p>
         {% else %}
-        <p style="font-size:12.5px;color:var(--ink-3);margin:10px 0 0;">
+        {# Where the node ends up, so the owner knows which account the link
+           will bind it to before they send it. #}
+        <div class="step-card">
+            <div class="step-card-body">
+                <div class="step-card-title">Where this node will appear</div>
+                <div class="step-card-sub">
+                    <a href="{{ dashboard_url }}" target="_blank" rel="noopener" style="color:var(--accent);">{{ dashboard_url }}</a>,
+                    under the account for the address above. Sign in there with the same address to see it.
+                </div>
+            </div>
+        </div>
+        <p style="font-size:12.5px;color:var(--ink-3);margin:0;">
             Use an address you own, because whoever opens the link owns the node.
             This step is optional. If you skip it or enter the wrong address, you can
             do it later under Node Claim on the Configuration page.
         </p>
         {% endif %}
 
-        <p id="wizClaimMsg" style="display:none;font-size:13px;margin:8px 0 0;"></p>
+        <p id="wizClaimMsg" style="display:none;font-size:13px;margin:0;"></p>
     </div>
 
 </div>

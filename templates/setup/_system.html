@@ -3,7 +3,11 @@
 <div data-step="system" class="step-panel" style="display:none;">
     <div class="wiz-title-row">
         <h1>Update OWL-OS</h1>
-        <p>This happens automatically, so there is no need to click anything. Keep the node connected to Wi-Fi and powered on; it will reboot on its own when ready.</p>
+        {# The wizard itself ships inside OWL-OS, so this is also where the
+           setup flow is brought up to date: after the update and reboot the
+           wizard resumes here on the new version.
+           See docs/features/setup-wizard.md#system-update #}
+        <p>This happens automatically, so there is no need to click anything. It brings OWL-OS, and this setup flow with it, up to date. Keep the node connected to Wi-Fi and powered on; it will reboot on its own when ready and come back to this step.</p>
     </div>
     <div class="step-stack">
         <div class="step-card">
