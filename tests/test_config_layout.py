@@ -2,7 +2,8 @@
 
 The page is grouped around how an owner thinks about the node. These hold the
 order, and the property the grouping must not break: every radar field is
-inside the form Apply changes submits, and nothing else is.
+inside the form Apply changes submits, and nothing else is, apart from the
+Processing section's, which are inside a form of their own.
 See docs/features/config-editor.md#page-layout.
 """
 
@@ -12,6 +13,7 @@ import pytest
 
 # The side nav, as (group, [(section id, label), ...]).
 LAYOUT = [
+    ("Testing", [("processing", "Processing")]),
     ("Node", [("identifiers", "Identifiers"), ("mode", "Mode"), ("claim", "Node Claim"),
               ("network", "Network")]),
     ("Radar", [("cached-towers", "Cached Towers"), ("tower", "Tower"), ("capture", "Capture")]),
@@ -117,6 +119,10 @@ def form_markup(page):
     return page.split('<form action="/config/save"')[1].split("</form>")[0]
 
 
+def processing_form_markup(page):
+    return page.split('<form action="/config/processing/save"')[1].split("</form>")[0]
+
+
 def test_the_form_wraps_the_radar_and_ads_b_groups_and_nothing_else(page):
     expected = [section_id for group, sections in LAYOUT if group in FORM_GROUPS
                 for section_id, _ in sections]
@@ -127,6 +133,7 @@ def test_the_form_posts_every_radar_field_on_the_page(page):
     """A radar field outside the form is silently left out of the POST, which
     the server reads as that setting having been cleared."""
     main = page.split("<main>")[1].split("</main>")[0]
+    main = main.replace(processing_form_markup(page), "")
     radar = {field_name(f) for f in named_fields(main) if "." in field_name(f)}
     inside = {field_name(f) for f in named_fields(form_markup(page))}
 
@@ -135,6 +142,18 @@ def test_the_form_posts_every_radar_field_on_the_page(page):
     assert radar <= inside, sorted(radar - inside)
     # No field reaches into the form from outside it either.
     assert not [f for f in named_fields(main) if 'form="configForm"' in f]
+
+
+def test_the_processing_form_posts_every_processing_field_and_only_those(page):
+    """The Processing section saves on its own, so its fields must all be in
+    its own form, and none of them anywhere else."""
+    main = page.split("<main>")[1].split("</main>")[0]
+    everywhere = [field_name(f) for f in named_fields(main) if field_name(f).startswith("process.")]
+    inside = [field_name(f) for f in named_fields(processing_form_markup(page))
+              if field_name(f) != "csrf_token"]
+    assert inside and all(n.startswith("process.") for n in inside)
+    assert sorted(everywhere) == sorted(inside)
+    assert "<form" not in processing_form_markup(page)
 
 
 def test_the_form_holds_no_nested_form(page):
