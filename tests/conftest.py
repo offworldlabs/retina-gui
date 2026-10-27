@@ -120,6 +120,15 @@ def sample_merged_config():
                 'bandwidthNumber': 0
             }
         },
+        'process': {
+            'data': {'cpi': 0.5, 'buffer': 1.5, 'overlap': 0},
+            'ambiguity': {'delayMin': -10, 'delayMax': 400, 'dopplerMin': -1000,
+                          'dopplerMax': 1000, 'dopplerWindow': 'none'},
+            'clutter': {'enable': True, 'delayMin': -10, 'delayMax': 400},
+            'detection': {'enable': True, 'pfa': 0.00001, 'nGuard': 2, 'nTrain': 6,
+                          'minDelay': 5, 'minDoppler': 15, 'maxReportedDoppler': 1000,
+                          'nCentroid': 6},
+        },
         'network': {
             'node_id': 'ret7a000001'
         },

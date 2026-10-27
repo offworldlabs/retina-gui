@@ -8,8 +8,16 @@ user.yml. See docs/features/config-editor.md#layered-config.
 """
 
 import os
+from copy import deepcopy
 
-from config_schema import load_yaml_file, save_yaml_file, values_differ
+from config_schema import (
+    PROCESSING_EDITABLE_FIELDS,
+    PROCESSING_READONLY_FIELDS,
+    deep_merge,
+    load_yaml_file,
+    save_yaml_file,
+    values_differ,
+)
 
 
 class ConfigManager:
@@ -114,6 +122,71 @@ class ConfigManager:
                 'name': flat.get('tx_name'),
             }
         }
+
+    @staticmethod
+    def flatten_processing_for_form(process):
+        """Convert the nested process config to flat Processing form values."""
+        process = process or {}
+        flat = {}
+        for name, (group, key) in PROCESSING_EDITABLE_FIELDS + PROCESSING_READONLY_FIELDS:
+            flat[name] = (process.get(group) or {}).get(key)
+        return flat
+
+    @staticmethod
+    def parse_processing_form(form_data):
+        """Parse the Processing form's `process.` fields into flat values.
+
+        Numbers are tried as int and then float, unlike parse_flat_form_data, so
+        a pfa written as 1e-05 is a number rather than a string. The clutter
+        filter is a checkbox, which is not posted when unchecked.
+        See docs/features/config-editor.md#processing-section.
+        """
+        flat = {}
+        for key, value in form_data.items():
+            if not key.startswith('process.') or value == '':
+                continue
+            if value.lower() in ('true', 'false', 'on'):
+                parsed = value.lower() in ('true', 'on')
+            else:
+                try:
+                    parsed = int(value)
+                except ValueError:
+                    try:
+                        parsed = float(value)
+                    except ValueError:
+                        parsed = value
+            flat[key[len('process.'):]] = parsed
+        flat.setdefault('clutter_enable', False)
+        return flat
+
+    @staticmethod
+    def unflatten_processing_from_form(values):
+        """Nest the editable Processing values under their `process` paths.
+
+        Read-only fields are left out, and so is a value that is not set.
+        """
+        nested = {}
+        for name, (group, key) in PROCESSING_EDITABLE_FIELDS:
+            if values.get(name) is not None:
+                nested.setdefault(group, {})[key] = values[name]
+        return nested
+
+    @staticmethod
+    def merge_processing_overrides(existing_process, overrides):
+        """user.yml's `process` section after a Processing save.
+
+        Keys the section does not edit (cpi, the Doppler span, clutter.delayMin
+        and so on) are kept as they were. Each edited key is replaced by its
+        override, or removed when it has none.
+        """
+        result = deepcopy(existing_process or {})
+        for _, (group, key) in PROCESSING_EDITABLE_FIELDS:
+            if isinstance(result.get(group), dict):
+                result[group].pop(key, None)
+                if not result[group]:
+                    del result[group]
+        deep_merge(result, overrides or {})
+        return result
 
     @staticmethod
     def parse_tar1090_adsb_source(config):
