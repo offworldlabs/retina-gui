@@ -3,17 +3,18 @@
 The page is grouped around how an owner thinks about the node. These hold the
 order, and the property the grouping must not break: every radar field is
 inside the form Apply changes submits, and nothing else is, apart from the
-Processing section's, which are inside a form of their own.
-See docs/features/config-editor.md#page-layout.
+Processing section's, which are inside a form of their own. That section and
+its Testing group exist only in developer mode, so the layout is checked in
+both modes. See docs/features/config-editor.md#page-layout.
 """
 
+import os
 import re
 
 import pytest
 
 # The side nav, as (group, [(section id, label), ...]).
 LAYOUT = [
-    ("Testing", [("processing", "Processing")]),
     ("Node", [("identifiers", "Identifiers"), ("mode", "Mode"), ("claim", "Node Claim"),
               ("network", "Network")]),
     ("Radar", [("cached-towers", "Cached Towers"), ("tower", "Tower"), ("capture", "Capture")]),
@@ -24,7 +25,12 @@ LAYOUT = [
 ]
 # The groups Apply changes saves: their sections are the form's, in this order.
 FORM_GROUPS = ("Radar", "ADS-B")
-SECTION_IDS = [section for _, sections in LAYOUT for section, _ in sections]
+# Developer mode adds one group, first. See docs/features/config-editor.md#developer-mode
+DEVELOPER_LAYOUT = [("Testing", [("processing", "Processing")])] + LAYOUT
+
+
+def section_ids(layout):
+    return [section for _, sections in layout for section, _ in sections]
 
 
 class FakeTelemetry:
@@ -54,6 +60,15 @@ def page(app_client, telemetry):
     return app_client.get("/config").data.decode()
 
 
+@pytest.fixture(params=["customer", "developer"])
+def laid_out(request, app_client, telemetry, temp_dir):
+    """The page and the layout it must have, with developer mode off and on."""
+    if request.param == "developer":
+        open(os.path.join(temp_dir, "developer-mode"), "w").close()
+        return app_client.get("/config").data.decode(), DEVELOPER_LAYOUT
+    return app_client.get("/config").data.decode(), LAYOUT
+
+
 def section(body, section_id):
     """One section's markup, from its opening tag to its closing one."""
     return body.split(f'<section id="{section_id}"')[1].split("</section>")[0]
@@ -71,7 +86,8 @@ def field_name(tag):
 # ── Order ──────────────────────────────────────────────────────
 
 
-def test_the_side_nav_is_grouped_as_designed(page):
+def test_the_side_nav_is_grouped_as_designed(laid_out):
+    page, layout = laid_out
     nav = page.split('<aside class="side"')[1].split("</aside>")[0]
     found = re.findall(r'<h3>([^<]+)</h3>|<a href="#([^"]+)"[^>]*>([^<]+)</a>', nav)
     groups = []
@@ -80,14 +96,16 @@ def test_the_side_nav_is_grouped_as_designed(page):
             groups.append((heading, []))
         else:
             groups[-1][1].append((section_id, label))
-    assert groups == LAYOUT
+    assert groups == layout
 
 
-def test_the_page_is_in_the_same_order_as_the_side_nav(page):
-    assert re.findall(r'<section id="([^"]+)" class="cfg-section"', page) == SECTION_IDS
+def test_the_page_is_in_the_same_order_as_the_side_nav(laid_out):
+    page, layout = laid_out
+    assert re.findall(r'<section id="([^"]+)" class="cfg-section"', page) == section_ids(layout)
 
 
-def test_each_group_is_titled_in_the_page_above_its_first_section(page):
+def test_each_group_is_titled_in_the_page_above_its_first_section(laid_out):
+    page, layout = laid_out
     main = page.split("<main>")[1].split("</main>")[0]
     found = re.findall(r'<h2 class="cfg-group">([^<]+)</h2>|<section id="([^"]+)" class="cfg-section"', main)
     groups = []
@@ -97,19 +115,21 @@ def test_each_group_is_titled_in_the_page_above_its_first_section(page):
         else:
             groups[-1][1].append(section_id)
     assert groups == [(title, [section_id for section_id, _ in sections])
-                      for title, sections in LAYOUT]
+                      for title, sections in layout]
 
 
-def test_each_section_is_headed_with_its_side_nav_label(page):
+def test_each_section_is_headed_with_its_side_nav_label(laid_out):
     """One name per section, written the same in both places."""
-    for _, sections in LAYOUT:
+    page, layout = laid_out
+    for _, sections in layout:
         for section_id, label in sections:
             assert f"<h2>{label}</h2>" in section(page, section_id), section_id
 
 
-def test_the_scrollspy_knows_every_section_in_page_order(page):
+def test_the_scrollspy_knows_every_section_in_page_order(laid_out):
+    page, layout = laid_out
     listed = re.search(r"var sectionIds = \[(.*?)\];", page, re.S).group(1)
-    assert re.findall(r"'([^']+)'", listed) == SECTION_IDS
+    assert re.findall(r"'([^']+)'", listed) == section_ids(layout)
 
 
 # ── The form ───────────────────────────────────────────────────
@@ -120,18 +140,23 @@ def form_markup(page):
 
 
 def processing_form_markup(page):
+    """The Processing form's markup, or "" outside developer mode."""
+    if '<form action="/config/processing/save"' not in page:
+        return ""
     return page.split('<form action="/config/processing/save"')[1].split("</form>")[0]
 
 
-def test_the_form_wraps_the_radar_and_ads_b_groups_and_nothing_else(page):
+def test_the_form_wraps_the_radar_and_ads_b_groups_and_nothing_else(laid_out):
+    page, _ = laid_out
     expected = [section_id for group, sections in LAYOUT if group in FORM_GROUPS
                 for section_id, _ in sections]
     assert re.findall(r'<section id="([^"]+)"', form_markup(page)) == expected
 
 
-def test_the_form_posts_every_radar_field_on_the_page(page):
+def test_the_form_posts_every_radar_field_on_the_page(laid_out):
     """A radar field outside the form is silently left out of the POST, which
     the server reads as that setting having been cleared."""
+    page, _ = laid_out
     main = page.split("<main>")[1].split("</main>")[0]
     main = main.replace(processing_form_markup(page), "")
     radar = {field_name(f) for f in named_fields(main) if "." in field_name(f)}
@@ -144,9 +169,10 @@ def test_the_form_posts_every_radar_field_on_the_page(page):
     assert not [f for f in named_fields(main) if 'form="configForm"' in f]
 
 
-def test_the_processing_form_posts_every_processing_field_and_only_those(page):
+def test_the_processing_form_posts_every_processing_field_and_only_those(app_client, telemetry, developer_mode):
     """The Processing section saves on its own, so its fields must all be in
     its own form, and none of them anywhere else."""
+    page = app_client.get("/config").data.decode()
     main = page.split("<main>")[1].split("</main>")[0]
     everywhere = [field_name(f) for f in named_fields(main) if field_name(f).startswith("process.")]
     inside = [field_name(f) for f in named_fields(processing_form_markup(page))
@@ -156,9 +182,10 @@ def test_the_processing_form_posts_every_processing_field_and_only_those(page):
     assert "<form" not in processing_form_markup(page)
 
 
-def test_the_form_holds_no_nested_form(page):
+def test_the_form_holds_no_nested_form(laid_out):
     """A nested <form> is dropped by the parser, so the fields after it would
     post on their own and Apply changes would save a subset of the page."""
+    page, _ = laid_out
     assert "<form" not in form_markup(page)
 
 

@@ -1,9 +1,9 @@
 # Config editor
 
 The `/config` page is a form over the node's radar configuration (capture, location, ADS-B Truth,
-tar1090 and retina-tracker settings) plus a set of panels that save on their own. At the top, the
-Processing section exposes blah2's detection settings for testing, with its own form. See
-[Page layout](#page-layout) for how they are arranged.
+tar1090 and retina-tracker settings) plus a set of panels that save on their own. On a node in
+[developer mode](#developer-mode), a Processing section at the top also exposes blah2's detection
+settings for testing, with its own form. See [Page layout](#page-layout) for how they are arranged.
 The radar fields are generated from Pydantic models, display the merged `config.yml` that the stack
 is actually running, and write only the user's overrides to `user.yml`. Saving is followed
 automatically by an apply, which runs retina-node's config-merger and restarts the stack.
@@ -122,7 +122,7 @@ The side nav and the page share one order, in six groups:
 
 | Group | Sections | Saved by |
 | --- | --- | --- |
-| Testing | Processing | Its own Save and apply, see [Processing section](#processing-section) |
+| Testing | Processing | Its own Save and apply, see [Processing section](#processing-section). [Developer mode](#developer-mode) only. |
 | Node | Identifiers, Mode, Node Claim, Network | Each on its own (Mode on Apply changes, see [Mode switch](#mode-switch)) |
 | Radar | Cached Towers, Tower, Capture | Apply changes |
 | ADS-B | ADS-B Truth, tar1090 | Apply changes |
@@ -379,9 +379,34 @@ move the snapshot with them; today only Auto-Calibrate uses it (see
 [Auto-Calibrate on this page](#auto-calibrate-on-this-page)). The snapshot records the element's
 value read back after setting it, so a select that rejects a value is not recorded as holding it.
 
+## Developer mode
+
+Developer tooling ships in every release but stays off unless the node has an empty flag file,
+`/data/retina-gui/developer-mode` (`DeviceState.is_developer_mode`). Customers get the same code with
+the tooling dormant, so there is no separate developer build or OS image to keep in step.
+
+| | Flag absent (every customer node) | Flag present |
+| --- | --- | --- |
+| `/config` | Rendered byte for byte as before the tooling existed | Adds the Testing group and its [Processing section](#processing-section), and a "Developer mode" pill beside the page title |
+| `/config/processing/save` | 404, so the server refuses it as well as the page hiding it | Saves the section |
+
+- **Who sets it.** Only someone with access to the node: `sudo touch /data/retina-gui/developer-mode`
+  over ssh, or the equivalent through Mender. Nothing in the GUI writes it, so an owner cannot turn
+  it on. Delete the file to turn it off.
+- **When it applies.** It is read on every request, so creating or deleting it takes effect on the
+  next page load, with no restart. It lives in `/data`, so it survives OS updates.
+- **How the template keeps the customer page unchanged.** Everything developer-only in `config.html`
+  sits behind one `developer_mode` switch, set at the top of both the `content` and `scripts` blocks
+  (Jinja does not carry a `set` from one block into another). That covers the side-nav entries, the
+  section, its script and the scrollspy's `processing` id. The `{%-` whitespace control on those tags
+  is what keeps the flag-off page byte for byte the same, so keep it when editing them.
+- **Tests.** `tests/test_developer_mode.py` covers both states and switching without a restart.
+  `tests/test_config_layout.py` checks the page layout in both modes.
+
 ## Processing section
 
-The Processing section, at the top of the page in its own Testing group, exposes the settings that
+The Processing section, at the top of the page in its own Testing group and only in
+[developer mode](#developer-mode), exposes the settings that
 decide what blah2 reports, so a test engineer can tune detection without editing YAML. What each
 setting does in blah2, and the measurements behind the copy, are in blah2-arm's
 `config/README.md`. `save.*` is deliberately not exposed.

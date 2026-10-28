@@ -1,6 +1,6 @@
 import time
 
-from flask import Blueprint, jsonify, redirect, render_template, request, url_for
+from flask import Blueprint, abort, jsonify, redirect, render_template, request, url_for
 from pydantic import ValidationError
 
 from apply_service import ConfigChangeRefused
@@ -89,8 +89,13 @@ def config_page():
 
 def _processing_fields(config, processing_flat=None):
     """The Processing section's fields: from `config`, or from a rejected
-    submission when one is given."""
+    submission when one is given. None outside developer mode, which the page
+    reads as "no Processing section". See docs/features/config-editor.md#developer-mode.
+    """
+    from app import device_state
     from config_manager import ConfigManager
+    if not device_state.is_developer_mode():
+        return None
     if processing_flat is None:
         processing_flat = ConfigManager.flatten_processing_for_form(config.get('process', {}))
     return schema_to_form_fields(ProcessingFormConfig, processing_flat)
@@ -369,9 +374,14 @@ def save_processing():
 
     Its own form, because the section sits above the Node group, outside the
     form Apply changes submits. See docs/features/config-editor.md#processing-section.
+    Not found outside developer mode, so the server refuses it as well as the
+    page hiding it.
     """
     from app import calibrator, config_mgr, device_state
     from config_manager import ConfigManager
+
+    if not device_state.is_developer_mode():
+        abort(404)
 
     processing_flat = ConfigManager.parse_processing_form(request.form.to_dict())
     errors = {}

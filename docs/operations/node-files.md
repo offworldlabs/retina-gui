@@ -44,6 +44,7 @@ locations are cross-repo contracts: do not rename them without changing the othe
 | `install.lock` | `DeviceState` | retina-gui | A GUI-initiated install is in progress; stale after 40 minutes. |
 | `mender-update.status` | owl-os Mender state scripts | retina-gui | A server-pushed update is in progress. |
 | `cloud-services-disabled` | `DeviceState` | retina-gui | Empty flag: the owner turned Mender cloud services off. |
+| `developer-mode` | By hand (ssh or Mender) | retina-gui | Empty flag: show developer tooling on this node. Never written by the GUI. See [developer mode](../features/config-editor.md#developer-mode). |
 | `setup-wizard.json` | `DeviceState` | retina-gui | Wizard progress, for resuming. |
 | `setup-wizard-completed` | `DeviceState` | retina-gui, **retina-telemetry** | Setup finished. retina-telemetry will not register a node without it. |
 | `telemetry-consent.json` | `DeviceState` | retina-gui, **retina-telemetry** | Consent records. Required for registration. |
