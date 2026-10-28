@@ -1,7 +1,9 @@
 """Tests for the Processing section of the Configuration page.
 
 It sits at the top of the page in its own form, and saves the detection
-settings a test engineer tunes. See docs/features/config-editor.md#processing-section.
+settings a test engineer tunes. It exists only in developer mode, which every
+test here turns on; tests/test_developer_mode.py covers the node without it.
+See docs/features/config-editor.md#processing-section.
 """
 
 import re
@@ -11,6 +13,8 @@ import yaml
 
 from config_manager import ConfigManager
 from config_schema import ProcessingFormConfig
+
+pytestmark = pytest.mark.usefixtures("developer_mode")
 
 # What the section posts when nothing on it has been changed, matching
 # conftest's sample_merged_config.

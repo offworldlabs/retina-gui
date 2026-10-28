@@ -9,7 +9,7 @@
 {# ── Macro: render a single form field as a cfg-row ─────────────────────── #}
 {# tutorial names the row as a guided-tutorial target (plain inputs and switches).
    See docs/features/tutorial.md#targets #}
-{# readout adds a line under the input that the Processing script fills in
+{#- readout adds a line under the input that the Processing script fills in
    with the value in physical units. See docs/features/config-editor.md#processing-section #}
 {% macro render_field(field, section, prefix='', tutorial='', readout=false) %}
     {% set field_name = section ~ '.' ~ (prefix ~ field.name if prefix else field.name) %}
@@ -35,8 +35,7 @@
                     {% for opt in field.options %}
                         <option value="{{ opt }}" {% if field.value == opt %}selected{% endif %}>{{ opt }}</option>
                     {% endfor %}
-                </select>
-                {% if readout %}<div class="help" data-readout="{{ field_name }}" style="margin-top:4px;"></div>{% endif %}
+                </select>{% if readout %}<div class="help" data-readout="{{ field_name }}" style="margin-top:4px;"></div>{% endif %}
                 {% if field_err %}<div style="color:var(--danger);font-size:12px;margin-top:4px;">{{ field_err }}</div>{% endif %}
             </div>
         </div>
@@ -76,8 +75,7 @@
                            value="{{ field.value if field.value is not none else '' }}"
                            {% if field.step is defined and field.step is not none %}step="{{ field.step }}"{% endif %}
                            {% if field.min  is defined and field.min  is not none %}min="{{ field.min }}"{% endif %}
-                           {% if field.max  is defined and field.max  is not none %}max="{{ field.max }}"{% endif %}>
-                    {% if readout %}<div class="help" data-readout="{{ field_name }}" style="margin-top:4px;"></div>{% endif %}
+                           {% if field.max  is defined and field.max  is not none %}max="{{ field.max }}"{% endif %}>{% if readout %}<div class="help" data-readout="{{ field_name }}" style="margin-top:4px;"></div>{% endif %}
                     {% if field_err %}<div style="color:var(--danger);font-size:12px;margin-top:4px;">{{ field_err }}</div>{% endif %}
                 {% endif %}
             </div>
@@ -86,6 +84,11 @@
 {% endmacro %}
 
 {% block content %}
+{#- Developer mode: everything new that is not for customers sits behind this,
+   so with the flag off the page is the customer page. Set from the route,
+   which passes no Processing fields outside developer mode.
+   See docs/features/config-editor.md#developer-mode #}
+{%- set developer_mode = processing_fields is not none %}
 <div class="shell">
 
     {# ── Side nav ──
@@ -93,8 +96,10 @@
        data-tutorial names what the guided tutorial points at; a step's target
        must keep its token. See docs/features/tutorial.md#targets #}
     <aside class="side" data-tutorial="cfg-side">
+        {%- if developer_mode %}
         <h3>Testing</h3>
         <a href="#processing">Processing</a>
+        {%- endif %}
         <h3>Node</h3>
         <a href="#identifiers">Identifiers</a>
         <a href="#mode" data-tutorial="cfg-mode-nav">Mode</a>
@@ -121,7 +126,7 @@
     <main>
         <div class="config-page-head">
             <div data-tutorial="cfg-head">
-                <h1>Configuration</h1>
+                <h1>Configuration{% if developer_mode %} <span class="ds-pill" style="font-size:12px;vertical-align:middle;">Developer mode</span>{% endif %}</h1>
                 <div class="sub">Tune the radar pipeline and manage the device. Changes apply on save.</div>
             </div>
         </div>
@@ -141,9 +146,8 @@
         </div>
         {% endif %}
 
+        {%- if developer_mode %}
         {# ════ Testing ════ #}
-        {# Group titles match the side nav's.
-           See docs/features/config-editor.md#page-layout #}
         <h2 class="cfg-group">Testing</h2>
         {# ── Processing ──
            Its own form: it sits above the Node group, outside #configForm.
@@ -184,8 +188,11 @@
                 </form>
             </div>
         </section>
+        {%- endif %}
 
         {# ════ Node ════ #}
+        {# Group titles match the side nav's.
+           See docs/features/config-editor.md#page-layout #}
         <h2 class="cfg-group">Node</h2>
         {# ── Identifiers ──
            Outside #configForm: the name saves on its own rather than on Apply,
@@ -1148,6 +1155,8 @@
 {% endblock %}
 
 {% block scripts %}
+{#- The same switch as in the content block: Jinja does not carry a set from one block into another. #}
+{%- set developer_mode = processing_fields is not none %}
 <script src="/static/calibrate.js"></script>
 <script>
 // This node's own address, deliberately not owl.local (answered by every node).
@@ -1730,6 +1739,7 @@ if (window.location.search.includes('saved=1')) {
     }
 }
 
+{%- if developer_mode %}
 // Processing: live readouts in physical units, and Save and apply enabled
 // once something here has changed. See docs/features/config-editor.md#processing-section
 (function() {
@@ -1822,6 +1832,7 @@ if (window.location.search.includes('saved=1')) {
     update();
     track();
 })();
+{%- endif %}
 
 // Unsaved changes tracker
 (function() {
@@ -1949,7 +1960,7 @@ if (discardBtn) discardBtn.addEventListener('click', () => location.reload());
 // Side-nav scrollspy
 (function() {
     // Page order: the first of these on screen is the one marked active.
-    var sectionIds = ['processing','identifiers','mode','claim','network','cached-towers','tower','capture',
+    var sectionIds = [{% if developer_mode %}'processing',{% endif %}'identifiers','mode','claim','network','cached-towers','tower','capture',
                       'truth','tar1090','ssh','wizard','tutorial','cloud','remote','contact'];
     var links = {};
     sectionIds.forEach(function(id) {
