@@ -1,8 +1,9 @@
 # Config editor
 
 The `/config` page is a form over the node's radar configuration (capture, location, ADS-B Truth,
-tar1090 and retina-tracker settings) plus a set of panels that save on their own. See
-[Page layout](#page-layout) for how the two are arranged.
+tar1090 and retina-tracker settings) plus a set of panels that save on their own. On a node in
+[developer mode](#developer-mode), a Processing section at the top also exposes blah2's detection
+settings for testing, with its own form. See [Page layout](#page-layout) for how they are arranged.
 The radar fields are generated from Pydantic models, display the merged `config.yml` that the stack
 is actually running, and write only the user's overrides to `user.yml`. Saving is followed
 automatically by an apply, which runs retina-node's config-merger and restarts the stack.
@@ -11,11 +12,11 @@ automatically by an apply, which runs retina-node's config-merger and restarts t
 
 | File | Role |
 | --- | --- |
-| [src/config_schema.py](../../src/config_schema.py) | Pydantic form models (`CaptureFormConfig`, `LocationFormConfig`, `AdsbTruthConfig`, `Tar1090Config`, plus `ContactFormConfig` and `ClaimFormConfig` used by the setup routes), length caps, YAML load/save and dict helpers. |
+| [src/config_schema.py](../../src/config_schema.py) | Pydantic form models (`ProcessingFormConfig`, `CaptureFormConfig`, `LocationFormConfig`, `AdsbTruthConfig`, `Tar1090Config`, plus `ContactFormConfig` and `ClaimFormConfig` used by the setup routes), the Processing field paths, length caps, YAML load/save and dict helpers. |
 | [src/config_manager.py](../../src/config_manager.py) | `ConfigManager`: reads `config.yml` and `user.yml`, flattens nested YAML into form fields and back, parses the posted form, computes the overrides to write. |
 | [src/form_utils.py](../../src/form_utils.py) | `schema_to_form_fields`: turns a Pydantic model plus current values into the field dicts the template renders. Works on Pydantic v1 and v2. |
-| [src/routes/config.py](../../src/routes/config.py) | Blueprint: `/config`, `/config/save`, `/config/apply`, `/config/apply/status`, `/config/rf-status`, plus `/ssh-keys`, `/ssh-keys/delete` and `/node-name`. Cross-field validation (location, ADS-B source). |
-| [templates/config.html](../../templates/config.html) | The page: `render_field` macro, hand-built Tower and tar1090 sections, tower presets, mode switch, save bar, auto-apply, peak meter, Auto-Calibrate modal, administration panels. |
+| [src/routes/config.py](../../src/routes/config.py) | Blueprint: `/config`, `/config/save`, `/config/processing/save`, `/config/apply`, `/config/apply/status`, `/config/rf-status`, plus `/ssh-keys`, `/ssh-keys/delete` and `/node-name`. Cross-field validation (location, ADS-B source, Processing). |
+| [templates/config.html](../../templates/config.html) | The page: `render_field` macro, Processing section and its readouts, hand-built Tower and tar1090 sections, tower presets, mode switch, save bar, auto-apply, peak meter, Auto-Calibrate modal, administration panels. |
 | [src/routes/towers.py](../../src/routes/towers.py) | `/towers/cache/add` and `/towers/cache/remove`, used by the Cached Towers section. |
 | [static/calibrate.js](../../static/calibrate.js) | `RetinaCalibrate`, shared with the setup wizard's calibrate step. |
 | retina-node `config-merger/script/merge_config.py` | Builds `config.yml` from `default.yml`, `user.yml` and `forced.yml` (separate repo). |
@@ -67,6 +68,7 @@ it with the matching model to `form_utils.schema_to_form_fields`:
 
 | Section | Source in `config.yml` | Flattened by | Model |
 | --- | --- | --- | --- |
+| `process` | `process` | `ConfigManager.flatten_processing_for_form` | `ProcessingFormConfig` |
 | `capture` | `capture` | `ConfigManager.flatten_capture_for_form` | `CaptureFormConfig` |
 | `location` | `location.rx`, `location.tx` | `ConfigManager.flatten_location_for_form` | `LocationFormConfig` |
 | `truth` | `truth.adsb` | (used as is) | `AdsbTruthConfig` |
@@ -116,10 +118,11 @@ This shapes the schema in a few ways:
 
 ## Page layout
 
-The side nav and the page share one order, in five groups:
+The side nav and the page share one order, in six groups:
 
 | Group | Sections | Saved by |
 | --- | --- | --- |
+| Testing | Processing | Its own Save and apply, see [Processing section](#processing-section). [Developer mode](#developer-mode) only. |
 | Node | Identifiers, Mode, Node Claim, Network | Each on its own (Mode on Apply changes, see [Mode switch](#mode-switch)) |
 | Radar | Cached Towers, Tower, Capture | Apply changes |
 | ADS-B | ADS-B Truth, tar1090 | Apply changes |
@@ -128,7 +131,8 @@ The side nav and the page share one order, in five groups:
 
 The groups are how an owner thinks about the node (what it is, what it listens to, what it is
 checked against, who can help with it), not how the settings are stored. Support is last: it is
-set once and rarely revisited.
+set once and rarely revisited. Testing is first because the person tuning detection returns to
+it after every change.
 
 `#configForm`, the form Apply changes submits, wraps the Radar and ADS-B groups and nothing else.
 Every other section has inputs or forms of its own, so it has to stay outside: a form cannot
@@ -159,6 +163,7 @@ A group's first section stops a little lower still, so its group title stays in 
 
 | Section | Fields | Notes |
 | --- | --- | --- |
+| Processing | `detection_*`, `ambiguity_*`, `clutter_enable`, plus four read-only fields | Stored under `process`. See [Processing section](#processing-section). |
 | Cached Towers | none of its own | Fills in the Tower section's fields and edits the tower cache. See [Tower presets](#tower-presets). |
 | Tower | `rx_*` and `tx_*` latitude, longitude, altitude, name, and Capture's `fc` | The location model's fields plus the center frequency. See [Tower section](#tower-section). |
 | Capture | `fs`, `device_type` (readonly), `device_agcSetPoint`, `device_gainReductionA/B`, `device_lnaState`, `device_dabNotch`, `device_rfNotch`, `device_bandwidthNumber` | `fs` and `device_bandwidthNumber` are `Literal` selects. `fc` belongs to this model but is shown in the Tower section. |
@@ -358,7 +363,7 @@ for the apply service.
 | Guard | Where | Why |
 | --- | --- | --- |
 | Setup Wizard in progress | `routes/config.py:_check_wizard_not_active` redirects every route in the blueprint to `/set-up`, except `/config/apply/status` | The wizard's tower step polls that status. A redirect would hand `fetch()` an HTML page: the request succeeds, `.json()` rejects, and the step re-polls forever with its spinner up and skip button hidden. Matched exactly, not by prefix, because `/config/apply` and `/config/save` mutate and must stay blocked. The same rule applies to `_CALIBRATION_ALLOWED_PREFIXES` in `app.py`. |
-| Auto-Calibrate running | `/config/save` (form-level error) and `ApplyService.request()` (raises `ConfigChangeRefused`, 409) | The save is refused as well as the apply. Guarding only the apply would leave changes in `user.yml` that were never applied, and they would be swept silently into the next merge, including the one `/calibrate/apply` runs after a successful calibration. The apply check lives in `request()` so no future route can skip it. |
+| Auto-Calibrate running | `/config/save` and `/config/processing/save` (form-level error) and `ApplyService.request()` (raises `ConfigChangeRefused`, 409) | The save is refused as well as the apply. Guarding only the apply would leave changes in `user.yml` that were never applied, and they would be swept silently into the next merge, including the one `/calibrate/apply` runs after a successful calibration. The apply check lives in `request()` so no future route can skip it. |
 | Mender install in progress | `/config/apply`, 409 | The install replaces the compose manifests config-merger runs against, and mender-update's own docker commands are outside the restart lock, so the two can genuinely run at once. The apply would also report success while skipping the restart, since the install sets `mode.txt` to `spectrum`. An install can end in rollback or reboot, so the user is asked to retry rather than having the apply held across it. |
 | retina-node missing | `/config/apply`, 400 | Nothing to apply to. |
 
@@ -373,6 +378,101 @@ page. `window.RetinaConfigForm.adoptSaved(values)` lets other code on the page c
 move the snapshot with them; today only Auto-Calibrate uses it (see
 [Auto-Calibrate on this page](#auto-calibrate-on-this-page)). The snapshot records the element's
 value read back after setting it, so a select that rejects a value is not recorded as holding it.
+
+## Developer mode
+
+Developer tooling ships in every release but stays off unless the node has an empty flag file,
+`/data/retina-gui/developer-mode` (`DeviceState.is_developer_mode`). Customers get the same code with
+the tooling dormant, so there is no separate developer build or OS image to keep in step.
+
+| | Flag absent (every customer node) | Flag present |
+| --- | --- | --- |
+| `/config` | Rendered byte for byte as before the tooling existed | Adds the Testing group and its [Processing section](#processing-section), and a "Developer mode" pill beside the page title |
+| `/config/processing/save` | 404, so the server refuses it as well as the page hiding it | Saves the section |
+
+- **Who sets it.** Only someone with access to the node: `sudo touch /data/retina-gui/developer-mode`
+  over ssh, or the equivalent through Mender. Nothing in the GUI writes it, so an owner cannot turn
+  it on. Delete the file to turn it off.
+- **When it applies.** It is read on every request, so creating or deleting it takes effect on the
+  next page load, with no restart. It lives in `/data`, so it survives OS updates.
+- **How the template keeps the customer page unchanged.** Everything developer-only in `config.html`
+  sits behind one `developer_mode` switch, set at the top of both the `content` and `scripts` blocks
+  (Jinja does not carry a `set` from one block into another). That covers the side-nav entries, the
+  section, its script and the scrollspy's `processing` id. The `{%-` whitespace control on those tags
+  is what keeps the flag-off page byte for byte the same, so keep it when editing them.
+- **Tests.** `tests/test_developer_mode.py` covers both states and switching without a restart.
+  `tests/test_config_layout.py` checks the page layout in both modes.
+
+## Processing section
+
+The Processing section, at the top of the page in its own Testing group and only in
+[developer mode](#developer-mode), exposes the settings that
+decide what blah2 reports, so a test engineer can tune detection without editing YAML. What each
+setting does in blah2, and the measurements behind the copy, are in blah2-arm's
+`config/README.md`. `save.*` is deliberately not exposed.
+
+| Field | `process` path | Editable |
+| --- | --- | --- |
+| Minimum Doppler | `detection.minDoppler` | yes |
+| Maximum Reported Doppler | `detection.maxReportedDoppler` | yes, optional |
+| Minimum Delay | `detection.minDelay` | yes |
+| Maximum Delay | `ambiguity.delayMax` | yes |
+| False Alarm Probability | `detection.pfa` | yes |
+| Training Cells, Guard Cells | `detection.nTrain`, `detection.nGuard` | yes |
+| Merge Distance | `detection.nCentroid` | yes |
+| Doppler Window | `ambiguity.dopplerWindow` | yes, optional |
+| Clutter Filter | `clutter.enable` | yes |
+| Doppler Span Minimum and Maximum | `ambiguity.dopplerMin`, `ambiguity.dopplerMax` | no |
+| Integration Time | `data.cpi` | no |
+| Clutter Filter Extent | `clutter.delayMax` | no |
+
+`PROCESSING_EDITABLE_FIELDS` and `PROCESSING_READONLY_FIELDS` in `config_schema.py` hold the paths.
+
+**Read-only fields.** Each one's description says why it is fixed. The Doppler span is fleet
+policy (retina-node's merger drops a `user.yml` override), and narrowing it folds fast targets
+back in as fake slow ones; Maximum Reported Doppler is the safe way to limit Doppler. `cpi` is
+fixed because the clutter filter's FFT length is tuned for 0.5 s. They post through hidden inputs
+like any read-only field, but the save never writes them.
+
+**Optional fields.** `maxReportedDoppler` and `dopplerWindow` are newer blah2 keys. On a node whose
+`default.yml` predates them they show empty, and an empty value is not written: blah2 then tests
+every Doppler row and uses no window, as it did before the keys existed.
+
+**Its own form.** The section is above the Node group, whose panels have forms of their own, so it
+cannot be inside `#configForm`. It posts to `/config/processing/save` with its own Save and apply
+button, which stays disabled until a field in the section changes (or after a rejected save, whose
+values are not what is saved). The route redirects to `/config?saved=1`, so the usual auto-apply
+runs and its progress shows on the save bar. Apply changes does not save this section, and Save and
+apply does not save the others; the text beside the button says so.
+
+**Saving.** `ConfigManager.parse_processing_form` reads the `process.` fields. Unlike
+`parse_flat_form_data` it tries int and then float for every number, so a pfa written `1e-05` is a
+number rather than a string. The values go through `ProcessingFormConfig`, then
+`compute_user_overrides` as for the other sections. `merge_processing_overrides` then rebuilds
+`user.yml`'s `process` section: keys the section does not edit (most of a first-boot copy of
+`default.yml`, such as `cpi` or `clutter.delayMin`) are kept, and each edited key is replaced by its
+override or removed. Other top-level sections are untouched.
+
+**Cross-field rules**, in `routes/config.py:_processing_errors`:
+
+| Rule | Why |
+| --- | --- |
+| Maximum Reported Doppler at least Minimum Doppler | blah2 checks this at startup and refuses to run otherwise. |
+| Minimum Delay below Maximum Delay | Otherwise no delay is tested at all. |
+
+**Readouts.** Every number field except the fixed ones has a line under it that a script fills in
+with the value in physical units, recomputed as fields change. They read the center frequency and
+sample rate from the Tower and Capture sections, so they follow unsaved edits there too.
+
+| Field | Readout |
+| --- | --- |
+| Minimum Doppler | The slowest Doppler row tested (rows sit on whole 1/cpi bins), as m/s of bistatic range rate, and half that as the slowest target that can ever be detected |
+| Maximum Reported Doppler | As m/s, or that it limits nothing at or beyond the span |
+| Minimum Delay | As metres of bistatic range, and half that as the distance from the receiver inside which a target is hidden in every direction |
+| Maximum Delay | As km of bistatic range |
+| False Alarm Probability | Expected false alarms per CPI: Doppler rows tested × delays tested × pfa |
+| Training Cells | The CA-CFAR threshold above the local noise, 10·log10(N(pfa^(-1/N) - 1)) with N = 2 × Training Cells |
+| Guard Cells, Merge Distance | As metres, and Hz for Merge Distance |
 
 ## Tower presets
 

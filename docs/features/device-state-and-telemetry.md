@@ -27,6 +27,7 @@ All paths are relative to `DATA_DIR` (`/data/retina-gui` on a node) unless state
 | `install.lock` | JSON `{version, started_at, stage?}` | `acquire_install_lock`, `update_install_stage` | GUI only |
 | `mender-update.status` | JSON `{state, ts}` | Mender state scripts in owl-os (`Download_Enter`, `ArtifactInstall_Enter`); removed by `ArtifactCommit_Leave` / `ArtifactFailure_Enter` | GUI |
 | `cloud-services-disabled` | Empty flag file | `set_cloud_services(False)` | GUI (`apply_startup_preferences` on every boot) |
+| `developer-mode` | Empty flag file | By hand only (ssh or Mender), never the GUI | GUI (`is_developer_mode`, per request). See [developer mode](config-editor.md#developer-mode) |
 | `calibrate.lock` | JSON `{started_at}` | `acquire_calibration_lock` | GUI, and blah2-arm's `blah2_rspduo_restart.bash` watchdog |
 | `setup-wizard.json` | JSON `{started_at, step}` | `save_setup_wizard_step` | GUI only |
 | `setup-wizard-completed` | Plain text, an ISO timestamp | `mark_setup_wizard_completed`, `backfill_setup_wizard_completed` | GUI, and retina-telemetry (registration gate) |

@@ -1,6 +1,6 @@
 import time
 
-from flask import Blueprint, jsonify, redirect, render_template, request, url_for
+from flask import Blueprint, abort, jsonify, redirect, render_template, request, url_for
 from pydantic import ValidationError
 
 from apply_service import ConfigChangeRefused
@@ -9,7 +9,9 @@ from config_schema import (
     AdsbTruthConfig,
     CaptureFormConfig,
     LocationFormConfig,
+    ProcessingFormConfig,
     Tar1090Config,
+    model_values,
 )
 from form_utils import schema_to_form_fields
 from node_name import MAX_LENGTH as NAME_MAX_LENGTH
@@ -82,6 +84,26 @@ def _remote_access_context():
 @bp.route("/config")
 def config_page():
     """Configuration page with all settings."""
+    return _render_config_page()
+
+
+def _processing_fields(config, processing_flat=None):
+    """The Processing section's fields: from `config`, or from a rejected
+    submission when one is given. None outside developer mode, which the page
+    reads as "no Processing section". See docs/features/config-editor.md#developer-mode.
+    """
+    from app import device_state
+    from config_manager import ConfigManager
+    if not device_state.is_developer_mode():
+        return None
+    if processing_flat is None:
+        processing_flat = ConfigManager.flatten_processing_for_form(config.get('process', {}))
+    return schema_to_form_fields(ProcessingFormConfig, processing_flat)
+
+
+def _render_config_page(config_errors=None, processing_flat=None):
+    """The page from the merged config. A rejected Processing save passes its
+    errors and submitted values, so only that section shows the submission."""
     from app import DEV_MODE, config_mgr, device_state, node_name, ssh_keys
 
     config = config_mgr.load_merged_config()
@@ -101,11 +123,13 @@ def config_page():
 
     return render_template("config.html",
                            retina_installed=retina_installed,
+                           processing_fields=_processing_fields(config, processing_flat),
                            capture_fields=capture_fields,
                            location_fields=location_fields,
                            truth_fields=truth_fields,
                            tar1090_fields=tar1090_fields,
                            towers_cache=device_state.get_towers_cache(),
+                           config_errors=config_errors,
                            node_name=node_name.get(),
                            node_name_max_length=NAME_MAX_LENGTH,
                            ssh_keys=ssh_keys.get_keys())
@@ -271,6 +295,7 @@ def save_config():
         from app import DEV_MODE, device_state, ssh_keys
         return render_template("config.html",
                                retina_installed=config_mgr.is_retina_node_installed() or DEV_MODE or request.args.get('demo') == '1',
+                               processing_fields=_processing_fields(config_mgr.load_merged_config()),
                                capture_fields=schema_to_form_fields(CaptureFormConfig, capture_flat),
                                location_fields=schema_to_form_fields(LocationFormConfig, location_flat),
                                truth_fields=schema_to_form_fields(AdsbTruthConfig, truth_data),
@@ -327,6 +352,67 @@ def save_config():
         if tar1090_overrides:
             new_user_config['tar1090'] = tar1090_overrides
 
+    config_mgr.save_user_config(new_user_config)
+    return redirect(url_for("config.config_page") + "?saved=1")
+
+
+def _processing_errors(values):
+    """Per-field errors for Processing values that pass on their own but not
+    together. blah2 refuses to start on the first, so it must not be saved."""
+    errors = {}
+    max_reported = values.get('detection_maxReportedDoppler')
+    if max_reported is not None and max_reported < values['detection_minDoppler']:
+        errors['process.detection_maxReportedDoppler'] = "must be at least Minimum Doppler"
+    if values['detection_minDelay'] >= values['ambiguity_delayMax']:
+        errors['process.detection_minDelay'] = "must be below Maximum Delay, or nothing is tested"
+    return errors
+
+
+@bp.route("/config/processing/save", methods=["POST"])
+def save_processing():
+    """Save the Processing section to user.yml on its own, then apply.
+
+    Its own form, because the section sits above the Node group, outside the
+    form Apply changes submits. See docs/features/config-editor.md#processing-section.
+    Not found outside developer mode, so the server refuses it as well as the
+    page hiding it.
+    """
+    from app import calibrator, config_mgr, device_state
+    from config_manager import ConfigManager
+
+    if not device_state.is_developer_mode():
+        abort(404)
+
+    processing_flat = ConfigManager.parse_processing_form(request.form.to_dict())
+    errors = {}
+
+    # Same guard as /config/save. See docs/features/config-editor.md#guards
+    if calibrator.is_running() or device_state.is_calibration_locked()[0]:
+        errors['_form'] = ("Auto-calibration is running. Cancel it before "
+                           "changing configuration.")
+
+    values = None
+    try:
+        values = model_values(ProcessingFormConfig(**processing_flat))
+    except ValidationError as e:
+        errors.update(ConfigManager.format_validation_errors(e, 'process'))
+    if values is not None:
+        errors.update(_processing_errors(values))
+
+    if errors:
+        return _render_config_page(config_errors=errors, processing_flat=processing_flat)
+
+    merged_config = config_mgr.load_merged_config()
+    existing_user = config_mgr.load_user_config()
+    nested = ConfigManager.unflatten_processing_from_form(values)
+    overrides = config_mgr.compute_user_overrides(nested, merged_config, existing_user, 'process')
+    process = ConfigManager.merge_processing_overrides(existing_user.get('process'), overrides)
+
+    new_user_config = dict(existing_user)
+    if process:
+        new_user_config['process'] = process
+    else:
+        new_user_config.pop('process', None)
     config_mgr.save_user_config(new_user_config)
     return redirect(url_for("config.config_page") + "?saved=1")
 

@@ -6,6 +6,7 @@ status into a single class with enforced guard conditions.
 State sources:
 - install.lock: GUI-initiated OTA installs (JSON with version + timestamp)
 - cloud-services-disabled: Mender service toggle (empty flag file)
+- developer-mode: developer tooling switch (empty flag file, set by hand)
 - mender-update.status: Server-pushed updates (JSON written by Mender state scripts)
 
 Guards:
@@ -56,6 +57,9 @@ class DeviceState:
         self.data_dir = data_dir
         self.install_lock_file = os.path.join(data_dir, "install.lock")
         self.cloud_disabled_flag = os.path.join(data_dir, "cloud-services-disabled")
+        # Set over ssh or by Mender, never from the GUI: owners cannot turn on
+        # developer tooling. See docs/features/config-editor.md#developer-mode.
+        self.developer_mode_flag = os.path.join(data_dir, "developer-mode")
         self.mender_status_file = os.path.join(data_dir, "mender-update.status")
         self.mender_services = mender_services
         self.mender_conf_path = mender_conf_path
@@ -148,6 +152,11 @@ class DeviceState:
     def is_cloud_services_enabled(self) -> bool:
         """Check cloud services flag file."""
         return not os.path.exists(self.cloud_disabled_flag)
+
+    def is_developer_mode(self) -> bool:
+        """Whether this node shows developer tooling. Read per request, so
+        creating or deleting the flag takes effect without a restart."""
+        return os.path.exists(self.developer_mode_flag)
 
     def get_cloud_services_status(self) -> dict:
         """Full status for GET /mender/cloud-services."""

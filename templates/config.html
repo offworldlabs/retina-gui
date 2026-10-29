@@ -9,7 +9,9 @@
 {# ── Macro: render a single form field as a cfg-row ─────────────────────── #}
 {# tutorial names the row as a guided-tutorial target (plain inputs and switches).
    See docs/features/tutorial.md#targets #}
-{% macro render_field(field, section, prefix='', tutorial='') %}
+{#- readout adds a line under the input that the Processing script fills in
+   with the value in physical units. See docs/features/config-editor.md#processing-section #}
+{% macro render_field(field, section, prefix='', tutorial='', readout=false) %}
     {% set field_name = section ~ '.' ~ (prefix ~ field.name if prefix else field.name) %}
     {% set field_id   = field_name | replace('.', '_') %}
     {% set field_err  = config_errors.get(field_name) if config_errors else none %}
@@ -33,7 +35,7 @@
                     {% for opt in field.options %}
                         <option value="{{ opt }}" {% if field.value == opt %}selected{% endif %}>{{ opt }}</option>
                     {% endfor %}
-                </select>
+                </select>{% if readout %}<div class="help" data-readout="{{ field_name }}" style="margin-top:4px;"></div>{% endif %}
                 {% if field_err %}<div style="color:var(--danger);font-size:12px;margin-top:4px;">{{ field_err }}</div>{% endif %}
             </div>
         </div>
@@ -73,7 +75,7 @@
                            value="{{ field.value if field.value is not none else '' }}"
                            {% if field.step is defined and field.step is not none %}step="{{ field.step }}"{% endif %}
                            {% if field.min  is defined and field.min  is not none %}min="{{ field.min }}"{% endif %}
-                           {% if field.max  is defined and field.max  is not none %}max="{{ field.max }}"{% endif %}>
+                           {% if field.max  is defined and field.max  is not none %}max="{{ field.max }}"{% endif %}>{% if readout %}<div class="help" data-readout="{{ field_name }}" style="margin-top:4px;"></div>{% endif %}
                     {% if field_err %}<div style="color:var(--danger);font-size:12px;margin-top:4px;">{{ field_err }}</div>{% endif %}
                 {% endif %}
             </div>
@@ -82,6 +84,11 @@
 {% endmacro %}
 
 {% block content %}
+{#- Developer mode: everything new that is not for customers sits behind this,
+   so with the flag off the page is the customer page. Set from the route,
+   which passes no Processing fields outside developer mode.
+   See docs/features/config-editor.md#developer-mode #}
+{%- set developer_mode = processing_fields is not none %}
 <div class="shell">
 
     {# ── Side nav ──
@@ -89,6 +96,10 @@
        data-tutorial names what the guided tutorial points at; a step's target
        must keep its token. See docs/features/tutorial.md#targets #}
     <aside class="side" data-tutorial="cfg-side">
+        {%- if developer_mode %}
+        <h3>Testing</h3>
+        <a href="#processing">Processing</a>
+        {%- endif %}
         <h3>Node</h3>
         <a href="#identifiers">Identifiers</a>
         <a href="#mode" data-tutorial="cfg-mode-nav">Mode</a>
@@ -115,7 +126,7 @@
     <main>
         <div class="config-page-head">
             <div data-tutorial="cfg-head">
-                <h1>Configuration</h1>
+                <h1>Configuration{% if developer_mode %} <span class="ds-pill" style="font-size:12px;vertical-align:middle;">Developer mode</span>{% endif %}</h1>
                 <div class="sub">Tune the radar pipeline and manage the device. Changes apply on save.</div>
             </div>
         </div>
@@ -134,6 +145,50 @@
                else 'Please fix the highlighted fields below.' }}
         </div>
         {% endif %}
+
+        {%- if developer_mode %}
+        {# ════ Testing ════ #}
+        <h2 class="cfg-group">Testing</h2>
+        {# ── Processing ──
+           Its own form: it sits above the Node group, outside #configForm.
+           See docs/features/config-editor.md#processing-section #}
+        {% set proc = {} %}
+        {% for f in processing_fields %}{% set _ = proc.update({f.name: f}) %}{% endfor %}
+        <section id="processing" class="cfg-section">
+            <div class="cfg-section-head">
+                <h2>Processing</h2>
+                <span class="desc">How the radar decides what to report. For testing detection: every setting here changes what the radar reports. Saving restarts the radar.</span>
+            </div>
+            <div class="cfg-body" {% if not retina_installed %}style="opacity:.5;pointer-events:none;"{% endif %}>
+                <form action="/config/processing/save" method="post" id="processingForm" novalidate>
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <div class="ds-label-micro" style="margin-bottom:14px;">What is reported</div>
+                    {% for name in ['detection_minDoppler', 'detection_maxReportedDoppler', 'detection_minDelay', 'ambiguity_delayMax'] %}
+                        {{ render_field(proc[name], 'process', readout=true) }}
+                    {% endfor %}
+                    <div class="divider"></div>
+                    <div class="ds-label-micro" style="margin-bottom:14px;">Detector</div>
+                    {% for name in ['detection_pfa', 'detection_nTrain', 'detection_nGuard', 'detection_nCentroid'] %}
+                        {{ render_field(proc[name], 'process', readout=true) }}
+                    {% endfor %}
+                    <div class="divider"></div>
+                    <div class="ds-label-micro" style="margin-bottom:14px;">Filtering</div>
+                    {{ render_field(proc['ambiguity_dopplerWindow'], 'process') }}
+                    {{ render_field(proc['clutter_enable'], 'process') }}
+                    <div class="divider"></div>
+                    <div class="ds-label-micro" style="margin-bottom:14px;">Fixed</div>
+                    {% for name in ['ambiguity_dopplerMin', 'ambiguity_dopplerMax', 'data_cpi', 'clutter_delayMax'] %}
+                        {{ render_field(proc[name], 'process') }}
+                    {% endfor %}
+                    <div class="divider"></div>
+                    <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
+                        <button type="submit" class="ds-btn primary" id="processingSaveBtn" disabled>Save and apply</button>
+                        <span class="help" id="processingSaveHelp" style="margin:0;">No changes. Saving here does not save the other sections, and their Apply changes does not save this one.</span>
+                    </div>
+                </form>
+            </div>
+        </section>
+        {%- endif %}
 
         {# ════ Node ════ #}
         {# Group titles match the side nav's.
@@ -1100,6 +1155,8 @@
 {% endblock %}
 
 {% block scripts %}
+{#- The same switch as in the content block: Jinja does not carry a set from one block into another. #}
+{%- set developer_mode = processing_fields is not none %}
 <script src="/static/calibrate.js"></script>
 <script>
 // This node's own address, deliberately not owl.local (answered by every node).
@@ -1682,6 +1739,101 @@ if (window.location.search.includes('saved=1')) {
     }
 }
 
+{%- if developer_mode %}
+// Processing: live readouts in physical units, and Save and apply enabled
+// once something here has changed. See docs/features/config-editor.md#processing-section
+(function() {
+    var form = document.getElementById('processingForm');
+    if (!form) return;
+    var C = 299792458;
+    // The data's first delay bin. Fixed and not on the form.
+    var DELAY_MIN = -10;
+
+    function num(name) {
+        var el = document.querySelector('[name="' + name + '"]');
+        return el && el.value !== '' ? Number(el.value) : NaN;
+    }
+    function fmt(x, digits) {
+        return Number.isFinite(x) ? x.toFixed(digits) : '?';
+    }
+    function set(name, text) {
+        var el = form.querySelector('[data-readout="process.' + name + '"]');
+        if (el) el.textContent = text;
+    }
+
+    function update() {
+        var fc = num('capture.fc'), fs = num('capture.fs');
+        var cpi = num('process.data_cpi'), span = num('process.ambiguity_dopplerMax');
+        var lambda = C / fc, binM = C / fs, res = 1 / cpi, mhz = fmt(fc / 1e6, 0) + ' MHz';
+        var minDop = num('process.detection_minDoppler');
+        var maxRep = num('process.detection_maxReportedDoppler');
+        var minDelay = num('process.detection_minDelay'), delayMax = num('process.ambiguity_delayMax');
+        var pfa = num('process.detection_pfa'), nTrain = num('process.detection_nTrain');
+        var nGuard = num('process.detection_nGuard'), nCentroid = num('process.detection_nCentroid');
+
+        // Rows sit on whole bins, so the slowest one tested can be above minDop.
+        var firstRow = Math.ceil(minDop / res - 1e-9) * res;
+        set('detection_minDoppler', minDop === 0
+            ? 'Every Doppler row is tested, including 0 Hz.'
+            : 'The slowest row tested is ' + fmt(firstRow, 0) + ' Hz, ' + fmt(firstRow * lambda, 1) +
+              ' m/s of bistatic range rate at ' + mhz + '. Nothing slower than ' +
+              fmt(firstRow * lambda / 2, 1) + ' m/s can be detected, in any direction.');
+        set('detection_maxReportedDoppler', !(maxRep < span)
+            ? 'At or beyond the ±' + fmt(span, 0) + ' Hz span, so it limits nothing.'
+            : fmt(maxRep, 0) + ' Hz is ' + fmt(maxRep * lambda, 0) + ' m/s at ' + mhz +
+              '. Faster targets are still processed, but not reported.');
+        set('detection_minDelay', minDelay === 0
+            ? 'Every delay is tested, including the direct signal\'s.'
+            : fmt(minDelay, 0) + ' bins is ' + fmt(minDelay * binM, 0) + ' m of bistatic range. A target nearer than ' +
+              fmt(minDelay * binM / 2, 0) + ' m to the receiver is hidden in every direction.');
+        set('ambiguity_delayMax', fmt(delayMax, 0) + ' bins is ' + fmt(delayMax * binM / 1000, 1) + ' km of bistatic range.');
+
+        // Cells tested x pfa. Doppler bins sit at whole multiples of 1/cpi.
+        var rows = 0, k, f;
+        for (k = -Math.floor(span / res + 1e-9); k <= span / res + 1e-9; k++) {
+            f = Math.abs(k * res);
+            if (f >= minDop && !(f > maxRep)) rows++;
+        }
+        var cols = Math.max(0, delayMax - Math.max(minDelay, DELAY_MIN) + 1);
+        set('detection_pfa', 'About ' + fmt(rows * cols * pfa, 1) + ' false alarms per ' + fmt(cpi, 2) +
+            ' s of data before merging (' + rows + ' Doppler rows by ' + cols + ' delays tested).');
+        var nCells = 2 * nTrain;
+        var alpha = nCells * (Math.pow(pfa, -1 / nCells) - 1);
+        set('detection_nTrain', 'Threshold ' + fmt(10 * Math.log10(alpha), 2) +
+            ' dB above the local noise, at this False Alarm Probability.');
+        set('detection_nGuard', fmt(nGuard, 0) + ' bins is ' + fmt(nGuard * binM, 0) + ' m either side.');
+        set('detection_nCentroid', 'Within ±' + fmt(nCentroid * binM, 0) + ' m and ±' + fmt(nCentroid * res, 0) + ' Hz.');
+    }
+
+    // Snapshot on load, as the save bar does for #configForm.
+    var btn = document.getElementById('processingSaveBtn');
+    var help = document.getElementById('processingSaveHelp');
+    var idle = help.textContent;
+    function read(el) { return el.type === 'checkbox' ? el.checked : el.value; }
+    var fields = form.querySelectorAll('input[name^="process."], select[name^="process."]');
+    var initial = Array.prototype.map.call(fields, read);
+    // A rejected save re-renders the submission, which is not what is saved.
+    var rejected = !!form.querySelector('.is-invalid');
+    function track() {
+        var n = 0;
+        fields.forEach(function(el, i) { if (read(el) !== initial[i]) n++; });
+        btn.disabled = !(n || rejected);
+        help.textContent = n ? n + ' unsaved change' + (n === 1 ? '' : 's') + ' in this section.' : idle;
+    }
+
+    function onChange() { update(); track(); }
+    form.addEventListener('input', onChange);
+    form.addEventListener('change', onChange);
+    // fc and fs are set in the Tower and Capture sections.
+    ['capture.fc', 'capture.fs'].forEach(function(name) {
+        var el = document.querySelector('[name="' + name + '"]');
+        if (el) { el.addEventListener('input', update); el.addEventListener('change', update); }
+    });
+    update();
+    track();
+})();
+{%- endif %}
+
 // Unsaved changes tracker
 (function() {
     const pill = document.getElementById('configChangesPill');
@@ -1808,7 +1960,7 @@ if (discardBtn) discardBtn.addEventListener('click', () => location.reload());
 // Side-nav scrollspy
 (function() {
     // Page order: the first of these on screen is the one marked active.
-    var sectionIds = ['identifiers','mode','claim','network','cached-towers','tower','capture',
+    var sectionIds = [{% if developer_mode %}'processing',{% endif %}'identifiers','mode','claim','network','cached-towers','tower','capture',
                       'truth','tar1090','ssh','wizard','tutorial','cloud','remote','contact'];
     var links = {};
     sectionIds.forEach(function(id) {
