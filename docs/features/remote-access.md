@@ -242,6 +242,19 @@ The service is restarted, not reloaded: mender-connect reads its config only at 
 
 The route calls `mender_connect.set_shell_enabled()` first and only then `remote_access.record_shell_allowed()`, skipping the record if enforcement failed. The reverse order would leave the marker, and therefore the upstream `remote_shell` inventory attribute, claiming the shell was declined while mender-connect kept serving it.
 
+### One flip at a time
+
+A flip is a read-modify-write of `mender-connect.conf` and then the marker. Two opposite flips
+arriving together (the wizard and the Configuration page, or a double click) interleaved: both
+read the conf, both wrote it, both restarted the service, and then each recorded its own choice,
+so the conf could end up saying one thing and the marker the other, with the inventory attribute
+following the marker. `routes/remote_access.py` holds `_switch_lock` across enforce-and-record,
+and across the support toggle's write for the same reason, so each flip runs whole and the last
+one wins in both places. It is a `threading.Lock`, not a file lock: retina-gui is one process,
+and nothing outside it writes these two files while it runs (`_reapply_shell_agreement` runs at
+startup, before any request). Found by sending two opposite requests at the same moment on a
+test node.
+
 ### Re-applied at startup
 
 The choice lives in `/data`, which survives an OS update. The enforcement lives in `/etc/mender/mender-connect.conf` on the A/B rootfs, which does not: an update replaces it with owl-os's template, where both features are enabled. Before `_reapply_shell_agreement()` existed, an owner who declined the shell had it restored by the next update while the marker, the config page and the inventory attribute all still said declined. That divergence was in the permissive direction.

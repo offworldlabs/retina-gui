@@ -167,8 +167,10 @@ also challenged with the browser's "leave site?" dialog.
 
 One `beforeunload` handler covers the whole wizard lifetime and shows the browser's native
 "leave site?" dialog on every step. On the location step it also sends a `sendBeacon` to
-`/api/mode/release-spectrum`, so retina-spectrum stops even if the owner confirms and leaves. The
-handler is removed on the complete step and when the session-expired overlay appears.
+`/api/mode/release-spectrum`, so the node returns to radar even if the owner confirms and leaves
+(the whole return, not only stopping retina-spectrum: see
+[sdr-mode.md](sdr-mode.md#returning-to-radar)). The handler is removed on the complete step and
+when the session-expired overlay appears.
 
 ## Agreements
 

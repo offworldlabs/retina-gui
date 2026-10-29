@@ -434,11 +434,14 @@ class TestRestartLockCoverage:
         assert is_locked(temp_dir) is False
 
     def test_release_spectrum_gives_up_quickly_when_busy(self, app_client, temp_dir, monkeypatch):
-        """A sendBeacon nobody waits on must not block the request thread."""
+        """A sendBeacon nobody waits on must not block the request thread,
+        and must not claim radar when it did nothing."""
         import app as app_module
         import restart_lock as rl
+        import routes.sdr as mode_module
         monkeypatch.setattr(app_module, 'DATA_DIR', temp_dir)
         monkeypatch.setattr(rl, 'OPPORTUNISTIC_TIMEOUT_SECONDS', 0.1)
+        mode_module._write_mode('spectrum')
 
         with restart_lock(temp_dir):
             with patch('subprocess.run') as mock_run:
@@ -449,6 +452,30 @@ class TestRestartLockCoverage:
         assert response.status_code == 204
         assert mock_run.call_count == 0
         assert elapsed < 5, f"blocked for {elapsed:.1f}s on a fire-and-forget beacon"
+        assert mode_module.get_current_mode() == 'spectrum'
+
+    def test_release_spectrum_brings_the_radar_back(self, app_client, temp_dir, monkeypatch):
+        """The owner has gone. Stopping retina-spectrum and writing radar
+        left the radar containers stopped, blah2 down until the watchdog's
+        next run; the beacon does the whole return, like the radar switch."""
+        import app as app_module
+        import routes.sdr as mode_module
+        monkeypatch.setattr(app_module, 'DATA_DIR', temp_dir)
+        mode_module._write_mode('spectrum')
+
+        with patch('subprocess.run') as mock_run:
+            mock_run.return_value = MagicMock(returncode=0)
+            response = app_client.post('/api/mode/release-spectrum')
+
+        assert response.status_code == 204
+        commands = [' '.join(str(a) for a in c.args[0]) for c in mock_run.call_args_list]
+        assert any('stop retina-spectrum' in c for c in commands)
+        assert any('rm -sf retina-spectrum' in c for c in commands)
+        ups = [c for c in commands if 'up -d --force-recreate blah2' in c]
+        assert ups, commands
+        # Radar is written once the stack is up, not before the teardown.
+        assert mode_module.get_current_mode() == 'radar'
+        assert commands.index(ups[0]) > commands.index(next(c for c in commands if 'stop retina-spectrum' in c))
 
 
 class TestNoSelfDeadlock:
