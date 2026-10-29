@@ -238,13 +238,19 @@ class TestNameYourNode:
             assert yaml.safe_load(f)['location']['rx']['name'] == 'ret7a000001'
 
         app_client.post("/node-name", data={"name": "Sample Rooftop"})
-        with patch('routes.setup._merge_config_opportunistically') as merge, \
-                patch('routes.sdr.enforce_radar_mode'):
+
+        # The restart's `up` is what merges the name (config-merger is a
+        # compose dependency), so the name must be on disk before it runs.
+        names_at_restart = []
+
+        def restart(_path):
+            with open(user_path) as f:
+                names_at_restart.append(yaml.safe_load(f)['location']['rx']['name'])
+
+        with patch('routes.sdr.enforce_radar_mode', side_effect=restart):
             resp = app_client.post('/set-up/complete')
         assert resp.get_json()['success'] is True
-        with open(user_path) as f:
-            assert yaml.safe_load(f)['location']['rx']['name'] == 'Sample Rooftop'
-        merge.assert_called_once()
+        assert names_at_restart == ['Sample Rooftop']
 
     def test_completion_leaves_an_unsited_node_alone(self, app_client, config_files):
         user_path, _ = config_files
@@ -255,57 +261,45 @@ class TestNameYourNode:
             yaml.dump(unsited, f)
 
         app_client.post("/node-name", data={"name": "Sample Rooftop"})
-        with patch('routes.setup._merge_config_opportunistically') as merge, \
-                patch('routes.sdr.enforce_radar_mode'):
+        with patch('routes.sdr.enforce_radar_mode'):
             app_client.post('/set-up/complete')
         with open(user_path) as f:
             assert yaml.safe_load(f) == unsited
-        merge.assert_not_called()
 
 
 class TestCompletionSaysWhenItFallsShort:
-    """Nothing on the page waits on /set-up/complete, so a merge that is
+    """Nothing on the page waits on /set-up/complete, so a restart that is
     skipped or fails, or a name that is not written, is invisible unless
     it is logged. Found on a test node with the restart lock held for the
     watchdog's 130 s: completion answered success after 100 s, the name
     was in user.yml but not config.yml, no container had restarted, and
     the journal held only the access log."""
 
-    def test_a_busy_lock_is_logged_as_a_skipped_merge(self, app_client, temp_dir, monkeypatch, caplog):
+    def test_a_failed_up_is_logged_with_its_exit_code_and_stderr(self, app_client, temp_dir, monkeypatch, caplog):
+        """The restart's `up` runs config-merger as a dependency, so a failed
+        merge stops the whole stack starting, and this is the only sign."""
         import app as app_module
-        import restart_lock as rl
-        from restart_lock import restart_lock
+        from routes.sdr import enforce_radar_mode
         monkeypatch.setattr(app_module, 'DATA_DIR', temp_dir)
-        monkeypatch.setattr(rl, 'OPPORTUNISTIC_TIMEOUT_SECONDS', 0.1)
-        from routes.setup import _merge_config_opportunistically
-        with restart_lock(temp_dir), patch('subprocess.run') as run:
-            with caplog.at_level('WARNING', logger=app_module.app.logger.name):
-                _merge_config_opportunistically(temp_dir)
-        run.assert_not_called()
-        assert any('restart lock busy' in r.message and 'config merge' in r.message
-                   for r in caplog.records), [r.message for r in caplog.records]
-
-    def test_a_failed_merger_is_logged_with_its_exit_code_and_stderr(self, app_client, temp_dir, monkeypatch, caplog):
-        import app as app_module
-        monkeypatch.setattr(app_module, 'DATA_DIR', temp_dir)
-        from routes.setup import _merge_config_opportunistically
-        failed = MagicMock(returncode=2, stderr='merger: user.yml: bad indent\n', stdout='')
-        with patch('subprocess.run', return_value=failed):
+        failed = MagicMock(returncode=1, stdout='',
+                           stderr="service \"config-merger\" didn't complete successfully: exit 2\n")
+        with patch('subprocess.run', return_value=failed), \
+                patch('routes.sdr._stop_blah2'), patch('routes.sdr.restart_sdrplay_service'):
             with caplog.at_level('ERROR', logger=app_module.app.logger.name):
-                _merge_config_opportunistically(temp_dir)
+                enforce_radar_mode(temp_dir)
         messages = [r.message for r in caplog.records]
-        assert any('config-merger exited 2' in m and 'bad indent' in m for m in messages), messages
+        assert any('up exited 1' in m and 'config-merger' in m for m in messages), messages
 
-    def test_a_merger_exception_is_logged(self, app_client, temp_dir, monkeypatch, caplog):
+    def test_a_timed_out_docker_command_is_logged(self, app_client, temp_dir, monkeypatch, caplog):
         import subprocess as sp
 
         import app as app_module
+        from routes.sdr import enforce_radar_mode
         monkeypatch.setattr(app_module, 'DATA_DIR', temp_dir)
-        from routes.setup import _merge_config_opportunistically
         with patch('subprocess.run', side_effect=sp.TimeoutExpired('docker', 60)):
             with caplog.at_level('ERROR', logger=app_module.app.logger.name):
-                _merge_config_opportunistically(temp_dir)   # must not raise
-        assert any('config merge failed' in r.message for r in caplog.records)
+                enforce_radar_mode(temp_dir)   # must not raise
+        assert any('Return to radar failed' in r.message for r in caplog.records)
 
     def test_an_unwritable_name_is_logged(self, app_client, caplog):
         import app as app_module
@@ -320,7 +314,7 @@ class TestCompletionSaysWhenItFallsShort:
 
     def test_a_busy_lock_on_the_radar_return_is_logged(self, app_client, temp_dir, monkeypatch, caplog):
         """Older than the naming step, and the other half of the same silence:
-        the restart after the merge is skipped just as quietly."""
+        the restart after the name is written is skipped just as quietly."""
         import app as app_module
         import restart_lock as rl
         from restart_lock import restart_lock

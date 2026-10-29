@@ -1,5 +1,4 @@
 import re
-import subprocess
 
 from flask import Blueprint, jsonify, render_template, request
 from pydantic import ValidationError
@@ -210,19 +209,17 @@ def complete():
     from routes.sdr import _write_mode, enforce_radar_mode
 
     # The naming step comes after the tower step, which wrote the receiver
-    # name before there was a name to write. Refresh it here and merge it,
-    # ahead of the restart below, so the name is on Home as soon as the wizard
-    # ends rather than after the next Apply.
+    # name before there was a name to write. Refresh it here, before the
+    # restart below: that restart's `up` runs config-merger first (retina-node's
+    # compose makes the stack depend on it), so it merges the name too.
     # See docs/features/setup-wizard.md#name-your-node
-    renamed = _refresh_receiver_name(config_mgr)
+    _refresh_receiver_name(config_mgr)
 
     # Write radar to mode.txt before docker ops so the home page cannot race
     # and see spectrum mode while enforce_radar_mode is still running.
     _write_mode('radar')
 
     if config_mgr.is_retina_node_installed():
-        if renamed:
-            _merge_config_opportunistically(RETINA_NODE_PATH)
         enforce_radar_mode(RETINA_NODE_PATH)
 
     return jsonify({"success": True})
@@ -256,34 +253,3 @@ def _refresh_receiver_name(config_mgr):
     except Exception as e:
         app.logger.error(f"Wizard completion: could not write the receiver name to user.yml: {e}")
         return False
-
-
-def _merge_config_opportunistically(retina_node_path):
-    """Run config-merger once, if the restart lock is free; otherwise skip.
-
-    The restart that follows recreates the stack but does not merge, and the
-    lock's holder is already restarting it, in which case the next Apply
-    carries the name instead. Never raises, and logs every way it can fall
-    short (lock busy, merger exit code, exception): the page does not wait
-    on completion, so the journal is the only place this shows.
-    See docs/features/setup-wizard.md#name-your-node.
-    """
-    from app import DATA_DIR, app
-    from restart_lock import OPPORTUNISTIC_TIMEOUT_SECONDS, RestartBusy, restart_lock
-
-    try:
-        with restart_lock(DATA_DIR, timeout=OPPORTUNISTIC_TIMEOUT_SECONDS):
-            result = subprocess.run(
-                ['docker', 'compose', '-p', 'retina-node', 'run', '--rm', 'config-merger'],
-                cwd=retina_node_path, capture_output=True, text=True, timeout=60)
-        if result.returncode != 0:
-            app.logger.error(
-                f"Wizard completion: config-merger exited {result.returncode}; the receiver "
-                f"name reaches config.yml on the next Apply. stderr: {(result.stderr or '').strip()}")
-    except RestartBusy:
-        app.logger.warning(
-            "Wizard completion: restart lock busy, skipped the config merge; the receiver "
-            "name reaches config.yml on the next Apply")
-    except Exception as e:
-        app.logger.error(f"Wizard completion: config merge failed: {e}; the receiver name "
-                         "reaches config.yml on the next Apply")

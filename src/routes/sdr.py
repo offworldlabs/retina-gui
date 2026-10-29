@@ -450,27 +450,34 @@ def enforce_radar_mode(retina_node_path: str) -> None:
 
 
 def _enforce_radar_mode_locked(retina_node_path: str) -> None:
-    try:
-        subprocess.run(
-            ['docker', 'compose', '-p', 'retina-node', 'stop', 'retina-spectrum'],
-            cwd=retina_node_path, capture_output=True, timeout=60
-        )
-        subprocess.run(
-            ['docker', 'compose', '-p', 'retina-node', 'rm', '-sf', 'retina-spectrum'],
-            cwd=retina_node_path, capture_output=True, timeout=30
-        )
-        subprocess.run(['systemctl', 'stop', 'sdrconnect.service'],
-                       capture_output=True, timeout=30)
-        # See docs/features/sdr-mode.md#stop-blah2-first.
-        _stop_blah2(retina_node_path)
-        restart_sdrplay_service()
-        subprocess.run(
-            ['docker', 'compose', '-p', 'retina-node', 'up', '-d', '--force-recreate',
-             'blah2', 'blah2_api', 'blah2_web', 'blah2_host', 'retina-tracker'],
-            cwd=retina_node_path, capture_output=True, timeout=120
-        )
-    except Exception:
-        pass
+    """The body of enforce_radar_mode, with the lock held. Raises on a timeout."""
+    from app import app
+
+    subprocess.run(
+        ['docker', 'compose', '-p', 'retina-node', 'stop', 'retina-spectrum'],
+        cwd=retina_node_path, capture_output=True, timeout=60
+    )
+    subprocess.run(
+        ['docker', 'compose', '-p', 'retina-node', 'rm', '-sf', 'retina-spectrum'],
+        cwd=retina_node_path, capture_output=True, timeout=30
+    )
+    subprocess.run(['systemctl', 'stop', 'sdrconnect.service'],
+                   capture_output=True, timeout=30)
+    # See docs/features/sdr-mode.md#stop-blah2-first.
+    _stop_blah2(retina_node_path)
+    restart_sdrplay_service()
+    # `up` runs config-merger first: retina-node's compose makes blah2, blah2_api
+    # and retina-tracker depend on it completing, so a failed merge leaves them
+    # (and blah2_host, behind blah2) stopped.
+    # See docs/features/sdr-mode.md#returning-to-radar.
+    result = subprocess.run(
+        ['docker', 'compose', '-p', 'retina-node', 'up', '-d', '--force-recreate',
+         'blah2', 'blah2_api', 'blah2_web', 'blah2_host', 'retina-tracker'],
+        cwd=retina_node_path, capture_output=True, text=True, timeout=120
+    )
+    if result.returncode != 0:
+        app.logger.error(f"Return to radar: docker compose up exited {result.returncode}. "
+                         f"stderr: {(result.stderr or '').strip()}")
 
 
 @bp.route('/api/mode/release-spectrum', methods=['POST'])

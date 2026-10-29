@@ -277,23 +277,25 @@ who has just typed "Garage roof" should not expect to reach the node by it.
 The naming step comes after the tower step, which wrote `location.rx.name` while the node was
 still unnamed, so at that point the receiver name in `user.yml` is the node id. `/set-up/complete`
 refreshes it from `node_name.receiver_name` (the one rule, see
-[config-editor.md](config-editor.md#receiver-name)) and, when retina-node is installed and the
-restart lock is free, runs `config-merger` once before the stack restart it was already going to
-do, so Home's subtitle carries the name the moment the wizard ends rather than after the next
-Apply. If the lock is busy the merge is skipped and the next Apply carries it; nothing on this
-step waits on it, and nothing can fail over it. An unsited node (no `location.rx`) is left alone.
+[config-editor.md](config-editor.md#receiver-name)) before the stack restart it was already going
+to do. That restart merges the name on its own: its `up` runs `config-merger` first (see
+[sdr-mode.md](sdr-mode.md#returning-to-radar)), so Home's subtitle carries the name once the
+radar is back rather than after the next Apply. An earlier version ran the merger separately
+first; on two test nodes Docker's events showed the merger running twice per completion, and
+with the separate run forced to fail the name still reached `config.yml` through the restart
+alone, so it was removed. If the restart lock is busy for longer than the restart waits, the
+restart is skipped and the lock holder's own restart merges the name, since every path that
+brings the stack up uses `up`. Nothing on this step waits on any of it, and nothing can fail
+over it. An unsited node (no `location.rx`) is left alone.
 
 Because nothing waits on it, every way it can fall short is logged, or nobody would know: the
-page has moved on and completion still answers success. `_refresh_receiver_name` logs an
-error when `user.yml` cannot be written; `_merge_config_opportunistically` logs a warning when
-the restart lock is busy and the merge is skipped, an error with the merger's exit code and
-stderr when it fails, and an error for any exception; and `enforce_radar_mode` logs when the
-restart after it is skipped for the same lock, which is older than this step but the other half
-of the same silence. The lines go to retina-gui's log, which on a node is its systemd journal
+page has moved on and completion still answers success. `_refresh_receiver_name` logs an error
+when `user.yml` cannot be written, and `enforce_radar_mode` logs a busy lock, an exception, and
+a failed `up` with its stderr (a failed merge shows up there, since the stack does not start
+without it). The lines go to retina-gui's log, which on a node is its systemd journal
 (`journalctl -u retina-gui`). This was found on a test node with the restart lock held for the
-watchdog's 130 s: completion answered success after 100 s (10 s waiting to merge, 90 s waiting
-to restart), the name was in `user.yml` but not `config.yml`, no container had restarted, and
-the journal held only the access log.
+watchdog's 130 s: completion answered success after 100 s, the name was in `user.yml` but not
+`config.yml`, no container had restarted, and the journal held only the access log.
 
 ## Node claim
 
