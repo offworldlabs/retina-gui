@@ -5,6 +5,8 @@
 See docs/features/remote-access.md.
 """
 
+import threading
+
 from flask import (
     Blueprint,
     jsonify,
@@ -18,6 +20,14 @@ from flask import (
 from remote_access import generate_password
 
 bp = Blueprint('remote_access', __name__)
+
+# One switch flip at a time. Each flip is a read-modify-write of a file plus
+# a marker, and two opposite flips arriving together (the wizard and the
+# Configuration page, or a double click) interleaved to leave
+# mender-connect.conf saying one thing and the marker the other. retina-gui is
+# one process, so an in-process lock serialises every writer.
+# See docs/features/remote-access.md#one-flip-at-a-time.
+_switch_lock = threading.Lock()
 
 
 def _safe_next(target):
@@ -102,13 +112,14 @@ def set_shell():
 
     allowed = str(request.form.get('allowed', '')).lower() in ('1', 'true', 'on', 'yes')
 
-    ok, error = mender_connect.set_shell_enabled(allowed)
-    if not ok:
-        return jsonify({"ok": False, "error": error}), 400
+    with _switch_lock:
+        ok, error = mender_connect.set_shell_enabled(allowed)
+        if not ok:
+            return jsonify({"ok": False, "error": error}), 400
 
-    ok, error = remote_access.record_shell_allowed(allowed)
-    if not ok:
-        return jsonify({"ok": False, "error": error}), 400
+        ok, error = remote_access.record_shell_allowed(allowed)
+        if not ok:
+            return jsonify({"ok": False, "error": error}), 400
 
     return jsonify({"ok": True, "shell_allowed": allowed})
 
@@ -123,8 +134,10 @@ def toggle():
     from app import remote_access
 
     enabled = str(request.form.get('enabled', '')).lower() in ('1', 'true', 'on', 'yes')
-    ok, error = remote_access.set_enabled(enabled)
-    if not ok:
-        return jsonify({"ok": False, "error": error}), 400
-    return jsonify({"ok": True, **remote_access.status()})
+    with _switch_lock:
+        ok, error = remote_access.set_enabled(enabled)
+        if not ok:
+            return jsonify({"ok": False, "error": error}), 400
+        status = remote_access.status()
+    return jsonify({"ok": True, **status})
 

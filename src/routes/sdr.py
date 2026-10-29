@@ -470,11 +470,14 @@ def _enforce_radar_mode_locked(retina_node_path: str) -> None:
 
 @bp.route('/api/mode/release-spectrum', methods=['POST'])
 def release_spectrum():
-    """Stop retina-spectrum and revert to radar mode.
+    """Return to radar when the owner leaves the wizard's location step.
 
     Called via navigator.sendBeacon when the user navigates away from the
     wizard location step mid-flow. Returns 204 — callers do not inspect the
-    response body.
+    response body. The whole return, not just the teardown: the owner has
+    gone, and a node left with spectrum removed and the radar containers
+    still stopped is down until the watchdog notices.
+    See docs/features/sdr-mode.md#returning-to-radar.
     """
     from app import DATA_DIR, RETINA_NODE_PATH, config_mgr
     from restart_lock import OPPORTUNISTIC_TIMEOUT_SECONDS, restart_lock
@@ -482,15 +485,16 @@ def release_spectrum():
     if not config_mgr.is_retina_node_installed():
         return '', 204
     try:
-        # Opportunistic: a beacon nobody waits on, and every restart path
-        # already stops retina-spectrum defensively, so giving up when the
-        # lock is busy loses nothing.
+        # Opportunistic: a beacon nobody waits on. A holder that outlasts
+        # the timeout is an apply or enforce_radar_mode, both of which end
+        # in radar themselves.
         with restart_lock(DATA_DIR, timeout=OPPORTUNISTIC_TIMEOUT_SECONDS):
-            subprocess.run(['docker', 'compose', '-p', 'retina-node', 'stop', 'retina-spectrum'],
-                           cwd=RETINA_NODE_PATH, capture_output=True, timeout=60)
-            subprocess.run(['docker', 'compose', '-p', 'retina-node', 'rm', '-sf', 'retina-spectrum'],
-                           cwd=RETINA_NODE_PATH, capture_output=True, timeout=30)
-        _write_mode('radar')
+            _enforce_radar_mode_locked(RETINA_NODE_PATH)
+            # Written after the stack is up, as the radar switch does. Also
+            # written when the bring-up failed (the helper never raises), so
+            # the watchdog, which leaves blah2 alone outside radar mode,
+            # repairs what is left.
+            _write_mode('radar')
     except Exception:
         pass
     return '', 204

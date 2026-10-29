@@ -9,6 +9,7 @@ import importlib
 import json
 import os
 import stat
+import time
 
 import pytest
 
@@ -932,3 +933,55 @@ def test_the_password_form_is_still_offered_once_one_exists(live):
     r = live.get("/", base_url=OWNER_URL)
     assert r.status_code == 302
     assert "/login" in r.headers["Location"]
+
+
+# ── One flip at a time ────────────────────────────────────────
+
+
+def test_two_opposite_shell_flips_do_not_interleave(client, temp_dir, monkeypatch):
+    """Two clients at the same moment, one allowing the shell and one
+    declining it. Each flip is enforce (write the conf, restart the
+    service) then record (the marker); interleaved, the conf could say one
+    thing and the marker the other. Each flip must run whole.
+    See docs/features/remote-access.md#one-flip-at-a-time."""
+    import threading
+    from unittest.mock import MagicMock, patch
+
+    import app as app_module
+
+    _write_connect_conf(temp_dir, shell_enabled=True)
+    events = []
+    real_enforce = app_module.mender_connect.set_shell_enabled
+    real_record = app_module.remote_access.record_shell_allowed
+
+    def slow_enforce(allowed):
+        events.append(('enforce', allowed))
+        time.sleep(0.2)  # long enough for the other request to arrive
+        return real_enforce(allowed)
+
+    def record(allowed):
+        events.append(('record', allowed))
+        return real_record(allowed)
+
+    monkeypatch.setattr(app_module.mender_connect, 'set_shell_enabled', slow_enforce)
+    monkeypatch.setattr(app_module.remote_access, 'record_shell_allowed', record)
+
+    def flip(allowed):
+        with app_module.app.test_client() as c:
+            c.post("/remote-access/shell", data={"allowed": allowed}, base_url=LAN_URL)
+
+    threads = [threading.Thread(target=flip, args=(a,)) for a in ("1", "0")]
+    with patch('subprocess.run', return_value=MagicMock(returncode=0, stderr=b'')):
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+
+    assert len(events) == 4
+    first, second = events[:2], events[2:]
+    assert [e[0] for e in first] == ['enforce', 'record'] and first[0][1] == first[1][1]
+    assert [e[0] for e in second] == ['enforce', 'record'] and second[0][1] == second[1][1]
+    # And the node ends in the state of whichever ran last, in both places.
+    last = second[0][1]
+    assert app_module.mender_connect.is_shell_enabled() is last
+    assert app_module.remote_access.is_shell_allowed() is last
