@@ -47,7 +47,7 @@ the `[data-step]` elements in document order, so reordering the includes reorder
 | 6 | `towers` | Choose a tower | Yes | Receiver and transmitter location, frequency (`/towers/select`) |
 | 7 | `calibrate` | Tune the receiver | Yes | Gain settings, persisted automatically |
 | 8 | `name` | Name your node | Yes | The node's name (`/node-name`), or nothing on Skip |
-| 9 | `claim` | Connect your node to your account | Yes | Claim record, or nothing on Skip |
+| 9 | `account` | Connect your node to your account | Yes | Claim record, or nothing on Skip |
 | 10 | `complete` | You're all set | n/a | Completion flag; the receiver name; forces radar mode |
 
 The order is deliberate. The owner answers about themselves first (agreements, contact,
@@ -92,7 +92,7 @@ The progress label reads "Step N of M" and dots behind the current step are mark
 
 | State | Where | Written by | Read by |
 | --- | --- | --- | --- |
-| Current step and `started_at` | `setup-wizard.json` in the data dir | `/set-up/save-step` on every step entry | `/set-up` (resume), home and config redirects |
+| Current step and `started_at` | `setup-wizard.json` in the data dir | `/set-up/save-step` on every step entry | `/set-up` (resume, through `resume_point`), home and config redirects |
 | Completion flag | `setup-wizard-completed` | `/set-up/save-step` with `complete` | `/set-up` (`is_rerun`), `/mender/check`, `/mender/check-os`, retina-telemetry |
 | Last tower search | `towers-cache.json` | `/towers/search` | `/set-up` (rehydration), Auto-Calibrate |
 | Consent, contact, claim | See [device-state-and-telemetry.md](device-state-and-telemetry.md) | The step routes below | retina-telemetry, prefills |
@@ -283,6 +283,18 @@ do, so Home's subtitle carries the name the moment the wizard ends rather than a
 Apply. If the lock is busy the merge is skipped and the next Apply carries it; nothing on this
 step waits on it, and nothing can fail over it. An unsited node (no `location.rx`) is left alone.
 
+Because nothing waits on it, every way it can fall short is logged, or nobody would know: the
+page has moved on and completion still answers success. `_refresh_receiver_name` logs an
+error when `user.yml` cannot be written; `_merge_config_opportunistically` logs a warning when
+the restart lock is busy and the merge is skipped, an error with the merger's exit code and
+stderr when it fails, and an error for any exception; and `enforce_radar_mode` logs when the
+restart after it is skipped for the same lock, which is older than this step but the other half
+of the same silence. The lines go to retina-gui's log, which on a node is its systemd journal
+(`journalctl -u retina-gui`). This was found on a test node with the restart lock held for the
+watchdog's 130 s: completion answered success after 100 s (10 s waiting to merge, 90 s waiting
+to restart), the name was in `user.yml` but not `config.yml`, no container had restarted, and
+the journal held only the access log.
+
 ## Node claim
 
 Asks for an email address to send a claim link to. Opening the link binds the node to the
@@ -326,6 +338,27 @@ the two that only ask the owner about themselves. After the update the node rebo
 resumes at the recorded step (`system`), the new wizard reports the OS up to date, and the owner
 continues through the new flow. A step name the new wizard no longer has resumes at the first
 step, since `initSetupWizard` falls back to index 0 when the recorded name matches nothing.
+
+The saved step is only a name, and the build that reads it can be newer than the one that wrote
+it. That is not an edge case: the wizard ships inside OWL-OS and updates itself at this step, so
+every node flashed before a release starts the wizard on the old build and finishes it on the
+new one. node-infra pushes the OS update as soon as the agreements step turns cloud services on,
+and on the old build the owner's next two steps were contact and the claim. The old order had
+the claim third; it is ninth now. A saved `claim` from the old build matched the moved step by
+name and opened at step 9 of 10, with completion the next click, skipping the update, the
+packages, siting, tuning and naming. Two things stop that, both in `routes/setup.py`:
+
+- A step that moves gets a new key, so an old saved value cannot match it: the claim panel's
+  `data-step` is `account`, not `claim` (`setup.js`'s `stepNames` and hooks use the same key;
+  the `/set-up/claim` route and `_claim.html`'s name are unchanged).
+- `LEGACY_RESUME_STEPS` maps the retired key to where a node that saved it should resume:
+  `claim` to `system`, the first step after the two the owner had already done. `resume_point`
+  applies it where the resume step is read. Every other old name still means the same place,
+  because the rest of the old order is the new order with steps inserted.
+
+A later rework that moves a step does the same two things. `tests/test_setup_flow.py`
+(`TestResumingFromAnOlderBuild`) seeds the old build's file and expects `system`, and checks
+the `claim` key is not reused.
 
 On a first run the step polls `/mender/check-os` every 5 seconds:
 

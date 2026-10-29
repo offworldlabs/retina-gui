@@ -434,14 +434,19 @@ def enforce_radar_mode(retina_node_path: str) -> None:
     Never raises, including when the lock is busy: the holder is already
     restarting the stack. See docs/features/sdr-mode.md#returning-to-radar.
     """
-    from app import DATA_DIR
-    from restart_lock import restart_lock
+    from app import DATA_DIR, app
+    from restart_lock import RestartBusy, restart_lock
 
     try:
         with restart_lock(DATA_DIR):
             _enforce_radar_mode_locked(retina_node_path)
-    except Exception:
-        pass
+    except RestartBusy:
+        # Nobody waits on the callers, so say so: the wizard's completion
+        # otherwise answers success with no container restarted.
+        app.logger.warning("Return to radar skipped: restart lock busy; the holder's "
+                           "restart decides the mode")
+    except Exception as e:
+        app.logger.error(f"Return to radar failed: {e}")
 
 
 def _enforce_radar_mode_locked(retina_node_path: str) -> None:

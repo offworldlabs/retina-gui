@@ -16,6 +16,21 @@ from node_name import MAX_LENGTH as NAME_MAX_LENGTH
 
 bp = Blueprint('setup', __name__)
 
+# Step keys the wizard no longer has, and where a run that saved one resumes.
+# The saved resume point is only a step name, and the build that reads it
+# can be newer than the one that wrote it: the OS update lands mid-wizard.
+# The old flow's claim was its third step; the claim is ninth now, keyed
+# `account` so the old name cannot match it, and a node that was on the old
+# claim resumes at the first step it has not seen. A step that moves in a
+# later rework gets a new key and a row here the same way.
+# See docs/features/setup-wizard.md#persistence-and-resume.
+LEGACY_RESUME_STEPS = {'claim': 'system'}
+
+
+def resume_point(step):
+    """Where a saved step resumes: itself, or its mapping for a retired key."""
+    return LEGACY_RESUME_STEPS.get(step, step)
+
 
 @bp.route("/set-up")
 def wizard():
@@ -35,7 +50,7 @@ def wizard():
     )
     from routes.fleet import DASHBOARD_URL
 
-    resume_step = device_state.get_setup_wizard_step()
+    resume_step = resume_point(device_state.get_setup_wizard_step())
     owl_os_version, retina_node_version = mender.get_versions()
     node_id = get_node_id()
     # From completion history, not from whether retina-node is installed.
@@ -218,9 +233,11 @@ def _refresh_receiver_name(config_mgr):
 
     Returns True when the file changed. Only when a receiver is already
     recorded: a node without a location has nothing to name. Best effort,
-    and never raises: completion must not fail over a label.
+    and never raises: completion must not fail over a label. Nothing on the
+    page waits on this, so every failure is logged, or nobody would know.
+    See docs/features/setup-wizard.md#name-your-node.
     """
-    from app import get_node_id, node_name
+    from app import app, get_node_id, node_name
     from node_name import receiver_name
 
     try:
@@ -236,7 +253,8 @@ def _refresh_receiver_name(config_mgr):
         user_config["location"] = location
         config_mgr.save_user_config(user_config)
         return True
-    except Exception:
+    except Exception as e:
+        app.logger.error(f"Wizard completion: could not write the receiver name to user.yml: {e}")
         return False
 
 
@@ -245,15 +263,27 @@ def _merge_config_opportunistically(retina_node_path):
 
     The restart that follows recreates the stack but does not merge, and the
     lock's holder is already restarting it, in which case the next Apply
-    carries the name instead. Never raises.
+    carries the name instead. Never raises, and logs every way it can fall
+    short (lock busy, merger exit code, exception): the page does not wait
+    on completion, so the journal is the only place this shows.
+    See docs/features/setup-wizard.md#name-your-node.
     """
-    from app import DATA_DIR
-    from restart_lock import OPPORTUNISTIC_TIMEOUT_SECONDS, restart_lock
+    from app import DATA_DIR, app
+    from restart_lock import OPPORTUNISTIC_TIMEOUT_SECONDS, RestartBusy, restart_lock
 
     try:
         with restart_lock(DATA_DIR, timeout=OPPORTUNISTIC_TIMEOUT_SECONDS):
-            subprocess.run(
+            result = subprocess.run(
                 ['docker', 'compose', '-p', 'retina-node', 'run', '--rm', 'config-merger'],
-                cwd=retina_node_path, capture_output=True, timeout=60)
-    except Exception:
-        pass
+                cwd=retina_node_path, capture_output=True, text=True, timeout=60)
+        if result.returncode != 0:
+            app.logger.error(
+                f"Wizard completion: config-merger exited {result.returncode}; the receiver "
+                f"name reaches config.yml on the next Apply. stderr: {(result.stderr or '').strip()}")
+    except RestartBusy:
+        app.logger.warning(
+            "Wizard completion: restart lock busy, skipped the config merge; the receiver "
+            "name reaches config.yml on the next Apply")
+    except Exception as e:
+        app.logger.error(f"Wizard completion: config merge failed: {e}; the receiver name "
+                         "reaches config.yml on the next Apply")

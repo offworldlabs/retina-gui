@@ -209,8 +209,8 @@ class TestTheWizardStep:
     def test_the_wizard_shows_the_claim_step_last_before_completion(self, app_client):
         page = app_client.get('/set-up').data.decode()
 
-        assert 'data-step="claim"' in page
-        assert page.index('data-step="name"') < page.index('data-step="claim"') \
+        assert 'data-step="account"' in page
+        assert page.index('data-step="name"') < page.index('data-step="account"') \
             < page.index('data-step="complete"')
         assert 'wizClaimSkipBtn' in page, "skipping must be offered, not just possible"
         assert 'Node Claim on the Configuration page' in page
@@ -220,7 +220,7 @@ class TestTheWizardStep:
         from routes.fleet import DASHBOARD_URL
 
         page = app_client.get('/set-up').data.decode()
-        claim = page[page.index('data-step="claim"'):page.index('data-step="complete"')]
+        claim = page[page.index('data-step="account"'):page.index('data-step="complete"')]
 
         assert DASHBOARD_URL in claim
         assert 'Where this node will appear' in claim

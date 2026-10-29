@@ -5,7 +5,7 @@ See docs/features/setup-wizard.md#step-order.
 import json
 import os
 import re
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import yaml
 
@@ -44,7 +44,7 @@ class TestStepOrder:
         so the link binds a node that is already set up."""
         assert step_order(page(app_client)) == [
             'agreements', 'contact', 'system', 'radar', 'location', 'towers',
-            'calibrate', 'name', 'claim', 'complete',
+            'calibrate', 'name', 'account', 'complete',
         ]
 
     def test_setup_js_names_every_step(self, app_client):
@@ -57,6 +57,44 @@ class TestStepOrder:
         html = page(app_client)
         for step in step_order(html):
             assert f'id="stepBtns-{step}"' in html, step
+
+
+class TestResumingFromAnOlderBuild:
+    """The saved resume point is only a step name, and the build that reads
+    it can be newer than the one that wrote it: the wizard ships inside
+    OWL-OS and updates itself at the System Update step, so every node
+    flashed before this release starts the wizard on the old build and
+    finishes it on this one. The old order had the claim third; it is ninth
+    now."""
+
+    def test_the_old_claim_key_is_not_reused(self, app_client):
+        """node-infra pushes the OS update as soon as the agreements step
+        turns cloud services on, and the old build's next two steps were
+        contact and claim. A saved `claim` must not match the ninth step."""
+        assert 'claim' not in step_order(page(app_client))
+        assert 'data-step="account"' in panel(page(app_client), 'account')
+
+    def test_a_node_on_the_old_claim_resumes_at_the_update_step(self, app_client, temp_dir):
+        """Seeded as the old build saves it while the owner is on its claim
+        step. Before the fix this rendered initSetupWizard("claim"), which
+        opened at step 9 of 10 with completion the next click, skipping
+        System Update, Packages, location, towers, tuning and naming."""
+        from datetime import datetime
+        with open(os.path.join(temp_dir, 'setup-wizard.json'), 'w') as f:
+            json.dump({'started_at': datetime.now().isoformat(), 'step': 'claim'}, f)
+        assert 'initSetupWizard("system"' in page(app_client)
+
+    def test_every_other_saved_step_resumes_where_it_was(self):
+        """The rest of the old order is the new order with steps inserted,
+        so those names still mean the same place."""
+        from routes.setup import resume_point
+        for step in ('agreements', 'contact', 'system', 'radar', 'location', 'towers', 'calibrate'):
+            assert resume_point(step) == step, step
+        assert resume_point(None) is None
+
+    def test_a_step_saved_by_this_build_resumes_there(self, app_client):
+        app_client.post('/set-up/save-step', json={'step': 'account'})
+        assert 'initSetupWizard("account"' in page(app_client)
 
 
 # ── Agreements ─────────────────────────────────────────────────
@@ -223,3 +261,74 @@ class TestNameYourNode:
         with open(user_path) as f:
             assert yaml.safe_load(f) == unsited
         merge.assert_not_called()
+
+
+class TestCompletionSaysWhenItFallsShort:
+    """Nothing on the page waits on /set-up/complete, so a merge that is
+    skipped or fails, or a name that is not written, is invisible unless
+    it is logged. Found on a test node with the restart lock held for the
+    watchdog's 130 s: completion answered success after 100 s, the name
+    was in user.yml but not config.yml, no container had restarted, and
+    the journal held only the access log."""
+
+    def test_a_busy_lock_is_logged_as_a_skipped_merge(self, app_client, temp_dir, monkeypatch, caplog):
+        import app as app_module
+        import restart_lock as rl
+        from restart_lock import restart_lock
+        monkeypatch.setattr(app_module, 'DATA_DIR', temp_dir)
+        monkeypatch.setattr(rl, 'OPPORTUNISTIC_TIMEOUT_SECONDS', 0.1)
+        from routes.setup import _merge_config_opportunistically
+        with restart_lock(temp_dir), patch('subprocess.run') as run:
+            with caplog.at_level('WARNING', logger=app_module.app.logger.name):
+                _merge_config_opportunistically(temp_dir)
+        run.assert_not_called()
+        assert any('restart lock busy' in r.message and 'config merge' in r.message
+                   for r in caplog.records), [r.message for r in caplog.records]
+
+    def test_a_failed_merger_is_logged_with_its_exit_code_and_stderr(self, app_client, temp_dir, monkeypatch, caplog):
+        import app as app_module
+        monkeypatch.setattr(app_module, 'DATA_DIR', temp_dir)
+        from routes.setup import _merge_config_opportunistically
+        failed = MagicMock(returncode=2, stderr='merger: user.yml: bad indent\n', stdout='')
+        with patch('subprocess.run', return_value=failed):
+            with caplog.at_level('ERROR', logger=app_module.app.logger.name):
+                _merge_config_opportunistically(temp_dir)
+        messages = [r.message for r in caplog.records]
+        assert any('config-merger exited 2' in m and 'bad indent' in m for m in messages), messages
+
+    def test_a_merger_exception_is_logged(self, app_client, temp_dir, monkeypatch, caplog):
+        import subprocess as sp
+
+        import app as app_module
+        monkeypatch.setattr(app_module, 'DATA_DIR', temp_dir)
+        from routes.setup import _merge_config_opportunistically
+        with patch('subprocess.run', side_effect=sp.TimeoutExpired('docker', 60)):
+            with caplog.at_level('ERROR', logger=app_module.app.logger.name):
+                _merge_config_opportunistically(temp_dir)   # must not raise
+        assert any('config merge failed' in r.message for r in caplog.records)
+
+    def test_an_unwritable_name_is_logged(self, app_client, caplog):
+        import app as app_module
+        from routes.setup import _refresh_receiver_name
+        config_mgr = MagicMock()
+        config_mgr.load_user_config.return_value = {'location': {'rx': {'name': 'old', 'latitude': 1}}}
+        config_mgr.save_user_config.side_effect = OSError('read-only file system')
+        app_client.post("/node-name", data={"name": "Sample Rooftop"})
+        with caplog.at_level('ERROR', logger=app_module.app.logger.name):
+            assert _refresh_receiver_name(config_mgr) is False
+        assert any('receiver name' in r.message and 'read-only' in r.message for r in caplog.records)
+
+    def test_a_busy_lock_on_the_radar_return_is_logged(self, app_client, temp_dir, monkeypatch, caplog):
+        """Older than the naming step, and the other half of the same silence:
+        the restart after the merge is skipped just as quietly."""
+        import app as app_module
+        import restart_lock as rl
+        from restart_lock import restart_lock
+        from routes.sdr import enforce_radar_mode
+        monkeypatch.setattr(app_module, 'DATA_DIR', temp_dir)
+        monkeypatch.setattr(rl, 'DEFAULT_TIMEOUT_SECONDS', 0.1)
+        with restart_lock(temp_dir), patch('subprocess.run') as run:
+            with caplog.at_level('WARNING', logger=app_module.app.logger.name):
+                enforce_radar_mode(temp_dir)
+        run.assert_not_called()
+        assert any('Return to radar skipped' in r.message for r in caplog.records)

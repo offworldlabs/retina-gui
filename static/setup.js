@@ -90,7 +90,7 @@ function initSetupWizard(resumeStep, devMode, isRerun, demoMode) {
         towers: 'Choose a tower',
         calibrate: 'Tune the receiver',
         name: 'Name your node',
-        claim: 'Connect your account',
+        account: 'Connect your account',
         complete: 'You\'re all set'
     };
 
@@ -549,8 +549,10 @@ function initSetupWizard(resumeStep, devMode, isRerun, demoMode) {
     };
 
     // Node claim. Optional; skipping writes nothing. The last step before
-    // completion. See docs/features/setup-wizard.md#node-claim
-    enterHooks.claim = function() {
+    // completion. The step key is `account`, not `claim`: the old flow had
+    // the claim third, and its saved step name must not match this one.
+    // See docs/features/setup-wizard.md#node-claim
+    enterHooks.account = function() {
         var box = document.getElementById('wizClaimEmail');
         var sendBtn = document.getElementById('wizClaimSendBtn');
         var skipBtn = document.getElementById('wizClaimSkipBtn');
@@ -580,8 +582,8 @@ function initSetupWizard(resumeStep, devMode, isRerun, demoMode) {
             }
         }
 
-        if (hookInitialized.claim) return;
-        hookInitialized.claim = true;
+        if (hookInitialized.account) return;
+        hookInitialized.account = true;
 
         skipBtn.addEventListener('click', function() { advance(); });
         if (!sendBtn) return;

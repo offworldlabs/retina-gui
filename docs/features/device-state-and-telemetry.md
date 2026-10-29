@@ -88,7 +88,7 @@ A `mender-update.status` with a missing or unparseable `ts` is treated as active
 
 ### Resume point
 
-`setup-wizard.json` holds `{started_at, step}`. `save_setup_wizard_step` preserves the original `started_at` and overwrites `step`. Because the wizard is forward-only, the stored step is both the resume point and the furthest step reached.
+`setup-wizard.json` holds `{started_at, step}`. `save_setup_wizard_step` preserves the original `started_at` and overwrites `step`. Because the wizard is forward-only, the stored step is both the resume point and the furthest step reached. The step is only a name, and a newer build may read what an older one wrote; `routes/setup.py`'s `resume_point` maps a retired step key to where it resumes. See [setup-wizard.md](setup-wizard.md#persistence-and-resume).
 
 An earlier version also tracked a separate `highest_step` so a reloaded page could offer back-navigation to finished steps. Nothing navigates backwards now, and that ordering never listed the calibrate step, so a run that reached it recorded itself as being back at the start. It was removed.
 
