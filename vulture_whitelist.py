@@ -29,6 +29,24 @@ _ = type("_", (), {})()
 first_name
 last_name
 phone
+# ProcessingFormConfig fields. Read by name through PROCESSING_EDITABLE_FIELDS
+# and PROCESSING_READONLY_FIELDS in config_schema.py, which map each to its
+# `process` path, and posted as `process.<name>` by the Processing section.
+#   src/config_schema.py
+detection_minDoppler
+detection_maxReportedDoppler
+detection_minDelay
+ambiguity_delayMax
+detection_pfa
+detection_nTrain
+detection_nGuard
+detection_nCentroid
+ambiguity_dopplerWindow
+clutter_enable
+ambiguity_dopplerMin
+ambiguity_dopplerMax
+data_cpi
+clutter_delayMax
 # CSRFProtect(app) registers on construction; the name is conventional
 #   src/app.py:44
 csrf
