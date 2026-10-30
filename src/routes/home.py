@@ -67,17 +67,21 @@ def index():
 # The two agreements, as PDFs. Read: a redirect to the static file, so the
 # browser shows it. Download (?download=1): the same file sent as an
 # attachment under a readable name, because the download attribute on a link
-# is advice some browsers ignore. See docs/features/setup-wizard.md#agreements.
+# is advice some browsers ignore. The files ship in their own change; until
+# one is there, both links land on a page saying the document is still being
+# finalised. See docs/features/setup-wizard.md#agreements.
 LEGAL_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
                          "..", "static", "legal")
 LEGAL_DOCUMENTS = {
-    "eula": ("eula.pdf", "RETINA-EULA.pdf"),
-    "privacy-policy": ("privacy-policy.pdf", "Offworld-Labs-Privacy-Policy.pdf"),
+    "eula": ("eula.pdf", "RETINA-EULA.pdf", "End User Licence Agreement"),
+    "privacy-policy": ("privacy-policy.pdf", "Offworld-Labs-Privacy-Policy.pdf", "Privacy Policy"),
 }
 
 
 def _legal(name):
-    filename, download_name = LEGAL_DOCUMENTS[name]
+    filename, download_name, title = LEGAL_DOCUMENTS[name]
+    if not os.path.exists(os.path.join(LEGAL_DIR, filename)):
+        return render_template("legal_pending.html", title=title)
     if request.args.get("download") == "1":
         return send_from_directory(os.path.abspath(LEGAL_DIR), filename, as_attachment=True,
                                    download_name=download_name, mimetype="application/pdf")

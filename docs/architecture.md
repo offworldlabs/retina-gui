@@ -651,5 +651,6 @@ Configuration pages, in the fleet bar and on the sub-nav's Config link carry `da
 points at; they have no other effect. See [tutorial.md](features/tutorial.md#targets).
 
 The EULA and the Privacy Policy are PDFs under `static/legal/`, served by `/eula` and
-`/privacy-policy` as redirects and linked from the wizard's agreements step. See
+`/privacy-policy` as redirects and linked from the wizard's agreements step; until a file is
+there, `templates/legal_pending.html` says the document is coming. See
 [setup-wizard.md](features/setup-wizard.md#agreements).

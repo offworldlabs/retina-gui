@@ -190,7 +190,11 @@ PDF so it opens in a new tab) and a "Download PDF" link (the same routes with `?
 which send the file as an attachment named `RETINA-EULA.pdf` / `Offworld-Labs-Privacy-Policy.pdf`
 through `Content-Disposition`, because a link's `download` attribute is advice that some
 browsers ignore). The documents themselves are the PDFs under `static/legal/`; replacing a document
-means replacing the file and bumping `TELEMETRY_CONSENT_VERSION`. **Cloud Services** has the
+means replacing the file and bumping `TELEMETRY_CONSENT_VERSION`. The files ship in their own
+change, so a build can carry this step before them: when a file is not there, both of its links
+render `legal_pending.html`, a page saying the document is still being finalised and will come
+with an OWL-OS update, rather than a 404 (`_legal` in `routes/home.py` checks for the file
+first). **Cloud Services** has the
 third checkbox, "Enable cloud services and data publication", with the publication disclosure
 under it. Continue is enabled only when all three are ticked. On Continue the page posts
 `/set-up/consent`, then `/mender/cloud-services` with `enabled: true`, then advances. On failure

@@ -7,6 +7,7 @@ import os
 import re
 from unittest.mock import MagicMock, patch
 
+import pytest
 import yaml
 
 HERE = os.path.dirname(__file__)
@@ -31,6 +32,17 @@ def step_order(html):
 def setup_js():
     with open(os.path.join(ROOT, 'static', 'setup.js')) as f:
         return f.read()
+
+
+@pytest.fixture
+def legal_dir(tmp_path, monkeypatch):
+    """A legal directory with a (fake) PDF for each document, so the serving
+    paths are tested whether or not the real files are in the checkout."""
+    import routes.home as home
+    for filename, _name, _title in home.LEGAL_DOCUMENTS.values():
+        (tmp_path / filename).write_bytes(b'%PDF-1.4\n%fake\n')
+    monkeypatch.setattr(home, 'LEGAL_DIR', str(tmp_path))
+    return tmp_path
 
 
 # ── Order ──────────────────────────────────────────────────────
@@ -121,15 +133,7 @@ class TestAgreements:
         assert 'href="/eula?download=1"' in agreements
         assert 'href="/privacy-policy?download=1"' in agreements
 
-    def test_the_documents_are_the_shipped_pdfs(self, app_client):
-        for path in ('legal/eula.pdf', 'legal/privacy-policy.pdf'):
-            with open(os.path.join(ROOT, 'static', path), 'rb') as f:
-                assert f.read(5) == b'%PDF-', path
-            resp = app_client.get('/static/' + path)
-            assert resp.status_code == 200
-            assert resp.mimetype == 'application/pdf'
-
-    def test_the_read_links_lead_to_the_same_pdfs(self, app_client):
+    def test_the_read_links_lead_to_the_pdfs(self, app_client, legal_dir):
         resp = app_client.get('/eula')
         assert resp.status_code == 302
         assert resp.headers['Location'].endswith('/static/legal/eula.pdf')
@@ -137,7 +141,7 @@ class TestAgreements:
         assert resp.status_code == 302
         assert resp.headers['Location'].endswith('/static/legal/privacy-policy.pdf')
 
-    def test_the_download_links_send_the_pdf_as_a_named_attachment(self, app_client):
+    def test_the_download_links_send_the_pdf_as_a_named_attachment(self, app_client, legal_dir):
         """The download attribute on a link is advice some browsers ignore, so
         the name travels in Content-Disposition instead."""
         for path, name in (('/eula', 'RETINA-EULA.pdf'),
@@ -147,6 +151,20 @@ class TestAgreements:
             assert resp.mimetype == 'application/pdf'
             assert f'attachment; filename={name}' in resp.headers['Content-Disposition']
             assert resp.data[:5] == b'%PDF-'
+
+    def test_without_the_file_both_links_say_the_document_is_coming(self, app_client, tmp_path, monkeypatch):
+        """The PDFs ship separately from the flow that links to them, and a
+        node can carry this flow before them. Neither link may 404."""
+        import routes.home as home
+        monkeypatch.setattr(home, 'LEGAL_DIR', str(tmp_path))
+        for path, title in (('/eula', 'End User Licence Agreement'),
+                            ('/privacy-policy', 'Privacy Policy')):
+            for suffix in ('', '?download=1'):
+                resp = app_client.get(path + suffix)
+                assert resp.status_code == 200, path + suffix
+                assert resp.mimetype == 'text/html'
+                body = resp.data.decode()
+                assert title in body and 'still being finalised' in body, path + suffix
 
     def test_the_consent_version_moved_with_the_terms(self):
         """The agreements screen changed (a privacy policy with its own box,
