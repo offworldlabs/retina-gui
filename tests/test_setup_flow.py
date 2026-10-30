@@ -368,6 +368,26 @@ class TestCoordinates:
         assert 'rxLat.value = m[1]' in body
         assert 'rxLon.value = m[2]' in body
 
+    def test_only_a_paste_is_split_while_typing(self):
+        """Splitting on every key press cut a pair typed by hand at
+        "38.8977, -7" and sent the rest into the latitude box. A paste splits
+        at once; a typed pair splits when the box loses focus."""
+        js = setup_js()
+        start = js.index('function onCoordInput(e)')
+        body = js[start:js.index('function onCoordChange', start)]
+        assert "e.inputType === 'insertFromPaste'" in body
+        assert "rxLat.addEventListener('change', onCoordChange)" in js
+        assert "rxLon.addEventListener('change', onCoordChange)" in js
+
+    def test_a_box_must_hold_one_whole_number(self):
+        """parseFloat reads "38.8977abc", or a pair left in one box, as its
+        first number, which then passes as a valid coordinate."""
+        js = setup_js()
+        start = js.index('function coordValue(box)')
+        body = js[start:js.index('function coordsValid', start)]
+        assert 'parseFloat' not in body
+        assert 'Number(s)' in body
+
     def test_the_map_lets_the_owner_place_the_pin(self, app_client):
         location = panel(page(app_client), 'location')
         assert 'id="rxMap"' in location
@@ -379,3 +399,14 @@ class TestCoordinates:
     def test_a_zip_the_match_does_not_carry_is_pointed_out(self):
         js = setup_js()
         assert 'typedZip !== matchedZip' in js
+
+    def test_a_five_digit_house_number_is_not_read_as_the_zip(self):
+        """"12345 County Road 5, Springfield 62701": the first five-digit group
+        is the house number. The ZIP is the last one, after the house number."""
+        js = setup_js()
+        start = js.index('function zipOf(address)')
+        body = js[start:js.index('\n        }', start)]
+        assert r"replace(/^\s*\d+[A-Za-z]?\b/, '')" in body
+        assert 'all[all.length - 1]' in body
+        assert 'var typedZip = zipOf(query)' in js
+        assert 'var matchedZip = zipOf(d.matched_address)' in js

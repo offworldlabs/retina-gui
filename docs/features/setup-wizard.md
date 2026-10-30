@@ -481,7 +481,9 @@ constraint does not reach.
   match, with a nudge to check the pin. The finder's second geocoder (OSM Nominatim, which
   answers when the Census geocoder has no match) takes its postcode from the surrounding map
   data, and that is sometimes the neighbouring town's; the coordinates can still be right, and
-  the map is where to tell.
+  the map is where to tell. `zipOf` takes the last five-digit group after dropping a leading
+  house number, because a rural house number is often five digits too ("12345 County Road 5")
+  and the first such group would be read as the ZIP.
 - The help text says a lookup is street-level and points at the map. Both geocoders place a
   house number along its street segment, not on the roof, so a lookup is where to start and the
   pin is where to finish.
@@ -497,8 +499,13 @@ nothing in the step rounds a value the owner gave:
 - A pair pasted from a map ("38.8895, -77.0353", with a comma, semicolon, space or tab
   between) lands in one box and is split across both (`splitPair`). Right-clicking a map
   application gives such a pair at a dozen decimals, which `type=number` would have refused as
-  a whole and an earlier `toFixed(6)` would have cut.
-- `coordValue` parses a box (accepting a Unicode minus) and `coordsValid` is the one gate: both
+  a whole and an earlier `toFixed(6)` would have cut. Only a paste splits at once
+  (`inputType === 'insertFromPaste'`); a pair typed by hand splits when the box loses focus
+  (`change`). Splitting on every key press cut a typed pair at "38.8977, -7" and sent the rest
+  of it into the latitude box, a valid-looking point with no warning.
+- `coordValue` accepts a box only when the whole of it is one decimal number (a Unicode minus is
+  allowed), so "38.8977abc", or a pair still in one box, is refused with a message rather than
+  read as its first number, as `parseFloat` would. `coordsValid` is the one gate: both
   present, in range. Find Towers reads nothing else, so no lookup or map failure can hold the
   step shut, and an out-of-range figure is explained under the boxes rather than silently
   disabling the button.

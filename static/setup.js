@@ -1005,9 +1005,11 @@ function initSetupWizard(resumeStep, devMode, isRerun, demoMode) {
         // Text boxes holding whatever the owner typed or pasted, at the
         // precision they gave it: nothing here rounds a hand-entered value.
         // See docs/features/setup-wizard.md#coordinates
+        // The whole box must be one decimal number: parseFloat would read
+        // "38.8977abc", or a pair left in one box, as its first number.
         function coordValue(box) {
-            var v = parseFloat(String(box.value).trim().replace(/[−]/g, '-'));
-            return isFinite(v) ? v : NaN;
+            var s = String(box.value).trim().replace(/[−]/g, '-');
+            return /^[-+]?(\d+(\.\d*)?|\.\d+)$/.test(s) ? Number(s) : NaN;
         }
         function coordsValid() {
             var lat = coordValue(rxLat), lon = coordValue(rxLon);
@@ -1038,13 +1040,19 @@ function initSetupWizard(resumeStep, devMode, isRerun, demoMode) {
             return true;
         }
         // One handler for both boxes: a split pair changes both, and
-        // everything below reads both anyway.
+        // everything below reads both anyway. Split only a paste, or a typed
+        // pair once the box loses focus (change): splitting on every key
+        // press cut a pair typed by hand at "38.8977, -7" and sent the rest
+        // into the latitude box.
         function onCoordInput(e) {
-            splitPair(e.target);
+            if (e.inputType === 'insertFromPaste') splitPair(e.target);
             checkCoords();
             updateFindBtn();
             scheduleElevation();
             placePinFromBoxes();
+        }
+        function onCoordChange(e) {
+            if (splitPair(e.target)) onCoordInput(e);
         }
 
         if (demoMode) {
@@ -1220,6 +1228,8 @@ function initSetupWizard(resumeStep, devMode, isRerun, demoMode) {
         refreshLocationMap = function() { placePinFromBoxes(); };
         rxLat.addEventListener('input', onCoordInput);
         rxLon.addEventListener('input', onCoordInput);
+        rxLat.addEventListener('change', onCoordChange);
+        rxLon.addEventListener('change', onCoordChange);
 
         // ── Address lookup and altitude prefill ──────────────
         // Both only fill boxes; nothing in here can block the step.
@@ -1241,6 +1251,15 @@ function initSetupWizard(resumeStep, devMode, isRerun, demoMode) {
             postcode: 'Postcode centre only. Add the street address for a precise fix.',
             locality: 'City centre only. Add the street address for a precise fix.'
         };
+
+        // The ZIP in a US address: the last five-digit group, after dropping
+        // a leading house number, which is often five digits on a rural road
+        // ("12345 County Road 5") and was read as the ZIP.
+        function zipOf(address) {
+            var rest = String(address || '').replace(/^\s*\d+[A-Za-z]?\b/, '');
+            var all = rest.match(/\b\d{5}(?:-\d{4})?\b/g);
+            return all ? all[all.length - 1].slice(0, 5) : undefined;
+        }
 
         function sayAddress(text, tone) {
             addressMsg.textContent = text || '';
@@ -1298,8 +1317,8 @@ function initSetupWizard(resumeStep, devMode, isRerun, demoMode) {
                 // A ZIP the owner typed that the match does not carry is the
                 // map data disagreeing with them, which is worth saying: the
                 // pin is what gets saved, so the map is where to check it.
-                var typedZip = (query.match(/\b(\d{5})(?:-\d{4})?\b/) || [])[1];
-                var matchedZip = (String(d.matched_address || '').match(/\b(\d{5})(?:-\d{4})?\b/) || [])[1];
+                var typedZip = zipOf(query);
+                var matchedZip = zipOf(d.matched_address);
                 var zipNote = (typedZip && matchedZip && typedZip !== matchedZip)
                     ? ' The map data lists ZIP ' + matchedZip + ' here rather than ' + typedZip +
                       ', so check the pin below and drag it if it is off.'
