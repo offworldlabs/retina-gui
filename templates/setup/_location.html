@@ -18,20 +18,38 @@
             {# The geocoder is US-pinned, and a foreign name can match a US
                place confidently. See docs/features/setup-wizard.md#address-lookup #}
             <p style="font-size:12.5px;color:var(--ink-3);margin:6px 0 0;">
-                US addresses only for now. You can also enter coordinates directly below.
+                US addresses only for now. You can also enter coordinates directly
+                below, pasted from a map if you like. An address lookup is street-level,
+                so check the pin on the map and drag it onto the antenna.
             </p>
             <p id="rxAddressMsg" style="display:none;font-size:13px;margin:6px 0 0;"></p>
         </div>
 
+        {# Text boxes, not type=number: a pair pasted from a map
+           ("38.8895, -77.0353") lands in one box and is split, and
+           nothing here rounds what the owner typed.
+           See docs/features/setup-wizard.md#coordinates #}
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;">
             <div class="ds-field">
                 <label class="ds-field-label" for="rxLat">Latitude</label>
-                <input type="number" class="ds-input mono" id="rxLat" step="any" min="-90" max="90" placeholder="e.g. 38.8977">
+                <input type="text" class="ds-input mono" id="rxLat" inputmode="decimal" autocomplete="off"
+                       placeholder="e.g. 38.8977">
             </div>
             <div class="ds-field">
                 <label class="ds-field-label" for="rxLon">Longitude</label>
-                <input type="number" class="ds-input mono" id="rxLon" step="any" min="-180" max="180" placeholder="e.g. -77.0365">
+                <input type="text" class="ds-input mono" id="rxLon" inputmode="decimal" autocomplete="off"
+                       placeholder="e.g. -77.0365">
             </div>
+        </div>
+        <p id="rxCoordMsg" style="display:none;font-size:13px;margin:-8px 0 0;"></p>
+
+        {# Shown once there is a point to show. Click or drag to place the pin
+           exactly; the boxes follow. See docs/features/setup-wizard.md#coordinates #}
+        <div id="rxMapWrap" style="display:none;">
+            <div id="rxMap" class="tower-map" style="height:240px;"></div>
+            <p style="font-size:12.5px;color:var(--ink-3);margin:6px 0 0;">
+                Click the map or drag the pin to place the receiver exactly.
+            </p>
         </div>
 
         <div class="ds-field">

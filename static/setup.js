@@ -323,6 +323,8 @@ function initSetupWizard(resumeStep, devMode, isRerun, demoMode) {
     var pendingModeSwitch = null;  // tracks in-flight /api/mode POST so the leave hook can serialise the revert
     var spectrumGating = false;    // true while scan is in progress; gates Find Towers
     var abortAddressLookups = null; // defined inside enterHooks.location on first entry
+    var refreshLocationMap = null;  // defined inside enterHooks.location on first entry
+    var refreshFindBtn = null;      // defined inside enterHooks.location on first entry
 
     // Agreements. Three boxes: the EULA, the Privacy Policy, then cloud
     // services. See docs/features/setup-wizard.md#agreements
@@ -985,10 +987,11 @@ function initSetupWizard(resumeStep, devMode, isRerun, demoMode) {
                 if (!locationActive) return;
                 scanStatus.textContent = 'Spectrum analyser unavailable, will search by location only';
                 spectrumGating = false;
-                var lat = parseFloat(document.getElementById('rxLat').value);
-                var lon = parseFloat(document.getElementById('rxLon').value);
-                document.getElementById('findTowersBtn').disabled = isNaN(lat) || isNaN(lon);
+                if (refreshFindBtn) refreshFindBtn();
             });
+
+        // The map was laid out while its panel was hidden; measure it again.
+        if (refreshLocationMap) refreshLocationMap();
 
         if (hookInitialized.location) return;
         hookInitialized.location = true;
@@ -996,18 +999,138 @@ function initSetupWizard(resumeStep, devMode, isRerun, demoMode) {
         var rxLat = document.getElementById('rxLat');
         var rxLon = document.getElementById('rxLon');
         var rxAlt = document.getElementById('rxAlt');
+        var coordMsg = document.getElementById('rxCoordMsg');
+
+        // ── Coordinates ──────────────────────────────────────
+        // Text boxes holding whatever the owner typed or pasted, at the
+        // precision they gave it: nothing here rounds a hand-entered value.
+        // See docs/features/setup-wizard.md#coordinates
+        // The whole box must be one decimal number: parseFloat would read
+        // "38.8977abc", or a pair left in one box, as its first number.
+        function coordValue(box) {
+            var s = String(box.value).trim().replace(/[−]/g, '-');
+            return /^[-+]?(\d+(\.\d*)?|\.\d+)$/.test(s) ? Number(s) : NaN;
+        }
+        function coordsValid() {
+            var lat = coordValue(rxLat), lon = coordValue(rxLon);
+            return !isNaN(lat) && !isNaN(lon) &&
+                   lat >= -90 && lat <= 90 && lon >= -180 && lon <= 180;
+        }
+        function sayCoords(text, danger) {
+            coordMsg.textContent = text || '';
+            coordMsg.style.color = danger ? 'var(--danger)' : 'var(--ink-3)';
+            coordMsg.style.display = text ? '' : 'none';
+        }
+        function checkCoords() {
+            var lat = coordValue(rxLat), lon = coordValue(rxLon);
+            if (rxLat.value.trim() === '' && rxLon.value.trim() === '') { sayCoords(''); return; }
+            if (isNaN(lat) || isNaN(lon)) { sayCoords('Enter both as decimal degrees, for example 38.8977 and -77.0365.', true); return; }
+            if (lat < -90 || lat > 90) { sayCoords('Latitude must be between -90 and 90.', true); return; }
+            if (lon < -180 || lon > 180) { sayCoords('Longitude must be between -180 and 180.', true); return; }
+            sayCoords('');
+        }
+
+        // A pair pasted from a map ("38.8895, -77.0353", or with a
+        // space, a tab or a semicolon between) lands in one box: split it.
+        function splitPair(box) {
+            var m = String(box.value).match(/^\s*(-?\d+(?:\.\d+)?)\s*[,;\t ]\s*(-?\d+(?:\.\d+)?)\s*$/);
+            if (!m) return false;
+            rxLat.value = m[1];
+            rxLon.value = m[2];
+            return true;
+        }
+        // One handler for both boxes: a split pair changes both, and
+        // everything below reads both anyway. Split only a paste, or a typed
+        // pair once the box loses focus (change): splitting on every key
+        // press cut a pair typed by hand at "38.8977, -7" and sent the rest
+        // into the latitude box.
+        function onCoordInput(e) {
+            if (e.inputType === 'insertFromPaste') splitPair(e.target);
+            checkCoords();
+            updateFindBtn();
+            scheduleElevation();
+            placePinFromBoxes();
+        }
+        function onCoordChange(e) {
+            if (splitPair(e.target)) onCoordInput(e);
+        }
 
         if (demoMode) {
             rxLat.value = '37.7749';
             rxLon.value = '-122.4194';
             rxAlt.value = '16';
-            rxLat.dispatchEvent(new Event('input'));
-            rxLon.dispatchEvent(new Event('input'));
+        } else if (!rxLat.value && !rxLon.value && window._towerSearchParams) {
+            // A reload: the boxes are empty but the page rehydrated the last
+            // search position for the tower step, so start from it here too.
+            // See docs/features/setup-wizard.md#rehydrating-the-tower-search
+            rxLat.value = String(window._towerSearchParams.lat);
+            rxLon.value = String(window._towerSearchParams.lon);
         }
         var useMyLocBtn = document.getElementById('useMyLocationBtn');
         var findBtn = document.getElementById('findTowersBtn');
         var geoError = document.getElementById('locationGeoError');
         var skipBtn = document.getElementById('locationSkipBtn');
+
+        // ── The map ──────────────────────────────────────────
+        // Shown once there is a point. A click or a drag moves the pin and
+        // writes the boxes at seven decimals (about a centimetre), which is
+        // the one place this step rounds, and only because a click has no
+        // precision of its own. See docs/features/setup-wizard.md#coordinates
+        var rxMap = null, rxPin = null;
+        var mapWrap = document.getElementById('rxMapWrap');
+        // A divIcon, as the tower step's markers are: Leaflet's stock marker
+        // image is fetched from wherever leaflet.js came from, and this one
+        // needs nothing fetched.
+        function pinIcon() {
+            return L.divIcon({
+                className: 'user-marker',
+                html: '<div style="width:18px;height:18px;background:#3b82f6;border:3px solid #fff;border-radius:50%;box-shadow:0 0 0 3px rgba(59,130,246,.25), 0 2px 8px rgba(0,0,0,.25);cursor:grab;"></div>',
+                iconSize: [18, 18],
+                iconAnchor: [9, 9]
+            });
+        }
+        function newPin(ll) {
+            rxPin = L.marker(ll, { draggable: true, icon: pinIcon(), title: 'Your receiver. Drag to move.' }).addTo(rxMap);
+            rxPin.on('dragend', function() { writeBoxesFromPin(rxPin.getLatLng()); });
+        }
+
+        function writeBoxesFromPin(ll) {
+            rxLat.value = ll.lat.toFixed(7);
+            rxLon.value = ll.lng.toFixed(7);
+            checkCoords();
+            updateFindBtn();
+            scheduleElevation();
+        }
+        function ensureMap() {
+            if (rxMap || typeof L === 'undefined') return;
+            mapWrap.style.display = '';
+            rxMap = L.map('rxMap', { zoomControl: true });
+            L.tileLayer(withCartoKey('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png'), {
+                attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OSM</a> &copy; <a href="https://carto.com/">CARTO</a>',
+                maxZoom: 20
+            }).addTo(rxMap);
+            rxMap.on('click', function(e) {
+                if (!rxPin) newPin(e.latlng);
+                else rxPin.setLatLng(e.latlng);
+                writeBoxesFromPin(e.latlng);
+            });
+        }
+        // Puts the pin where the boxes say, zooming in on the first point and
+        // following without re-zooming after that.
+        function placePinFromBoxes(zoomTo) {
+            if (!coordsValid()) return;
+            ensureMap();
+            if (!rxMap) return;
+            var ll = L.latLng(coordValue(rxLat), coordValue(rxLon));
+            var first = !rxPin;
+            if (first) newPin(ll);
+            else rxPin.setLatLng(ll);
+            // The panel was display:none when the map was made, so its size
+            // is stale until it is measured again.
+            rxMap.invalidateSize();
+            if (first || zoomTo) rxMap.setView(ll, 17);
+            else if (!rxMap.getBounds().contains(ll)) rxMap.panTo(ll);
+        }
 
 
         // RF scan over SSE, opened once retina-spectrum is up.
@@ -1097,14 +1220,16 @@ function initSetupWizard(resumeStep, devMode, isRerun, demoMode) {
             };
         };
 
-        // Enable Find Towers when lat/lon are filled and the scan is done or unavailable.
+        // Enable Find Towers when lat/lon are valid and the scan is done or unavailable.
         function updateFindBtn() {
-            var lat = parseFloat(rxLat.value);
-            var lon = parseFloat(rxLon.value);
-            findBtn.disabled = isNaN(lat) || isNaN(lon) || spectrumGating;
+            findBtn.disabled = !coordsValid() || spectrumGating;
         }
-        rxLat.addEventListener('input', updateFindBtn);
-        rxLon.addEventListener('input', updateFindBtn);
+        refreshFindBtn = updateFindBtn;
+        refreshLocationMap = function() { placePinFromBoxes(); };
+        rxLat.addEventListener('input', onCoordInput);
+        rxLon.addEventListener('input', onCoordInput);
+        rxLat.addEventListener('change', onCoordChange);
+        rxLon.addEventListener('change', onCoordChange);
 
         // ── Address lookup and altitude prefill ──────────────
         // Both only fill boxes; nothing in here can block the step.
@@ -1126,6 +1251,15 @@ function initSetupWizard(resumeStep, devMode, isRerun, demoMode) {
             postcode: 'Postcode centre only. Add the street address for a precise fix.',
             locality: 'City centre only. Add the street address for a precise fix.'
         };
+
+        // The ZIP in a US address: the last five-digit group, after dropping
+        // a leading house number, which is often five digits on a rural road
+        // ("12345 County Road 5") and was read as the ZIP.
+        function zipOf(address) {
+            var rest = String(address || '').replace(/^\s*\d+[A-Za-z]?\b/, '');
+            var all = rest.match(/\b\d{5}(?:-\d{4})?\b/g);
+            return all ? all[all.length - 1].slice(0, 5) : undefined;
+        }
 
         function sayAddress(text, tone) {
             addressMsg.textContent = text || '';
@@ -1172,14 +1306,27 @@ function initSetupWizard(resumeStep, devMode, isRerun, demoMode) {
                     return;
                 }
                 var d = res.data;
-                // Six decimals is about 0.1 m.
-                rxLat.value = Number(d.latitude).toFixed(6);
-                rxLon.value = Number(d.longitude).toFixed(6);
+                // As returned, not rounded: the finder already fixes the
+                // precision, and a figure typed over it later is kept whole.
+                rxLat.value = String(d.latitude);
+                rxLon.value = String(d.longitude);
+                checkCoords();
                 updateFindBtn();
+                placePinFromBoxes(true);
+
+                // A ZIP the owner typed that the match does not carry is the
+                // map data disagreeing with them, which is worth saying: the
+                // pin is what gets saved, so the map is where to check it.
+                var typedZip = zipOf(query);
+                var matchedZip = zipOf(d.matched_address);
+                var zipNote = (typedZip && matchedZip && typedZip !== matchedZip)
+                    ? ' The map data lists ZIP ' + matchedZip + ' here rather than ' + typedZip +
+                      ', so check the pin below and drag it if it is off.'
+                    : '';
 
                 var warning = PRECISION_WARNINGS[d.precision];
-                sayAddress(warning || ('Matched: ' + d.matched_address),
-                           warning ? 'warn' : '');
+                sayAddress(warning || ('Matched: ' + d.matched_address + zipNote),
+                           (warning || zipNote) ? 'warn' : '');
 
                 // Forced: an explicit lookup makes the old altitude stale.
                 fetchElevation(d.latitude, d.longitude, true);
@@ -1223,18 +1370,13 @@ function initSetupWizard(resumeStep, devMode, isRerun, demoMode) {
         function scheduleElevation() {
             clearTimeout(elevationTimer);
             elevationTimer = setTimeout(function() {
-                var lat = parseFloat(rxLat.value);
-                var lon = parseFloat(rxLon.value);
-                if (isNaN(lat) || isNaN(lon)) return;
-                if (lat < -90 || lat > 90 || lon < -180 || lon > 180) return;
-                fetchElevation(lat, lon, false);
+                if (!coordsValid()) return;
+                fetchElevation(coordValue(rxLat), coordValue(rxLon), false);
             }, 800);
         }
 
         // An altitude the owner types is theirs from then on.
         rxAlt.addEventListener('input', function() { altAutoFilled = false; });
-        rxLat.addEventListener('input', scheduleElevation);
-        rxLon.addEventListener('input', scheduleElevation);
 
         addressInput.addEventListener('input', updateAddressBtn);
         addressBtn.addEventListener('click', lookupAddress);
@@ -1272,12 +1414,14 @@ function initSetupWizard(resumeStep, devMode, isRerun, demoMode) {
                 function(pos) {
                     useMyLocBtn.disabled = false;
                     useMyLocBtn.textContent = 'Use My Location';
-                    rxLat.value = pos.coords.latitude.toFixed(6);
-                    rxLon.value = pos.coords.longitude.toFixed(6);
+                    rxLat.value = String(pos.coords.latitude);
+                    rxLon.value = String(pos.coords.longitude);
                     if (pos.coords.altitude != null) {
                         rxAlt.value = Math.round(pos.coords.altitude);
                     }
+                    checkCoords();
                     updateFindBtn();
+                    placePinFromBoxes(true);
                 },
                 function(err) {
                     useMyLocBtn.disabled = false;
@@ -1295,14 +1439,18 @@ function initSetupWizard(resumeStep, devMode, isRerun, demoMode) {
         });
 
         findBtn.addEventListener('click', function() {
+            if (!coordsValid()) { checkCoords(); return; }
             window._towerSearchParams = {
-                lat: parseFloat(rxLat.value),
-                lon: parseFloat(rxLon.value),
+                lat: coordValue(rxLat),
+                lon: coordValue(rxLon),
                 alt: parseFloat(rxAlt.value) || 0,
                 measurements: rfMeasurements
             };
             advance();
         });
+
+        // Seeded coordinates (demo, or a reload) drive the map and the button.
+        if (rxLat.value || rxLon.value) { checkCoords(); updateFindBtn(); placePinFromBoxes(true); scheduleElevation(); }
 
         skipBtn.addEventListener('click', function() {
             // Skip both location and towers
