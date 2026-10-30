@@ -593,7 +593,10 @@ identifiers it is known by. Only the name can be changed.
 
 The node name is only a label. The fleet page shows it on the node's card instead of the
 `ret<node_id>` identifier, and it reaches other nodes through the DNS-SD TXT record. Nothing
-addresses the node by it, so a rename cannot break a bookmark or an SSH config.
+addresses the node by it, so a rename cannot break a bookmark or an SSH config. The setup
+wizard's "Name your node" step posts to the same `/node-name` route, which is the one config
+route the wizard's redirect lets through while setup is in progress (see
+[setup-wizard.md](setup-wizard.md#name-your-node)).
 
 The address shown is the node's own `http://<node_id>.local`, deliberately not `owl.local`: that
 name is answered by every node on the network at once, so checking it proves only that some node is
@@ -626,6 +629,9 @@ shows.
   failed.
 - The two toggles drive separate endpoints, each reverting itself on failure, and are deliberately
   not linked: the point of two settings is that changing one says nothing about the other.
+- The setup wizard's contact step carries the same two switches, posting to the same routes
+  (see [setup-wizard.md](setup-wizard.md#remote-support)), so a node arrives on this page with
+  whatever its owner chose during setup.
 
 ### How We Reach You
 

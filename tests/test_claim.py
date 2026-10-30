@@ -204,16 +204,26 @@ class TestWhatTheSectionShows:
 
 
 class TestTheWizardStep:
-    """The optional step after contact details, posting to the same route."""
+    """The optional last step before completion, posting to the same route."""
 
-    def test_the_wizard_shows_the_claim_step_after_contact(self, app_client):
+    def test_the_wizard_shows_the_claim_step_last_before_completion(self, app_client):
         page = app_client.get('/set-up').data.decode()
 
-        assert 'data-step="claim"' in page
-        assert page.index('data-step="contact"') < page.index('data-step="claim"') \
-            < page.index('data-step="system"')
+        assert 'data-step="account"' in page
+        assert page.index('data-step="name"') < page.index('data-step="account"') \
+            < page.index('data-step="complete"')
         assert 'wizClaimSkipBtn' in page, "skipping must be offered, not just possible"
         assert 'Node Claim on the Configuration page' in page
+
+    def test_the_wizard_says_where_a_claimed_node_appears(self, app_client):
+        """The owner should know which account and site the link binds the node to."""
+        from routes.fleet import DASHBOARD_URL
+
+        page = app_client.get('/set-up').data.decode()
+        claim = page[page.index('data-step="account"'):page.index('data-step="complete"')]
+
+        assert DASHBOARD_URL in claim
+        assert 'Where this node will appear' in claim
 
     def test_the_wizard_prefills_the_stored_address(self, app_client):
         post(app_client, {"email": ADDRESS})

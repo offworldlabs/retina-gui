@@ -12,15 +12,17 @@ re-consent path, and most steps then become informational.
 | --- | --- |
 | [src/routes/setup.py](../../src/routes/setup.py) | `/set-up` page render, plus the step routes: `save-step`, `consent`, `contact`, `claim`, `complete` |
 | [templates/setup.html](../../templates/setup.html) | Page shell: header, progress dots, footer buttons for every step, script bootstrap |
-| [templates/setup/_agreements.html](../../templates/setup/_agreements.html) | Agreements step (EULA and cloud services / publication) |
-| [templates/setup/_contact.html](../../templates/setup/_contact.html) | Contact details step |
-| [templates/setup/_claim.html](../../templates/setup/_claim.html) | Node claim step |
+| [templates/setup/_agreements.html](../../templates/setup/_agreements.html) | Agreements step (EULA, Privacy Policy, cloud services / publication) |
+| [static/legal/](../../static/legal/) | The EULA and Privacy Policy PDFs the agreements step links to and offers for download |
+| [templates/setup/_contact.html](../../templates/setup/_contact.html) | Contact details and support step |
 | [templates/setup/_system.html](../../templates/setup/_system.html) | OWL-OS update step |
 | [templates/setup/_packages.html](../../templates/setup/_packages.html) | RETINA package install step (`data-step="radar"`) |
 | [templates/setup/_while_you_wait.html](../../templates/setup/_while_you_wait.html) | `while_you_wait` macro shared by the two install steps |
 | [templates/setup/_location.html](../../templates/setup/_location.html) | Receiver location step |
 | [templates/setup/_towers.html](../../templates/setup/_towers.html) | Tower selection step |
 | [templates/setup/_calibrate.html](../../templates/setup/_calibrate.html) | Auto-Calibrate step markup |
+| [templates/setup/_name.html](../../templates/setup/_name.html) | Name your node step |
+| [templates/setup/_claim.html](../../templates/setup/_claim.html) | Node claim step |
 | [templates/setup/_complete.html](../../templates/setup/_complete.html) | Final step |
 | [static/setup.js](../../static/setup.js) | `initSetupWizard`: step engine, enter/leave hooks for every step, tower presentation helpers |
 | [static/calibrate.js](../../static/calibrate.js) | `window.RetinaCalibrate`, shared with the Configuration page, used by the calibrate step |
@@ -37,18 +39,27 @@ the `[data-step]` elements in document order, so reordering the includes reorder
 
 | # | `data-step` | Title | Skippable | What it writes |
 | --- | --- | --- | --- | --- |
-| 1 | `agreements` | Let's get started | No | Consent records, then enables cloud services |
-| 2 | `contact` | How can we reach you? | Yes | Contact record, or nothing on Skip |
-| 3 | `claim` | Connect your node to your account | Yes | Claim record, or nothing on Skip |
-| 4 | `system` | Update OWL-OS | No (waits for the update) | Nothing; reports a server-pushed update |
-| 5 | `radar` | RETINA packages | No on first run | Installs retina-node via `/mender/install` |
-| 6 | `location` | Where is your receiver? | Yes (skips towers too) | Nothing directly; switches the SDR to spectrum mode |
-| 7 | `towers` | Choose a tower | Yes | Receiver and transmitter location, frequency (`/towers/select`) |
-| 8 | `calibrate` | Tune the receiver | Yes | Gain settings, persisted automatically |
-| 9 | `complete` | You're all set | n/a | Completion flag; forces radar mode |
+| 1 | `agreements` | Agreements | No | Consent records, then enables cloud services |
+| 2 | `contact` | How can we reach you? | Yes | Contact record, or nothing on Skip; the two support switches write themselves |
+| 3 | `system` | Update OWL-OS | No (waits for the update) | Nothing; reports a server-pushed update |
+| 4 | `radar` | RETINA packages | No on first run | Installs retina-node via `/mender/install` |
+| 5 | `location` | Where is your receiver? | Yes (skips towers too) | Nothing directly; switches the SDR to spectrum mode |
+| 6 | `towers` | Choose a tower | Yes | Receiver and transmitter location, frequency (`/towers/select`) |
+| 7 | `calibrate` | Tune the receiver | Yes | Gain settings, persisted automatically |
+| 8 | `name` | Name your node | Yes | The node's name (`/node-name`), or nothing on Skip |
+| 9 | `account` | Connect your node to your account | Yes | Claim record, or nothing on Skip |
+| 10 | `complete` | You're all set | n/a | Completion flag; the receiver name; forces radar mode |
+
+The order is deliberate. The owner answers about themselves first (agreements, contact,
+support), while the node is still a box on a desk; then the node is brought up to date, which
+is as early as it can be because the OS update arrives through the cloud services the
+agreements step enables; then it is sited, tuned and named; and connecting it to an account is
+the very last thing, so the claim link binds a node that is already set up and the owner can
+see on the claim step which account and which site it will appear under.
 
 The step comments in the templates and in `setup.js` name steps rather than number them,
-because the numbering changed each time a step was added.
+because the numbering changed each time a step was added. `tests/test_setup_flow.py` asserts
+the order.
 
 ## Navigation
 
@@ -81,7 +92,7 @@ The progress label reads "Step N of M" and dots behind the current step are mark
 
 | State | Where | Written by | Read by |
 | --- | --- | --- | --- |
-| Current step and `started_at` | `setup-wizard.json` in the data dir | `/set-up/save-step` on every step entry | `/set-up` (resume), home and config redirects |
+| Current step and `started_at` | `setup-wizard.json` in the data dir | `/set-up/save-step` on every step entry | `/set-up` (resume, through `resume_point`), home and config redirects |
 | Completion flag | `setup-wizard-completed` | `/set-up/save-step` with `complete` | `/set-up` (`is_rerun`), `/mender/check`, `/mender/check-os`, retina-telemetry |
 | Last tower search | `towers-cache.json` | `/towers/search` | `/set-up` (rehydration), Auto-Calibrate |
 | Consent, contact, claim | See [device-state-and-telemetry.md](device-state-and-telemetry.md) | The step routes below | retina-telemetry, prefills |
@@ -122,11 +133,12 @@ altitude is rehydrated as 0.
 
 ### Prefilled answers
 
-`/set-up` also prefills the contact and claim steps. Contact comes from the stored contact
-record, and an empty record renders as empty boxes, which is the ordinary case. Claim comes from
-the stored claim address, except when `status.json` from retina-telemetry reports the node as
-`owned`: then the owner's address from that status is shown instead and the step can only be
-skipped (see [Node claim](#node-claim)).
+`/set-up` also prefills the contact, support, name and claim steps. Contact comes from the
+stored contact record, and an empty record renders as empty boxes, which is the ordinary case.
+The support switches come from `remote_access.status()` and the name from `node_name.get()`. Claim comes from the stored claim address, except
+when `status.json` from retina-telemetry reports the node as `owned`: then the owner's address
+from that status is shown instead and the step can only be skipped (see
+[Node claim](#node-claim)).
 
 ## Page chrome
 
@@ -172,9 +184,29 @@ handler is removed on the complete step and when the session-expired overlay app
 
 ## Agreements
 
-Two checkboxes: the EULA and "Enable cloud services and data publication". Continue is enabled
-only when both are ticked. On Continue the page posts `/set-up/consent`, then
-`/mender/cloud-services` with `enabled: true`, then advances. On failure the button is restored.
+Two sections. **Agreements** has one checkbox per document: the End User Licence Agreement and
+the Privacy Policy, each with a "Read" link (`/eula`, `/privacy-policy`, which redirect to the
+PDF so it opens in a new tab) and a "Download PDF" link (the same routes with `?download=1`,
+which send the file as an attachment named `RETINA-EULA.pdf` / `Offworld-Labs-Privacy-Policy.pdf`
+through `Content-Disposition`, because a link's `download` attribute is advice that some
+browsers ignore). The documents themselves are the PDFs under `static/legal/`; replacing a document
+means replacing the file and bumping `TELEMETRY_CONSENT_VERSION`. The files ship in their own
+change, so a build can carry this step before them: when a file is not there, both of its links
+render `legal_pending.html`, a page saying the document is still being finalised and will come
+with an OWL-OS update, rather than a 404 (`_legal` in `routes/home.py` checks for the file
+first). **Cloud Services** has the
+third checkbox, "Enable cloud services and data publication", with the publication disclosure
+under it. Continue is enabled only when all three are ticked. On Continue the page posts
+`/set-up/consent`, then `/mender/cloud-services` with `enabled: true`, then advances. On failure
+the button is restored.
+
+- One consent record covers both documents. `save_telemetry_consent` writes the shape the wire
+  expects (`licence`, `remote_management`, `publication`), and `TELEMETRY_CONSENT_VERSION` names
+  the whole screen the owner saw: both PDFs and the checkbox wording. The privacy policy has no
+  record of its own because the wire has no field for one.
+- The cloud services box also says that updates include this setup flow, because the next step
+  that matters, the OS update, is what brings the wizard itself up to date (see
+  [System update](#system-update)).
 
 - Consent is recorded before the Mender toggle because it is the half that unblocks telemetry:
   if cloud services fail, the owner has still accepted and retina-telemetry can register.
@@ -186,17 +218,19 @@ only when both are ticked. On Continue the page posts `/set-up/consent`, then
   so the change takes effect within seconds with no restart or ordering between containers. The
   same holds for the contact and claim files.
 - The publication disclosure is in this template rather than in the EULA, so its wording is part
-  of what `TELEMETRY_CONSENT_VERSION` in `device_state.py` identifies. Changing the wording must
-  bump that constant. Recording publication as `"public"` is only honest while the text says so.
-  See [device-state-and-telemetry.md](device-state-and-telemetry.md).
-- Demo mode pre-ticks both boxes and skips the consent write. A write there would record an
+  of what `TELEMETRY_CONSENT_VERSION` in `device_state.py` identifies, as are the two PDFs.
+  Changing any of them must bump that constant. Recording publication as `"public"` is only
+  honest while the text says so. See
+  [device-state-and-telemetry.md](device-state-and-telemetry.md).
+- Demo mode pre-ticks all three boxes and skips the consent write. A write there would record an
   acceptance nobody gave, which is the one thing the versioned-record design exists to prevent.
 
 ## Contact details
 
-Optional name, email, phone and a two-letter phone country, placed straight after the agreements
-so it is asked while the owner is still answering questions about themselves rather than about
-the radar. Nothing downstream blocks on it.
+Two sections on one step: **Contact** and **Support** (the latter below). Contact is an optional
+name, email, phone and a two-letter phone country, placed straight after the agreements so it is
+asked while the owner is still answering questions about themselves rather than about the radar.
+Nothing downstream blocks on it.
 
 - **Save and continue** posts to `/set-up/contact`, the same route the "How We Reach You"
   section on the Configuration page uses, so the two surfaces cannot drift into storing
@@ -218,10 +252,64 @@ the radar. Nothing downstream blocks on it.
 - The boxes are prefilled server-side, so a re-run shows the owner their details rather than
   empty boxes that would read as "we hold nothing".
 
+## Remote support
+
+The second section of the contact step: the two Remote Support switches from the Configuration
+page, with the same wording. "Let support open this node's interface" posts
+`/remote-access/toggle`; "Let support open a command line" posts `/remote-access/shell`. Each
+switch posts the moment it is flipped (form-encoded, as those routes read `request.form`),
+shows the route's answer under the step, and reverts on failure, exactly as `config.html`'s
+section does. They are independent of Save and Skip: both buttons belong to the contact
+details, and a flipped switch has already been recorded. The initial state comes from
+`remote_access.status()`, so a re-run shows what the node is set to.
+
+The shell switch keeps the enforce-then-record order that
+[remote-access.md](remote-access.md#order-enforce-then-record) describes: an ok answer means
+mender-connect was changed, not merely that a wish was noted. The gate that refuses
+`/remote-access/*` on the tunnel hostname is unaffected; the wizard runs on the LAN.
+
+## Name your node
+
+Optional, after tuning and before the claim. One box, prefilled with the current name, posting
+to `/node-name`, the Configuration page's rename route, so the wizard cannot store a different
+shape or apply a different rule; `_WIZARD_ALLOWED_PATHS` in `routes/config.py` lets that one
+route through the redirect that otherwise sends every config route back to `/set-up` while the
+wizard is in progress. Save with an empty box is the same as Skip: the stored name, if any, is
+left alone rather than cleared. The help text says the id stays underneath, because an owner
+who has just typed "Garage roof" should not expect to reach the node by it.
+
+The naming step comes after the tower step, which wrote `location.rx.name` while the node was
+still unnamed, so at that point the receiver name in `user.yml` is the node id. `/set-up/complete`
+refreshes it from `node_name.receiver_name` (the one rule, see
+[config-editor.md](config-editor.md#receiver-name)) before the stack restart it was already going
+to do. That restart merges the name on its own: its `up` runs `config-merger` first (see
+[sdr-mode.md](sdr-mode.md#returning-to-radar)), so Home's subtitle carries the name once the
+radar is back rather than after the next Apply. An earlier version ran the merger separately
+first; on two test nodes Docker's events showed the merger running twice per completion, and
+with the separate run forced to fail the name still reached `config.yml` through the restart
+alone, so it was removed. If the restart lock is busy for longer than the restart waits, the
+restart is skipped and the lock holder's own restart merges the name, since every path that
+brings the stack up uses `up`. Nothing on this step waits on any of it, and nothing can fail
+over it. An unsited node (no `location.rx`) is left alone.
+
+Because nothing waits on it, every way it can fall short is logged, or nobody would know: the
+page has moved on and completion still answers success. `_refresh_receiver_name` logs an error
+when `user.yml` cannot be written, and `enforce_radar_mode` logs a busy lock, an exception, and
+a failed `up` with its stderr (a failed merge shows up there, since the stack does not start
+without it). The lines go to retina-gui's log, which on a node is its systemd journal
+(`journalctl -u retina-gui`). This was found on a test node with the restart lock held for the
+watchdog's 130 s: completion answered success after 100 s, the name was in `user.yml` but not
+`config.yml`, no container had restarted, and the journal held only the access log.
+
 ## Node claim
 
 Asks for an email address to send a claim link to. Opening the link binds the node to the
-account behind that address, creating one if needed.
+account behind that address, creating one if needed. The last step before completion: the step
+names the Network Map and Dashboard (`DASHBOARD_URL` in `routes/fleet.py`, the same address as
+the Resources card and the fleet bar's button) and says that the node will appear there under
+the account for the address typed, so the owner knows which account and which site the link
+binds the node to before sending it. An owned node's "release it from your dashboard" links
+there too.
 
 - Posts to `/set-up/claim`, the same route as the Node Claim section on the Configuration page.
 - An empty box is filled with the contact email from the previous step as a suggestion only.
@@ -246,6 +334,37 @@ account behind that address, creating one if needed.
 Fully automatic: OS updates are pushed by the server as a deployment and applied by the
 managed-mode Mender client, so this page only reports progress. See
 [ota-updates.md](ota-updates.md).
+
+This is also where the setup flow itself is brought up to date, and the step says so. retina-gui
+ships inside the OWL-OS image, so there is no separate "configuration flow" package to fetch
+first: the wizard a node boots with is the one its OS carries, and the OS update is the way to
+the current one. It cannot be the first step, because the Mender client that receives the
+deployment is among the cloud services the agreements step enables; it is the first step after
+the two that only ask the owner about themselves. After the update the node reboots, the wizard
+resumes at the recorded step (`system`), the new wizard reports the OS up to date, and the owner
+continues through the new flow. A step name the new wizard no longer has resumes at the first
+step, since `initSetupWizard` falls back to index 0 when the recorded name matches nothing.
+
+The saved step is only a name, and the build that reads it can be newer than the one that wrote
+it. That is not an edge case: the wizard ships inside OWL-OS and updates itself at this step, so
+every node flashed before a release starts the wizard on the old build and finishes it on the
+new one. node-infra pushes the OS update as soon as the agreements step turns cloud services on,
+and on the old build the owner's next two steps were contact and the claim. The old order had
+the claim third; it is ninth now. A saved `claim` from the old build matched the moved step by
+name and opened at step 9 of 10, with completion the next click, skipping the update, the
+packages, siting, tuning and naming. Two things stop that, both in `routes/setup.py`:
+
+- A step that moves gets a new key, so an old saved value cannot match it: the claim panel's
+  `data-step` is `account`, not `claim` (`setup.js`'s `stepNames` and hooks use the same key;
+  the `/set-up/claim` route and `_claim.html`'s name are unchanged).
+- `LEGACY_RESUME_STEPS` maps the retired key to where a node that saved it should resume:
+  `claim` to `system`, the first step after the two the owner had already done. `resume_point`
+  applies it where the resume step is read. Every other old name still means the same place,
+  because the rest of the old order is the new order with steps inserted.
+
+A later rework that moves a step does the same two things. `tests/test_setup_flow.py`
+(`TestResumingFromAnOlderBuild`) seeds the old build's file and expects `system`, and checks
+the `claim` key is not reused.
 
 On a first run the step polls `/mender/check-os` every 5 seconds:
 
@@ -354,10 +473,6 @@ constraint does not reach.
 - A postcode-level or locality-level match shows a warning instead of "Matched: ...". These
   coordinates are not only a search input: `/towers/select` writes them to the radar config as
   the receiver position, and a city-centre fix can sit 10 km from the real receiver.
-- The geocoder is pinned to the US, and the help text says so. A non-US address usually returns
-  "no match", which reads as a typo unless the page has already said otherwise. Worse, a foreign
-  place name that collides with a US one returns a confident street-level match in the wrong
-  country. That has been measured, so the owner still has to check the matched address.
 - Each lookup gets an `AbortController`, so a late answer cannot write coordinates into a step
   the owner has already left. An aborted request leaves the button label to whichever request
   replaced it.
@@ -379,7 +494,8 @@ whole metres (a site altitude, not a survey figure).
 ### Leaving the step
 
 Find Towers stores the coordinates, altitude and RF measurements in `window._towerSearchParams`
-and advances. Skip jumps two steps, past both location and towers, to the calibrate step.
+and advances. Skip jumps two steps,
+past both location and towers, to the calibrate step.
 
 ## Tower selection
 
@@ -561,10 +677,11 @@ mode the link carries `demo=1` so the tour runs in demo mode too.
 
 | Mode | Trigger | Behaviour |
 | --- | --- | --- |
-| Demo | `/set-up?demo=1` | Treated as a re-run. Starts at the first step, pre-ticks the agreements, skips the consent write, prefills location with fixed example coordinates and seeds the tower search. `window.fetch` is wrapped to fake `/mender/cloud-services`, `/mender/check-os`, `/mender/check`, `/mender/install` (an install that finishes after 8 seconds), `/towers/select`, `/api/mode`, `/set-up/save-step` and `/set-up/complete`. Everything else goes to the real server. |
+| Demo | `/set-up?demo=1` | Treated as a re-run. Starts at the first step, pre-ticks the agreements, skips the consent write, prefills location with fixed example coordinates and seeds the tower search. `window.fetch` is wrapped to fake `/mender/cloud-services`, `/mender/check-os`, `/mender/check`, `/mender/install` (an install that finishes after 8 seconds), `/towers/select`, `/api/mode`, `/set-up/save-step`, `/set-up/complete`, `/node-name`, `/remote-access/toggle` and `/remote-access/shell`. Everything else goes to the real server. |
 | Dev | `DEV_MODE` environment variable | Starts at the location step instead of the recorded one. |
 
-Demo mode is meant to be safe to show on a live node, which is why it skips the consent write.
-Requests it does not fake still reach the node, so in demo mode Save on the contact step, Send
-on the claim step, the tower search, the address and elevation lookups, and Optimise reception
-are all real actions.
+Demo mode is meant to be safe to show on a live node, which is why it skips the consent write
+and also fakes `/node-name` and the
+two `/remote-access/*` switches. Requests it does not fake still reach the node, so in demo mode
+Save on the contact step, Send on the claim step, the tower search, the address and elevation
+lookups, and Optimise reception are all real actions.

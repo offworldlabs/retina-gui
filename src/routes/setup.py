@@ -11,8 +11,24 @@ from config_schema import (
     ClaimFormConfig,
     ContactFormConfig,
 )
+from node_name import MAX_LENGTH as NAME_MAX_LENGTH
 
 bp = Blueprint('setup', __name__)
+
+# Step keys the wizard no longer has, and where a run that saved one resumes.
+# The saved resume point is only a step name, and the build that reads it
+# can be newer than the one that wrote it: the OS update lands mid-wizard.
+# The old flow's claim was its third step; the claim is ninth now, keyed
+# `account` so the old name cannot match it, and a node that was on the old
+# claim resumes at the first step it has not seen. A step that moves in a
+# later rework gets a new key and a row here the same way.
+# See docs/features/setup-wizard.md#persistence-and-resume.
+LEGACY_RESUME_STEPS = {'claim': 'system'}
+
+
+def resume_point(step):
+    """Where a saved step resumes: itself, or its mapping for a retired key."""
+    return LEGACY_RESUME_STEPS.get(step, step)
 
 
 @bp.route("/set-up")
@@ -21,9 +37,19 @@ def wizard():
 
     See docs/features/setup-wizard.md.
     """
-    from app import CARTO_API_KEY, DEV_MODE, device_state, get_node_id, mender, telemetry_status
+    from app import (
+        CARTO_API_KEY,
+        DEV_MODE,
+        device_state,
+        get_node_id,
+        mender,
+        node_name,
+        remote_access,
+        telemetry_status,
+    )
+    from routes.fleet import DASHBOARD_URL
 
-    resume_step = device_state.get_setup_wizard_step()
+    resume_step = resume_point(device_state.get_setup_wizard_step())
     owl_os_version, retina_node_version = mender.get_versions()
     node_id = get_node_id()
     # From completion history, not from whether retina-node is installed.
@@ -49,8 +75,16 @@ def wizard():
                            resume_step=resume_step,
                            towers_cache=towers_cache,
                            contact=contact,
+                           # The support switches, as the Configuration page
+                           # shows them. See docs/features/setup-wizard.md#remote-support
+                           remote_access=remote_access.status(),
+                           node_name=node_name.get(),
+                           node_name_max_length=NAME_MAX_LENGTH,
                            claim=claim,
                            claim_owned=claim_owned,
+                           # Where a claimed node appears, so the claim step
+                           # can say which account the link binds it to.
+                           dashboard_url=DASHBOARD_URL,
                            node_id=node_id,
                            owl_os_version=owl_os_version,
                            retina_node_version=retina_node_version,
@@ -174,6 +208,13 @@ def complete():
     from app import RETINA_NODE_PATH, config_mgr
     from routes.sdr import _write_mode, enforce_radar_mode
 
+    # The naming step comes after the tower step, which wrote the receiver
+    # name before there was a name to write. Refresh it here, before the
+    # restart below: that restart's `up` runs config-merger first (retina-node's
+    # compose makes the stack depend on it), so it merges the name too.
+    # See docs/features/setup-wizard.md#name-your-node
+    _refresh_receiver_name(config_mgr)
+
     # Write radar to mode.txt before docker ops so the home page cannot race
     # and see spectrum mode while enforce_radar_mode is still running.
     _write_mode('radar')
@@ -182,3 +223,33 @@ def complete():
         enforce_radar_mode(RETINA_NODE_PATH)
 
     return jsonify({"success": True})
+
+
+def _refresh_receiver_name(config_mgr):
+    """Rewrite location.rx.name in user.yml from the one rule for it.
+
+    Returns True when the file changed. Only when a receiver is already
+    recorded: a node without a location has nothing to name. Best effort,
+    and never raises: completion must not fail over a label. Nothing on the
+    page waits on this, so every failure is logged, or nobody would know.
+    See docs/features/setup-wizard.md#name-your-node.
+    """
+    from app import app, get_node_id, node_name
+    from node_name import receiver_name
+
+    try:
+        user_config = dict(config_mgr.load_user_config())
+        rx = ((user_config.get("location") or {}).get("rx") or {})
+        if not rx:
+            return False
+        wanted = receiver_name(node_name.get(), get_node_id())
+        if rx.get("name") == wanted:
+            return False
+        location = dict(user_config["location"])
+        location["rx"] = {**rx, "name": wanted}
+        user_config["location"] = location
+        config_mgr.save_user_config(user_config)
+        return True
+    except Exception as e:
+        app.logger.error(f"Wizard completion: could not write the receiver name to user.yml: {e}")
+        return False

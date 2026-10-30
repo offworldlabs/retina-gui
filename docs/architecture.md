@@ -15,12 +15,11 @@ requests are gated, and the machinery that keeps stack restarts from colliding.
 | [src/apply_service.py](../src/apply_service.py) | `ApplyService`: runs config apply (config-merger plus stack restart) on a background thread |
 | [src/stack_reconcile.py](../src/stack_reconcile.py) | Repairs a compose project left half-recreated |
 | [src/restart_lock.py](../src/restart_lock.py) | Cross-process `flock` mutex around anything that drives the stack |
-| [src/routes/home.py](../src/routes/home.py) | `/` (home page) and `/eula` |
+| [src/routes/home.py](../src/routes/home.py) | `/` (home page), `/eula` and `/privacy-policy` (the PDFs under `static/legal/`: a redirect to read, `?download=1` to save) |
 | [src/routes/sdr.py](../src/routes/sdr.py) | `run_config_merger_and_restart`, the restart body that `ApplyService` runs (see [sdr-mode.md](features/sdr-mode.md)) |
 | [templates/base.html](../templates/base.html) | Page shell: fleet bar, node sub-nav, footer, CSRF meta tag |
 | [templates/index.html](../templates/index.html) | Home page |
 | [templates/summary.html](../templates/summary.html) | Fleet summary page, including the flight-path diagram |
-| [templates/eula.html](../templates/eula.html) | Placeholder EULA linked from the wizard |
 | [static/flight-sim.js](../static/flight-sim.js) | Makes the summary page's diagram interactive |
 | [static/common.css](../static/common.css) | Shared design-system styles for every page |
 
@@ -651,4 +650,7 @@ When `tutorial` is set, `base.html` also loads `tutorial.css`, the tour payload 
 Configuration pages, in the fleet bar and on the sub-nav's Config link carry `data-tutorial` attributes naming what the tour
 points at; they have no other effect. See [tutorial.md](features/tutorial.md#targets).
 
-[eula.html](../templates/eula.html) is a placeholder, linked from the wizard.
+The EULA and the Privacy Policy are PDFs under `static/legal/`, served by `/eula` and
+`/privacy-policy` as redirects and linked from the wizard's agreements step; until a file is
+there, `templates/legal_pending.html` says the document is coming. See
+[setup-wizard.md](features/setup-wizard.md#agreements).

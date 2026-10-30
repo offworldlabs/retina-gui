@@ -31,10 +31,11 @@ SETUP_WIZARD_TIMEOUT = timedelta(hours=24)
 CALIBRATE_LOCK_TIMEOUT = timedelta(minutes=20)
 
 # Identifies the terms the owner was shown. Bump it whenever that text changes:
-# templates/eula.html AND the checkbox labels in templates/setup/_agreements.html,
-# which carry the publication disclosure. Nothing re-prompts older records.
+# the EULA and Privacy Policy PDFs under static/legal/ AND the checkbox labels
+# in templates/setup/_agreements.html, which carry the publication disclosure.
+# Nothing re-prompts older records.
 # See docs/features/device-state-and-telemetry.md#consent-version-and-wording.
-TELEMETRY_CONSENT_VERSION = "2026-08-15"
+TELEMETRY_CONSENT_VERSION = "2026-10-26"
 
 # Publishing is a condition of participation, so there is no UI for it. Only
 # honest while the agreements step checkbox discloses it (a matched pair).

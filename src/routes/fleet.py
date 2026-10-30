@@ -40,6 +40,10 @@ def _mailto(name, address):
 # target 404s today); the template omits the line while this is blank.
 PRIMER_URL = ""
 
+# The network's dashboard and map, one site. Also the setup wizard's claim
+# step, which says where a claimed node appears, and _fleet_bar.html's button.
+DASHBOARD_URL = "https://app.retina.fm"
+
 # Fixed links out, ordered by distance from the node: the company, the manual
 # for this box, the live view of the wider network (dashboard and map are one
 # site, also linked from the banner), news from the field, then the community
@@ -52,7 +56,7 @@ RESOURCES = (
     _resource("Retina Wiki",
               "https://github.com/offworldlabs/owl-os/wiki/4-Troubleshooting-and-Tuning",
               "book"),
-    _resource("Network Map and Dashboard", "https://app.retina.fm", "map"),
+    _resource("Network Map and Dashboard", DASHBOARD_URL, "map"),
     _resource("Passive Radar News", "https://passiveradar.com/", "news"),
     _resource("blah2 Discord", "https://discord.gg/ewNQbeK5Zn", "chat"),
 )

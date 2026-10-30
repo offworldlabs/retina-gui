@@ -1,4 +1,6 @@
-from flask import Blueprint, redirect, render_template, request
+import os
+
+from flask import Blueprint, redirect, render_template, request, send_from_directory, url_for
 
 from routes.sdr import get_current_mode
 
@@ -62,7 +64,37 @@ def index():
                            mode=get_current_mode())
 
 
+# The two agreements, as PDFs. Read: a redirect to the static file, so the
+# browser shows it. Download (?download=1): the same file sent as an
+# attachment under a readable name, because the download attribute on a link
+# is advice some browsers ignore. The files ship in their own change; until
+# one is there, both links land on a page saying the document is still being
+# finalised. See docs/features/setup-wizard.md#agreements.
+LEGAL_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                         "..", "static", "legal")
+LEGAL_DOCUMENTS = {
+    "eula": ("eula.pdf", "RETINA-EULA.pdf", "End User Licence Agreement"),
+    "privacy-policy": ("privacy-policy.pdf", "Offworld-Labs-Privacy-Policy.pdf", "Privacy Policy"),
+}
+
+
+def _legal(name):
+    filename, download_name, title = LEGAL_DOCUMENTS[name]
+    if not os.path.exists(os.path.join(LEGAL_DIR, filename)):
+        return render_template("legal_pending.html", title=title)
+    if request.args.get("download") == "1":
+        return send_from_directory(os.path.abspath(LEGAL_DIR), filename, as_attachment=True,
+                                   download_name=download_name, mimetype="application/pdf")
+    return redirect(url_for("static", filename="legal/" + filename))
+
+
 @bp.route("/eula")
 def eula():
-    """Display EULA page."""
-    return render_template("eula.html")
+    """The End User Licence Agreement: read it, or ?download=1 to save it."""
+    return _legal("eula")
+
+
+@bp.route("/privacy-policy")
+def privacy_policy():
+    """The Privacy Policy: read it, or ?download=1 to save it."""
+    return _legal("privacy-policy")
