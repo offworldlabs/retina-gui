@@ -12,6 +12,9 @@ bp = Blueprint('towers', __name__, url_prefix='/towers')
 # The finder ranks best-first; only the best few back /config's preset picker.
 # See docs/features/towers.md#tower-search
 MAX_CACHED_TOWERS = 5
+# The most an owner may tick by hand on the wizard's tower step.
+# See docs/features/towers.md#choosing-what-to-cache
+MAX_CACHED_TOWERS_BY_HAND = 10
 
 # Covers the upstream's two geocoders at 10s each plus its Nominatim throttle.
 # See docs/features/towers.md#timeouts-and-limits
@@ -112,7 +115,11 @@ def search():
         resp.raise_for_status()
         result = resp.json()
         towers = _cacheable_towers(result.get("towers") or [])
-        if towers:
+        # The wizard's tower step owns the list it keeps (cache: false) and
+        # saves it through /towers/cache/set; caching here would replace the
+        # owner's picks on every search. Defaults on for any older page.
+        # See docs/features/towers.md#choosing-what-to-cache
+        if towers and body.get("cache", True) is not False:
             try:
                 device_state.save_towers_cache(body["lat"], body["lon"], towers[:MAX_CACHED_TOWERS])
             except Exception as e:
@@ -213,10 +220,33 @@ def _upstream_detail(resp, fallback):
     return detail if isinstance(detail, str) and detail.strip() else fallback
 
 
+def _refused_while_the_wizard_runs():
+    """409 while the setup wizard is in progress, otherwise None.
+
+    The wizard's tower step owns the list then and replaces it whole, so an
+    add or remove from a Configuration page tab left open would be undone by
+    its next save, and a remove by position could hit the wrong tower after
+    it re-sorts. See docs/features/towers.md#the-tower-cache.
+    """
+    from app import device_state
+
+    if device_state.is_setup_wizard_in_progress():
+        return jsonify({
+            "success": False,
+            "error": "The setup wizard is choosing this node's towers. "
+                     "Finish or leave it, then change them here.",
+        }), 409
+    return None
+
+
 @bp.route("/cache/add", methods=["POST"])
 def cache_add():
     """Manually add a tower to the cached tower-preset list."""
     from app import device_state
+
+    refused = _refused_while_the_wizard_runs()
+    if refused:
+        return refused
 
     body = request.get_json()
     if not body:
@@ -257,10 +287,54 @@ def cache_add():
     return jsonify({"success": True, "towers": cache["towers"], "cached_at": cache["cached_at"]})
 
 
+@bp.route("/cache/set", methods=["POST"])
+def cache_set():
+    """Replace the cached tower-preset list with the towers the owner kept.
+
+    The wizard's tower step, which owns the list it keeps (its searches pass
+    cache: false). The list also carries towers added by hand on the
+    Configuration page (source "manual"), which the wizard keeps as they are.
+    Every tower is screened as the search screens them; only the finder's
+    towers count toward MAX_CACHED_TOWERS_BY_HAND, since the Configuration
+    page's add has no cap of its own.
+    See docs/features/towers.md#choosing-what-to-cache.
+    """
+    from app import device_state
+
+    body = request.get_json(silent=True)
+    if not body:
+        return jsonify({"success": False, "error": "Missing JSON body"}), 400
+
+    try:
+        lat = float(body.get("lat"))
+        lon = float(body.get("lon"))
+    except (TypeError, ValueError):
+        return jsonify({"success": False, "error": "lat and lon are required"}), 400
+    towers = body.get("towers")
+    if not isinstance(towers, list):
+        return jsonify({"success": False, "error": "towers must be a list"}), 400
+    picked = [t for t in towers if not (isinstance(t, dict) and t.get("source") == "manual")]
+    if len(picked) > MAX_CACHED_TOWERS_BY_HAND:
+        return jsonify({
+            "success": False,
+            "error": f"Keep at most {MAX_CACHED_TOWERS_BY_HAND} towers",
+        }), 400
+
+    kept = _cacheable_towers(towers)
+    device_state.save_towers_cache(lat, lon, kept)
+    cache = device_state.get_towers_cache() or {}
+    return jsonify({"success": True, "towers": cache.get("towers", []),
+                    "cached_at": cache.get("cached_at")})
+
+
 @bp.route("/cache/remove", methods=["POST"])
 def cache_remove():
     """Remove a tower from the cached tower-preset list by its position."""
     from app import device_state
+
+    refused = _refused_while_the_wizard_runs()
+    if refused:
+        return refused
 
     body = request.get_json()
     if not body or body.get("index") is None:

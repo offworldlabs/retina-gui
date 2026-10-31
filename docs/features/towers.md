@@ -28,6 +28,7 @@ picker on `/config` and as Auto-Calibrate's alternate-tower list.
 | `/towers/elevation` | GET | tower-finder `/api/elevation` | Advisory altitude prefill. |
 | `/towers/cache/add` | POST | none | Manual tower into the cache. |
 | `/towers/cache/remove` | POST | none | Remove a cached tower by index. |
+| `/towers/cache/set` | POST | none | Replace the cache with the towers the wizard's owner ticked. |
 | `/towers/spectrum/events` | GET (SSE) | retina-spectrum `/api/events` | Byte-for-byte stream proxy for the wizard's RF scan. |
 | `/towers/select` | POST | none | Save location and centre frequency, then queue an apply. |
 
@@ -44,9 +45,45 @@ picker on `/config` and as Auto-Calibrate's alternate-tower list.
 The response is returned to the browser unchanged, so the wizard's map and table can show
 every tower the service found. Separately, the towers are screened (see
 [Screening cached towers](#screening-cached-towers)) and the first `MAX_CACHED_TOWERS` (5) are
-written to the cache. The service already ranks best-first, and the cache only backs a dropdown
-and a manage list, which stay usable only when short. A failed cache write is logged and does
-not fail the search.
+written to the cache, unless the request carries `cache: false`. The service already ranks
+best-first, and the cache only backs a dropdown and a manage list, which stay usable only when
+short. A failed cache write is logged and does not fail the search.
+
+The wizard's tower step always sends `cache: false`: it owns the list it keeps and saves it
+through `/towers/cache/set` (see [Choosing what to cache](#choosing-what-to-cache)). Caching on
+every search threw away the owner's picks whenever the page searched again, which it does on
+"Show every tower near you", on going back to the swept list, and on a reload; that was found
+on a test node. The default stays on for any other caller, including a wizard page that was
+loaded before an update.
+
+Note what the service does with `measurements`: it returns only the towers the sweep measured
+and drops the rest before ranking (its `process_and_rank`, the `measured` filter). A tower the
+sweep did not reach is not in the response at all, which is why the wizard offers a second,
+location-only search. See
+[setup-wizard.md](setup-wizard.md#towers-the-sweep-did-not-measure).
+
+## Choosing what to cache
+
+`cache_set()` replaces the whole cached list with the towers the owner kept on the wizard's
+tower step: `lat`, `lon` (the search position, kept so `/set-up` can still rehydrate a reload)
+and `towers`, the finder's own records as the page received them plus any towers added by hand
+on the Configuration page. The route screens them all with `_cacheable_towers`, exactly as the
+search does before it caches. It is a replacement, not a merge, so an owner who unticks a tower
+sees it go.
+
+- **Hand-added towers survive the wizard.** The page carries every `source: manual` tower from
+  the saved list into what it posts, wherever the search position is, and never shows or
+  unticks them. Before, the wizard's first search replaced them along with everything else.
+- **Only the finder's towers count toward the ceiling.** The route refuses more than
+  `MAX_CACHED_TOWERS_BY_HAND` (10) towers that are not `manual`: the default of five is the
+  finder's choice, ten is the most a preset picker stays readable at. Hand-added towers do not
+  count, because `cache_add()` has no cap, and counting them would refuse every save from an
+  owner who had added more than ten.
+- **The list is saved best first,** finder towers by their rank and hand-added towers after
+  them in their own order, because Auto-Calibrate takes the first cached towers as its
+  alternates (see [The tower cache](#the-tower-cache)). The position of a tower in the list
+  therefore changes when the wizard saves. `cache_remove()` works by position, which is why it
+  and `cache_add()` refuse while the wizard runs (see [The tower cache](#the-tower-cache)).
 
 Failures collapse to one message per kind: a timeout is 504, any other request failure is 502,
 and anything unexpected is 500.
@@ -54,8 +91,10 @@ and anything unexpected is 500.
 ## The tower cache
 
 `towers-cache.json` holds `lat`, `lon`, `cached_at` and a `towers` list. It has no expiry:
-tower frequencies and positions essentially never change, and re-running the wizard's tower
-step overwrites it with a fresh search.
+tower frequencies and positions essentially never change. Re-running the wizard's tower step at
+the same position starts from the saved list; at a new position it replaces the finder's towers
+with the new search's best few and keeps the hand-added ones (see
+[Choosing what to cache](#choosing-what-to-cache)).
 
 Its consumers:
 
@@ -72,6 +111,12 @@ set to the typed name), creating the cache if the wizard's search never ran.
 Both return the updated list so the page can re-render without a reload. They write the cache
 file immediately and are independent of the staged `/config` form (the same "takes effect
 immediately" model as SSH keys).
+
+Both refuse with 409, and a sentence the page shows, while the setup wizard is in progress
+(`_refused_while_the_wizard_runs`). The wizard's tower step owns the list then and replaces it
+whole, so an add from a Configuration page tab left open from before the wizard started would
+be undone by the wizard's next save, and a removal by position could hit the wrong tower once
+the wizard re-sorts. `/config` itself already redirects to the wizard; the routes did not.
 
 `cache_add()` refuses a name longer than `TX_NAME_MAX_LENGTH` itself, as well as through
 `LocationFormConfig`, so the error lands on the field the owner is typing into rather than
@@ -187,4 +232,5 @@ the owner switches back to radar mode.
 | `ELEVATION_TIMEOUT_S` | 15 s | One cached upstream lookup, and nothing waits on the result. |
 | `GEOCODE_QUERY_MAX_LENGTH` | 200 | Mirrors the upstream's `AddressQuery` bound. |
 | `MAX_CACHED_TOWERS` | 5 | Keeps the preset dropdown and manage list usable. |
+| `MAX_CACHED_TOWERS_BY_HAND` | 10 | The most the wizard's Keep column accepts. |
 | Spectrum SSE | 5 s connect, no read timeout | The scan stream is long-lived. On failure the proxy emits one `{"type":"error"}` message. |

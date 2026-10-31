@@ -346,6 +346,173 @@ class TestCompletionSaysWhenItFallsShort:
         assert any('Return to radar skipped' in r.message for r in caplog.records)
 
 
+# ── Choosing what to cache ─────────────────────────────────────
+
+
+def tower(callsign, rank, freq=500.0 + 0.0):
+    return {"callsign": callsign, "name": callsign, "rank": rank,
+            "frequency_mhz": freq, "latitude": 40.0 + rank / 100,
+            "longitude": -75.0, "altitude_m": 100, "distance_km": 10.0 * rank}
+
+
+class TestChoosingWhatToCache:
+    def test_the_table_has_a_keep_column_and_says_what_it_means(self, app_client):
+        towers = panel(page(app_client), 'towers')
+        assert '<th title="Save this tower on the node as a preset">Keep</th>' in towers
+        assert 'Cached Towers on the Configuration page' in towers
+        js = setup_js()
+        assert "postJSON('/towers/cache/set'" in js
+
+    def test_setting_the_cache_replaces_it_with_the_ticked_towers(self, app_client):
+        import app as app_module
+        app_module.device_state.save_towers_cache(40.0, -75.0, [tower("KOLD-TV", 1)])
+
+        kept = [tower("KTST-TV", 2), tower("KNEW-TV", 5)]
+        resp = app_client.post('/towers/cache/set',
+                               data=json.dumps({"lat": 40.0, "lon": -75.0, "towers": kept}),
+                               content_type='application/json')
+        assert resp.status_code == 200
+        cache = app_module.device_state.get_towers_cache()
+        assert [t["callsign"] for t in cache["towers"]] == ["KTST-TV", "KNEW-TV"]
+        assert cache["lat"] == 40.0
+
+    def test_the_towers_are_screened_as_the_search_screens_them(self, app_client):
+        import app as app_module
+        bad = dict(tower("KBAD-TV", 3), latitude="north")
+        resp = app_client.post('/towers/cache/set',
+                               data=json.dumps({"lat": 40.0, "lon": -75.0,
+                                                "towers": [tower("KTST-TV", 1), bad]}),
+                               content_type='application/json')
+        assert resp.status_code == 200
+        assert [t["callsign"] for t in app_module.device_state.get_towers_cache()["towers"]] == ["KTST-TV"]
+
+    def test_there_is_a_ceiling_by_hand(self, app_client):
+        from routes.towers import MAX_CACHED_TOWERS_BY_HAND
+        too_many = [tower(f"K{i:03d}", i) for i in range(MAX_CACHED_TOWERS_BY_HAND + 1)]
+        resp = app_client.post('/towers/cache/set',
+                               data=json.dumps({"lat": 40.0, "lon": -75.0, "towers": too_many}),
+                               content_type='application/json')
+        assert resp.status_code == 400
+
+    def test_a_bad_body_is_refused(self, app_client):
+        for body in ({}, {"lat": 40.0}, {"lat": 40.0, "lon": -75.0, "towers": "KTST-TV"}):
+            resp = app_client.post('/towers/cache/set', data=json.dumps(body),
+                                   content_type='application/json')
+            assert resp.status_code == 400, body
+
+    def test_towers_added_on_the_configuration_page_do_not_count_toward_the_ceiling(self, app_client):
+        """That page's add has no cap, so an owner can hold more hand-added
+        towers than the wizard's ceiling. Counting them would refuse every
+        save from the wizard."""
+        import app as app_module
+        from routes.towers import MAX_CACHED_TOWERS_BY_HAND
+        picked = [tower(f"K{i:03d}", i + 1) for i in range(MAX_CACHED_TOWERS_BY_HAND)]
+        manual = [dict(tower(f"KHND{i}", 1), source="manual") for i in range(3)]
+        for t in manual:
+            t.pop("rank", None)
+        resp = app_client.post('/towers/cache/set',
+                               data=json.dumps({"lat": 40.0, "lon": -75.0, "towers": picked + manual}),
+                               content_type='application/json')
+        assert resp.status_code == 200
+        saved = app_module.device_state.get_towers_cache()["towers"]
+        assert len(saved) == MAX_CACHED_TOWERS_BY_HAND + 3
+        assert [t["callsign"] for t in saved[-3:]] == ["KHND0", "KHND1", "KHND2"]
+
+    @patch('routes.towers.http_requests.get')
+    def test_the_wizard_search_does_not_replace_the_kept_list(self, mock_get, app_client):
+        """Every search used to cache the finder's best five, which threw away
+        the owner's picks on "Show every tower", going back, and a reload.
+        Found on a test node. The wizard now saves its list itself."""
+        import app as app_module
+        mock_resp = MagicMock()
+        mock_resp.json.return_value = {"towers": [tower("KNEW-TV", 1)]}
+        mock_get.return_value = mock_resp
+        app_module.device_state.save_towers_cache(40.0, -75.0, [tower("KPICK-TV", 4)])
+
+        app_client.post('/towers/search', data=json.dumps({"lat": 40.0, "lon": -75.0, "cache": False}),
+                        content_type='application/json')
+        assert [t["callsign"] for t in app_module.device_state.get_towers_cache()["towers"]] == ["KPICK-TV"]
+
+        # A caller that does not say so still caches, as before.
+        app_client.post('/towers/search', data=json.dumps({"lat": 40.0, "lon": -75.0}),
+                        content_type='application/json')
+        assert [t["callsign"] for t in app_module.device_state.get_towers_cache()["towers"]] == ["KNEW-TV"]
+
+    def test_the_page_owns_the_list_across_searches_and_reloads(self, app_client):
+        js = setup_js()
+        start = js.index('function search(useSweep)')
+        assert 'cache: false' in js[start:js.index('search(true);', start)]
+        # Matched by callsign and frequency: the two lists hold different copies.
+        assert 'function towerKey(t)' in js
+        assert "(keptTowers || []).some(function(k) { return towerKey(k) === key; })" in js
+        # A reload, or a re-run at the same point, starts from the saved list.
+        assert 'window._cachedTowers' in js
+        assert 'saved.lat === params.lat && saved.lon === params.lon' in js
+        # Hand-added towers carry over anywhere.
+        assert 'manualCarry = savedTowers.filter(isManual)' in js
+        page_html = page(app_client)
+        assert 'window._cachedTowers = ' in page_html
+        assert 'window._maxKeptTowers = ' in page_html
+
+    def test_a_configuration_tab_left_open_cannot_edit_the_list_mid_wizard(self, app_client):
+        """The Configuration page redirects to the wizard, but a tab opened
+        before the wizard started could still post. The wizard replaces the
+        list whole, so that add would be undone, and a remove by position
+        could hit the wrong tower after the wizard re-sorts."""
+        import app as app_module
+        app_module.device_state.save_towers_cache(40.0, -75.0, [tower("KTST-TV", 1)])
+        app_module.device_state.save_setup_wizard_step('towers')
+
+        add = {"callsign": "KHND-TV", "frequency_mhz": 600.0, "latitude": 40.1, "longitude": -75.1}
+        resp = app_client.post('/towers/cache/add', data=json.dumps(add), content_type='application/json')
+        assert resp.status_code == 409
+        assert 'setup wizard' in resp.get_json()['error']
+        resp = app_client.post('/towers/cache/remove', data=json.dumps({"index": 0}),
+                               content_type='application/json')
+        assert resp.status_code == 409
+        assert [t["callsign"] for t in app_module.device_state.get_towers_cache()["towers"]] == ["KTST-TV"]
+
+        # The wizard's own save still works.
+        resp = app_client.post('/towers/cache/set',
+                               data=json.dumps({"lat": 40.0, "lon": -75.0, "towers": [tower("KNEW-TV", 2)]}),
+                               content_type='application/json')
+        assert resp.status_code == 200
+
+        # Once the wizard is over, the Configuration page edits again.
+        app_client.post('/set-up/save-step', data=json.dumps({"step": "complete"}),
+                        content_type='application/json')
+        resp = app_client.post('/towers/cache/add', data=json.dumps(add), content_type='application/json')
+        assert resp.status_code == 200
+
+    def test_a_failed_save_puts_the_ticks_back(self):
+        """The page said "Could not save the list" but left the box ticked, so
+        it showed a list the node did not hold. Found on a test node."""
+        js = setup_js()
+        start = js.index('function syncCache(now)')
+        body = js[start:js.index('}, now ? 0 : 600);', start)]
+        assert 'savedKept = sending' in body
+        assert 'keptTowers = savedKept.slice()' in body
+        assert 'refreshKeepBoxes()' in body
+
+    def test_the_list_is_saved_best_first_with_hand_added_towers_last(self):
+        """Auto-Calibrate tries the first cached towers as its alternates."""
+        js = setup_js()
+        start = js.index('function bestFirst(list)')
+        body = js[start:js.index('function keptSummary', start)]
+        assert 'Number(a.rank)' in body
+        assert 'picked.concat(list.filter(isManual))' in body
+
+    def test_the_page_offers_the_location_only_search(self, app_client):
+        """The finder drops every tower the sweep did not measure, so a strong
+        tower the scan missed is simply absent. The way to see it is a search
+        by location alone."""
+        towers = panel(page(app_client), 'towers')
+        assert 'id="towerScope"' in towers
+        js = setup_js()
+        assert 'Show every tower near you' in js
+        assert 'search(false)' in js
+
+
 # ── Coordinates ────────────────────────────────────────────────
 
 
