@@ -374,3 +374,41 @@ def test_the_closing_step_is_served_on_summary_at_the_end_of_either_run(app_clie
     last = len(tutorial.STEPS)
     run = payload_in(app_client.get(f"/summary?tutorial={last}&summary=1").data.decode())
     assert run["current"] == last - 1
+
+
+# ── The welcome ────────────────────────────────────────────────
+
+
+class TestTheWelcome:
+    def test_every_run_opens_with_the_welcome_on_its_first_page(self):
+        with_summary = tutorial.steps_for(include_summary=True)
+        without = tutorial.steps_for(include_summary=False)
+        assert with_summary[0]["welcome"] and with_summary[0]["page"] == "/summary"
+        assert without[0]["welcome"] and without[0]["page"] == "/"
+        assert with_summary[1]["title"] == "List of nodes"
+        assert without[1]["title"] == "Welcome to your node"
+
+    def test_the_welcome_points_at_nothing_and_says_two_sentences(self):
+        welcome = tutorial.STEPS[0]
+        assert welcome["targets"] == []
+        assert len(re.findall(r"[.!?](?:\s|$)", welcome["body"])) == 2
+
+    def test_the_welcome_greets_the_owner_by_first_name(self, app_client):
+        app_client.post('/set-up/contact',
+                        data=json.dumps({"first_name": "Ada", "last_name": "Lovelace"}),
+                        content_type='application/json')
+        body = app_client.get('/?tutorial=1').data.decode()
+        assert '"title": "Welcome Ada!"' in body
+        assert '"welcome": true' in body
+
+    def test_without_a_contact_name_it_is_a_plain_welcome(self, app_client):
+        """The node's name is not a person, so it does not stand in."""
+        app_client.post("/node-name", data={"name": "Sample Rooftop"})
+        body = app_client.get('/?tutorial=1').data.decode()
+        assert '"title": "Welcome!"' in body
+        assert "Sample Rooftop!" not in body
+
+    def test_the_overlay_does_not_call_the_welcome_empty(self):
+        js = (PROJECT_ROOT / "static" / "tutorial.js").read_text()
+        assert "all.length === 0 && !steps[current].welcome" in js
+        assert "card.classList.toggle('tut-welcome', !!step.welcome)" in js

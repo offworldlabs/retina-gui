@@ -60,4 +60,14 @@ def tutorial_context():
     step_arg = request.args.get("tutorial")
     if step_arg is None:
         return None
-    return tutorial.payload(request.path, step_arg, _include_summary(), _demo())
+    return tutorial.payload(request.path, step_arg, _include_summary(), _demo(),
+                            owner_name=_owner_name())
+
+
+def _owner_name():
+    """Whom the welcome greets: the contact record's first name, or nothing.
+    See docs/features/tutorial.md#the-welcome."""
+    from app import device_state
+
+    contact = device_state.get_telemetry_contact() or {}
+    return contact.get("first_name") or ""

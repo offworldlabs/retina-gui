@@ -216,7 +216,8 @@
     // to fit beside the page. See docs/features/tutorial.md#the-overlay
     function margins() {
         // A step with a picture uses a wide card, which no margin can hold.
-        if (steps[current].image) return null;
+        // The welcome stands in the middle of the page, beside nothing.
+        if (steps[current].image || steps[current].welcome) return null;
         var column = document.querySelector('.shell') || document.querySelector('main.main');
         if (!column) return null;
         var box = column.getBoundingClientRect();
@@ -498,8 +499,9 @@
         });
 
         // Said only when there is truly nothing to point at (for example the
-        // Services cards while the node is in Spectrum mode).
-        var nothing = all.length === 0;
+        // Services cards while the node is in Spectrum mode). The welcome
+        // points at nothing by design. See docs/features/tutorial.md#the-welcome
+        var nothing = all.length === 0 && !steps[current].welcome;
         note.hidden = !nothing;
         if (nothing) note.textContent = 'This part of the page is not shown right now, so there is nothing to point at.';
 
@@ -553,6 +555,7 @@
         figure.hidden = !step.image;
         // Wide enough to read the picture; see .tut-wide in tutorial.css.
         card.classList.toggle('tut-wide', !!step.image);
+        card.classList.toggle('tut-welcome', !!step.welcome);
         if (step.image) {
             drawMarks(step.image);
             // The size comes with the step, so the card's height is right
