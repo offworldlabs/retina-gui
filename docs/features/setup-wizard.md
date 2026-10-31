@@ -10,7 +10,7 @@ re-consent path, and most steps then become informational.
 
 | File | Role |
 | --- | --- |
-| [src/routes/setup.py](../../src/routes/setup.py) | `/set-up` page render, plus the step routes: `save-step`, `consent`, `contact`, `claim`, `complete` |
+| [src/routes/setup.py](../../src/routes/setup.py) | `/set-up` page render, plus the step routes: `save-step`, `consent`, `contact`, `claim`, `filters`, `complete` |
 | [templates/setup.html](../../templates/setup.html) | Page shell: header, progress dots, footer buttons for every step, script bootstrap |
 | [templates/setup/_agreements.html](../../templates/setup/_agreements.html) | Agreements step (EULA, Privacy Policy, cloud services / publication) |
 | [static/legal/](../../static/legal/) | The EULA and Privacy Policy PDFs the agreements step links to and offers for download |
@@ -20,7 +20,7 @@ re-consent path, and most steps then become informational.
 | [templates/setup/_while_you_wait.html](../../templates/setup/_while_you_wait.html) | `while_you_wait` macro shared by the two install steps |
 | [templates/setup/_location.html](../../templates/setup/_location.html) | Receiver location step |
 | [templates/setup/_towers.html](../../templates/setup/_towers.html) | Tower selection step |
-| [templates/setup/_calibrate.html](../../templates/setup/_calibrate.html) | Auto-Calibrate step markup |
+| [templates/setup/_calibrate.html](../../templates/setup/_calibrate.html) | Optimise reception step: the filters, then Auto-Calibrate |
 | [templates/setup/_name.html](../../templates/setup/_name.html) | Name your node step |
 | [templates/setup/_claim.html](../../templates/setup/_claim.html) | Node claim step |
 | [templates/setup/_complete.html](../../templates/setup/_complete.html) | Final step |
@@ -45,7 +45,7 @@ the `[data-step]` elements in document order, so reordering the includes reorder
 | 4 | `radar` | RETINA packages | No on first run | Installs retina-node via `/mender/install` |
 | 5 | `location` | Where is your receiver? | Yes (skips towers too) | Nothing directly; switches the SDR to spectrum mode |
 | 6 | `towers` | Choose a tower | Yes | Receiver and transmitter location, frequency (`/towers/select`); the cached tower list (`/towers/cache/set`) |
-| 7 | `calibrate` | Tune the receiver | Yes | Gain settings, persisted automatically |
+| 7 | `calibrate` | Optimise reception | Yes | The two notch filters (`/set-up/filters`); gain settings, persisted automatically |
 | 8 | `name` | Name your node | Yes | The node's name (`/node-name`), or nothing on Skip |
 | 9 | `account` | Connect your node to your account | Yes | Claim record, or nothing on Skip |
 | 10 | `complete` | You're all set | n/a | Completion flag; the receiver name; forces radar mode |
@@ -135,9 +135,10 @@ map and pin where they left them rather than blank boxes.
 
 ### Prefilled answers
 
-`/set-up` also prefills the contact, support, name and claim steps. Contact comes from the
-stored contact record, and an empty record renders as empty boxes, which is the ordinary case.
-The support switches come from `remote_access.status()` and the name from `node_name.get()`. Claim comes from the stored claim address, except
+`/set-up` also prefills the contact, support, filter, name and claim steps. Contact comes from
+the stored contact record, and an empty record renders as empty boxes, which is the ordinary
+case. The support switches come from `remote_access.status()`, the filters from the running
+config and the name from `node_name.get()`. Claim comes from the stored claim address, except
 when `status.json` from retina-telemetry reports the node as `owned`: then the owner's address
 from that status is shown instead and the step can only be skipped (see
 [Node claim](#node-claim)).
@@ -539,7 +540,7 @@ whole metres (a site altitude, not a survey figure).
 
 Find Towers stores the coordinates (parsed from the boxes, see [Coordinates](#coordinates)),
 altitude and RF measurements in `window._towerSearchParams` and advances. Skip jumps two steps,
-past both location and towers, to the calibrate step.
+past both location and towers, to the Optimise reception step.
 
 ## Tower selection
 
@@ -691,11 +692,38 @@ tower's position, altitude, callsign and frequency.
 - With retina-node not installed yet, the config is saved and the step advances; services start
   when retina-node is installed.
 
-## Auto-Calibrate step
+## Optimise reception step
 
-Optional tuning against the tower just chosen. It never blocks completion. The engine and the
-shared client are covered in [auto-calibrate.md](auto-calibrate.md); this section covers only the
-wizard's use of them.
+Optional tuning against the tower just chosen, with the receiver's two filters set first. It
+never blocks completion. The engine and the shared client are covered in
+[auto-calibrate.md](auto-calibrate.md); this section covers only the wizard's use of them.
+
+### Filters
+
+Before the run, the step shows the two notch filters from the Capture section of the
+Configuration page, the DAB notch (155–235 MHz) and the FM notch (77–115 MHz), as checkboxes
+prefilled from the running config (`current_capture_filters` in `routes/setup.py`: the merged
+config, else `user.yml`, else off). They sit here, before Auto-Calibrate, because changing
+either one moves the signal level enough that the capture section's own help text says to
+recalibrate afterwards; asking first means the run tunes the receiver the owner will actually
+use.
+
+Above the two boxes the step shows the chosen frequency, the tower picked on the previous step
+(`window._chosenFcMhz`: set by the tower step when it saves, and on a reload by the page from
+`capture.fc` in `user.yml`, else the merged config, via `current_capture_fc_mhz`), and beside
+each filter a recommendation: **on** unless the chosen frequency sits inside the band that
+filter blocks (DAB 155–235 MHz, FM 77–115 MHz), in which case **off**, because the notch would
+take out the very signal the radar listens for. `renderFilterAdvice` in `setup.js` draws it on
+every entry; with no frequency it says so and recommends both on. It is advice: nothing ticks a
+box for the owner.
+
+Each change posts `/set-up/filters` at once, which writes only the two keys into
+`user.yml`'s `capture.device` and queues an apply (202 with the status, as `/towers/select`
+does; `applied: false` without retina-node, when the value is simply saved for the first start).
+The step polls the apply to its end (`CAL.pollApply`) with the boxes and Optimise reception
+disabled, because a run started mid-restart would measure the old filter. A refused change
+(409 while an update or calibration runs, or any failure) puts the box back and shows the
+reason. The run itself is unchanged below.
 
 - The run shape is `RetinaCalibrate.QUICK_RUN`: scope `current_tower` (the owner picked a tower
   one step ago, and re-searching alternates would contradict that and triple the time) plus
@@ -770,11 +798,11 @@ mode the link carries `demo=1` so the tour runs in demo mode too.
 
 | Mode | Trigger | Behaviour |
 | --- | --- | --- |
-| Demo | `/set-up?demo=1` | Treated as a re-run. Starts at the first step, pre-ticks the agreements, skips the consent write, prefills location with fixed example coordinates and seeds the tower search. `window.fetch` is wrapped to fake `/mender/cloud-services`, `/mender/check-os`, `/mender/check`, `/mender/install` (an install that finishes after 8 seconds), `/towers/select`, `/towers/cache/set`, `/api/mode`, `/set-up/save-step`, `/set-up/complete`, `/node-name`, `/remote-access/toggle` and `/remote-access/shell`. Everything else goes to the real server. |
+| Demo | `/set-up?demo=1` | Treated as a re-run. Starts at the first step, pre-ticks the agreements, skips the consent write, prefills location with fixed example coordinates and seeds the tower search. `window.fetch` is wrapped to fake `/mender/cloud-services`, `/mender/check-os`, `/mender/check`, `/mender/install` (an install that finishes after 8 seconds), `/towers/select`, `/towers/cache/set`, `/api/mode`, `/set-up/save-step`, `/set-up/filters`, `/set-up/complete`, `/node-name`, `/remote-access/toggle` and `/remote-access/shell`. Everything else goes to the real server. |
 | Dev | `DEV_MODE` environment variable | Starts at the location step instead of the recorded one. |
 
 Demo mode is meant to be safe to show on a live node, which is why it skips the consent write
-and also fakes `/towers/cache/set`, `/node-name` and the
+and also fakes `/set-up/filters` (a stack restart), `/towers/cache/set`, `/node-name` and the
 two `/remote-access/*` switches. Requests it does not fake still reach the node, so in demo mode
 Save on the contact step, Send on the claim step, the tower search, the address and elevation
 lookups, and Optimise reception are all real actions.
