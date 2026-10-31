@@ -566,17 +566,33 @@ container it already owns, and the second search on one entry is a real case now
 
 ### Cached towers
 
-The search caches the finder's best `MAX_CACHED_TOWERS` on the node (see
-[towers.md](towers.md#tower-search)); those are what the Configuration page's Cached Towers
-section offers as presets. The table's first column, **Keep**, shows that list and lets the
-owner change it: the best few start ticked, a tick or untick posts the whole ticked set to
-`/towers/cache/set` (debounced, so a run of ticks is one request), and the status beside the
-explanation says how many are kept or why a tick was refused. Two rules: the chosen tower is
-always kept (unticking it is refused, and choosing an unkept tower ticks it), because it is the
-one preset the node is about to run on; and at most `MAX_CACHED_TOWERS_BY_HAND` may be ticked,
-so the preset picker stays short. The list posted is the finder's own records, screened by the
-route as the search screens them. The tick is its own control: clicking it does not also select
-the row.
+The cached list is what the Configuration page's Cached Towers section offers as presets, and
+what Auto-Calibrate tries as alternates. The table's first column, **Keep**, shows that list and
+lets the owner change it. The page is the list's only writer during the wizard: its searches
+send `cache: false`, and every change posts the whole kept set to `/towers/cache/set`
+(debounced, so a run of ticks is one request). The status beside the explanation says how many
+are kept, how many the owner added on the Configuration page, or why a tick was refused.
+
+- **Where the list starts.** If a list is saved for this search position (a reload, or a re-run
+  at the same point), it starts from that, Configuration page edits included. Otherwise the
+  finder's best `MAX_CACHED_TOWERS` start ticked, and the page saves them at once.
+- **Picks outlive a search.** "Show every tower near you" and going back keep the owner's picks.
+  A tower is matched by callsign and frequency, because the two lists hold different copies of
+  the same tower. A kept tower that is not in the list on screen stays kept.
+- **Hand-added towers** (`source: manual`, from the Configuration page) are kept as they are,
+  wherever the search position is. They are not shown or ticked here, and they do not count
+  toward the ceiling.
+- **The chosen tower is always kept.** Unticking it is refused, and choosing an unkept tower
+  ticks it, because it is the one preset the node is about to run on. If that would pass the
+  ceiling, the lowest-ranked pick is dropped and the status says which.
+- **At most `MAX_CACHED_TOWERS_BY_HAND`** finder towers may be ticked, so the preset picker stays
+  short. The page reads the number from the template, so it cannot drift from the route's.
+- **A failed save puts the ticks back** to the last list the node accepted and says so, so the
+  page never shows a list the node does not hold.
+- **The list is saved best first** (see [towers.md](towers.md#choosing-what-to-cache)).
+
+The list posted is the finder's own records, screened by the route as the search screens them.
+The tick is its own control: clicking it does not also select the row.
 
 ### Tower presentation
 

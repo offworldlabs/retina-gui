@@ -1445,9 +1445,14 @@ function initSetupWizard(resumeStep, devMode, isRerun, demoMode) {
         var towerMarkers = [];
         var selectedTower = null;
         var listenersAdded = false;
-        // The Keep column: which of the listed towers this node caches as
-        // presets. See docs/features/setup-wizard.md#cached-towers
-        var keptTowers = [];
+        // The Keep column: which towers this node caches as presets. The page
+        // is the list's only writer, and the list outlives a search: "Show
+        // every tower" and back keep the owner's picks. null until the first
+        // list of the run decides it. savedKept is the last list the node
+        // accepted, which a failed save falls back to.
+        // See docs/features/setup-wizard.md#cached-towers
+        var keptTowers = null;
+        var savedKept = null;
         var cacheSyncTimer = null;
         // Whether the current list was searched with the sweep's measurements
         // (and so omits every tower the sweep did not measure) or by location.
@@ -1473,8 +1478,7 @@ function initSetupWizard(resumeStep, devMode, isRerun, demoMode) {
         function resetResults() {
             towerMarkers = [];
             selectedTower = null;
-            keptTowers = [];
-            clearTimeout(cacheSyncTimer);
+            // Not keptTowers, and not a pending save: both outlive the list.
 
             var mapEl = document.getElementById('towerMap');
             if (window._towerMap) {
@@ -1557,7 +1561,9 @@ function initSetupWizard(resumeStep, devMode, isRerun, demoMode) {
             postJSON('/towers/search', {
                 lat: params.lat,
                 lon: params.lon,
-                measurements: measurements
+                measurements: measurements,
+                // This page saves the Keep list itself (syncCache).
+                cache: false
             })
                 .then(function(r) { return r.json(); })
                 .then(function(data) {
@@ -1578,11 +1584,12 @@ function initSetupWizard(resumeStep, devMode, isRerun, demoMode) {
         search(true);
 
         // ── The Keep column ──────────────────────────────────
-        // The search cached the finder's best few by itself; a tick here
-        // replaces that list. Debounced, so a run of ticks is one request.
+        // A tick replaces the node's list with the kept set. Debounced, so a
+        // run of ticks is one request.
         var MAX_KEEP_DEFAULT = window._maxCachedTowers || 5;
-        var MAX_KEEP = 10; // MAX_CACHED_TOWERS_BY_HAND in routes/towers.py
+        var MAX_KEEP = window._maxKeptTowers || 10;
         var cacheStatus = document.getElementById('towerCacheStatus');
+        var pendingNote = '';
 
         function sayCache(text, danger) {
             if (!cacheStatus) return;
@@ -1590,22 +1597,94 @@ function initSetupWizard(resumeStep, devMode, isRerun, demoMode) {
             cacheStatus.style.color = danger ? 'var(--danger)' : 'var(--ok)';
         }
 
-        function syncCache() {
-            clearTimeout(cacheSyncTimer);
-            sayCache('Saving\u2026');
-            cacheSyncTimer = setTimeout(function() {
-                postJSON('/towers/cache/set', {
-                    lat: params.lat, lon: params.lon, towers: keptTowers
-                })
-                .then(function() { sayCache(keptTowers.length + ' kept.'); })
-                .catch(function(err) { sayCache('Could not save the list: ' + err.message, true); });
-            }, 600);
+        // The swept and the location-only lists hold different copies of the
+        // same tower, so a tower is matched by callsign and frequency.
+        function towerKey(t) {
+            return (t.callsign || t.name || '') + '|' + Number(t.frequency_mhz);
+        }
+        // Added by hand on the Configuration page (Cached Towers): kept as
+        // they are, never shown or unticked here, and not counted toward
+        // MAX_KEEP, since that page has no cap of its own.
+        function isManual(t) { return !!t && t.source === 'manual'; }
+        function isKept(t) {
+            var key = towerKey(t);
+            return (keptTowers || []).some(function(k) { return towerKey(k) === key; });
+        }
+        function pickedCount() {
+            return keptTowers.filter(function(k) { return !isManual(k); }).length;
+        }
+        function keepTower(t, keep) {
+            var key = towerKey(t);
+            keptTowers = keptTowers.filter(function(k) { return towerKey(k) !== key; });
+            if (keep) keptTowers.push(t);
+        }
+        function refreshKeepBoxes() {
+            tableBody.querySelectorAll('tr').forEach(function(row) {
+                var box = row.querySelector('.tower-keep');
+                if (box && row._tower) box.checked = isKept(row._tower);
+            });
+        }
+        // Saved best first, because Auto-Calibrate tries the first cached
+        // towers as its alternates; hand-added towers have no rank and stay
+        // last, in their own order.
+        // See docs/features/towers.md#choosing-what-to-cache
+        function bestFirst(list) {
+            var picked = list.filter(function(t) { return !isManual(t); });
+            picked.sort(function(a, b) {
+                return (Number(a.rank) || Infinity) - (Number(b.rank) || Infinity);
+            });
+            return picked.concat(list.filter(isManual));
+        }
+        function keptSummary(list) {
+            var manual = list.filter(isManual).length;
+            return (list.length - manual) + ' kept' +
+                (manual ? ', plus ' + manual + ' you added on the Configuration page' : '') + '.';
         }
 
-        function keepTower(t, keep) {
-            var i = keptTowers.indexOf(t);
-            if (keep && i === -1) keptTowers.push(t);
-            if (!keep && i !== -1) keptTowers.splice(i, 1);
+        // Where the owner's picks start. The list saved for this position (a
+        // reload, or a re-run at the same point) is the owner's own, edits on
+        // the Configuration page included. Anywhere else, the towers added by
+        // hand still carry over, and the finder's best few join them when the
+        // first list arrives.
+        var manualCarry = [];
+        if (keptTowers === null) {
+            var saved = window._cachedTowers;
+            var savedTowers = (saved && saved.towers) || [];
+            if (savedTowers.length && saved.lat === params.lat && saved.lon === params.lon) {
+                keptTowers = savedTowers.slice();
+                savedKept = savedTowers.slice();
+            } else {
+                manualCarry = savedTowers.filter(isManual);
+            }
+        }
+
+        function syncCache(now) {
+            clearTimeout(cacheSyncTimer);
+            sayCache('Saving…');
+            cacheSyncTimer = setTimeout(function() {
+                var sending = bestFirst(keptTowers);
+                var note = pendingNote;
+                pendingNote = '';
+                postJSON('/towers/cache/set', {
+                    lat: params.lat, lon: params.lon, towers: sending
+                })
+                .then(function() {
+                    savedKept = sending;
+                    sayCache(note + keptSummary(sending));
+                })
+                .catch(function(err) {
+                    // Never show a list the node did not take: back to the
+                    // last one it did.
+                    if (savedKept) {
+                        keptTowers = savedKept.slice();
+                        refreshKeepBoxes();
+                        sayCache('Could not save that change, so the list is back to what was saved: ' +
+                                 err.message, true);
+                    } else {
+                        sayCache('Could not save the list: ' + err.message, true);
+                    }
+                });
+            }, now ? 0 : 600);
         }
 
         function renderResults(towers, query) {
@@ -1643,11 +1722,18 @@ function initSetupWizard(resumeStep, devMode, isRerun, demoMode) {
                 }
             }
 
-            // The finder's best few start kept, as the search cached them.
-            keptTowers = towers.slice(0, MAX_KEEP_DEFAULT);
+            // Only the first list of the run, with nothing saved for this
+            // position, starts from the finder's best few, and saves them at
+            // once: the search no longer caches anything by itself.
             var dflt = document.getElementById('towerCacheDefault');
             if (dflt) dflt.textContent = Math.min(MAX_KEEP_DEFAULT, towers.length);
             sayCache('');
+            if (keptTowers === null) {
+                keptTowers = manualCarry.concat(towers.slice(0, MAX_KEEP_DEFAULT));
+                if (keptTowers.length) syncCache(true);
+            } else if (savedKept) {
+                sayCache(keptSummary(savedKept));
+            }
 
             if (towers.length === 0) {
                 summaryEl.innerHTML = '';
@@ -1757,7 +1843,7 @@ function initSetupWizard(resumeStep, devMode, isRerun, demoMode) {
 
                 tr.innerHTML =
                     '<td class="keep"><input type="checkbox" class="tower-keep" title="Keep this tower on the node as a preset"' +
-                        (keptTowers.indexOf(t) !== -1 ? ' checked' : '') + '></td>' +
+                        (isKept(t) ? ' checked' : '') + '></td>' +
                     '<td class="rank"><span class="tower-badge rank-badge ' + tier.cls + '">' + esc(t.rank) + '</span></td>' +
                     '<td class="mono">' + esc(formatAreaKm2(t.expected_area_km2) || '\u2014') + '</td>' +
                     '<td>' + point + '</td>' +
@@ -1794,7 +1880,7 @@ function initSetupWizard(resumeStep, devMode, isRerun, demoMode) {
                 var keep = tr.querySelector('.tower-keep');
                 keep.addEventListener('click', function(e) { e.stopPropagation(); });
                 keep.addEventListener('change', function() {
-                    if (keep.checked && keptTowers.length >= MAX_KEEP) {
+                    if (keep.checked && pickedCount() >= MAX_KEEP) {
                         keep.checked = false;
                         sayCache('Keep at most ' + MAX_KEEP + ' towers.', true);
                         return;
@@ -1924,13 +2010,16 @@ function initSetupWizard(resumeStep, devMode, isRerun, demoMode) {
         function selectTower(t) {
             selectedTower = t;
             // Always kept: it is the one preset the node is about to run on.
-            if (keptTowers.indexOf(t) === -1) {
-                if (keptTowers.length >= MAX_KEEP) keptTowers.pop();
-                keptTowers.push(t);
-                tableBody.querySelectorAll('tr').forEach(function(row) {
-                    var box = row.querySelector('.tower-keep');
-                    if (box) box.checked = keptTowers.indexOf(row._tower) !== -1;
-                });
+            if (!isKept(t)) {
+                if (pickedCount() >= MAX_KEEP) {
+                    // Make room by dropping the lowest-ranked pick, and say so.
+                    var picks = bestFirst(keptTowers).filter(function(k) { return !isManual(k); });
+                    var dropped = picks[picks.length - 1];
+                    keepTower(dropped, false);
+                    pendingNote = (dropped.callsign || dropped.name) + ' was dropped to make room. ';
+                }
+                keepTower(t, true);
+                refreshKeepBoxes();
                 syncCache();
             }
             selectedCard.style.display = '';

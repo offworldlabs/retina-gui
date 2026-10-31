@@ -169,9 +169,12 @@
         // Public by nature: tile requests come from the browser. Empty yields a
         // watermarked map. See docs/features/setup-wizard.md#basemap-key
         window._cartoApiKey = {{ carto_api_key|default('')|tojson }};
-        // How many of the finder's best towers the search caches by itself;
-        // the Keep column starts from that. See docs/features/setup-wizard.md#cached-towers
+        // The Keep column: how many of the finder's best towers it starts with,
+        // the most an owner may keep, and the list already saved, so a reload
+        // starts from the owner's picks. See docs/features/setup-wizard.md#cached-towers
         window._maxCachedTowers = {{ max_cached_towers|default(5)|tojson }};
+        window._maxKeptTowers = {{ max_kept_towers|default(10)|tojson }};
+        window._cachedTowers = {{ (towers_cache or none)|tojson }};
         initSetupWizard({{ resume_step|tojson }}, {{ dev_mode|default(false)|tojson }}, {{ is_rerun|default(false)|tojson }}, {{ demo_mode|default(false)|tojson }});
     </script>
 {% endblock %}
