@@ -19,4 +19,4 @@ def test_the_cards_run_from_the_live_views_to_the_controller(app_client):
 def test_the_tracker_card_says_how_much_it_keeps(app_client):
     body = app_client.get("/?demo=1").data.decode()
     tracker = body.split('<div class="svc-name">Tracker</div>')[1].split("</a>")[0]
-    assert "up to 4 hours" in tracker
+    assert "Live &amp; 4hr Track Data" in tracker
