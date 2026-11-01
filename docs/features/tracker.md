@@ -187,8 +187,9 @@ what the node can see, which is not knowable from what it happened to see. Plotl
 `uirevision` keeps a viewer's own zoom across updates, so the node's range is where the axis
 starts rather than somewhere it is dragged back to.
 
-The Doppler bounds are the Full setting of the Doppler view below. By default the page draws a
-narrower band inside them.
+The Doppler bounds are the Full setting of the Doppler view below, and by default the page draws a
+narrower band inside them. The delay bounds are the Full setting of the [Delay view](#delay-view),
+which is the default for that axis.
 
 `SPEED_OF_LIGHT` is mirrored rather than imported for the same reason as the window bounds.
 
@@ -210,28 +211,58 @@ are labelled with the ranges they draw, so they stay truthful on a node with a d
 after the narrow range is changed.
 
 The gear in the page header opens Tracker settings, a native `<dialog>` (the page does not load
-Bootstrap's JavaScript), with one field: the narrow range as a whole number of hertz, from 1 to
-half the node's span (or up to 100,000 when the span is unknown). Saving switches the view to
-narrow, since setting a range is asking to see it. Reset to ±300 refills the field without
+Bootstrap's JavaScript), with two fields: this narrow Doppler range and the narrow delay range of
+the [Delay view](#delay-view). The Doppler field takes a whole number of hertz, from 1 to half the
+node's span (or up to 100,000 when the span is unknown). Saving checks both fields and saves
+neither unless both are valid. A field whose value changed switches its axis to narrow, since
+setting a range is asking to see it; an unchanged field leaves its axis as it was, so editing one
+range never narrows the other. Reset to defaults refills both fields (±300 Hz and 30 km) without
 saving.
 
 Narrow is clipped to the node's span so it never draws Doppler the node cannot see. If the span
 lies wholly to one side of the narrow band, narrow falls back to the node's bounds.
 
-The plot's `uirevision` includes the view and the narrow range. A viewer's zoom survives stream
-updates as before, but switching view or saving a new range redraws at the new range rather than
-keeping the old zoom (the delay axis included). Double-click resets to the current view's range.
+The plot's `uirevision` includes both views and both narrow ranges. A viewer's zoom survives
+stream updates as before, but switching either view or saving a new range redraws both axes at
+their current ranges rather than keeping the old zoom. Double-click resets to the current views'
+ranges.
+
+## Delay view
+
+The Delay control in the toolbar does the same for the bistatic range (x) axis:
+
+| Setting | Draws | Label |
+| --- | --- | --- |
+| Narrow | From the node's `delayMin` out to 30 km, or whatever the gear sets, clipped to the node's range | `30 km` |
+| Full (the default) | The node's own bounds from [Axis bounds](#axis-bounds), or autoscale if the config does not state them | `60 km` on a default node |
+
+It is presentation only, like the Doppler view: nothing is written to config and the stream
+carries the full range either way. Full is the default because, unlike Doppler, there is no band
+where ordinary traffic sits that the rest of the axis distracts from. Narrow is for looking
+closely at near targets, and a viewer turns it on.
+
+The narrow range is a single far limit, set in the same gear dialog as a whole number of
+kilometres from 1 to the node's furthest processed range rounded up (or up to 1,000 when the range
+is unknown). The near end stays at the node's own `delayMin` (slightly below zero on a default
+node, past the direct signal), so narrowing never cuts off the nearest detections. If the node's
+range starts beyond the narrow limit, narrow falls back to the node's bounds. Labels round to the
+nearest kilometre.
+
+The view applies to the Delay / Doppler scope only. The wedge view's processed range limit is
+the node's real `delayMax` whichever view is drawn.
 
 ## Out-of-view alert
 
-Narrowing the plot must not hide activity, so when the narrow view is on, the toolbar shows a
-warning pill such as "1 track outside ±300 Hz" with a Show full span button that switches to
-Full. Each such track also gets an Outside view chip in the rail.
+Narrowing the plot must not hide activity, so when either narrow view is on, the toolbar shows a
+warning pill such as "1 track outside ±300 Hz" with a Show full span button that switches both
+axes to Full. Each such track also gets an Outside view chip in the rail.
 
-A track counts when any of its points in the current view window lies beyond the narrow range.
+A track counts when any of its points in the current view window lies beyond a narrow range that
+is on. The count is of tracks, so one outside both ranges counts once, and the pill names only
+the ranges some track escapes: "2 tracks outside 30 km", or "3 tracks outside ±300 Hz / 30 km".
 Removed tracks never count. Hidden and filtered-out tracks do, because the alert reports what
-the node saw rather than what the rail happens to list. The alert never fires in Full, where
-nothing can be outside.
+the node saw rather than what the rail happens to list. The alert never fires with both axes on
+Full, where nothing can be outside.
 
 It counts tracks, not raw detections. Widening the processed span from ±300 to ±1000 Hz gives
 CFAR about 3.3 times as many cells, and most of the extra detections are false alarms spread
@@ -330,8 +361,8 @@ The rail beside the scope lists every track in the window.
 - **Sort:** newest (last seen), longest (duration), strongest (peak SNR), most points.
 - **Filter:** All, ADS-B (has `adsb_hex`), Flagged (`is_anomalous`), Unmatched (no `adsb_hex`).
 - **Row:** colour swatch, id, duration, point count, peak SNR, age ("live" under 15 s), an
-  ADS-B chip with the hex when matched, and an Outside view chip when the narrow Doppler view
-  cannot show all of the track (see [Out-of-view alert](#out-of-view-alert)).
+  ADS-B chip with the hex when matched, and an Outside view chip when a narrow Doppler or delay
+  view cannot show all of the track (see [Out-of-view alert](#out-of-view-alert)).
 - **Flagged tracks get a dot, not a badge.** retina-tracker's anomaly detector is not trusted
   yet, and a solid label would be read as a verdict. The expanded row lists the anomaly types
   marked "(provisional)".
@@ -340,8 +371,10 @@ The rail beside the scope lists every track in the window.
 - **Hide** (eye) removes a track from the scope but keeps its row. **Remove** (bin) drops the row
   too; removals are per browser and can be undone with Restore in the rail footer.
 
-View window, layer, track overlay, sort, filter, Doppler view (`tracker.dopView`), the
-narrow range (`tracker.narrowHz`) and the display (`tracker.display`) are remembered in `localStorage` (`tracker.*` keys) and
+View window, layer, track overlay, sort, filter, Doppler view (`tracker.dopView`), the narrow
+Doppler range (`tracker.narrowHz`), delay view (`tracker.delView`), the narrow delay range
+(`tracker.narrowKm`) and the display (`tracker.display`) are remembered in `localStorage`
+(`tracker.*` keys) and
 restored into the controls before connecting. They are per browser: nothing about the page's
 presentation is stored on the node.
 
