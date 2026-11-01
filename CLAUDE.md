@@ -37,6 +37,102 @@ function name, never by line number.
 `docs/history/` holds the original pre-implementation plans. It is an archive: do not update it
 to match current behaviour, write current behaviour in `docs/features/` or `docs/architecture.md`.
 
+## Check beyond the path you built
+
+A change usually works on the path it was written for. What review keeps finding is what
+happens around that path: other code using the same state, a request still in flight, a
+restart, a failure, an unusual input. Work through every check below before calling a change
+finished, and put the answers in the PR description (see [Pull requests](#pull-requests)). A
+check that does not apply takes one line saying why.
+
+### 1. Find every writer and reader of the state you touch
+
+Before adding code that reads or writes lasting state, find everything else that writes or
+reads it. That state includes:
+
+- any file under `/data/retina-gui`;
+- `user.yml` and `config.yml`;
+- the towers cache and the saved wizard step;
+- the restart lock and the SDR mode;
+- a URL parameter a page reads back.
+
+Start from [docs/operations/node-files.md](docs/operations/node-files.md#files-under-dataretina-gui),
+then confirm with `grep -rn` over `src static templates`. Decide which writer owns the state
+and what the others may do with it. In the PR, give the list as a table: "This PR touches | Who
+else writes or reads it".
+
+### 2. Refuse before writing, on the server
+
+- **Refuse first.** A route that changes configuration refuses before it writes anything. Use
+  the checks the Configuration page uses, never a copy of them:
+  - `ApplyService.check()` before the write, then `ApplyService.request()` for the apply;
+  - `device_state.is_any_update_in_progress()`.
+
+  See [docs/architecture.md](docs/architecture.md#the-calibration-guard).
+- **A redirect is not a guard.** A page redirecting elsewhere does not stop a tab opened
+  earlier from posting to its routes. Every route that changes the same state refuses on its
+  own.
+- **Check what is clickable mid-request.** While a request is in flight, which buttons are
+  live? Look in particular for buttons shown before an earlier request has returned.
+- **Go through `ApplyService`, and apply once.** Configuration changes reach the stack through
+  `ApplyService`. A stack restart takes about a minute and risks wedging an RSPduo, so one
+  change applies once, not once per control the owner touched.
+
+### 3. Think across time
+
+- **Restarts.** In-memory state, such as the tracker sidecar's history, starts empty after
+  every restart, update and reboot. Code and copy that state a fact about it must still be
+  true then.
+- **Updates mid-flow.** The setup wizard updates the OS part way through, so state saved by the
+  previous build is read by the new one. Renaming or moving a saved step, key or field needs a
+  mapping for the old value, and a test that seeds the old value.
+- **Reloads and old links.** A reload, Back, or a link from the previous build resumes where it
+  was or fails safely.
+
+### 4. Force each failure path once
+
+For every failure the code handles, make it happen and watch what the node does:
+
+- a busy restart lock: hold it with `flock /data/retina-gui/restart.lock sleep 130`;
+- a failed or slow request: fail or delay it in the browser with Playwright's `page.route`;
+- a broken `user.yml`, or a file that cannot be written;
+- a merger or `docker compose` failure.
+
+Never swallow an exception without logging it. A PR description or design review only claims
+behaviour ("it logs", "it reverts", "it refuses") that you saw happen, and says how you saw it.
+
+### 5. Test the edges of the input
+
+- Use the limits the code accepts (`maxlength`, the schema's length limits, caps on lists), not
+  a typical value.
+- A handler that rewrites what the owner types: check which events it runs on. `input` fires on
+  every key press, not only on a paste.
+- Try valid but unusual values: a long name with no spaces, a five-digit house number, an empty
+  or corrupt record.
+
+### 6. Find what the change made stale
+
+After changing a name, title, number, count or order, `git grep` the old value across
+`src static templates tests docs` and fix every hit. This is part of
+[the docs rule](#documentation-is-part-of-every-change), not optional.
+
+### 7. Open every file you ship
+
+Read every non-code file the change adds (PDFs, images, data) in full. A test that checks a
+file's type cannot tell a draft from a final version, or spot a real location in a screenshot.
+Legal text is unfinished until whoever owns it says it is final.
+
+### 8. Run it for real, and say what you did not run
+
+- **In a browser.** Run UI changes in a real browser, typing and clicking as an owner would.
+  Playwright drives one from a script (`pip install playwright`, then
+  `playwright install chromium`).
+- **On a test node.** Run changes to the stack, the SDR, configuration apply or the setup wizard
+  on a test node. Ask the user which one, and check nobody else is using it first.
+- **Say what was not run.** In the PR's Testing section, say plainly what was not run. A change
+  that was not run in a browser or on a node is not verified, so say so in the summary to the
+  user, not only in the PR.
+
 ## Branches, commits and pull requests
 
 ### Branches
@@ -73,6 +169,8 @@ to match current behaviour, write current behaviour in `docs/features/` or `docs
   - `## What`: the problem or feature in a paragraph.
   - `## Why`: the cause or motivation.
   - `## Fix`: what changed, for a bug fix. For a larger change, use headings for each topic instead.
+  - `## Interactions`: the answers to [Check beyond the path you built](#check-beyond-the-path-you-built):
+    the table of who else writes or reads the state, the failures forced and what happened.
   - `## Testing` or `## Verification`: what was run (full suite count, ruff) and, stated plainly,
     what was **not** verified, such as "not run in a browser" or "not tried on hardware".
   - `## After this`: follow-up work in other repos or releases, when there is any.
