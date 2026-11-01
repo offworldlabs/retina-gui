@@ -392,6 +392,11 @@ report an ordinary-looking "no confirmed track". Guarding `request()` covers rou
 and routes that do not yet. It raises rather than returning a refusal, so a caller that forgets
 to handle it gets a 500 rather than a 202 claiming work was queued.
 
+`check()` asks the same guard without starting anything, and returns `(ok, reason)`. It is for a
+route that writes `user.yml` before its apply: refusing only at `request()` would leave the
+written change in the file, to be swept into the next merge. `/set-up/filters` calls it before
+writing (see [setup-wizard.md](features/setup-wizard.md#filters)).
+
 `request(bypass_guard=True)` has exactly one caller: Auto-Calibrate's preflight recovery
 (`Calibrator._run_recovery_apply`), which restarts the stack to unwedge the radio it is about to
 search with. There the calibration is the caller and holds the lock itself. No route should

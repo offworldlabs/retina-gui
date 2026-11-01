@@ -199,3 +199,19 @@ class TestDevMode:
 
         assert status['state'] == 'done'
         assert called == []
+
+
+class TestCheck:
+    """check() asks the same guard request() enforces, for a route that must
+    refuse before writing user.yml. See docs/architecture.md#the-calibration-guard."""
+
+    def test_no_guard_is_always_ok(self):
+        assert ApplyService('/nonexistent').check() == (True, None)
+
+    def test_it_returns_the_guards_answer_and_starts_nothing(self):
+        called = []
+        svc = ApplyService('/nonexistent', restart_fn=lambda *a, **k: called.append(1),
+                           guard=lambda: (False, "Auto-calibration is running."))
+        assert svc.check() == (False, "Auto-calibration is running.")
+        assert svc.get_status()['state'] == 'idle'
+        assert called == []

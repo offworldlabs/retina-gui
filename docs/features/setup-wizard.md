@@ -725,6 +725,20 @@ disabled, because a run started mid-restart would measure the old filter. A refu
 (409 while an update or calibration runs, or any failure) puts the box back and shows the
 reason. The run itself is unchanged below.
 
+The route changes the filters the same way the Configuration page does, in the same order:
+`/config/save` refuses a save while Auto-Calibrate runs, before it writes, and `/config/apply`
+refuses while an update installs, then hands over to `ApplyService.request()`. So
+`/set-up/filters` checks `device_state.is_any_update_in_progress()` and
+`apply_service.check()` (the very guard `request()` enforces) **before** it writes `user.yml`,
+then queues the apply through the same `ApplyService` the Configuration page and the tower step
+use, with its restart lock, merge, settle window and repair. If `request()` still refuses (a
+run started in the moment between the check and the request), `_restore_filters` puts the two
+keys back. Written first and refused after, as the route first did, the change sat in
+`user.yml` while the owner was told it failed, and the next Apply swept it in, including the one
+Auto-Calibrate runs when it saves its gains. That was shown on a test node with
+`calibrate.lock` planted: 409, `user.yml` changed, and an unrelated filter Apply then put the
+refused value into `config.yml`. See [config-editor.md](config-editor.md#guards).
+
 - The run shape is `RetinaCalibrate.QUICK_RUN`: scope `current_tower` (the owner picked a tower
   one step ago, and re-searching alternates would contradict that and triple the time) plus
   `skip_confirmation` (descend, then soak the resolved point for overload, but never wait for a

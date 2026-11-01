@@ -80,6 +80,18 @@ class ApplyService:
         with self._lock:
             return self._status['state'] == 'running'
 
+    def check(self):
+        """Ask the guard request() enforces, without starting anything.
+
+        Returns (ok, reason). For a route that writes user.yml before its
+        apply: it must refuse before the write, or a refused change sits in
+        the file and is swept into the next merge.
+        See docs/architecture.md#the-calibration-guard.
+        """
+        if self._guard is None:
+            return True, None
+        return self._guard()
+
     def request(self, bypass_guard=False):
         """Start an apply, or coalesce into the one already running.
 

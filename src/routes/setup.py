@@ -261,8 +261,10 @@ def filters():
     The calibrate step offers them before a run because changing either one
     moves the signal level enough to need recalibrating. Writes only the two
     keys, so nothing else in the capture section is touched, and returns 202
-    with the apply status when retina-node is installed, as /towers/select
-    does. See docs/features/setup-wizard.md#filters.
+    with the apply status when retina-node is installed. Refuses (409) before
+    writing anything while an update or a calibration is in progress, and
+    takes the change back out if the apply is refused after all.
+    See docs/features/setup-wizard.md#filters.
     """
     from app import apply_service, config_mgr, device_state
 
@@ -279,9 +281,22 @@ def filters():
     if not wanted:
         return jsonify({"success": False, "error": "Nothing to set"}), 400
 
+    # Refuse before writing, as /config/save does: a change written and then
+    # refused sits in user.yml and is swept into the next merge, under gains
+    # calibrated without it. The same two checks /config/apply makes, through
+    # the same ApplyService. See docs/features/setup-wizard.md#filters
+    in_progress, reason = device_state.is_any_update_in_progress()
+    if in_progress:
+        return jsonify({"success": False,
+                        "error": f"{reason}. Change the filters once it finishes."}), 409
+    ok, reason = apply_service.check()
+    if not ok:
+        return jsonify({"success": False, "error": reason}), 409
+
     user_config = dict(config_mgr.load_user_config())
     capture = dict(user_config.get("capture") or {})
     device = dict(capture.get("device") or {})
+    previous = {key: device[key] for key in wanted if key in device}
     device.update(wanted)
     capture["device"] = device
     user_config["capture"] = capture
@@ -290,15 +305,38 @@ def filters():
     if not config_mgr.is_retina_node_installed():
         return jsonify({"success": True, "applied": False})
 
-    in_progress, reason = device_state.is_any_update_in_progress()
-    if in_progress:
-        return jsonify({"success": False,
-                        "error": f"{reason}. Change the filters once it finishes."}), 409
-
     try:
         return jsonify({"success": True, "status": apply_service.request()}), 202
     except ConfigChangeRefused as refused:
+        # A run started between the check and the request: take the change
+        # back out, so the refusal leaves nothing behind for the next merge.
+        _restore_filters(config_mgr, wanted, previous)
         return jsonify({"success": False, "error": refused.reason}), 409
+
+
+def _restore_filters(config_mgr, keys, previous):
+    """Put the filter keys in user.yml back as they were before the write.
+
+    previous holds the keys that existed then; any other key in `keys` is
+    removed, and a capture section left empty goes with it.
+    """
+    user_config = dict(config_mgr.load_user_config())
+    capture = dict(user_config.get("capture") or {})
+    device = dict(capture.get("device") or {})
+    for key in keys:
+        if key in previous:
+            device[key] = previous[key]
+        else:
+            device.pop(key, None)
+    if device:
+        capture["device"] = device
+    else:
+        capture.pop("device", None)
+    if capture:
+        user_config["capture"] = capture
+    else:
+        user_config.pop("capture", None)
+    config_mgr.save_user_config(user_config)
 
 
 @bp.route("/set-up/complete", methods=["POST"])

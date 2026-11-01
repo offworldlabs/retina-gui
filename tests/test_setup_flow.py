@@ -282,6 +282,55 @@ class TestFilters:
             expected['capture']['device'].pop('dabNotch')
         assert after == expected
 
+    def _user_yml(self, config_files):
+        with open(config_files[0]) as f:
+            return yaml.safe_load(f)
+
+    def test_a_change_refused_for_a_running_calibration_is_not_written(self, app_client, config_files):
+        """Written first and refused after, the change sat in user.yml and the
+        next Apply (Auto-Calibrate's own save among them) applied it. Found on
+        a test node with calibrate.lock planted: 409, yet user.yml changed, and
+        an unrelated Apply then put it into config.yml."""
+        import app as app_module
+        before = self._user_yml(config_files)
+        assert app_module.device_state.acquire_calibration_lock()
+        try:
+            resp = app_client.post('/set-up/filters', data=json.dumps({"dab_notch": False}),
+                                   content_type='application/json')
+        finally:
+            app_module.device_state.release_calibration_lock()
+        assert resp.status_code == 409
+        assert 'Auto-calibration is running' in resp.get_json()['error']
+        assert self._user_yml(config_files) == before
+
+    def test_a_change_during_an_update_is_not_written(self, app_client, config_files, monkeypatch):
+        import app as app_module
+        before = self._user_yml(config_files)
+        monkeypatch.setattr(app_module.device_state, 'is_any_update_in_progress',
+                            lambda: (True, "An update is being installed"))
+        resp = app_client.post('/set-up/filters', data=json.dumps({"rf_notch": False}),
+                               content_type='application/json')
+        assert resp.status_code == 409
+        assert resp.get_json()['error'].startswith("An update is being installed")
+        assert self._user_yml(config_files) == before
+
+    def test_a_refusal_after_the_write_takes_the_change_back_out(self, app_client, config_files, monkeypatch):
+        """A run can start between the check and the request: the route then
+        puts the keys back, so the refusal leaves nothing for the next merge."""
+        import app as app_module
+        from apply_service import ConfigChangeRefused
+        before = self._user_yml(config_files)
+
+        def refuse(**kw):
+            raise ConfigChangeRefused("Auto-calibration is running. Cancel it before changing configuration")
+        monkeypatch.setattr(app_module.apply_service, 'check', lambda: (True, None))
+        monkeypatch.setattr(app_module.apply_service, 'request', refuse)
+        resp = app_client.post('/set-up/filters',
+                               data=json.dumps({"dab_notch": False, "rf_notch": False}),
+                               content_type='application/json')
+        assert resp.status_code == 409
+        assert self._user_yml(config_files) == before
+
     def test_without_retina_node_the_filter_is_saved_for_later(self, app_client_no_retina, config_files):
         user_path, _ = config_files
         resp = app_client_no_retina.post('/set-up/filters',
