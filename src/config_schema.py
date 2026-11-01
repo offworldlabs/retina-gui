@@ -80,6 +80,11 @@ def set_nested_value(data, path, value):
     current[keys[-1]] = value
 
 
+def model_values(model):
+    """A validated model's values as a dict (Pydantic v1 and v2)."""
+    return model.model_dump() if PYDANTIC_V2 else model.dict()
+
+
 def values_differ(val1, val2):
     """Check if two values are different (for change tracking)."""
     # Handle None vs missing
@@ -130,6 +135,107 @@ class CaptureFormConfig(BaseModel):
         description="AGC loop bandwidth (Hz). 0 disables AGC: gain is fixed by Gain Reduction/LNA State. "
                      "5/50/100 enable AGC: lower is slower and more stable, higher reacts faster but chases noise more."
     )
+
+
+# ============================================================================
+# Processing Settings
+# ============================================================================
+
+class ProcessingFormConfig(BaseModel):
+    """Flat process config for the Processing section.
+
+    For testing detection: every field changes what the radar reports. The
+    copy says what each does and what to expect; the page adds live readouts
+    in physical units. See docs/features/config-editor.md#processing-section
+    and blah2-arm's config/README.md for the measurements behind it.
+    """
+    detection_minDoppler: float = Field(
+        ge=0, le=1000, title="Minimum Doppler",
+        description="Hz. Slower detections are not reported. Keeps slowly moving clutter out, and "
+                    "hides every slow target with it. Expect: lowering it adds detections in the newly "
+                    "tested Doppler rows first. If those rows fill up while the rest of the map does not, "
+                    "this site has moving clutter there.")
+    detection_maxReportedDoppler: float | None = Field(
+        None, ge=0, le=1000, title="Maximum Reported Doppler",
+        description="Hz. Faster detections are not reported. The radar still processes them, so a fast "
+                    "aircraft cannot fold into the reported band as a fake slow target, which is what "
+                    "narrowing the Doppler span would do. Expect: detections above it disappear and "
+                    "nothing below it changes.")
+    detection_minDelay: int = Field(
+        ge=0, le=400, title="Minimum Delay",
+        description="Delay bins. Nearer detections are not reported. Keeps out the noise next to the "
+                    "direct signal, and hides targets close to the receiver. Expect: lowering it adds "
+                    "detections at the nearest delays, where false alarms are most likely.")
+    ambiguity_delayMax: int = Field(
+        ge=10, le=600, title="Maximum Delay",
+        description="Delay bins. How far out the radar processes at all. Lowering it costs nothing "
+                    "for nearer targets and means fewer cells, so fewer false alarms. Expect: nothing "
+                    "is detected or shown on the map beyond it.")
+    detection_pfa: float = Field(
+        ge=1e-7, le=1e-3, title="False Alarm Probability",
+        description="Chance that a cell of pure noise is reported, for example 0.00001. Higher reports "
+                    "weaker targets and more false alarms. Expect: each 10x increase gives about 10x the "
+                    "false alarms, spread evenly over the map, for about 1.4 dB more sensitivity.")
+    detection_nTrain: int = Field(
+        ge=1, le=32, title="Training Cells",
+        description="Delay bins each side used to estimate the local noise. More gives a steadier, lower "
+                    "threshold but follows changes in the noise less closely. Expect: slightly more "
+                    "detections far out, slightly fewer at the nearest delays.")
+    detection_nGuard: int = Field(
+        ge=0, le=10, title="Guard Cells",
+        description="Delay bins each side skipped between a cell and its training cells, so a target "
+                    "does not raise its own threshold.")
+    detection_nCentroid: int = Field(
+        ge=0, le=20, title="Merge Distance",
+        description="Bins. A detection is dropped when a stronger one lies within this many delay and "
+                    "Doppler bins of it. Expect: lowering it keeps close targets apart but can split one "
+                    "strong target into several detections.")
+    ambiguity_dopplerWindow: Literal["none", "hann"] | None = Field(
+        None, title="Doppler Window",
+        description="hann stops strong targets and slow clutter leaking into neighbouring Doppler bins, "
+                    "and costs every target 1.76 dB. Expect: fewer detections next to strong targets, "
+                    "and slightly fewer of the weakest targets.")
+    clutter_enable: bool = Field(
+        title="Clutter Filter",
+        description="Removes the direct signal and still clutter. Turn it off only to see them: the "
+                    "detector will fire heavily near 0 Hz while it is off.")
+    ambiguity_dopplerMin: int | None = _readonly_field(
+        default=None, title="Doppler Span Minimum",
+        description="Hz. Fixed. A narrower span folds fast targets back in as fake slow ones. Use "
+                    "Maximum Reported Doppler instead.")
+    ambiguity_dopplerMax: int | None = _readonly_field(
+        default=None, title="Doppler Span Maximum",
+        description="Hz. Fixed, for the same reason.")
+    data_cpi: float | None = _readonly_field(
+        default=None, title="Integration Time",
+        description="Seconds. Fixed: the clutter filter is tuned for 0.5 s. Sets the Doppler bin size.")
+    clutter_delayMax: int | None = _readonly_field(
+        default=None, title="Clutter Filter Extent",
+        description="Delay bins. Fixed: shorter leaves far clutter uncancelled.")
+
+
+#: The processing fields this page writes, as (form field, path under
+#: `process`). The read-only fields post too but are never written.
+PROCESSING_EDITABLE_FIELDS = (
+    ("detection_minDoppler", ("detection", "minDoppler")),
+    ("detection_maxReportedDoppler", ("detection", "maxReportedDoppler")),
+    ("detection_minDelay", ("detection", "minDelay")),
+    ("ambiguity_delayMax", ("ambiguity", "delayMax")),
+    ("detection_pfa", ("detection", "pfa")),
+    ("detection_nTrain", ("detection", "nTrain")),
+    ("detection_nGuard", ("detection", "nGuard")),
+    ("detection_nCentroid", ("detection", "nCentroid")),
+    ("ambiguity_dopplerWindow", ("ambiguity", "dopplerWindow")),
+    ("clutter_enable", ("clutter", "enable")),
+)
+
+#: Shown locked, with the reason in their description.
+PROCESSING_READONLY_FIELDS = (
+    ("ambiguity_dopplerMin", ("ambiguity", "dopplerMin")),
+    ("ambiguity_dopplerMax", ("ambiguity", "dopplerMax")),
+    ("data_cpi", ("data", "cpi")),
+    ("clutter_delayMax", ("clutter", "delayMax")),
+)
 
 
 # ============================================================================

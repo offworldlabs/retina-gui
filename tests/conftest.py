@@ -120,6 +120,15 @@ def sample_merged_config():
                 'bandwidthNumber': 0
             }
         },
+        'process': {
+            'data': {'cpi': 0.5, 'buffer': 1.5, 'overlap': 0},
+            'ambiguity': {'delayMin': -10, 'delayMax': 400, 'dopplerMin': -1000,
+                          'dopplerMax': 1000, 'dopplerWindow': 'none'},
+            'clutter': {'enable': True, 'delayMin': -10, 'delayMax': 400},
+            'detection': {'enable': True, 'pfa': 0.00001, 'nGuard': 2, 'nTrain': 6,
+                          'minDelay': 5, 'minDoppler': 15, 'maxReportedDoppler': 1000,
+                          'nCentroid': 6},
+        },
         'network': {
             'node_id': 'ret7a000001'
         },
@@ -363,3 +372,11 @@ def app_client_no_node_id(temp_dir, config_files_no_node_id, test_manifests_dir)
     app_module.app.config['WTF_CSRF_ENABLED'] = False
     with app_module.app.test_client() as client:
         yield client
+
+
+@pytest.fixture
+def developer_mode(temp_dir):
+    """Turn developer mode on for this node, as the flag file would on a
+    device. app_client uses temp_dir as DATA_DIR.
+    See docs/features/config-editor.md#developer-mode."""
+    open(os.path.join(temp_dir, 'developer-mode'), 'w').close()
