@@ -175,6 +175,10 @@
         window._maxCachedTowers = {{ max_cached_towers|default(5)|tojson }};
         window._maxKeptTowers = {{ max_kept_towers|default(10)|tojson }};
         window._cachedTowers = {{ (towers_cache or none)|tojson }};
+        // The configured centre frequency in MHz, or null, for the filter
+        // advice on a reload. The tower step overwrites it when it saves.
+        // See docs/features/setup-wizard.md#filters
+        window._chosenFcMhz = {{ capture_fc_mhz|tojson }};
         initSetupWizard({{ resume_step|tojson }}, {{ dev_mode|default(false)|tojson }}, {{ is_rerun|default(false)|tojson }}, {{ demo_mode|default(false)|tojson }});
     </script>
 {% endblock %}

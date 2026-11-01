@@ -1,16 +1,48 @@
 <!-- Auto-Calibrate step (current tower, no track confirmation) -->
 <div data-step="calibrate" class="step-panel" style="display:none;">
     <div class="wiz-title-row">
-        <h1>Tune the receiver</h1>
+        <h1>Optimise reception</h1>
         {# Deliberately never promises aircraft: this run skips track
            confirmation. See docs/features/auto-calibrate.md#skip-confirmation-and-the-soak #}
-        <p>Find the best gain settings for your location.<br>
+        <p>Set the receiver's filters, then let auto-calibration find the best gain settings for your location.<br>
             Takes a few minutes, and you can skip it.</p>
     </div>
 
     {# Pre-run explainer. Replaced by the progress view once a run starts. #}
     <div id="calWizIntro" class="step-stack">
-        <p style="font-size:13px;color:var(--ink-2);margin:0 0 10px;">
+        {# Filters first: changing either one changes the signal level a lot,
+           which is the reason they sit before the run rather than after it.
+           Each change is saved and applied on its own, and Optimise reception
+           waits for the restart. See docs/features/setup-wizard.md#filters #}
+        <div class="wiz-section-label">Filters</div>
+        {# The chosen frequency and what it means for each filter. Filled by
+           renderFilterAdvice in setup.js from the tower just saved, or from
+           the config on a reload. A filter should be on unless the chosen
+           frequency falls inside the band it blocks. #}
+        <div class="step-card" id="calWizChosen">
+            <div class="step-card-body">
+                <div class="step-card-title">Chosen frequency: <span class="mono" id="calWizChosenFc">&mdash;</span></div>
+                <div class="step-card-sub" id="calWizChosenSub">The tower you picked on the previous step.</div>
+            </div>
+        </div>
+        <label class="step-check">
+            <input type="checkbox" id="calWizDabNotch" {% if capture_filters.dab_notch %}checked{% endif %}>
+            <div>
+                <div class="step-check-text">DAB notch filter <span class="tower-badge" id="calWizDabAdvice" style="margin-left:6px;display:none;"></span></div>
+                <div class="step-check-help">Blocks 155&ndash;235 MHz (DAB and VHF TV). <span id="calWizDabWhy">Leave on unless your tower is in this range.</span></div>
+            </div>
+        </label>
+        <label class="step-check">
+            <input type="checkbox" id="calWizRfNotch" {% if capture_filters.rf_notch %}checked{% endif %}>
+            <div>
+                <div class="step-check-text">FM notch filter <span class="tower-badge" id="calWizRfAdvice" style="margin-left:6px;display:none;"></span></div>
+                <div class="step-check-help">Blocks 77&ndash;115 MHz (FM radio). <span id="calWizRfWhy">Leave on unless your tower is in this range.</span></div>
+            </div>
+        </label>
+        <p id="calWizFilterMsg" style="display:none;font-size:13px;margin:-6px 0 0;"></p>
+
+        <div class="wiz-section-label" style="margin-top:8px;">Auto-calibration</div>
+        <p style="font-size:13px;color:var(--ink-2);margin:0;">
             Your radio starts on generic settings that are not chosen for your
             site. This tries progressively more sensitive settings against your
             chosen tower and keeps the strongest one that does not overload the
@@ -18,7 +50,8 @@
         </p>
         <p style="font-size:13px;color:var(--ink-3);margin:0;">
             The radar restarts at the end to pick up the new settings. You can
-            run this again at any time from Configuration.
+            run this again at any time from Configuration, and you should
+            re-run it if you change a filter later.
         </p>
     </div>
 
