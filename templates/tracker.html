@@ -138,6 +138,7 @@
 .trk-dlg h2 { margin: 0; font-size: 1.05rem; }
 .dlg-head { padding: 14px 16px 0; }
 .dlg-body { padding: 12px 16px 4px; }
+.dlg-body .ds-field + .ds-field { margin-top: 16px; }
 .dlg-input-row { display: flex; align-items: center; gap: 8px; font-family: var(--font-mono, monospace); }
 .dlg-input-row .ds-input { width: 120px; }
 .dlg-err { font-size: 12px; color: var(--color-danger); }
@@ -212,7 +213,7 @@
     <div class="trk-bar">
       <span class="trk-status" id="trkStatus"><span class="dot"></span>connecting&hellip;</span>
       <span class="oov-alert dd-only" id="oovAlert" role="status" hidden
-            title="Tracks in this window with a point outside the narrow Doppler range. The node processes its full span; only the plot is narrowed.">
+            title="Tracks in this window with a point outside the narrow Doppler or delay range. The node processes its full span; only the plot is narrowed.">
         <span id="oovText"></span>
         <button type="button" class="linkbtn" id="oovShowBtn">Show full span</button>
       </span>
@@ -224,6 +225,16 @@
           <button type="button" data-dop="narrow" aria-pressed="true" id="dopNarrowBtn"
                   title="The narrow range, set with the gear. Where ordinary air traffic sits.">&plusmn;300</button>
           <button type="button" data-dop="full" aria-pressed="false" id="dopFullBtn"
+                  title="Everything the node processes.">Full</button>
+        </div>
+      </div>
+
+      <div class="trk-ctl dd-only">
+        <span class="trk-lab">Delay</span>
+        <div class="seg" role="group" aria-label="Delay range">
+          <button type="button" data-del="narrow" aria-pressed="false" id="delNarrowBtn"
+                  title="The narrow range, set with the gear. The near part of the bistatic range axis.">30 km</button>
+          <button type="button" data-del="full" aria-pressed="true" id="delFullBtn"
                   title="Everything the node processes.">Full</button>
         </div>
       </div>
@@ -356,9 +367,24 @@
           </div>
           <div class="dlg-err" id="narrowHzErr" role="alert" hidden></div>
         </div>
+        <div class="ds-field">
+          <label class="ds-field-label" for="narrowKmInput">Narrow delay range</label>
+          <div class="dlg-input-row">
+            <span>out to</span>
+            <input class="ds-input mono" id="narrowKmInput" type="number" min="1" step="1"
+                   inputmode="numeric" aria-describedby="narrowKmHelp narrowKmErr">
+            <span>km</span>
+          </div>
+          <div class="ds-field-help" id="narrowKmHelp">
+            What the Delay toggle's narrow setting shows, in bistatic range. The node processes
+            <span id="fullDelayText">its full range</span> either way, so this changes the plot
+            only. Saved in this browser.
+          </div>
+          <div class="dlg-err" id="narrowKmErr" role="alert" hidden></div>
+        </div>
       </div>
       <div class="dlg-foot">
-        <button type="button" class="linkbtn" id="narrowResetBtn">Reset to &plusmn;300</button>
+        <button type="button" class="linkbtn" id="narrowResetBtn">Reset to defaults</button>
         <span class="trk-spacer"></span>
         <button type="button" class="ds-btn ghost sm" id="settingsCancel">Cancel</button>
         <button type="submit" class="ds-btn primary sm">Save</button>
@@ -521,6 +547,46 @@
 
     function fmtHzRange(r) {
         return r[0] === -r[1] ? '±' + r[1] : r[0] + '…' + r[1];
+    }
+
+    // ── Delay view ───────────────────────────────────────────────────────
+
+    // The same idea on the bistatic range axis, and presentation only too.
+    // Full is the default, so nothing is hidden until a viewer asks for it.
+    // See docs/features/tracker.md#delay-view
+    var DEFAULT_NARROW_KM = 30;
+    var MAX_NARROW_KM = 1000;      // a sanity cap, used only when the span is unknown
+
+    // The node's furthest processed range, the widest narrow range worth having.
+    function delayReach() {
+        return AXES.delay ? Math.ceil(AXES.delay[1]) : null;
+    }
+
+    function validNarrowKm(n) {
+        var cap = delayReach() || MAX_NARROW_KM;
+        return Number.isInteger(n) && n >= 1 && n <= cap ? n : null;
+    }
+
+    state.delView = recall('delView', 'full') === 'narrow' ? 'narrow' : 'full';
+    state.narrowKm = validNarrowKm(parseInt(recall('narrowKm', DEFAULT_NARROW_KM), 10)) || DEFAULT_NARROW_KM;
+
+    // Starts where the node starts (a little below zero, past the direct
+    // signal), clipped so narrow never draws range the node cannot see.
+    function narrowDelayRange() {
+        var lo = AXES.delay ? AXES.delay[0] : 0, hi = state.narrowKm;
+        if (AXES.delay) {
+            hi = Math.min(hi, AXES.delay[1]);
+            if (lo >= hi) return AXES.delay.slice();
+        }
+        return [lo, hi];
+    }
+
+    function delayRange() {
+        return state.delView === 'narrow' ? narrowDelayRange() : AXES.delay;
+    }
+
+    function fmtKm(km) {
+        return Math.round(km) + ' km';
     }
 
     // ── Column helpers ───────────────────────────────────────────────────
@@ -700,11 +766,13 @@
         return Object.keys(store.tracks).map(function (id) {
             var trk = store.tracks[id];
             var meta = trk.meta || {};
-            var peak = 0, dmin = Infinity, dmax = -Infinity;
+            var peak = 0, dmin = Infinity, dmax = -Infinity, kmin = Infinity, kmax = -Infinity;
             for (var i = 0; i < trk.snr.length; i++) {
                 if (trk.snr[i] > peak) peak = trk.snr[i];
                 if (trk.doppler[i] < dmin) dmin = trk.doppler[i];
                 if (trk.doppler[i] > dmax) dmax = trk.doppler[i];
+                if (trk.delay[i] < kmin) kmin = trk.delay[i];
+                if (trk.delay[i] > kmax) kmax = trk.delay[i];
             }
             return {
                 id: id,
@@ -713,6 +781,8 @@
                 peak: peak,
                 dmin: dmin,
                 dmax: dmax,
+                kmin: kmin,
+                kmax: kmax,
                 first: trk.t.length ? trk.t[0] : 0,
                 last: trk.t.length ? trk.t[trk.t.length - 1] : 0,
                 dur: trk.t.length ? (trk.t[trk.t.length - 1] - trk.t[0]) / 1000 : 0
@@ -782,7 +852,7 @@
         var chips = '';
         if (r.meta.adsb_hex) chips += '<span class="chip ok">ADS-B ' + esc(r.meta.adsb_hex) + '</span>';
         if (outside[r.id]) {
-            chips += '<span class="chip oov" title="Has a point outside the narrow Doppler range.">'
+            chips += '<span class="chip oov" title="Has a point outside the narrow Doppler or delay range.">'
                    + 'Outside view</span>';
         }
         return chips ? '<div class="trk-chips">' + chips + '</div>' : '';
@@ -855,24 +925,35 @@
     // about what the node saw, not what this rail is listing.
     var outside = {};
 
+    // Counts per axis too, so the alert names only the ranges a track escapes.
     function markOutside(all) {
         outside = {};
-        if (state.dopView !== 'narrow') return 0;
-        var r = narrowRange(), n = 0;
+        var dop = state.dopView === 'narrow' ? narrowRange() : null;
+        var del = state.delView === 'narrow' ? narrowDelayRange() : null;
+        var out = { n: 0, dop: 0, del: 0 };
+        if (!dop && !del) return out;
         all.forEach(function (row) {
-            if (state.removed[row.id] || !(row.dmin < r[0] || row.dmax > r[1])) return;
+            if (state.removed[row.id]) return;
+            var d = !!dop && (row.dmin < dop[0] || row.dmax > dop[1]);
+            var k = !!del && (row.kmin < del[0] || row.kmax > del[1]);
+            if (!d && !k) return;
             outside[row.id] = true;
-            n++;
+            out.n++;
+            if (d) out.dop++;
+            if (k) out.del++;
         });
-        return n;
+        return out;
     }
 
     // See docs/features/tracker.md#out-of-view-alert
-    function renderOutsideAlert(n) {
-        oovAlert.hidden = n === 0;
-        if (n) {
-            oovText.textContent = n + (n === 1 ? ' track' : ' tracks') + ' outside '
-                + fmtHzRange(narrowRange()) + ' Hz';
+    function renderOutsideAlert(out) {
+        oovAlert.hidden = out.n === 0;
+        if (out.n) {
+            var ranges = [];
+            if (out.dop) ranges.push(fmtHzRange(narrowRange()) + ' Hz');
+            if (out.del) ranges.push(fmtKm(narrowDelayRange()[1]));
+            oovText.textContent = out.n + (out.n === 1 ? ' track' : ' tracks') + ' outside '
+                + ranges.join(' / ');
         }
     }
 
@@ -945,16 +1026,17 @@
         }
 
         // react (not newPlot) with a uirevision so zoom, pan and the viewer's
-        // axis ranges survive every update. It changes with the Doppler view,
-        // so switching views redraws at the new range rather than keeping the
-        // old zoom. The legend is off: the rail owns identity now, which is
-        // what lets the plot keep its full height and the SNR scale sit under
-        // it instead of fighting for the right-hand strip.
+        // axis ranges survive every update. It changes with the Doppler and
+        // delay views, so switching views redraws at the new range rather than
+        // keeping the old zoom. The legend is off: the rail owns identity now,
+        // which is what lets the plot keep its full height and the SNR scale
+        // sit under it instead of fighting for the right-hand strip.
         Plotly.react(plotDiv, traces, {
-            uirevision: 'tracker:' + state.dopView + ':' + state.narrowHz,
+            uirevision: 'tracker:' + state.dopView + ':' + state.narrowHz
+                      + ':' + state.delView + ':' + state.narrowKm,
             showlegend: false,
             margin: { t: 12, r: 14, b: 44, l: 58 },
-            xaxis: axis('Bistatic range (km)', AXES.delay),
+            xaxis: axis('Bistatic range (km)', delayRange()),
             yaxis: axis('Doppler (Hz)', dopplerRange())
         }, { displayModeBar: false, responsive: true });
 
@@ -1091,14 +1173,30 @@
         scheduleRender();
     }
 
+    function setDelView(v) {
+        state.delView = v;
+        remember('delView', v);
+        document.querySelectorAll('.seg [data-del]').forEach(function (b) {
+            b.setAttribute('aria-pressed', String(b.getAttribute('data-del') === v));
+        });
+        scheduleRender();
+    }
+
     wireSeg('dop', setDopView);
-    document.getElementById('oovShowBtn').addEventListener('click', function () { setDopView('full'); });
+    wireSeg('del', setDelView);
+    // Widens both axes: the alert counts escapes from either narrow range.
+    document.getElementById('oovShowBtn').addEventListener('click', function () {
+        setDopView('full');
+        setDelView('full');
+    });
 
     // The buttons name the ranges they draw, so the toggle reads "±300 / ±1000"
     // on a node at ±1000 and stays truthful after the gear changes narrow.
-    function labelDopButtons() {
+    function labelRangeButtons() {
         document.getElementById('dopNarrowBtn').textContent = fmtHzRange(narrowRange());
         document.getElementById('dopFullBtn').textContent = AXES.doppler ? fmtHzRange(AXES.doppler) : 'Full';
+        document.getElementById('delNarrowBtn').textContent = fmtKm(narrowDelayRange()[1]);
+        document.getElementById('delFullBtn').textContent = AXES.delay ? fmtKm(AXES.delay[1]) : 'Full';
     }
 
     // ── Settings ─────────────────────────────────────────────────────────
@@ -1106,12 +1204,16 @@
     var settingsDlg = document.getElementById('settingsDlg');
     var narrowInput = document.getElementById('narrowHzInput');
     var narrowErr = document.getElementById('narrowHzErr');
+    var narrowKmInput = document.getElementById('narrowKmInput');
+    var narrowKmErr = document.getElementById('narrowKmErr');
 
-    function showNarrowError(text) {
-        narrowErr.textContent = text;
-        narrowErr.hidden = !text;
-        narrowInput.classList.toggle('is-invalid', !!text);
+    function showFieldError(input, err, text) {
+        err.textContent = text;
+        err.hidden = !text;
+        input.classList.toggle('is-invalid', !!text);
     }
+    function showNarrowError(text) { showFieldError(narrowInput, narrowErr, text); }
+    function showNarrowKmError(text) { showFieldError(narrowKmInput, narrowKmErr, text); }
 
     document.getElementById('settingsBtn').addEventListener('click', function () {
         narrowInput.value = state.narrowHz;
@@ -1119,14 +1221,22 @@
         if (half) narrowInput.max = half;
         document.getElementById('fullSpanText').textContent =
             AXES.doppler ? fmtHzRange(AXES.doppler) + ' Hz' : 'its full span';
+        narrowKmInput.value = state.narrowKm;
+        var reach = delayReach();
+        if (reach) narrowKmInput.max = reach;
+        document.getElementById('fullDelayText').textContent =
+            AXES.delay ? 'out to ' + fmtKm(AXES.delay[1]) : 'its full range';
         showNarrowError('');
+        showNarrowKmError('');
         settingsDlg.showModal();
         narrowInput.select();
     });
 
     document.getElementById('narrowResetBtn').addEventListener('click', function () {
         narrowInput.value = DEFAULT_NARROW_HZ;
+        narrowKmInput.value = DEFAULT_NARROW_KM;
         showNarrowError('');
+        showNarrowKmError('');
     });
 
     document.getElementById('settingsCancel').addEventListener('click', function () { settingsDlg.close(); });
@@ -1137,19 +1247,30 @@
     document.getElementById('settingsForm').addEventListener('submit', function (e) {
         e.preventDefault();
         var n = Number(narrowInput.value);
-        if (validNarrow(n) === null) {
-            var half = spanHalfWidth();
-            showNarrowError(half
-                ? 'Enter a whole number from 1 to ' + half + ', the most the node processes.'
-                : 'Enter a whole number of Hz, 1 or more.');
-            return;
-        }
+        var km = Number(narrowKmInput.value);
+        var hzOk = validNarrow(n) !== null, kmOk = validNarrowKm(km) !== null;
+        var half = spanHalfWidth(), reach = delayReach();
+        showNarrowError(hzOk ? '' : half
+            ? 'Enter a whole number from 1 to ' + half + ', the most the node processes.'
+            : 'Enter a whole number of Hz, 1 or more.');
+        showNarrowKmError(kmOk ? '' : reach
+            ? 'Enter a whole number from 1 to ' + reach + ', the most the node processes.'
+            : 'Enter a whole number of km, from 1 to ' + MAX_NARROW_KM + '.');
+        // Nothing is saved unless both fields are valid.
+        if (!hzOk || !kmOk) return;
+
+        var hzChanged = n !== state.narrowHz, kmChanged = km !== state.narrowKm;
         state.narrowHz = n;
+        state.narrowKm = km;
         remember('narrowHz', n);
-        labelDopButtons();
+        remember('narrowKm', km);
+        labelRangeButtons();
         settingsDlg.close();
-        // Saving a narrow range is asking to see it.
-        setDopView('narrow');
+        // Saving a new narrow range is asking to see it. Only the axis whose
+        // range changed switches, so editing one never narrows the other.
+        if (hzChanged) setDopView('narrow');
+        if (kmChanged) setDelView('narrow');
+        scheduleRender();
     });
 
     document.querySelectorAll('.fchip').forEach(function (b) {
@@ -1337,7 +1458,10 @@
     document.querySelectorAll('.seg [data-dop]').forEach(function (b) {
         b.setAttribute('aria-pressed', String(b.getAttribute('data-dop') === state.dopView));
     });
-    labelDopButtons();
+    document.querySelectorAll('.seg [data-del]').forEach(function (b) {
+        b.setAttribute('aria-pressed', String(b.getAttribute('data-del') === state.delView));
+    });
+    labelRangeButtons();
     setDisplay(state.display);
 
     render();

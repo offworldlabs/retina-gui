@@ -303,6 +303,8 @@ class TestTheDopplerViewIsPresentationOnly:
     def test_the_setting_is_kept_in_the_browser_and_never_posted(self, page):
         assert "remember('narrowHz', n)" in page
         assert "remember('dopView', v)" in page
+        assert "remember('narrowKm', km)" in page
+        assert "remember('delView', v)" in page
         # The only requests the page makes besides the stream are Reset wedge
         # and Clear buffer; the wedge view's reads live in static/tracker-wedge.js.
         assert re.findall(r"fetch\('([^']+)'", page) == ['/tracker/coverage/reset', '/tracker/clear']
@@ -311,6 +313,44 @@ class TestTheDopplerViewIsPresentationOnly:
         alert = re.search(r'<span[^>]*id="oovAlert"[^>]*>', page).group(0)
         assert 'hidden' in alert
         assert 'id="oovShowBtn"' in page
+
+
+class TestTheDelayViewMirrorsTheDopplerView:
+    """The same narrow/full choice on the bistatic range axis, set from the
+    same gear. See docs/features/tracker.md#delay-view."""
+
+    @pytest.fixture
+    def page(self, app_client):
+        config = {"capture": {"fs": 2000000},
+                  "process": {"ambiguity": {"delayMin": -10, "delayMax": 400}}}
+        merged = MagicMock()
+        merged.load_merged_config.return_value = config
+        with patch.dict('sys.modules', {'app': MagicMock(config_mgr=merged)}):
+            return app_client.get('/tracker').get_data(as_text=True)
+
+    def test_the_toggle_opens_on_full_so_nothing_is_hidden_by_default(self, page):
+        narrow = re.search(r'<button[^>]*data-del="narrow"[^>]*>', page).group(0)
+        full = re.search(r'<button[^>]*data-del="full"[^>]*>', page).group(0)
+        assert 'aria-pressed="false"' in narrow
+        assert 'aria-pressed="true"' in full
+        assert "recall('delView', 'full') === 'narrow' ? 'narrow' : 'full'" in page
+
+    def test_narrow_defaults_to_30_km(self, page):
+        assert re.search(r'var DEFAULT_NARROW_KM = 30;', page)
+
+    def test_the_full_view_is_the_nodes_range_not_a_constant(self, page):
+        assert "state.delView === 'narrow' ? narrowDelayRange() : AXES.delay" in page
+        assert "xaxis: axis('Bistatic range (km)', delayRange())" in page
+
+    def test_the_gear_dialog_has_a_field_for_the_narrow_delay_range(self, page):
+        field = re.search(r'<input[^>]*id="narrowKmInput"[^>]*>', page).group(0)
+        assert 'type="number"' in field and 'min="1"' in field
+        dialog = re.search(r'<dialog[^>]*id="settingsDlg".*?</dialog>', page, re.S).group(0)
+        assert 'id="narrowKmInput"' in dialog and 'id="narrowHzInput"' in dialog
+
+    def test_show_full_span_widens_both_axes(self, page):
+        handler = re.search(r"getElementById\('oovShowBtn'\).*?\}\);", page, re.S).group(0)
+        assert "setDopView('full')" in handler and "setDelView('full')" in handler
 
 
 # ── the coverage wedge ──────────────────────────────────────────────────────
