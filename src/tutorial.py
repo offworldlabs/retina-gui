@@ -64,10 +64,10 @@ WELCOME_BODY = ("This short tour shows you around your node: what each page is f
 
 
 def welcome_title(name):
-    """"Welcome <name>!" from the first name on the contact record, or a plain
+    """"Welcome, <name>!" from the first name on the contact record, or a plain
     "Welcome!" when none was given."""
     name = str(name or "").strip()
-    return f"Welcome {name}!" if name else "Welcome!"
+    return f"Welcome, {name}!" if name else "Welcome!"
 
 
 # Order is the tour. Each body is a sentence or two, and each target name must exist
@@ -104,8 +104,8 @@ STEPS = (
     # ── Home ──
     # Says "highlighted", never "first": tabs keep one fixed order on every
     # node. See docs/features/fleet-and-naming.md#fleet-order.
-    _step(HOME, "Welcome to your node",
-          "Welcome to this node's Home page, headed with the name of its site, "
+    _step(HOME, "Your node's Home page",
+          "This is your node's Home page, headed with the name of its site, "
           "and the highlighted tab at the top always shows which node you are "
           "looking at.",
           ["home-head", "fleet-this-tab"]),

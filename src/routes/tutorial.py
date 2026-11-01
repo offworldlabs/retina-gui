@@ -32,9 +32,9 @@ def _include_summary():
     """Whether the run this request belongs to tours the Summary page.
 
     Read from the URL rather than worked out again. A step number is a position
-    in the run's own step list, which is 28 steps long with Summary and 23
-    without, so asking the fleet again on every request would renumber a tour
-    under its owner the moment a peer appeared or dropped.
+    in the run's own step list, and the list is shorter without Summary, so
+    asking the fleet again on every request would renumber a tour under its
+    owner the moment a peer appeared or dropped.
     See docs/features/tutorial.md#which-steps-run.
     """
     return _demo() or request.args.get("summary") == "1"

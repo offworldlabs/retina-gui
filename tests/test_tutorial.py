@@ -204,7 +204,7 @@ def test_step_numbers_follow_the_run_not_the_full_list(app_client, fleet):
     assert payload_in(app_client.get("/?tutorial=1&summary=1").data.decode()) is None
     run = payload_in(app_client.get(f"/?tutorial={summary_steps + 1}&summary=1").data.decode())
     assert run["current"] == summary_steps
-    assert run["steps"][summary_steps]["title"] == "Welcome to your node"
+    assert run["steps"][summary_steps]["title"] == "Your node's Home page"
 
 
 # ── A run keeps its shape ──────────────────────────────────────
@@ -386,7 +386,7 @@ class TestTheWelcome:
         assert with_summary[0]["welcome"] and with_summary[0]["page"] == "/summary"
         assert without[0]["welcome"] and without[0]["page"] == "/"
         assert with_summary[1]["title"] == "List of nodes"
-        assert without[1]["title"] == "Welcome to your node"
+        assert without[1]["title"] == "Your node's Home page"
 
     def test_the_welcome_points_at_nothing_and_says_two_sentences(self):
         welcome = tutorial.STEPS[0]
@@ -398,7 +398,7 @@ class TestTheWelcome:
                         data=json.dumps({"first_name": "Ada", "last_name": "Lovelace"}),
                         content_type='application/json')
         body = app_client.get('/?tutorial=1').data.decode()
-        assert '"title": "Welcome Ada!"' in body
+        assert '"title": "Welcome, Ada!"' in body
         assert '"welcome": true' in body
 
     def test_without_a_contact_name_it_is_a_plain_welcome(self, app_client):
