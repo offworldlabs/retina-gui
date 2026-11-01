@@ -40,8 +40,9 @@ which is the right answer: the tour can wait for the run.
 
 ## How a run moves
 
-A step is addressed by its page and its number in the run: `/summary?tutorial=2`,
-`/?tutorial=6`, `/config?tutorial=16`. There is no session state and nothing stored in the
+A step is addressed by its page and its number in the run: in a run that tours Summary,
+`/summary?tutorial=2`, `/?tutorial=7` and `/config?tutorial=17`, each also carrying `summary=1`
+(see [Which steps run](#which-steps-run)). There is no session state and nothing stored in the
 browser, so a reload resumes on the step being shown and a copied link opens the same step.
 
 On every render, `inject_globals` in `app.py` calls `tutorial_context`. With no `tutorial`
@@ -80,8 +81,26 @@ point of it.
 
 ## Which steps run
 
-`STEPS` lists every step in tour order: Summary, then Home, then Configuration, then one closing
-step back on Summary.
+`STEPS` lists every step in tour order: the welcome, then Summary, then Home, then Configuration,
+then one closing step back on Summary.
+
+### The welcome
+
+Every run opens with a greeting card that points at nothing: "Welcome, <name>!" and two
+sentences on what the tour is and that it can be skipped. The step is marked `welcome=True` in
+`STEPS`, where it carries the Summary page so the list stays in page order; `steps_for` puts it
+on whichever page the run actually starts on (Summary when toured, Home otherwise), so it never
+costs a page change. Its title is finished in `payload` from `owner_name`, which
+`routes/tutorial._owner_name` takes from the contact record's first name; with none given it
+is a plain "Welcome!". The node's own name does not stand in: it names a place, not a person.
+The body is the same for everyone. It is a module constant, `WELCOME_BODY`, rather than inline,
+because the title is built around it.
+
+On the page, `tutorial.js` gives the card the `tut-welcome` class (wider, and a larger title that
+breaks anywhere, so a long first name with no spaces stays inside the card), keeps
+it out of the margin column (`margins` returns null for it, as for a picture step) so it sits in
+the middle of the dimmed page, and does not show the "nothing to point at" note, which is for a
+targeted region that happens to be off the page, not for a step that has no target by design.
 
 The Summary steps run only when there is more than one node. With a single node the Summary page
 has one card and nothing to choose between, so the run starts on Home.
@@ -95,8 +114,8 @@ request rather than asking the fleet again, and `demo=1` implies it, since a dem
 tour by definition.
 
 The answer has to be fixed for the length of a run because a step number means nothing without
-the list it indexes into: the same `tutorial=6` is Home's first step in a Summary-toured run and
-Configuration's welcome in a single node's. Asking `discovered_nodes` on every request meant a
+the list it indexes into: the same `tutorial=7` is Home's first step in a Summary-toured run and
+Max-Hold in a single node's. Asking `discovered_nodes` on every request meant a
 peer appearing or dropping mid-tour silently swapped the list and renumbered the tour under its
 owner. A hand-edited link that carries a step number without the shape is read as a single node's
 run; if the number does not name a step on that page, `payload` returns `None` and the page
@@ -107,8 +126,8 @@ drops). It is on Summary because that is where the Resources and Help links are,
 there to visit with one node as well as with several. So a single node's run starts on Home and
 still ends on Summary. Getting there is an ordinary Next from the last Configuration step.
 
-Step numbers are positions in the run, not in `STEPS`. Home's first step is step 1 on a single
-node and step 6 when Summary is toured.
+Step numbers are positions in the run, not in `STEPS`. The welcome is step 1 in every run;
+Home's first step is step 2 on a single node and step 7 when Summary is toured.
 
 ### Demo mode
 
@@ -125,12 +144,13 @@ Summary and on Home is a [click-through step](#click-through-steps).
 
 | Page | Step | Points at |
 | --- | --- | --- |
+| (first page of the run) | Welcome, <name>! | Nothing: a centred greeting; see [The welcome](#the-welcome) |
 | Summary | List of nodes | The node cards and the tabs in the banner |
 | Summary | Resources | The Resources links |
 | Summary | If you need help | The Help links |
 | Summary | Doppler Mapping Tool | The flight-path simulator |
 | Summary | Open your node (click-through) | This node's card and this node's tab |
-| Home | Welcome to your node | The page heading with the site name, and this node's highlighted tab |
+| Home | Your node's Home page | The page heading with the site name, and this node's highlighted tab |
 | Home | System information | The "Listening on" row and the Telemetry card |
 | Home | Passive Radar: detections | Its service card, and white dots in the example image |
 | Home | Passive Radar: expected flights | Its service card, and orange dots in the example image |
@@ -203,7 +223,7 @@ used to say "a radar setting" for that reason, and was reworded:
 an owner who presses Apply after changing one of the others loses nothing, and "radar setting"
 left them to work out which settings those were.
 
-Home's welcome step points at this node's tab and calls it the highlighted one. It does not say the
+Home's first step points at this node's tab and calls it the highlighted one. It does not say the
 tab moves to the front, because it does not: tabs are in one fixed order on every node (see
 [fleet-and-naming.md](fleet-and-naming.md#fleet-order)), and which node is open is shown by the
 highlight alone.

@@ -32,9 +32,9 @@ def _include_summary():
     """Whether the run this request belongs to tours the Summary page.
 
     Read from the URL rather than worked out again. A step number is a position
-    in the run's own step list, which is 28 steps long with Summary and 23
-    without, so asking the fleet again on every request would renumber a tour
-    under its owner the moment a peer appeared or dropped.
+    in the run's own step list, and the list is shorter without Summary, so
+    asking the fleet again on every request would renumber a tour under its
+    owner the moment a peer appeared or dropped.
     See docs/features/tutorial.md#which-steps-run.
     """
     return _demo() or request.args.get("summary") == "1"
@@ -60,4 +60,14 @@ def tutorial_context():
     step_arg = request.args.get("tutorial")
     if step_arg is None:
         return None
-    return tutorial.payload(request.path, step_arg, _include_summary(), _demo())
+    return tutorial.payload(request.path, step_arg, _include_summary(), _demo(),
+                            owner_name=_owner_name())
+
+
+def _owner_name():
+    """Whom the welcome greets: the contact record's first name, or nothing.
+    See docs/features/tutorial.md#the-welcome."""
+    from app import device_state
+
+    contact = device_state.get_telemetry_contact() or {}
+    return contact.get("first_name") or ""
