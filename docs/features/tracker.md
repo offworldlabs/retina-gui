@@ -13,7 +13,7 @@ surface for Auto-Calibrate.
 
 | File | Role |
 | --- | --- |
-| [src/routes/tracker.py](../../src/routes/tracker.py) | The `/tracker` blueprint (page, SSE proxy, one-shot snapshot, clear, and the coverage proxies) and the `/tracker-preview` redirect. Computes the plot's axis bounds from the merged config. |
+| [src/routes/tracker.py](../../src/routes/tracker.py) | The `/tracker` blueprint (page, SSE proxy, one-shot snapshot, clear, and the coverage proxies) and the `/tracker-preview` redirect. Computes the plot's axis bounds from the merged config, and passes the node's centre frequency and display units. |
 | [templates/tracker.html](../../templates/tracker.html) | The page: controls, the Plotly scope, the wedge view's container and reset dialog, the track rail, and the EventSource client. |
 | [static/tracker-wedge.js](../../static/tracker-wedge.js) | The wedge view: the Leaflet map, the wedge, trails and arcs, and the replay. |
 | [src/retina_tracker_client.py](../../src/retina_tracker_client.py) | `RetinaTrackerClient`: JSONL event tailer plus HTTP control client (`reset`). |
@@ -187,6 +187,17 @@ what the node can see, which is not knowable from what it happened to see. Plotl
 `uirevision` keeps a viewer's own zoom across updates, so the node's range is where the axis
 starts rather than somewhere it is dragged back to.
 
+The same render carries two more facts about the node, for the same reason: its centre frequency
+(`capture.fc`, through `_centre_frequency_hz()`, for the [radial velocity](#radial-velocity)) and
+its [display units](#units) (through `_display_units()`). `fc` is `None`, and the page offers
+hertz only, when the config cannot be read or does not state a positive value: a speed from a
+guessed wavelength would be a confident wrong number. The config is the merged `config.yml`, the
+frequency the stack starts at and returns to. Auto-Calibrate retunes blah2 without writing it, so
+a point recorded while a run dwells on another candidate tower is converted with the configured
+wavelength and its speed is off by the ratio of the two frequencies; the page does not try to
+follow the retune, because the run is short, the tracker is reset between candidates, and the
+record the page draws from is cleared by Clear buffer and not by the run.
+
 The Doppler bounds are the Full setting of the Doppler view below, and by default the page draws a
 narrower band inside them. The delay bounds are the Full setting of the [Delay view](#delay-view),
 which is the default for that axis.
@@ -227,14 +238,65 @@ stream updates as before, but switching either view or saving a new range redraw
 their current ranges rather than keeping the old zoom. Double-click resets to the current views'
 ranges.
 
+## Radial velocity
+
+A Doppler figure means little to anyone who does not carry the wavelength in their head, so the
+Doppler axis writes both. Every tick carries the Hz on its first line and the radial velocity
+under it in a smaller grey type, and the Y axis control in the toolbar (Hz, km/h or mph) chooses
+which of the two is the main line and the axis title: `Doppler (Hz)`, or
+`Radial velocity (km/h, + closing)`. Hover labels on tracks and detections give both as well.
+
+The speed is `v = f · c / fc / 2`, positive closing. The halving makes it the monostatic-
+equivalent speed, the same figure as retina-tracker's `max_velocity_ms` (its `|range rate| / 2`
+floor on target speed), so the axis and the rail's peak velocity agree. It understates the true
+bistatic range rate, `f · c / fc`, by up to half, depending on the geometry; it was chosen over the
+range rate because "radial velocity" is what a radar operator asks for and what the rail already
+shows, and the doc line here is where the factor is recorded. Closing is positive so the picture
+keeps the orientation of the Hz view: blah2 reports an approaching target as positive Doppler,
+and switching the unit must not flip the plot.
+
+Plotly cannot label a tick in two units, so the page lays the ticks out itself (`dopplerTicks`):
+round values of the main unit, at a 1-2-5 step giving about eight across the visible range, each
+placed at its Hz position with `tickmode: 'array'`. The data is never converted: the stream, the
+narrow ranges and the [out-of-view alert](#out-of-view-alert) stay in hertz, and only the tick
+text changes. The visible range is the view's own, or after a zoom whatever `plotly_relayout` last
+reported, so a zoom into ±100 km/h gets ticks every 20 km/h rather than one or two from the full
+span; double-click clears it. The handler is wired after the first draw, which is when Plotly
+gives the div its `on`, and ignores its own tick relayouts, which carry no range key.
+
+The choice is remembered in the browser (`tracker.yUnit`). On a node whose config states no
+centre frequency the speed button is disabled with a title saying why, the ticks carry Hz alone,
+and a remembered speed choice falls back to Hz rather than drawing nothing. The axis margin is
+wider when speeds are drawn, for the second line.
+
+## Units
+
+Distances and speeds are written in the node's [display units](config-editor.md#display-units):
+kilometres and km/h, or miles and mph. The setting is the node's, not the browser's, so every
+viewer of a node reads the same figures. It changes the bistatic range axis and its title, the
+Delay toggle's labels, the out-of-view alert, the gear dialog's narrow delay field, the hover
+labels, the rail's peak velocity and the speed unit on the Y axis control.
+
+The x axis is the one place the data itself converts (`distOf`), so zoom, pan and hover read in
+the display unit. Everything the page reasons with stays in km: the stream's columns, `AXES.delay`,
+and the narrow delay range, which is typed and shown as a whole number of the display unit but
+stored in km (`tracker.narrowKm`) so a node that switches units keeps the same range rather than
+reading 30 as 30 miles. Its default is 30 km, or 20 mi on an imperial node. The validation cap
+is the node's reach rounded up in the display unit, as before.
+
+Altitude on the setup wizard's location step and every figure in the radar config stay metric:
+the setting is for what is read, never for what is written.
+
 ## Delay view
 
 The Delay control in the toolbar does the same for the bistatic range (x) axis:
 
 | Setting | Draws | Label |
 | --- | --- | --- |
-| Narrow | From the node's `delayMin` out to 30 km, or whatever the gear sets, clipped to the node's range | `30 km` |
+| Narrow | From the node's `delayMin` out to 30 km (20 mi), or whatever the gear sets, clipped to the node's range | `30 km` |
 | Full (the default) | The node's own bounds from [Axis bounds](#axis-bounds), or autoscale if the config does not state them | `60 km` on a default node |
+
+Labels and the gear field are in the node's [display units](#units).
 
 It is presentation only, like the Doppler view: nothing is written to config and the stream
 carries the full range either way. Full is the default because, unlike Doppler, there is no band
@@ -242,8 +304,8 @@ where ordinary traffic sits that the rest of the axis distracts from. Narrow is 
 closely at near targets, and a viewer turns it on.
 
 The narrow range is a single far limit, set in the same gear dialog as a whole number of
-kilometres from 1 to the node's furthest processed range rounded up (or up to 1,000 when the range
-is unknown). The near end stays at the node's own `delayMin` (slightly below zero on a default
+kilometres or miles from 1 to the node's furthest processed range rounded up (or up to 1,000 km
+when the range is unknown), and kept in km. The near end stays at the node's own `delayMin` (slightly below zero on a default
 node, past the direct signal), so narrowing never cuts off the nearest detections. If the node's
 range starts beyond the narrow limit, narrow falls back to the node's bounds. Labels round to the
 nearest kilometre.
@@ -271,7 +333,8 @@ repeated detections that line up, which is the evidence worth interrupting someo
 
 ## What is plotted
 
-The scope plots bistatic range (km) against Doppler (Hz).
+The scope plots bistatic range (km or mi, see [Units](#units)) against Doppler (Hz), with the
+[radial velocity](#radial-velocity) written beside it.
 
 **Detections** come in three classes, all reported by retina-tracker. It knows which
 detections a confirmed track claimed, so the page does not infer any of it. (An earlier version
@@ -366,17 +429,17 @@ The rail beside the scope lists every track in the window.
 - **Flagged tracks get a dot, not a badge.** retina-tracker's anomaly detector is not trusted
   yet, and a solid label would be read as a verdict. The expanded row lists the anomaly types
   marked "(provisional)".
-- **Clicking a row** expands a detail panel: first and last seen, length, peak velocity and
-  shadow fraction. In the wedge view it also [replays the track](#replaying-a-track).
+- **Clicking a row** expands a detail panel: first and last seen, length, peak velocity (in the
+  node's [display units](#units)) and shadow fraction. In the wedge view it also [replays the track](#replaying-a-track).
 - **Hide** (eye) removes a track from the scope but keeps its row. **Remove** (bin) drops the row
   too; removals are per browser and can be undone with Restore in the rail footer.
 
 View window, layer, track overlay, sort, filter, Doppler view (`tracker.dopView`), the narrow
 Doppler range (`tracker.narrowHz`), delay view (`tracker.delView`), the narrow delay range
-(`tracker.narrowKm`) and the display (`tracker.display`) are remembered in `localStorage`
-(`tracker.*` keys) and
-restored into the controls before connecting. They are per browser: nothing about the page's
-presentation is stored on the node.
+(`tracker.narrowKm`, always in km), the Doppler axis unit (`tracker.yUnit`) and the display
+(`tracker.display`) are remembered in `localStorage` (`tracker.*` keys) and restored into the
+controls before connecting. They are per browser: the one thing about the page's presentation
+stored on the node is the [display units](#units) setting, which belongs to the node.
 
 The page is full width with a viewport-clamped height, since both the plot and the rail want
 every pixel; below 900 px the rail stacks under the plot.

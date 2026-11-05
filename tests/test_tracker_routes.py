@@ -335,12 +335,13 @@ class TestTheDelayViewMirrorsTheDopplerView:
         assert 'aria-pressed="true"' in full
         assert "recall('delView', 'full') === 'narrow' ? 'narrow' : 'full'" in page
 
-    def test_narrow_defaults_to_30_km(self, page):
-        assert re.search(r'var DEFAULT_NARROW_KM = 30;', page)
+    def test_narrow_defaults_to_30_km_or_20_miles(self, page):
+        assert re.search(r'var DEFAULT_NARROW_DIST = IMPERIAL \? 20 : 30;', page)
+        assert re.search(r'var DEFAULT_NARROW_KM = kmOf\(DEFAULT_NARROW_DIST\);', page)
 
     def test_the_full_view_is_the_nodes_range_not_a_constant(self, page):
         assert "state.delView === 'narrow' ? narrowDelayRange() : AXES.delay" in page
-        assert "xaxis: axis('Bistatic range (km)', delayRange())" in page
+        assert "xaxis: axis('Bistatic range (' + DIST_UNIT + ')', displayDelayRange())" in page
 
     def test_the_gear_dialog_has_a_field_for_the_narrow_delay_range(self, page):
         field = re.search(r'<input[^>]*id="narrowKmInput"[^>]*>', page).group(0)
@@ -425,3 +426,86 @@ def test_the_page_carries_the_wedge_view(app_client):
     assert 'Processed range limit' in body
     assert 'Close-in, overhead' in body
     assert re.search(r'cartoKey: "[^"]*",', body)
+
+
+# ── radial velocity and units ───────────────────────────────────────────────
+
+class TestTheCentreFrequencyAndUnitsReachThePage:
+    """The page turns Doppler into radial velocity through the node's centre
+    frequency and writes distances and speeds in the node's display units.
+    See docs/features/tracker.md#radial-velocity and #units."""
+
+    def _fc(self, config):
+        merged = MagicMock()
+        merged.load_merged_config.return_value = config
+        with patch.dict('sys.modules', {'app': MagicMock(config_mgr=merged)}):
+            return tracker_routes._centre_frequency_hz()
+
+    def test_the_centre_frequency_is_the_nodes_own(self):
+        assert self._fc({"capture": {"fc": 503000000}}) == 503000000.0
+
+    @pytest.mark.parametrize("config", [
+        {}, {"capture": {}}, {"capture": {"fc": None}}, {"capture": {"fc": 0}},
+        {"capture": {"fc": -5}}, {"capture": {"fc": "soon"}},
+    ])
+    def test_no_usable_fc_means_no_speeds_rather_than_a_guess(self, config):
+        assert self._fc(config) is None
+
+    def test_an_unreadable_config_means_no_speeds(self):
+        merged = MagicMock()
+        merged.load_merged_config.side_effect = OSError("gone")
+        with patch.dict('sys.modules', {'app': MagicMock(config_mgr=merged)}):
+            assert tracker_routes._centre_frequency_hz() is None
+
+    @pytest.fixture
+    def page(self, app_client):
+        def render(units=None):
+            if units:
+                app_client.post("/display-units", json={"units": units})
+            return app_client.get('/tracker').get_data(as_text=True)
+        return render
+
+    def test_the_page_carries_fc_and_the_units(self, page):
+        body = page()
+        assert re.search(r'var FC_HZ = 503000000\.0;', body)
+        assert 'var UNITS = "metric";' in body
+        assert 'var UNITS = "imperial";' in page("imperial")
+
+    def test_a_node_without_fc_offers_hertz_only(self, app_client):
+        config = {"process": {"ambiguity": {"dopplerMin": -1000, "dopplerMax": 1000}}}
+        merged = MagicMock()
+        merged.load_merged_config.return_value = config
+        with patch.dict('sys.modules', {'app': MagicMock(config_mgr=merged)}):
+            body = app_client.get('/tracker').get_data(as_text=True)
+        assert 'var FC_HZ = null;' in body
+        # The mocked app has no real display_units; the page falls back to metric.
+        assert 'var UNITS = "metric";' in body
+        assert "speedBtn.disabled = true;" in body
+
+    def test_the_y_axis_toggle_opens_on_hertz(self, page):
+        body = page()
+        hz = re.search(r'<button[^>]*data-yunit="hz"[^>]*>', body).group(0)
+        speed = re.search(r'<button[^>]*data-yunit="speed"[^>]*>', body).group(0)
+        assert 'aria-pressed="true"' in hz
+        assert 'aria-pressed="false"' in speed and 'id="yUnitSpeedBtn"' in speed
+
+    def test_the_speed_is_the_monostatic_equivalent_closing_positive(self, page):
+        """v = f * c / fc / 2: the same halving as retina-tracker's peak
+        velocity, so the axis and the rail agree."""
+        body = page()
+        assert "function speedOf(hz) { return hz * SPEED_OF_LIGHT / FC_HZ / 2 / MPS_PER_SPEED; }" in body
+        assert "var SPEED_OF_LIGHT = 299792458;" in body
+
+    def test_the_unit_choice_stays_in_the_browser_and_the_data_in_hertz(self, page):
+        body = page()
+        assert "remember('yUnit', state.yUnit)" in body
+        # The stream's columns are plotted as they are; only ticks and labels convert.
+        assert "bin.y.push(trk.doppler[i]);" in body
+        assert "spec.tickmode = 'array';" in body
+
+    def test_the_narrow_delay_range_is_kept_in_kilometres(self, page):
+        """Typed in the display unit, stored in km, so switching units keeps
+        the same range."""
+        body = page()
+        assert "var km = kmOf(dist);" in body
+        assert "remember('narrowKm', km);" in body

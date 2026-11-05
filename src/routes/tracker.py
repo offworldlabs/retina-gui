@@ -62,6 +62,35 @@ def _axis_bounds():
     return bounds
 
 
+def _centre_frequency_hz():
+    """The node's centre frequency from its merged config, or None.
+
+    The page turns Doppler into radial velocity with it. None when the config
+    cannot be loaded or does not state a positive `capture.fc`; the page then
+    offers hertz only rather than a speed from a guessed wavelength.
+    See docs/features/tracker.md#radial-velocity.
+    """
+    from app import config_mgr
+
+    try:
+        config = config_mgr.load_merged_config() or {}
+        fc = float((config.get("capture", {}) or {}).get("fc"))
+    except Exception:
+        return None
+    return fc if fc > 0 else None
+
+
+def _display_units():
+    """metric or imperial, from the node's Display setting; metric when unsure."""
+    from app import display_units
+
+    try:
+        units = display_units.get()
+    except Exception:
+        return "metric"
+    return units if units in ("metric", "imperial") else "metric"
+
+
 def _drawable(lo, hi):
     """Whether a pair is an axis rather than a typo: both present, hi > lo."""
     return lo is not None and hi is not None and hi > lo
@@ -105,9 +134,11 @@ def moved(path):
 @bp.route("")
 def index():
     """The Tracker page. Everything it draws arrives on /tracker/events and
-    /tracker/coverage, except the axis bounds, which come from config."""
+    /tracker/coverage, except the axis bounds, the centre frequency and the
+    display units, which come from the node."""
     from services import CARTO_API_KEY
-    return render_template("tracker.html", axes=_axis_bounds(), carto_api_key=CARTO_API_KEY)
+    return render_template("tracker.html", axes=_axis_bounds(), fc=_centre_frequency_hz(),
+                           units=_display_units(), carto_api_key=CARTO_API_KEY)
 
 
 @bp.route("/events")

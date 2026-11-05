@@ -229,6 +229,19 @@
         </div>
       </div>
 
+      {# Hz or a speed on the Doppler axis. The speed is worked out from the
+         node's centre frequency, so the button is dead when the config does
+         not state one. See docs/features/tracker.md#radial-velocity #}
+      <div class="trk-ctl dd-only">
+        <span class="trk-lab">Y axis</span>
+        <div class="seg" role="group" aria-label="Doppler axis unit">
+          <button type="button" data-yunit="hz" aria-pressed="true"
+                  title="Bistatic Doppler as the node reports it. The speed is written under each tick.">Hz</button>
+          <button type="button" data-yunit="speed" aria-pressed="false" id="yUnitSpeedBtn"
+                  title="Radial velocity, positive closing, worked out from the node's centre frequency. The Doppler is written under each tick.">km/h</button>
+        </div>
+      </div>
+
       <div class="trk-ctl dd-only">
         <span class="trk-lab">Delay</span>
         <div class="seg" role="group" aria-label="Delay range">
@@ -373,7 +386,7 @@
             <span>out to</span>
             <input class="ds-input mono" id="narrowKmInput" type="number" min="1" step="1"
                    inputmode="numeric" aria-describedby="narrowKmHelp narrowKmErr">
-            <span>km</span>
+            <span id="narrowKmUnit">km</span>
           </div>
           <div class="ds-field-help" id="narrowKmHelp">
             What the Delay toggle's narrow setting shows, in bistatic range. The node processes
@@ -432,6 +445,34 @@
     // See docs/features/tracker.md#axis-bounds
     var AXES = {{ (axes or {}) | tojson }};
     var csrf = document.querySelector('meta[name="csrf-token"]').content;
+
+    // ── Units ────────────────────────────────────────────────────────────
+
+    // The node's Display setting decides the distance and speed units. The
+    // stream, the narrow ranges and the out-of-view test stay in km and Hz;
+    // only what is drawn and written converts.
+    // See docs/features/tracker.md#units
+    var UNITS = {{ units | tojson }};
+    var IMPERIAL = UNITS === 'imperial';
+    var DIST_UNIT = IMPERIAL ? 'mi' : 'km';
+    var SPEED_UNIT = IMPERIAL ? 'mph' : 'km/h';
+    var KM_PER_DIST = IMPERIAL ? 1.609344 : 1;      // km in one displayed distance unit
+    var MPS_PER_SPEED = IMPERIAL ? 0.44704 : 1 / 3.6; // m/s in one displayed speed unit
+
+    function distOf(km) { return km / KM_PER_DIST; }
+    function kmOf(dist) { return dist * KM_PER_DIST; }
+    function fmtDist(km) { return Math.round(distOf(km)) + ' ' + DIST_UNIT; }
+    function fmtSpeedMps(mps) { return Math.round(mps / MPS_PER_SPEED) + ' ' + SPEED_UNIT; }
+
+    // Radial velocity from Doppler, through the node's centre frequency:
+    // v = f * c / fc / 2, positive closing. The halving makes it the
+    // monostatic-equivalent speed the rail's peak velocity uses; the bistatic
+    // range rate is twice it. null fc: speeds cannot be worked out.
+    // See docs/features/tracker.md#radial-velocity
+    var FC_HZ = {{ fc | tojson }};
+    var SPEED_OF_LIGHT = 299792458;
+    function speedOf(hz) { return hz * SPEED_OF_LIGHT / FC_HZ / 2 / MPS_PER_SPEED; }
+    function hzOf(speed) { return speed * MPS_PER_SPEED * 2 * FC_HZ / SPEED_OF_LIGHT; }
 
     // 15 min, not 4 h: only sets how much the node sends on open.
     // See docs/features/tracker.md#view-window
@@ -506,6 +547,9 @@
     state.sort = recall('sort', 'recent');
     state.filter = recall('filter', 'all');
     state.display = recall('display', 'scope') === 'wedge' ? 'wedge' : 'scope';
+    // Hz, or the speed, on the Doppler axis. Speed needs fc, so without it the
+    // remembered choice falls back to Hz rather than drawing nothing.
+    state.yUnit = FC_HZ && recall('yUnit', 'hz') === 'speed' ? 'speed' : 'hz';
 
     // ── Doppler view ─────────────────────────────────────────────────────
 
@@ -554,21 +598,32 @@
     // The same idea on the bistatic range axis, and presentation only too.
     // Full is the default, so nothing is hidden until a viewer asks for it.
     // See docs/features/tracker.md#delay-view
-    var DEFAULT_NARROW_KM = 30;
+    // The setting is typed and shown in the display unit but kept in km, so a
+    // node switching units keeps the same range. 30 km, or 20 mi, by default.
+    var DEFAULT_NARROW_DIST = IMPERIAL ? 20 : 30;
+    var DEFAULT_NARROW_KM = kmOf(DEFAULT_NARROW_DIST);
     var MAX_NARROW_KM = 1000;      // a sanity cap, used only when the span is unknown
 
-    // The node's furthest processed range, the widest narrow range worth having.
+    // The node's furthest processed range, the widest narrow range worth
+    // having, in the display unit rounded up.
     function delayReach() {
-        return AXES.delay ? Math.ceil(AXES.delay[1]) : null;
+        return AXES.delay ? Math.ceil(distOf(AXES.delay[1])) : null;
     }
 
-    function validNarrowKm(n) {
-        var cap = delayReach() || MAX_NARROW_KM;
+    // A whole number of the display unit, 1 to the reach; null otherwise.
+    function validNarrowDist(n) {
+        var cap = delayReach() || Math.ceil(distOf(MAX_NARROW_KM));
         return Number.isInteger(n) && n >= 1 && n <= cap ? n : null;
     }
 
+    // The remembered km, if it still fits the node; otherwise the default.
+    function validNarrowKm(km) {
+        var cap = AXES.delay ? AXES.delay[1] : MAX_NARROW_KM;
+        return Number.isFinite(km) && km > 0 && km <= cap ? km : null;
+    }
+
     state.delView = recall('delView', 'full') === 'narrow' ? 'narrow' : 'full';
-    state.narrowKm = validNarrowKm(parseInt(recall('narrowKm', DEFAULT_NARROW_KM), 10)) || DEFAULT_NARROW_KM;
+    state.narrowKm = validNarrowKm(parseFloat(recall('narrowKm', DEFAULT_NARROW_KM))) || DEFAULT_NARROW_KM;
 
     // Starts where the node starts (a little below zero, past the direct
     // signal), clipped so narrow never draws range the node cannot see.
@@ -583,10 +638,6 @@
 
     function delayRange() {
         return state.delView === 'narrow' ? narrowDelayRange() : AXES.delay;
-    }
-
-    function fmtKm(km) {
-        return Math.round(km) + ' km';
     }
 
     // ── Column helpers ───────────────────────────────────────────────────
@@ -740,10 +791,14 @@
     function pushTrack(bin, id, trk) {
         if (bin.x.length) { bin.x.push(null); bin.y.push(null); bin.cd.push(null); }
         for (var i = 0; i < trk.delay.length; i++) {
-            bin.x.push(trk.delay[i]);
+            bin.x.push(distOf(trk.delay[i]));
             bin.y.push(trk.doppler[i]);
-            bin.cd.push([id, trk.snr[i]]);
+            bin.cd.push([id, trk.snr[i], FC_HZ ? speedOf(trk.doppler[i]) : null]);
         }
+    }
+
+    function hoverSpeed(field) {
+        return FC_HZ ? '<br>Radial velocity: %{' + field + ':.0f} ' + SPEED_UNIT : '';
     }
 
     function trackTrace(bin, color, opacity) {
@@ -753,8 +808,9 @@
             line: { color: 'rgba(0,0,0,0.25)', width: 1 },
             marker: { color: color, size: 7, line: { color: '#ffffff', width: 0.5 } },
             customdata: bin.cd,
-            hovertemplate: '%{customdata[0]}<br>Delay: %{x:.2f}<br>Doppler: %{y:.2f} Hz<br>'
-                         + 'SNR: %{customdata[1]:.1f} dB<extra></extra>',
+            hovertemplate: '%{customdata[0]}<br>Range: %{x:.2f} ' + DIST_UNIT + '<br>Doppler: %{y:.2f} Hz'
+                         + hoverSpeed('customdata[2]')
+                         + '<br>SNR: %{customdata[1]:.1f} dB<extra></extra>',
             opacity: opacity,
             showlegend: false
         };
@@ -839,7 +895,7 @@
         var out = '<div class="trk-detail">';
         out += '<div>first <b>' + clockOf(r.first) + '</b> &middot; last <b>' + clockOf(r.last) + '</b></div>';
         out += '<div>length <b>' + (m.length != null ? m.length : r.n) + '</b>'
-             + ' &middot; peak velocity <b>' + (m.max_velocity_ms || 0).toFixed(0) + ' m/s</b></div>';
+             + ' &middot; peak velocity <b>' + fmtSpeedMps(m.max_velocity_ms || 0) + '</b></div>';
         out += '<div>shadow fraction <b>' + (m.shadow_fraction || 0).toFixed(2) + '</b></div>';
         if (m.anomaly_types && m.anomaly_types.length) {
             out += '<div>flagged <b>' + esc(m.anomaly_types.join(', ')) + '</b> (provisional)</div>';
@@ -951,7 +1007,7 @@
         if (out.n) {
             var ranges = [];
             if (out.dop) ranges.push(fmtHzRange(narrowRange()) + ' Hz');
-            if (out.del) ranges.push(fmtKm(narrowDelayRange()[1]));
+            if (out.del) ranges.push(fmtDist(narrowDelayRange()[1]));
             oovText.textContent = out.n + (out.n === 1 ? ' track' : ' tracks') + ' outside '
                 + ranges.join(' / ');
         }
@@ -982,10 +1038,10 @@
             shown += cols.t.length;
             for (var i = 0; i < cols.delay.length; i++) {
                 var b = bandOf(cols.snr[i]);
-                var bin = bands[b] || (bands[b] = { x: [], y: [], snr: [] });
-                bin.x.push(cols.delay[i]);
+                var bin = bands[b] || (bands[b] = { x: [], y: [], cd: [] });
+                bin.x.push(distOf(cols.delay[i]));
                 bin.y.push(cols.doppler[i]);
-                bin.snr.push(cols.snr[i]);
+                bin.cd.push([cols.snr[i], FC_HZ ? speedOf(cols.doppler[i]) : null]);
             }
         });
         bands.forEach(function (bin, b) {
@@ -993,8 +1049,10 @@
                 type: 'scattergl', mode: 'markers', name: 'Detections',
                 x: bin.x, y: bin.y,
                 marker: { color: BAND_COLOUR[b], size: 4, opacity: 0.4 },
-                customdata: bin.snr,
-                hovertemplate: 'Delay: %{x:.2f}<br>Doppler: %{y:.2f} Hz<br>SNR: %{customdata:.1f} dB<extra></extra>',
+                customdata: bin.cd,
+                hovertemplate: 'Range: %{x:.2f} ' + DIST_UNIT + '<br>Doppler: %{y:.2f} Hz'
+                             + hoverSpeed('customdata[1]')
+                             + '<br>SNR: %{customdata[0]:.1f} dB<extra></extra>',
                 opacity: detectionOpacity(),
                 showlegend: false
             });
@@ -1035,10 +1093,11 @@
             uirevision: 'tracker:' + state.dopView + ':' + state.narrowHz
                       + ':' + state.delView + ':' + state.narrowKm,
             showlegend: false,
-            margin: { t: 12, r: 14, b: 44, l: 58 },
-            xaxis: axis('Bistatic range (km)', delayRange()),
-            yaxis: axis('Doppler (Hz)', dopplerRange())
+            margin: { t: 12, r: 14, b: 44, l: FC_HZ ? 74 : 58 },
+            xaxis: axis('Bistatic range (' + DIST_UNIT + ')', displayDelayRange()),
+            yaxis: dopplerAxis()
         }, { displayModeBar: false, responsive: true });
+        wireZoom();
 
         detCount.textContent = shown.toLocaleString() + ' detections shown'
             + cappedNote() + heldNote();
@@ -1056,6 +1115,117 @@
         var spec = { title: { text: title } };
         if (range) spec.range = range.slice();
         return spec;
+    }
+
+    // The delay range in the display unit, for the x axis.
+    function displayDelayRange() {
+        var r = delayRange();
+        return r ? [distOf(r[0]), distOf(r[1])] : null;
+    }
+
+    // ── The Doppler axis ─────────────────────────────────────────────────
+
+    // Plotly cannot write two units on one tick, so the ticks are placed and
+    // written here: the chosen unit on the first line, the other beneath it.
+    // Ticks are laid out over the visible range, which is the view's range
+    // or, after a zoom, whatever plotly_relayout last reported.
+    // See docs/features/tracker.md#radial-velocity
+    var yZoom = null;
+
+    function dopplerAxis() {
+        var speed = state.yUnit === 'speed' && FC_HZ;
+        var spec = axis(speed ? 'Radial velocity (' + SPEED_UNIT + ', + closing)' : 'Doppler (Hz)',
+                        dopplerRange());
+        var visible = yZoom || dopplerRange() || dataDopplerExtent();
+        if (visible) {
+            var ticks = dopplerTicks(visible, speed);
+            spec.tickmode = 'array';
+            spec.tickvals = ticks.vals;
+            spec.ticktext = ticks.text;
+        }
+        return spec;
+    }
+
+    // Where the ticks fall when nothing states a range (an unknown span,
+    // drawn on autoscale): the data's own extent.
+    function dataDopplerExtent() {
+        var lo = Infinity, hi = -Infinity;
+        function take(cols) {
+            for (var i = 0; i < cols.doppler.length; i++) {
+                if (cols.doppler[i] < lo) lo = cols.doppler[i];
+                if (cols.doppler[i] > hi) hi = cols.doppler[i];
+            }
+        }
+        layerCols().forEach(take);
+        Object.keys(store.tracks).forEach(function (id) { take(store.tracks[id]); });
+        return lo < hi ? [lo, hi] : null;
+    }
+
+    // A 1-2-5 step giving about eight ticks across the span.
+    function niceStep(span) {
+        var raw = span / 8;
+        var mag = Math.pow(10, Math.floor(Math.log(raw) / Math.LN10));
+        var m = raw / mag;
+        return (m < 1.5 ? 1 : m < 3.5 ? 2 : m < 7.5 ? 5 : 10) * mag;
+    }
+
+    function fmtTick(v, step) {
+        var decimals = step >= 1 ? 0 : Math.min(3, Math.ceil(-Math.log(step) / Math.LN10));
+        return v.toLocaleString(undefined, { minimumFractionDigits: decimals, maximumFractionDigits: decimals });
+    }
+
+    function minor(text) {
+        return '<br><span style="font-size:10px;color:#8a877f">' + text + '</span>';
+    }
+
+    // Ticks at round values of the chosen unit, each with the other unit
+    // written beneath it. Returns Hz positions in `vals`.
+    function dopplerTicks(range, speed) {
+        var vals = [], text = [];
+        var lo = range[0], hi = range[1];
+        if (hi <= lo) return { vals: vals, text: text };
+        if (speed) {
+            var sLo = speedOf(lo), sHi = speedOf(hi), sStep = niceStep(sHi - sLo);
+            for (var i = Math.ceil(sLo / sStep); i * sStep <= sHi + sStep * 1e-6; i++) {
+                var sp = i * sStep;
+                vals.push(hzOf(sp));
+                text.push(fmtTick(sp, sStep) + minor(fmtTick(hzOf(sp), 1) + ' Hz'));
+            }
+        } else {
+            var step = niceStep(hi - lo);
+            for (var j = Math.ceil(lo / step); j * step <= hi + step * 1e-6; j++) {
+                var hz = j * step;
+                vals.push(hz);
+                text.push(fmtTick(hz, step) + (FC_HZ ? minor(fmtTick(speedOf(hz), 1) + ' ' + SPEED_UNIT) : ''));
+            }
+        }
+        return { vals: vals, text: text };
+    }
+
+    // After a zoom, lay the ticks out over what is now visible: eight ticks
+    // over the whole span are one or two over a zoomed slice. A relayout of
+    // the ticks alone carries no range key and is ignored, so this cannot
+    // feed itself. Double-click (autorange) clears the zoom. Wired after the
+    // first draw, which is when Plotly gives the div its `on`.
+    var zoomWired = false;
+    function wireZoom() {
+        if (zoomWired || typeof plotDiv.on !== 'function') return;
+        zoomWired = true;
+        plotDiv.on('plotly_relayout', onZoom);
+    }
+
+    function onZoom(ev) {
+        if (!ev) return;
+        if ('yaxis.range[0]' in ev) {
+            yZoom = [ev['yaxis.range[0]'], ev['yaxis.range[1]']];
+        } else if (ev['yaxis.autorange'] || ev['yaxis.range']) {
+            yZoom = ev['yaxis.range'] ? ev['yaxis.range'].slice() : null;
+        } else {
+            return;
+        }
+        var spec = dopplerAxis();
+        Plotly.relayout(plotDiv, { 'yaxis.tickvals': spec.tickvals || null,
+                                   'yaxis.ticktext': spec.ticktext || null });
     }
 
     // Says when the node holds less history than the window asks for (after a
@@ -1166,6 +1336,7 @@
 
     function setDopView(v) {
         state.dopView = v;
+        yZoom = null;
         remember('dopView', v);
         document.querySelectorAll('.seg [data-dop]').forEach(function (b) {
             b.setAttribute('aria-pressed', String(b.getAttribute('data-dop') === v));
@@ -1175,6 +1346,7 @@
 
     function setDelView(v) {
         state.delView = v;
+        yZoom = null;
         remember('delView', v);
         document.querySelectorAll('.seg [data-del]').forEach(function (b) {
             b.setAttribute('aria-pressed', String(b.getAttribute('data-del') === v));
@@ -1184,6 +1356,13 @@
 
     wireSeg('dop', setDopView);
     wireSeg('del', setDelView);
+
+    // Relabels the ticks only: the data stays in Hz, so nothing else moves.
+    wireSeg('yunit', function (v) {
+        state.yUnit = FC_HZ && v === 'speed' ? 'speed' : 'hz';
+        remember('yUnit', state.yUnit);
+        scheduleRender();
+    });
     // Widens both axes: the alert counts escapes from either narrow range.
     document.getElementById('oovShowBtn').addEventListener('click', function () {
         setDopView('full');
@@ -1195,8 +1374,8 @@
     function labelRangeButtons() {
         document.getElementById('dopNarrowBtn').textContent = fmtHzRange(narrowRange());
         document.getElementById('dopFullBtn').textContent = AXES.doppler ? fmtHzRange(AXES.doppler) : 'Full';
-        document.getElementById('delNarrowBtn').textContent = fmtKm(narrowDelayRange()[1]);
-        document.getElementById('delFullBtn').textContent = AXES.delay ? fmtKm(AXES.delay[1]) : 'Full';
+        document.getElementById('delNarrowBtn').textContent = fmtDist(narrowDelayRange()[1]);
+        document.getElementById('delFullBtn').textContent = AXES.delay ? fmtDist(AXES.delay[1]) : 'Full';
     }
 
     // ── Settings ─────────────────────────────────────────────────────────
@@ -1221,11 +1400,11 @@
         if (half) narrowInput.max = half;
         document.getElementById('fullSpanText').textContent =
             AXES.doppler ? fmtHzRange(AXES.doppler) + ' Hz' : 'its full span';
-        narrowKmInput.value = state.narrowKm;
+        narrowKmInput.value = Math.round(distOf(state.narrowKm));
         var reach = delayReach();
         if (reach) narrowKmInput.max = reach;
         document.getElementById('fullDelayText').textContent =
-            AXES.delay ? 'out to ' + fmtKm(AXES.delay[1]) : 'its full range';
+            AXES.delay ? 'out to ' + fmtDist(AXES.delay[1]) : 'its full range';
         showNarrowError('');
         showNarrowKmError('');
         settingsDlg.showModal();
@@ -1234,7 +1413,7 @@
 
     document.getElementById('narrowResetBtn').addEventListener('click', function () {
         narrowInput.value = DEFAULT_NARROW_HZ;
-        narrowKmInput.value = DEFAULT_NARROW_KM;
+        narrowKmInput.value = DEFAULT_NARROW_DIST;
         showNarrowError('');
         showNarrowKmError('');
     });
@@ -1247,18 +1426,19 @@
     document.getElementById('settingsForm').addEventListener('submit', function (e) {
         e.preventDefault();
         var n = Number(narrowInput.value);
-        var km = Number(narrowKmInput.value);
-        var hzOk = validNarrow(n) !== null, kmOk = validNarrowKm(km) !== null;
+        var dist = Number(narrowKmInput.value);
+        var hzOk = validNarrow(n) !== null, kmOk = validNarrowDist(dist) !== null;
         var half = spanHalfWidth(), reach = delayReach();
         showNarrowError(hzOk ? '' : half
             ? 'Enter a whole number from 1 to ' + half + ', the most the node processes.'
             : 'Enter a whole number of Hz, 1 or more.');
         showNarrowKmError(kmOk ? '' : reach
             ? 'Enter a whole number from 1 to ' + reach + ', the most the node processes.'
-            : 'Enter a whole number of km, from 1 to ' + MAX_NARROW_KM + '.');
+            : 'Enter a whole number of ' + DIST_UNIT + ', from 1 to ' + Math.ceil(distOf(MAX_NARROW_KM)) + '.');
         // Nothing is saved unless both fields are valid.
         if (!hzOk || !kmOk) return;
 
+        var km = kmOf(dist);
         var hzChanged = n !== state.narrowHz, kmChanged = km !== state.narrowKm;
         state.narrowHz = n;
         state.narrowKm = km;
@@ -1461,6 +1641,16 @@
     document.querySelectorAll('.seg [data-del]').forEach(function (b) {
         b.setAttribute('aria-pressed', String(b.getAttribute('data-del') === state.delView));
     });
+    document.querySelectorAll('.seg [data-yunit]').forEach(function (b) {
+        b.setAttribute('aria-pressed', String(b.getAttribute('data-yunit') === state.yUnit));
+    });
+    var speedBtn = document.getElementById('yUnitSpeedBtn');
+    speedBtn.textContent = SPEED_UNIT;
+    if (!FC_HZ) {
+        speedBtn.disabled = true;
+        speedBtn.title = 'The node\'s configuration does not state a centre frequency, so speeds cannot be worked out.';
+    }
+    document.getElementById('narrowKmUnit').textContent = DIST_UNIT;
     labelRangeButtons();
     setDisplay(state.display);
 
