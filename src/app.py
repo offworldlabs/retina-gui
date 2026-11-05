@@ -33,6 +33,7 @@ from services import (  # noqa: F401  (re-exported for routes)
     calibrator,
     config_mgr,
     device_state,
+    display_units,
     mender,
     mender_connect,
     network_mgr,

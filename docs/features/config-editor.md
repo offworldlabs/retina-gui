@@ -123,7 +123,7 @@ The side nav and the page share one order, in six groups:
 | Group | Sections | Saved by |
 | --- | --- | --- |
 | Testing | Processing | Its own Save and apply, see [Processing section](#processing-section). [Developer mode](#developer-mode) only. |
-| Node | Identifiers, Mode, Node Claim, Network | Each on its own (Mode on Apply changes, see [Mode switch](#mode-switch)) |
+| Node | Identifiers, Display, Mode, Node Claim, Network | Each on its own (Mode on Apply changes, see [Mode switch](#mode-switch)) |
 | Radar | Cached Towers, Tower, Capture | Apply changes |
 | ADS-B | ADS-B Truth, tar1090 | Apply changes |
 | Other | SSH Access, Setup Wizard, Tutorial | Each on its own |
@@ -671,6 +671,7 @@ together. These sections are spread across the Node, Support and Other groups (s
 | Section | Group | Endpoint | Notes |
 | --- | --- | --- | --- |
 | Identifiers | Node | `POST /node-name` | See below. |
+| Display | Node | `POST /display-units` | Metric or imperial, see [Display units](#display-units). |
 | Node Claim | Node | `POST /set-up/claim` | The address that owns the node. |
 | Network | Node | (page script) | Status, scan, manual entry, connect. |
 | SSH Access | Other | `POST /ssh-keys`, `/ssh-keys/delete` | Form posts that redirect back to `/config`. |
@@ -713,6 +714,26 @@ The two identifiers are shown together because owners meet both and need telling
 not registered yet and on one without the telemetry package, and the page then says it has not been
 assigned rather than leaving the row blank. This is the same value the Home page's Telemetry card
 shows.
+
+### Display units
+
+The Display section holds one choice, Metric or Imperial, which decides how every page on this
+node shows distances and speeds: kilometres and km/h, or miles and mph. The
+[Tracker page](tracker.md#units) is the first consumer. It is a presentation setting:
+the radar keeps working in hertz, kilometres and metres, `user.yml` and `config.yml` are untouched,
+and nothing restarts, so the route needs none of the configuration guards.
+
+It is stored on the node (`/data/retina-gui/display-units`, the word `metric` or `imperial`,
+owned by `display_units.py`; see [node-files.md](../operations/node-files.md#files-under-dataretina-gui))
+rather than in the browser like the Tracker page's own view settings, because the choice belongs
+to the installation, not to whoever opened it: a node in the United States should read in miles
+on the owner's phone and on support's laptop alike. A missing or unreadable file reads as metric,
+and so does any other content, so a hand-edited file cannot put a page into an unknown unit.
+
+The control is a segmented button that saves on click through `POST /display-units`
+(`{"units": "metric" | "imperial"}`), and moves only when the node confirms: a failed save
+leaves it showing what is stored and says why. The setup wizard's location step offers the same
+choice through the same route (see [setup-wizard.md](setup-wizard.md#location)).
 
 ### Remote Support
 

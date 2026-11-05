@@ -106,7 +106,7 @@ def _processing_fields(config, processing_flat=None):
 def _render_config_page(config_errors=None, processing_flat=None):
     """The page from the merged config. A rejected Processing save passes its
     errors and submitted values, so only that section shows the submission."""
-    from app import DEV_MODE, config_mgr, device_state, node_name, ssh_keys
+    from app import DEV_MODE, config_mgr, device_state, display_units, node_name, ssh_keys
 
     config = config_mgr.load_merged_config()
     retina_installed = config_mgr.is_retina_node_installed() or DEV_MODE or request.args.get('demo') == '1'
@@ -134,6 +134,7 @@ def _render_config_page(config_errors=None, processing_flat=None):
                            config_errors=config_errors,
                            node_name=node_name.get(),
                            node_name_max_length=NAME_MAX_LENGTH,
+                           display_units=display_units.get(),
                            ssh_keys=ssh_keys.get_keys())
 
 
@@ -193,6 +194,24 @@ def set_node_name():
     if not ok:
         return jsonify({"ok": False, "error": error}), 400
     return jsonify({"ok": True, "name": node_name.get()})
+
+
+@bp.route("/display-units", methods=["POST"])
+def set_display_units():
+    """Choose metric or imperial for every page on this node.
+
+    Presentation only, so it needs none of the config guards: nothing is
+    written to user.yml and nothing restarts. Shared by the Display section
+    and the setup wizard's location step.
+    See docs/features/config-editor.md#display-units.
+    """
+    from app import display_units
+
+    data = request.get_json(silent=True) or {}
+    ok, error = display_units.set(data.get("units"))
+    if not ok:
+        return jsonify({"ok": False, "error": error}), 400
+    return jsonify({"ok": True, "units": display_units.get()})
 
 
 # One YAML value (host,port,protocol): complete, or empty with adsblol_fallback
@@ -294,7 +313,7 @@ def save_config():
         all_errors.update(_adsb_source_errors(tar1090_data))
 
     if all_errors:
-        from app import DEV_MODE, device_state, ssh_keys
+        from app import DEV_MODE, device_state, display_units, ssh_keys
         return render_template("config.html",
                                retina_installed=config_mgr.is_retina_node_installed() or DEV_MODE or request.args.get('demo') == '1',
                                processing_fields=_processing_fields(config_mgr.load_merged_config()),
@@ -306,6 +325,7 @@ def save_config():
                                config_errors=all_errors,
                                node_name=node_name.get(),
                                node_name_max_length=NAME_MAX_LENGTH,
+                               display_units=display_units.get(),
                                ssh_keys=ssh_keys.get_keys())
 
     capture_nested = ConfigManager.unflatten_capture_from_form(capture_flat)

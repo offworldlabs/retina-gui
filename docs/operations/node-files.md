@@ -54,6 +54,7 @@ locations are cross-repo contracts: do not rename them without changing the othe
 | `towers-cache.json` | `DeviceState` | retina-gui | Cached tower search results. |
 | `authorized_keys` | `SSHKeyManager` | retina-gui, sshd | SSH public keys, mode 0644 so sshd can read it. |
 | `node-name` | `NodeName` | retina-gui, **owl-mdns-identity** | The node's friendly name. |
+| `display-units` | `DisplayUnits` | retina-gui | `metric` or `imperial`: how pages show distances and speeds. Absent means metric. See [config-editor.md](../features/config-editor.md#display-units). |
 | `remote-access.json` | `RemoteAccess` | retina-gui | Remote access state. |
 | `remote-access-enabled` | `RemoteAccess` | **owl-os inventory script** | Marker read into the `remote_access` Mender inventory attribute. |
 | `remote-shell-disabled` | `RemoteAccess` | retina-gui, **owl-os inventory script** | Present only when the owner declined a remote shell. |
