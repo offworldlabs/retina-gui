@@ -1003,6 +1003,52 @@ function initSetupWizard(resumeStep, devMode, isRerun, demoMode) {
         var rxAlt = document.getElementById('rxAlt');
         var coordMsg = document.getElementById('rxCoordMsg');
 
+        // ── Units ────────────────────────────────────────────
+        // Posts to the Configuration page's own route the moment a button is
+        // pressed, and moves only when the node confirms, so Skip and Find
+        // towers have nothing to do with it. See docs/features/setup-wizard.md#display-units
+        (function() {
+            var seg = document.getElementById('wizUnitsSegmented');
+            var msg = document.getElementById('wizUnitsMsg');
+            if (!seg) return;
+            var buttons = Array.prototype.slice.call(seg.querySelectorAll('.ds-segmented-btn'));
+            function sayUnits(text, danger) {
+                msg.textContent = text;
+                msg.style.color = danger ? 'var(--danger)' : 'var(--ink-3)';
+                msg.style.display = text ? '' : 'none';
+            }
+            buttons.forEach(function(btn) {
+                btn.addEventListener('click', function() {
+                    if (btn.classList.contains('active')) return;
+                    buttons.forEach(function(b) { b.disabled = true; });
+                    sayUnits('');
+                    fetch('/display-units', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrfToken },
+                        body: JSON.stringify({ units: btn.dataset.units })
+                    })
+                    .then(function(r) {
+                        return r.json().then(function(j) { return { ok: r.ok, body: j || {} }; },
+                                             function() { return { ok: false, body: {} }; });
+                    })
+                    .then(function(res) {
+                        if (!res.ok || !res.body.ok) {
+                            sayUnits(res.body.error || 'Could not change the units.', true);
+                            return;
+                        }
+                        buttons.forEach(function(b) {
+                            b.classList.toggle('active', b.dataset.units === res.body.units);
+                        });
+                        sayUnits(res.body.units === 'imperial'
+                            ? 'This node shows miles and mph.'
+                            : 'This node shows kilometres and km/h.');
+                    })
+                    .catch(function() { sayUnits('Could not reach the node.', true); })
+                    .then(function() { buttons.forEach(function(b) { b.disabled = false; }); });
+                });
+            });
+        })();
+
         // ── Coordinates ──────────────────────────────────────
         // Text boxes holding whatever the owner typed or pasted, at the
         // precision they gave it: nothing here rounds a hand-entered value.

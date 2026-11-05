@@ -392,6 +392,40 @@ class TestFilters:
         assert 'if (filtersBusy) return;' in js
 
 
+# ── Display units ──────────────────────────────────────────────
+
+
+class TestDisplayUnits:
+    """The location step's Metric / Imperial choice.
+    See docs/features/setup-wizard.md#display-units."""
+
+    def test_the_step_shows_the_stored_choice(self, app_client):
+        location = panel(page(app_client), 'location')
+        assert 'id="wizUnitsSegmented"' in location
+        assert 'active" data-units="metric"' in location
+        assert 'active" data-units="imperial"' not in location
+
+        app_client.post("/display-units", json={"units": "imperial"})
+        location = panel(page(app_client), 'location')
+        assert 'active" data-units="imperial"' in location
+        assert 'active" data-units="metric"' not in location
+
+    def test_the_units_route_is_reachable_mid_wizard(self, app_client):
+        """Like /node-name: the config blueprint bounces everything else to
+        /set-up while the wizard is in progress."""
+        import app as app_module
+        app_module.device_state.save_setup_wizard_step('location')
+        assert app_client.get('/config').status_code == 302
+
+        resp = app_client.post("/display-units", json={"units": "imperial"})
+        assert resp.status_code == 200
+        assert app_module.display_units.get() == "imperial"
+
+    def test_the_step_posts_to_the_config_page_s_route(self, app_client):
+        js = app_client.get('/static/setup.js').data.decode()
+        assert "fetch('/display-units'" in js
+
+
 # ── Name your node ─────────────────────────────────────────────
 
 

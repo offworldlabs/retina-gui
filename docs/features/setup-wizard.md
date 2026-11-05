@@ -275,9 +275,9 @@ mender-connect was changed, not merely that a wish was noted. The gate that refu
 
 Optional, after tuning and before the claim. One box, prefilled with the current name, posting
 to `/node-name`, the Configuration page's rename route, so the wizard cannot store a different
-shape or apply a different rule; `_WIZARD_ALLOWED_PATHS` in `routes/config.py` lets that one
-route through the redirect that otherwise sends every config route back to `/set-up` while the
-wizard is in progress. Save with an empty box is the same as Skip: the stored name, if any, is
+shape or apply a different rule; `_WIZARD_ALLOWED_PATHS` in `routes/config.py` lets that
+route (and the location step's `/display-units`) through the redirect that otherwise sends every
+config route back to `/set-up` while the wizard is in progress. Save with an empty box is the same as Skip: the stored name, if any, is
 left alone rather than cleared. The help text says the id stays underneath, because an owner
 who has just typed "Garage roof" should not expect to reach the node by it.
 
@@ -535,6 +535,19 @@ whole metres (a site altitude, not a survey figure).
   replaced when the coordinates move; one the owner typed is never replaced by the manual path.
 - Failures are silent. Nothing gates on altitude, and an error here would be noise on a step
   that already has a sweep reporting into it.
+
+### Display units
+
+Between the coordinates and the altitude box sits a Metric / Imperial choice: the same setting as
+the Display section of the Configuration page, posting to the same `/display-units` route (see
+[config-editor.md](config-editor.md#display-units)), which `_WIZARD_ALLOWED_PATHS` in
+`routes/config.py` lets through the wizard-in-progress redirect the way it lets `/node-name`
+through. It sits on this step because this is where an owner first says where in the world the
+node is, and it is the step before the ranges and speeds that the choice changes appear. It saves
+itself the moment a button is pressed, like the Support switches on the contact step, and moves
+only when the node confirms, so Find Towers and Skip have nothing to do with it and a reload shows
+what is stored. The altitude box stays in metres whichever is chosen, and says so under the box:
+that figure goes into the radar config, which is metric.
 
 ### Leaving the step
 
