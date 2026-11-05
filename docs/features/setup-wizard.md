@@ -546,8 +546,8 @@ through. It sits on this step because this is where an owner first says where in
 node is, and it is the step before the ranges and speeds that the choice changes appear. It saves
 itself the moment a button is pressed, like the Support switches on the contact step, and moves
 only when the node confirms, so Find Towers and Skip have nothing to do with it and a reload shows
-what is stored. The altitude box stays in metres whichever is chosen: that figure goes into the
-radar config, which is metric.
+what is stored. The altitude box stays in metres whichever is chosen, and says so under the box:
+that figure goes into the radar config, which is metric.
 
 ### Leaving the step
 

@@ -64,7 +64,7 @@
             <p style="font-size:12.5px;color:var(--ink-3);margin:6px 0 0;">
                 How this node's pages show distances and speeds: kilometres and km/h, or miles
                 and mph. The radar is unaffected, and you can change it later under Display on
-                the Configuration page. Altitude below is always in metres.
+                the Configuration page.
             </p>
             <p id="wizUnitsMsg" style="display:none;font-size:13px;margin:6px 0 0;"></p>
         </div>
@@ -72,6 +72,10 @@
         <div class="ds-field">
             <label class="ds-field-label" for="rxAlt">Altitude (m)</label>
             <input type="number" class="ds-input mono" id="rxAlt" step="any" min="0" placeholder="Filled from your coordinates">
+            <p style="font-size:12.5px;color:var(--ink-3);margin:6px 0 0;">
+                Always in metres, whichever units you chose above: this figure goes into the
+                radar configuration, which is metric.
+            </p>
         </div>
 
         <!-- "Use my location" requires HTTPS (browser Geolocation API); re-enable once 20260616-location-fetch-https lands.
