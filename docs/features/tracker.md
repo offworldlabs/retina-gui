@@ -265,8 +265,10 @@ span; double-click clears it. The handler is wired after the first draw, which i
 gives the div its `on`, and ignores its own tick relayouts, which carry no range key.
 
 The choice is remembered in the browser (`tracker.yUnit`). On a node whose config states no
-centre frequency the speed button is disabled with a title saying why, the ticks carry Hz alone,
-and a remembered speed choice falls back to Hz rather than drawing nothing. The axis margin is
+centre frequency the speed button is disabled, greyed, with a title on it and on the control
+naming the missing key (`capture.fc`); the ticks carry Hz alone, and a remembered speed choice
+falls back to Hz rather than drawing nothing. A dev checkout whose `dev_data/config.yml` has no
+`capture.fc` is the usual way to meet this. The axis margin is
 wider when speeds are drawn, for the second line.
 
 ## Units
