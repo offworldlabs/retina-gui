@@ -733,7 +733,7 @@ and so does any other content, so a hand-edited file cannot put a page into an u
 The control is a segmented button that saves on click through `POST /display-units`
 (`{"units": "metric" | "imperial"}`), and moves only when the node confirms: a failed save
 leaves it showing what is stored and says why. The setup wizard's location step offers the same
-choice through the same route (see [setup-wizard.md](setup-wizard.md#location)).
+choice through the same route (see [setup-wizard.md](setup-wizard.md#display-units)).
 
 ### Remote Support
 

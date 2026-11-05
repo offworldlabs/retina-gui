@@ -25,8 +25,10 @@ bp = Blueprint('config', __name__)
 # Same rule as _CALIBRATION_ALLOWED_PREFIXES in app.py.
 # See docs/features/config-editor.md#guards
 # /config/apply/status because the tower and filter steps poll it; /node-name
-# because the naming step posts to it. See docs/features/setup-wizard.md#name-your-node
-_WIZARD_ALLOWED_PATHS = ('/config/apply/status', '/node-name')
+# because the naming step posts to it; /display-units because the location
+# step posts to it. See docs/features/setup-wizard.md#name-your-node and
+# #display-units
+_WIZARD_ALLOWED_PATHS = ('/config/apply/status', '/node-name', '/display-units')
 
 
 @bp.before_request

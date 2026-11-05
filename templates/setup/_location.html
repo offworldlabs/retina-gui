@@ -52,6 +52,23 @@
             </p>
         </div>
 
+        {# Saves itself through the Configuration page's route the moment it is
+           pressed, like the Support switches, so neither Find towers nor Skip
+           has anything to do with it. See docs/features/setup-wizard.md#display-units #}
+        <div class="ds-field">
+            <div class="ds-field-label">Units</div>
+            <div class="ds-segmented" id="wizUnitsSegmented" role="group" aria-label="Units" style="align-self:flex-start;">
+                <button type="button" class="ds-segmented-btn{% if display_units != 'imperial' %} active{% endif %}" data-units="metric">Metric</button>
+                <button type="button" class="ds-segmented-btn{% if display_units == 'imperial' %} active{% endif %}" data-units="imperial">Imperial</button>
+            </div>
+            <p style="font-size:12.5px;color:var(--ink-3);margin:6px 0 0;">
+                How this node's pages show distances and speeds: kilometres and km/h, or miles
+                and mph. The radar is unaffected, and you can change it later under Display on
+                the Configuration page. Altitude below is always in metres.
+            </p>
+            <p id="wizUnitsMsg" style="display:none;font-size:13px;margin:6px 0 0;"></p>
+        </div>
+
         <div class="ds-field">
             <label class="ds-field-label" for="rxAlt">Altitude (m)</label>
             <input type="number" class="ds-input mono" id="rxAlt" step="any" min="0" placeholder="Filled from your coordinates">
