@@ -102,6 +102,7 @@
         {%- endif %}
         <h3>Node</h3>
         <a href="#identifiers">Identifiers</a>
+        <a href="#display">Display</a>
         <a href="#mode" data-tutorial="cfg-mode-nav">Mode</a>
         <a href="#claim">Node Claim</a>
         <a href="#network" data-tutorial="cfg-network-nav">Network</a>
@@ -269,6 +270,31 @@
                         {% endif %}
                     </div>
                 </div>
+            </div>
+        </section>
+
+        {# ── Display ──
+           Outside #configForm: a presentation choice that saves on click and
+           never touches the radar config, so it needs no Apply.
+           See docs/features/config-editor.md#display-units #}
+        <section id="display" class="cfg-section">
+            <div class="cfg-section-head">
+                <h2>Display</h2>
+                <span class="desc">How this node's pages show distances and speeds.</span>
+            </div>
+            <div class="cfg-body">
+                <div class="toggle-row" style="padding:0;border:0;">
+                    <div class="ds-segmented" id="unitsSegmented" role="group" aria-label="Units">
+                        <button type="button" class="ds-segmented-btn{% if display_units != 'imperial' %} active{% endif %}" data-units="metric">Metric</button>
+                        <button type="button" class="ds-segmented-btn{% if display_units == 'imperial' %} active{% endif %}" data-units="imperial">Imperial</button>
+                    </div>
+                    <div class="body">
+                        <div class="name" id="unitsLabel">{{ 'Imperial' if display_units == 'imperial' else 'Metric' }}</div>
+                        <div class="desc">Metric means kilometers and km/h, imperial means miles and mph, for the pages that draw ranges and speeds. The radar itself is unaffected: it keeps working in hertz and kilometers, nothing restarts, and the altitudes under Tower and in the setup wizard stay in meters. Applies to everyone who opens this node, and saves at once.</div>
+                    </div>
+                    <span class="spinner-border spinner-border-sm" id="unitsSpinner" style="display:none;width:.9em;height:.9em;border-width:1.5px;flex-shrink:0;"></span>
+                </div>
+                <div id="unitsStatus" style="font-size:12px;margin-top:6px;"></div>
             </div>
         </section>
 
@@ -1209,6 +1235,60 @@ var NODE_ID = {{ node_id | tojson }};
     });
 })();
 
+// Display units: saves on click, nothing to apply.
+// See docs/features/config-editor.md#display-units
+(function () {
+    var segmented = document.getElementById('unitsSegmented');
+    if (!segmented) { return; }
+    var buttons = Array.prototype.slice.call(segmented.querySelectorAll('.ds-segmented-btn'));
+    var label   = document.getElementById('unitsLabel');
+    var spinner = document.getElementById('unitsSpinner');
+    var status  = document.getElementById('unitsStatus');
+    var csrf    = document.querySelector('meta[name="csrf-token"]').content;
+    var LABELS  = { metric: 'Metric', imperial: 'Imperial' };
+
+    function show(units) {
+        label.textContent = LABELS[units] || 'Metric';
+        buttons.forEach(function (btn) {
+            btn.classList.toggle('active', btn.dataset.units === units);
+        });
+    }
+    function note(message, ok) {
+        status.textContent = message;
+        status.style.color = ok ? 'var(--ok)' : 'var(--danger)';
+    }
+
+    buttons.forEach(function (btn) {
+        btn.addEventListener('click', function () {
+            if (btn.classList.contains('active')) { return; }
+            // Nothing moves until the node confirms: a failed save leaves
+            // the control showing what is actually stored.
+            buttons.forEach(function (b) { b.disabled = true; });
+            spinner.style.display = 'inline-block';
+            note('', true);
+            fetch('/display-units', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrf },
+                body: JSON.stringify({ units: btn.dataset.units })
+            })
+                .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, d: d }; }); })
+                .then(function (result) {
+                    if (result.ok && result.d.ok) {
+                        show(result.d.units);
+                        note('Saved.', true);
+                    } else {
+                        note(result.d.error || 'Could not save the units.', false);
+                    }
+                })
+                .catch(function () { note('Could not reach the node.', false); })
+                .finally(function () {
+                    buttons.forEach(function (b) { b.disabled = false; });
+                    spinner.style.display = 'none';
+                });
+        });
+    });
+})();
+
 // Mode segmented control — change is staged; applied when user clicks Apply changes
 (function() {
     var segmented    = document.getElementById('modeSegmented');
@@ -1960,7 +2040,7 @@ if (discardBtn) discardBtn.addEventListener('click', () => location.reload());
 // Side-nav scrollspy
 (function() {
     // Page order: the first of these on screen is the one marked active.
-    var sectionIds = [{% if developer_mode %}'processing',{% endif %}'identifiers','mode','claim','network','cached-towers','tower','capture',
+    var sectionIds = [{% if developer_mode %}'processing',{% endif %}'identifiers','display','mode','claim','network','cached-towers','tower','capture',
                       'truth','tar1090','ssh','wizard','tutorial','cloud','remote','contact'];
     var links = {};
     sectionIds.forEach(function(id) {

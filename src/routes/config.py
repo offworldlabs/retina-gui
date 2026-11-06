@@ -25,8 +25,10 @@ bp = Blueprint('config', __name__)
 # Same rule as _CALIBRATION_ALLOWED_PREFIXES in app.py.
 # See docs/features/config-editor.md#guards
 # /config/apply/status because the tower and filter steps poll it; /node-name
-# because the naming step posts to it. See docs/features/setup-wizard.md#name-your-node
-_WIZARD_ALLOWED_PATHS = ('/config/apply/status', '/node-name')
+# because the naming step posts to it; /display-units because the location
+# step posts to it. See docs/features/setup-wizard.md#name-your-node and
+# #display-units
+_WIZARD_ALLOWED_PATHS = ('/config/apply/status', '/node-name', '/display-units')
 
 
 @bp.before_request
@@ -106,7 +108,7 @@ def _processing_fields(config, processing_flat=None):
 def _render_config_page(config_errors=None, processing_flat=None):
     """The page from the merged config. A rejected Processing save passes its
     errors and submitted values, so only that section shows the submission."""
-    from app import DEV_MODE, config_mgr, device_state, node_name, ssh_keys
+    from app import DEV_MODE, config_mgr, device_state, display_units, node_name, ssh_keys
 
     config = config_mgr.load_merged_config()
     retina_installed = config_mgr.is_retina_node_installed() or DEV_MODE or request.args.get('demo') == '1'
@@ -134,6 +136,7 @@ def _render_config_page(config_errors=None, processing_flat=None):
                            config_errors=config_errors,
                            node_name=node_name.get(),
                            node_name_max_length=NAME_MAX_LENGTH,
+                           display_units=display_units.get(),
                            ssh_keys=ssh_keys.get_keys())
 
 
@@ -193,6 +196,26 @@ def set_node_name():
     if not ok:
         return jsonify({"ok": False, "error": error}), 400
     return jsonify({"ok": True, "name": node_name.get()})
+
+
+@bp.route("/display-units", methods=["POST"])
+def set_display_units():
+    """Choose metric or imperial for every page on this node.
+
+    Writes display.units to user.yml and never applies: the radar is
+    unaffected, so nothing restarts, and config-merger carries the key into
+    config.yml at the next apply or boot. That is why it skips the apply
+    guards: a change swept into the next merge is the intent here, not a
+    hazard. Shared by the Display section and the wizard's location step.
+    See docs/features/config-editor.md#display-units.
+    """
+    from app import display_units
+
+    data = request.get_json(silent=True) or {}
+    ok, error = display_units.set(data.get("units"))
+    if not ok:
+        return jsonify({"ok": False, "error": error}), 400
+    return jsonify({"ok": True, "units": display_units.get()})
 
 
 # One YAML value (host,port,protocol): complete, or empty with adsblol_fallback
@@ -294,7 +317,7 @@ def save_config():
         all_errors.update(_adsb_source_errors(tar1090_data))
 
     if all_errors:
-        from app import DEV_MODE, device_state, ssh_keys
+        from app import DEV_MODE, device_state, display_units, ssh_keys
         return render_template("config.html",
                                retina_installed=config_mgr.is_retina_node_installed() or DEV_MODE or request.args.get('demo') == '1',
                                processing_fields=_processing_fields(config_mgr.load_merged_config()),
@@ -306,6 +329,7 @@ def save_config():
                                config_errors=all_errors,
                                node_name=node_name.get(),
                                node_name_max_length=NAME_MAX_LENGTH,
+                               display_units=display_units.get(),
                                ssh_keys=ssh_keys.get_keys())
 
     capture_nested = ConfigManager.unflatten_capture_from_form(capture_flat)

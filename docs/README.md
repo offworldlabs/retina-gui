@@ -39,7 +39,7 @@ Use this to find the doc to update when you change a file.
 | `src/device_state.py`, `src/telemetry_status.py` | [features/device-state-and-telemetry.md](features/device-state-and-telemetry.md) |
 | `src/remote_access.py`, `src/access_identity.py`, `src/mender_connect.py`, `src/ssh_keys.py`, `src/routes/remote_access.py`, `templates/login.html`, `templates/remote_denied.html` | [features/remote-access.md](features/remote-access.md) |
 | `src/mdns_peers.py`, `src/routes/fleet.py`, `src/node_name.py`, `templates/_fleet_bar.html` | [features/fleet-and-naming.md](features/fleet-and-naming.md) |
-| `src/config_schema.py`, `src/config_manager.py`, `src/form_utils.py`, `src/routes/config.py`, `templates/config.html` | [features/config-editor.md](features/config-editor.md) |
+| `src/config_schema.py`, `src/config_manager.py`, `src/form_utils.py`, `src/display_units.py`, `src/routes/config.py`, `templates/config.html` | [features/config-editor.md](features/config-editor.md) |
 | `src/mender.py`, `src/routes/mender_routes.py` | [features/ota-updates.md](features/ota-updates.md) |
 | `src/routes/sdr.py` | [features/sdr-mode.md](features/sdr-mode.md) |
 | `src/network_manager.py`, `src/routes/network.py` | No doc yet: the prose is short and stays in code. Write `features/network.md` if it grows. |

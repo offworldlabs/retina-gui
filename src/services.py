@@ -14,6 +14,7 @@ from blah2_client import Blah2Client
 from calibrator import Calibrator
 from config_manager import ConfigManager
 from device_state import DeviceState
+from display_units import DisplayUnits
 from mdns_peers import peer_directory_from_env
 from mender import MenderClient
 from mender_connect import MenderConnect
@@ -109,6 +110,8 @@ telemetry_status = TelemetryStatus(
 )
 
 node_name = NodeName(os.path.join(DATA_DIR, "node-name"), dev_mode=DEV_MODE)
+
+display_units = DisplayUnits(config_mgr)
 
 remote_access = RemoteAccess(os.path.join(DATA_DIR, "remote-access.json"))
 
