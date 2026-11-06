@@ -43,6 +43,7 @@ def wizard():
         DEV_MODE,
         config_mgr,
         device_state,
+        display_units,
         get_node_id,
         mender,
         node_name,
@@ -89,6 +90,9 @@ def wizard():
                            capture_fc_mhz=current_capture_fc_mhz(config_mgr),
                            node_name=node_name.get(),
                            node_name_max_length=NAME_MAX_LENGTH,
+                           # The location step's units choice, as the
+                           # Configuration page shows it.
+                           display_units=display_units.get(),
                            claim=claim,
                            claim_owned=claim_owned,
                            # Where a claimed node appears, so the claim step

@@ -35,7 +35,7 @@ default.yml -> user.yml -> forced.yml   =>   config.yml
 | File | Owner | What retina-gui does with it |
 | --- | --- | --- |
 | `default.yml`, `forced.yml` | Baked into the retina-node containers | Nothing directly. |
-| `user.yml` (`/data/retina-node/config/user.yml`) | The node owner, via retina-gui | Writes overrides here. Also written by `/towers/select` and `/calibrate/apply`. |
+| `user.yml` (`/data/retina-node/config/user.yml`) | The node owner, via retina-gui | Writes overrides here. Also written by `/towers/select`, `/calibrate/apply` and `/display-units` (see [Display units](#display-units)). |
 | `config.yml` (`/data/retina-node/config/config.yml`) | config-merger output | Reads it to show what is running. Never writes it. |
 
 Paths come from `USER_CONFIG_PATH` and `MERGED_CONFIG_PATH` in `services.py` (both under `dev_data/`
@@ -123,7 +123,7 @@ The side nav and the page share one order, in six groups:
 | Group | Sections | Saved by |
 | --- | --- | --- |
 | Testing | Processing | Its own Save and apply, see [Processing section](#processing-section). [Developer mode](#developer-mode) only. |
-| Node | Identifiers, Mode, Node Claim, Network | Each on its own (Mode on Apply changes, see [Mode switch](#mode-switch)) |
+| Node | Identifiers, Display, Mode, Node Claim, Network | Each on its own (Mode on Apply changes, see [Mode switch](#mode-switch)) |
 | Radar | Cached Towers, Tower, Capture | Apply changes |
 | ADS-B | ADS-B Truth, tar1090 | Apply changes |
 | Other | SSH Access, Setup Wizard, Tutorial | Each on its own |
@@ -468,11 +468,11 @@ sample rate from the Tower and Capture sections, so they follow unsaved edits th
 | --- | --- |
 | Minimum Doppler | The slowest Doppler row tested (rows sit on whole 1/cpi bins), as m/s of bistatic range rate, and half that as the slowest target that can ever be detected |
 | Maximum Reported Doppler | As m/s, or that it limits nothing at or beyond the span |
-| Minimum Delay | As metres of bistatic range, and half that as the distance from the receiver inside which a target is hidden in every direction |
+| Minimum Delay | As meters of bistatic range, and half that as the distance from the receiver inside which a target is hidden in every direction |
 | Maximum Delay | As km of bistatic range |
 | False Alarm Probability | Expected false alarms per CPI: Doppler rows tested × delays tested × pfa |
 | Training Cells | The CA-CFAR threshold above the local noise, 10·log10(N(pfa^(-1/N) - 1)) with N = 2 × Training Cells |
-| Guard Cells, Merge Distance | As metres, and Hz for Merge Distance |
+| Guard Cells, Merge Distance | As meters, and Hz for Merge Distance |
 
 ## Tower presets
 
@@ -671,6 +671,7 @@ together. These sections are spread across the Node, Support and Other groups (s
 | Section | Group | Endpoint | Notes |
 | --- | --- | --- | --- |
 | Identifiers | Node | `POST /node-name` | See below. |
+| Display | Node | `POST /display-units` | Metric or imperial, see [Display units](#display-units). |
 | Node Claim | Node | `POST /set-up/claim` | The address that owns the node. |
 | Network | Node | (page script) | Status, scan, manual entry, connect. |
 | SSH Access | Other | `POST /ssh-keys`, `/ssh-keys/delete` | Form posts that redirect back to `/config`. |
@@ -713,6 +714,38 @@ The two identifiers are shown together because owners meet both and need telling
 not registered yet and on one without the telemetry package, and the page then says it has not been
 assigned rather than leaving the row blank. This is the same value the Home page's Telemetry card
 shows.
+
+### Display units
+
+The Display section holds one choice, Metric or Imperial, which is to decide how every page on
+this node shows distances and speeds: kilometers and km/h, or miles and mph. Nothing reads it
+yet: this change stores the choice and offers it in the two places an owner sets things up, and
+the Tracker page and the live views take it up in their own changes.
+
+It is stored as `display.units` in `user.yml`, so config-merger carries it into `config.yml` with
+the rest of the node's configuration, where anything in the stack can read it: `config.yml` is
+mounted into the blah2 containers, so a blah2-web page can be given it through `blah2_api` without
+going through retina-gui. (config-merger merges `user.yml` over `default.yml` with `mergedeep`, so
+a key `default.yml` does not know passes straight through.) It is kept on the node rather than in
+the browser like the Tracker page's own view settings because the choice belongs to the
+installation, not to whoever opened it: a node in the United States should read in miles on the
+owner's phone and on support's laptop alike.
+
+It is the one `user.yml` write that **never applies**. The radar keeps working in hertz, kilometers
+and meters whichever is chosen, so nothing needs restarting, and a stack restart for a display
+choice would be a minute of downtime and an RSPduo risk for nothing. The route therefore skips the
+apply guards: the reason those exist is that a refused change left in `user.yml` is swept into the
+next merge, and here being swept into the next merge is the intent. The consequence a consumer must
+know: `user.yml` holds the choice at once, `config.yml` only after the next apply or boot, so
+`DisplayUnits.get()` reads `user.yml` and anything that reads `config.yml` instead sees the previous
+value until then. A missing key, a value other than the two names, or an unreadable `user.yml` all
+read as metric, so a hand-edited file cannot put a page into an unknown unit, and the write keeps
+every other key in the file and in the `display` section.
+
+The control is a segmented button that saves on click through `POST /display-units`
+(`{"units": "metric" | "imperial"}`), and moves only when the node confirms: a failed save
+leaves it showing what is stored and says why. The setup wizard's location step offers the same
+choice through the same route (see [setup-wizard.md](setup-wizard.md#display-units)).
 
 ### Remote Support
 

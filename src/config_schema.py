@@ -257,11 +257,11 @@ class LocationFormConfig(BaseModel):
     """
     rx_latitude: float | None = Field(None, ge=-90, le=90, title="Receiver Latitude", description="decimal degrees")
     rx_longitude: float | None = Field(None, ge=-180, le=180, title="Receiver Longitude", description="decimal degrees")
-    rx_altitude: float | None = Field(None, title="Receiver Altitude", description="meters")
+    rx_altitude: float | None = Field(None, title="Receiver Altitude", description="meters, even with Imperial chosen")
     rx_name: str | None = Field(None, title="Receiver Name", description="location name")
     tx_latitude: float | None = Field(None, ge=-90, le=90, title="Transmitter Latitude", description="decimal degrees")
     tx_longitude: float | None = Field(None, ge=-180, le=180, title="Transmitter Longitude", description="decimal degrees")
-    tx_altitude: float | None = Field(None, title="Transmitter Altitude", description="meters")
+    tx_altitude: float | None = Field(None, title="Transmitter Altitude", description="meters, even with Imperial chosen")
     # Contract limit, not display: a longer name blocks registration.
     tx_name: str | None = Field(None, max_length=TX_NAME_MAX_LENGTH, title="Transmitter Name", description="location name")
 

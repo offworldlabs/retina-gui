@@ -15,8 +15,8 @@ import pytest
 
 # The side nav, as (group, [(section id, label), ...]).
 LAYOUT = [
-    ("Node", [("identifiers", "Identifiers"), ("mode", "Mode"), ("claim", "Node Claim"),
-              ("network", "Network")]),
+    ("Node", [("identifiers", "Identifiers"), ("display", "Display"), ("mode", "Mode"),
+              ("claim", "Node Claim"), ("network", "Network")]),
     ("Radar", [("cached-towers", "Cached Towers"), ("tower", "Tower"), ("capture", "Capture")]),
     ("ADS-B", [("truth", "ADS-B Truth"), ("tar1090", "tar1090")]),
     ("Other", [("ssh", "SSH Access"), ("wizard", "Setup Wizard"), ("tutorial", "Tutorial")]),
