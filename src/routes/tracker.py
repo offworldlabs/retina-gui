@@ -5,6 +5,7 @@ See docs/features/tracker.md#why-the-page-is-proxied.
 """
 
 import json
+import math
 import re
 
 import requests
@@ -26,6 +27,10 @@ CONTROL_TIMEOUT_S = 5
 # For turning blah2's delay bins into kilometres.
 SPEED_OF_LIGHT = 299792458.0
 
+# The stream carries delay to 0.01 km: mirrors retina-tracker's
+# history.DELAY_DP (another repo).
+STREAM_DELAY_STEP_M = 10.0
+
 # The sidecar mints ids like 261017-00012C. Checked here as well as there,
 # because the id is spliced into the upstream path.
 TRACK_ID = re.compile(r"[A-Za-z0-9-]{1,40}")
@@ -38,12 +43,13 @@ def _axis_bounds():
     axis the config does not state (it then autoscales). Never guess a range.
     See docs/features/tracker.md#axis-bounds.
     """
-    from app import config_mgr
+    from app import app, config_mgr
 
     blank = {"doppler": None, "delay": None}
     try:
         config = config_mgr.load_merged_config() or {}
-    except Exception:
+    except Exception as e:
+        app.logger.warning(f"Tracker axes unavailable, config did not load: {e}")
         return blank
 
     ambiguity = (config.get("process", {}) or {}).get("ambiguity", {}) or {}
@@ -60,6 +66,62 @@ def _axis_bounds():
         bounds["delay"] = [lo * cell_km, hi * cell_km]
 
     return bounds
+
+
+def _drone_settings():
+    """What the detector is set to report, for the Drone view, or None outside
+    developer mode.
+
+    Distances in metres, Doppler in Hz; a key is None when the config does not
+    state it. See docs/features/tracker.md#drone-view.
+    """
+    from app import app, config_mgr, device_state
+
+    if not device_state.is_developer_mode():
+        return None
+    try:
+        config = config_mgr.load_merged_config() or {}
+    except Exception as e:
+        app.logger.warning(f"Drone view limits unavailable, config did not load: {e}")
+        config = {}
+
+    process = config.get("process", {}) or {}
+    detection = process.get("detection", {}) or {}
+    fs = (config.get("capture", {}) or {}).get("fs")
+    cpi = (process.get("data", {}) or {}).get("cpi")
+
+    cell_m = SPEED_OF_LIGHT / float(fs) if _positive(fs) else None
+    bin_hz = 1.0 / cpi if _positive(cpi) else None
+    min_delay = detection.get("minDelay")
+    min_doppler = detection.get("minDoppler")
+    max_reported = detection.get("maxReportedDoppler")
+
+    # blah2 interpolates a detection up to half a cell past the one tested,
+    # so the nearest and slowest it can report are half a cell inside the
+    # limits, and the stream's rounding moves range down to its next step.
+    # Rows sit on whole bins: minDoppler 15 first tests 16 Hz.
+    # See docs/features/tracker.md#what-it-draws.
+    near_m = None
+    if cell_m and _number(min_delay):
+        near_m = math.floor((min_delay - 0.5) * cell_m / STREAM_DELAY_STEP_M) * STREAM_DELAY_STEP_M
+    slow_hz = None
+    if _positive(min_doppler):
+        slow_hz = (math.ceil(min_doppler / bin_hz) - 0.5) * bin_hz if bin_hz else min_doppler
+    return {
+        "cell_m": cell_m,
+        "near_limit_m": near_m,
+        "slow_limit_hz": slow_hz,
+        "max_reported_hz": max_reported if _positive(max_reported) else None,
+        "bin_hz": bin_hz,
+    }
+
+
+def _number(value):
+    return isinstance(value, (int, float)) and not isinstance(value, bool)
+
+
+def _positive(value):
+    return _number(value) and value > 0
 
 
 def _drawable(lo, hi):
@@ -105,9 +167,11 @@ def moved(path):
 @bp.route("")
 def index():
     """The Tracker page. Everything it draws arrives on /tracker/events and
-    /tracker/coverage, except the axis bounds, which come from config."""
+    /tracker/coverage, except the axis bounds and the Drone view's detector
+    settings, which come from config."""
     from services import CARTO_API_KEY
-    return render_template("tracker.html", axes=_axis_bounds(), carto_api_key=CARTO_API_KEY)
+    return render_template("tracker.html", axes=_axis_bounds(), drone=_drone_settings(),
+                           carto_api_key=CARTO_API_KEY)
 
 
 @bp.route("/events")

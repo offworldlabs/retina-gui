@@ -389,6 +389,7 @@ the tooling dormant, so there is no separate developer build or OS image to keep
 | --- | --- | --- |
 | `/config` | Rendered byte for byte as before the tooling existed | Adds the Testing group and its [Processing section](#processing-section), and a "Developer mode" pill beside the page title |
 | `/config/processing/save` | 404, so the server refuses it as well as the page hiding it | Saves the section |
+| `/tracker` | No Drone display | Adds the [Drone view](tracker.md#drone-view), which draws at the limits the Processing section sets |
 
 - **Who sets it.** Only someone with access to the node: `sudo touch /data/retina-gui/developer-mode`
   over ssh, or the equivalent through Mender. Nothing in the GUI writes it, so an owner cannot turn
@@ -409,7 +410,9 @@ The Processing section, at the top of the page in its own Testing group and only
 [developer mode](#developer-mode), exposes the settings that
 decide what blah2 reports, so a test engineer can tune detection without editing YAML. What each
 setting does in blah2, and the measurements behind the copy, are in blah2-arm's
-`config/README.md`. `save.*` is deliberately not exposed.
+`config/README.md`. `save.*` is deliberately not exposed. The Tracker's
+[Drone view](tracker.md#drone-view) draws at the limits set here, so the effect of a change can be
+seen there.
 
 | Field | `process` path | Editable |
 | --- | --- | --- |

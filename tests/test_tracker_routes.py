@@ -353,6 +353,124 @@ class TestTheDelayViewMirrorsTheDopplerView:
         assert "setDopView('full')" in handler and "setDelView('full')" in handler
 
 
+class TestTheNarrowDelayDefaultFitsTheNode:
+    """A node at the drone profile's delayMax (100 bins, 15 km) processes less
+    than the 30 km default. Opened on 30, the gear refused every save until
+    the delay field was edited by hand."""
+
+    def test_the_default_is_clipped_to_what_the_node_processes(self, app_client):
+        page = app_client.get('/tracker').get_data(as_text=True)
+        assert "Math.min(DEFAULT_NARROW_KM, reach)" in page
+        assert "recall('narrowKm', defaultNarrowKm())" in page
+        assert "narrowKmInput.value = defaultNarrowKm();" in page
+
+
+# ── the Drone view ──────────────────────────────────────────────────────────
+
+class TestTheDroneViewFollowsTheDetector:
+    """The Drone view draws at the limits the Processing section sets, so it
+    follows whatever a test engineer applies. It exists only in developer
+    mode. See docs/features/tracker.md#drone-view."""
+
+    DETECTOR = {
+        "capture": {"fs": 2000000},
+        "process": {
+            "data": {"cpi": 0.5},
+            "ambiguity": {"delayMin": -10, "delayMax": 100,
+                          "dopplerMin": -1000, "dopplerMax": 1000},
+            "detection": {"minDelay": 2, "minDoppler": 5, "maxReportedDoppler": 150},
+        },
+    }
+
+    def _settings(self, config, developer=True):
+        merged = MagicMock()
+        merged.load_merged_config.return_value = config
+        state = MagicMock()
+        state.is_developer_mode.return_value = developer
+        with patch.dict('sys.modules', {'app': MagicMock(config_mgr=merged, device_state=state)}):
+            return tracker_routes._drone_settings()
+
+    def test_bins_and_rows_become_metres_and_hertz(self):
+        s = self._settings(self.DETECTOR)
+        assert s["cell_m"] == pytest.approx(149.9, abs=0.01)
+        assert s["max_reported_hz"] == 150
+        assert s["bin_hz"] == 2.0
+
+    def test_the_limits_allow_for_interpolation(self):
+        """blah2 moves a detection up to half a cell from the one tested, and
+        the stream rounds delay to 10 m, so a node at minDelay 1 reports
+        detections from 70 m. Shading from 150 m drew real detections inside
+        "Not tested"."""
+        s = self._settings(self.DETECTOR)
+        assert s["near_limit_m"] == 220.0   # minDelay 2: 224.8 m, down to the stream's 10 m step
+        assert s["slow_limit_hz"] == 5.0    # minDoppler 5 first tests the 6 Hz row
+
+    def test_a_node_at_min_delay_1_is_shaded_to_70_m(self):
+        """Measured on a test node at minDelay 1: the nearest detection the
+        stream carried was 0.07 km."""
+        config = dict(self.DETECTOR, process={"detection": {"minDelay": 1}})
+        assert self._settings(config)["near_limit_m"] == 70.0
+
+    @pytest.mark.parametrize("min_doppler,limit", [(15, 15.0), (16, 15.0), (4, 3.0), (1, 1.0)])
+    def test_doppler_rows_sit_on_whole_bins(self, min_doppler, limit):
+        config = {"process": {"data": {"cpi": 0.5},
+                              "detection": {"minDoppler": min_doppler}}}
+        assert self._settings(config)["slow_limit_hz"] == limit
+
+    def test_nothing_outside_developer_mode(self):
+        assert self._settings(self.DETECTOR, developer=False) is None
+
+    def test_a_setting_the_config_does_not_state_is_not_guessed(self):
+        """An older default.yml has no maxReportedDoppler; without fs the bins
+        mean nothing. The page then falls back to its own defaults."""
+        s = self._settings({"process": {"detection": {"minDelay": 5, "minDoppler": 0,
+                                                      "maxReportedDoppler": "x"}}})
+        assert s == {"cell_m": None, "near_limit_m": None, "slow_limit_hz": None,
+                     "max_reported_hz": None, "bin_hz": None}
+
+    def test_an_unreadable_config_still_offers_the_view(self):
+        merged = MagicMock()
+        merged.load_merged_config.side_effect = OSError("no config")
+        state = MagicMock()
+        state.is_developer_mode.return_value = True
+        app_module = MagicMock(config_mgr=merged, device_state=state)
+        with patch.dict('sys.modules', {'app': app_module}):
+            assert tracker_routes._drone_settings()["cell_m"] is None
+        assert "no config" in app_module.app.logger.warning.call_args.args[0]
+
+    def test_a_customer_page_has_no_drone_view(self, app_client):
+        page = app_client.get('/tracker').get_data(as_text=True)
+        assert not re.search(r'<button[^>]*data-display="drone"', page)
+        assert 'id="humInput"' not in page and 'data-fade=' not in page
+        assert 'var DRONE = null;' in page
+        # A remembered Drone display falls back rather than opening on nothing.
+        assert "state.display === 'drone' && DRONE" in page
+
+    def test_a_developer_page_offers_it_with_its_own_controls(self, app_client, developer_mode):
+        page = app_client.get('/tracker').get_data(as_text=True)
+        assert re.search(r'<button[^>]*data-display="drone"', page)
+        for attr in ('data-fade="15"', 'data-fade="30"', 'data-floor="8"', 'data-dtracks="slow"'):
+            assert attr in page
+        dialog = re.search(r'<dialog[^>]*id="settingsDlg".*?</dialog>', page, re.S).group(0)
+        for field in ('droneMInput', 'humInput', 'slowInput'):
+            assert 'id="' + field + '"' in dialog
+        drone = json.loads(re.search(r'var DRONE = (.+?);\n', page).group(1))
+        assert drone["cell_m"] == pytest.approx(149.9, abs=0.01)
+
+    def test_it_asks_the_node_for_the_shortest_window_it_serves(self, app_client, developer_mode):
+        """The sidecar serves no less than 60 s, so the page asks for that and
+        fades its own shorter window. The two minimums must match."""
+        page = app_client.get('/tracker').get_data(as_text=True)
+        assert f'var SERVER_MIN_WINDOW = {tracker_routes.MIN_VIEW_WINDOW_S};' in page
+        assert "new EventSource('/tracker/events?window=' + requestWindow())" in page
+
+    def test_the_settings_stay_in_the_browser(self, app_client, developer_mode):
+        page = app_client.get('/tracker').get_data(as_text=True)
+        for key in ('fade', 'floor', 'dtracks', 'droneM', 'hum', 'slowMs'):
+            assert "remember('" + key + "'" in page
+        assert re.findall(r"fetch\('([^']+)'", page) == ['/tracker/coverage/reset', '/tracker/clear']
+
+
 # ── the coverage wedge ──────────────────────────────────────────────────────
 
 def fake_reply(body, status=200):
