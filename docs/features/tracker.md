@@ -5,7 +5,8 @@ and which of those detections retina-tracker has built into tracks. retina-gui h
 data: the record lives in the retina-tracker sidecar container, which serves it over a loopback
 SSE endpoint, and retina-gui proxies that stream to the browser and draws it with Plotly. A
 second display, the [wedge view](#wedge-view), draws the node's ADS-B-proven coverage and its
-tracks on a map with Leaflet.
+tracks on a map with Leaflet. A third, the [Drone view](#drone-view), exists only in developer mode
+and draws the near field at the detector's own limits for drone testing.
 Separately, `RetinaTrackerClient` tails the sidecar's track-event file and drives its control
 surface for Auto-Calibrate.
 
@@ -13,7 +14,7 @@ surface for Auto-Calibrate.
 
 | File | Role |
 | --- | --- |
-| [src/routes/tracker.py](../../src/routes/tracker.py) | The `/tracker` blueprint (page, SSE proxy, one-shot snapshot, clear, and the coverage proxies) and the `/tracker-preview` redirect. Computes the plot's axis bounds from the merged config. |
+| [src/routes/tracker.py](../../src/routes/tracker.py) | The `/tracker` blueprint (page, SSE proxy, one-shot snapshot, clear, and the coverage proxies) and the `/tracker-preview` redirect. Computes the plot's axis bounds, and the Drone view's detector settings, from the merged config. |
 | [templates/tracker.html](../../templates/tracker.html) | The page: controls, the Plotly scope, the wedge view's container and reset dialog, the track rail, and the EventSource client. |
 | [static/tracker-wedge.js](../../static/tracker-wedge.js) | The wedge view: the Leaflet map, the wedge, trails and arcs, and the replay. |
 | [src/retina_tracker_client.py](../../src/retina_tracker_client.py) | `RetinaTrackerClient`: JSONL event tailer plus HTTP control client (`reset`). |
@@ -144,6 +145,9 @@ The page defaults to 15 min. The sidecar keeps the full four hours either way; t
 decides how much the node has to build and send when the page opens (measured at 0.28 MB for
 15 min against 4.50 MB for 4 h).
 
+The [Drone view](#drone-view) has no View control. It asks for `MIN_VIEW_WINDOW_S` (60 s) and
+holds only its fade time, which is shorter than the node serves.
+
 Changing the window reconnects rather than filtering locally. Narrowing could be done in the
 browser, but widening needs history the browser never received, and one path for both means
 there is never a stale-cursor case. The stream re-seeds itself with a snapshot at the new
@@ -212,12 +216,13 @@ after the narrow range is changed.
 
 The gear in the page header opens Tracker settings, a native `<dialog>` (the page does not load
 Bootstrap's JavaScript), with two fields: this narrow Doppler range and the narrow delay range of
-the [Delay view](#delay-view). The Doppler field takes a whole number of hertz, from 1 to half the
-node's span (or up to 100,000 when the span is unknown). Saving checks both fields and saves
-neither unless both are valid. A field whose value changed switches its axis to narrow, since
+the [Delay view](#delay-view). In developer mode it also holds the [Drone view](#drone-view)'s
+range, hum rows and slow track limit. The Doppler field takes a whole number of hertz, from 1 to
+half the node's span (or up to 100,000 when the span is unknown). Saving checks every field and
+saves none unless all are valid. A field whose value changed switches its axis to narrow, since
 setting a range is asking to see it; an unchanged field leaves its axis as it was, so editing one
-range never narrows the other. Reset to defaults refills both fields (±300 Hz and 30 km) without
-saving.
+range never narrows the other. Reset to defaults refills every field (±300 Hz and 30 km, or the
+node's furthest range if that is nearer) without saving.
 
 Narrow is clipped to the node's span so it never draws Doppler the node cannot see. If the span
 lies wholly to one side of the narrow band, narrow falls back to the node's bounds.
@@ -233,7 +238,7 @@ The Delay control in the toolbar does the same for the bistatic range (x) axis:
 
 | Setting | Draws | Label |
 | --- | --- | --- |
-| Narrow | From the node's `delayMin` out to 30 km, or whatever the gear sets, clipped to the node's range | `30 km` |
+| Narrow | From the node's `delayMin` out to 30 km (or the node's furthest range, if that is nearer), or whatever the gear sets, clipped to the node's range | `30 km` |
 | Full (the default) | The node's own bounds from [Axis bounds](#axis-bounds), or autoscale if the config does not state them | `60 km` on a default node |
 
 It is presentation only, like the Doppler view: nothing is written to config and the stream
@@ -243,7 +248,9 @@ closely at near targets, and a viewer turns it on.
 
 The narrow range is a single far limit, set in the same gear dialog as a whole number of
 kilometres from 1 to the node's furthest processed range rounded up (or up to 1,000 when the range
-is unknown). The near end stays at the node's own `delayMin` (slightly below zero on a default
+is unknown). The 30 km default is clipped to that furthest range, because a node set to the drone
+profile's `delayMax` of 100 bins processes only 15 km, and a dialog opened on 30 refused every save
+until the delay field was changed by hand. The near end stays at the node's own `delayMin` (slightly below zero on a default
 node, past the direct signal), so narrowing never cuts off the nearest detections. If the node's
 range starts beyond the narrow limit, narrow falls back to the node's bounds. Labels round to the
 nearest kilometre.
@@ -264,10 +271,98 @@ Removed tracks never count. Hidden and filtered-out tracks do, because the alert
 the node saw rather than what the rail happens to list. The alert never fires with both axes on
 Full, where nothing can be outside.
 
+In the [Drone view](#drone-view) the alert counts escapes from that view's range and Doppler limits
+instead, so a slow track drawn there never hides an aircraft further out. Its Show full span button
+leaves the Drone view for the Delay / Doppler display with both axes on Full.
+
 It counts tracks, not raw detections. Widening the processed span from ±300 to ±1000 Hz gives
 CFAR about 3.3 times as many cells, and most of the extra detections are false alarms spread
 evenly across the band, so an alert on raw detections would be lit permanently. A track needs
 repeated detections that line up, which is the evidence worth interrupting someone for.
+
+## Drone view
+
+The Drone view is a third display for drone testing, offered only in
+[developer mode](config-editor.md#developer-mode). It is the near-field picture a test engineer
+needs while tuning detection in the config page's
+[Processing section](config-editor.md#processing-section): a few range bins, a narrow Doppler band,
+and only the last few seconds, so a change to a setting shows up as a change on the plot. The
+scope's other views cannot do that. Their shortest window is five minutes, and five minutes of
+close-in clutter such as street traffic fills the plot.
+
+It is presentation only, like the narrow views. Nothing is written to config, and the stream and
+the node are unchanged.
+
+### What it draws
+
+The axes come from what the detector is set to report, so the view follows whatever the engineer
+applies. `_drone_settings()` reads them from the merged config and passes them to the page as
+`DRONE` (null outside developer mode, which is what hides the view):
+
+| | Range (x) | Doppler (y) |
+| --- | --- | --- |
+| Drawn | 0 m (or the near limit below, if that is below zero) out to the range set with the gear, 1,000 m by default | ±`maxReportedDoppler`, or ±150 Hz when the node reports its whole span or does not state the key |
+| Shaded grey, "Not tested" | Nearer than half a cell inside `detection.minDelay` | Inside half a row of the first row `detection.minDoppler` tests |
+| Units | Metres, with a tick on each range bin labelled with its number (one bin is `c / fs`, about 150 m at 2 MS/s) | Hz |
+
+Both are clipped to the node's processed bounds from [Axis bounds](#axis-bounds). The grey bands
+mark where nothing can be reported. They end half a cell inside the settings, not at them, because
+blah2 refines each detection's position after the detector (`Interpolate.cpp`), moving it up to half
+a cell in range and half a row in Doppler. A node at `minDelay` 1 tests from bin 1 (150 m) but could
+report from 75 m, and the stream rounds delay to 0.01 km (retina-tracker's `DELAY_DP`), so the limit
+is rounded down to the stream's 10 m step: detections arrive from 70 m, which is what a test node at
+`minDelay` 1 showed. Shading from the setting itself drew real detections inside "Not tested".
+`STREAM_DELAY_STEP_M` in `routes/tracker.py` mirrors `DELAY_DP`. Doppler rows sit on whole bins of
+`1 / cpi`, so `minDoppler` 15 first tests the 16 Hz row and the band ends at 15 Hz.
+`_drone_settings()` computes both limits. A detection drawn inside one means the running config
+differs from the saved one, for example a save that has not been applied yet. Hovering a point gives
+its range in metres and feet, its range bin and its SNR.
+
+The footer counts detections inside the drawn range apart from those outside it ("5 detections in
+view in the last 30s · 297 outside it"). Points outside are still plotted, so zooming out shows
+them, but a single total described an empty plot as a busy one: on a test node at default settings,
+1 of 544 detections in a minute fell inside 0-1,000 m and ±150 Hz.
+
+The range is set in the gear dialog as whole metres, from 100 to the node's furthest processed
+range, with a readout in feet and range bins. The default is clipped to that furthest range, like
+the narrow delay default.
+
+### Fading by age
+
+Points fade from full opacity when new to 0.15 at the fade time (15 s or 30 s, the Fade control,
+30 s by default) and are not drawn after it. The sidecar serves no window shorter than
+`MIN_VIEW_WINDOW_S` (60 s), so the page asks for that (`SERVER_MIN_WINDOW` in the page mirrors
+it) and prunes to the fade time itself. Switching into or out of the view, or lengthening the fade,
+reconnects, because the points it needs were pruned.
+
+The age is measured from node time, carried forward by the browser's own elapsed time
+(`nowMs()`), and the view redraws every second. Without that, a sky that went quiet would freeze
+the last points at full opacity, since "now" is otherwise the newest point held. Only a difference
+of browser times is used, so the clock skew argument in [View window](#view-window) still holds.
+
+### Its controls
+
+| Control | Settings | What it does |
+| --- | --- | --- |
+| SNR | All, ≥5, ≥8, ≥12 dB | Hides weaker detections from the plot. The footer counts how many are not drawn. Off by default, because real detections on these nodes often sit near 5 dB and a drone is a small target. Tracks are not filtered. |
+| Tracks | All, `<20 m/s`, Off | The middle setting draws only tracks whose `max_velocity_ms` is under the slow track limit (20 m/s by default, set with the gear), and is the default. |
+| Hum rows (gear) | Up to 8 frequencies in Hz | Shades each row at ±f, one Doppler bin (`1 / cpi`) either side, in amber. Detections in a hum row are drawn grey and counted in the footer, not hidden, because a drone's Doppler can cross them. Empty by default: which rows hum depends on the site. |
+
+`max_velocity_ms` is a lower bound. retina-tracker takes half the bistatic range rate, which
+never exceeds twice the target's speed, so a target crossing side-on can be much faster than it
+says. The Tracks button's tooltip says so. The rail still lists every track, as with the scope's
+Tracks Off.
+
+The Doppler and Delay toggles, the View window and the scope's Tracks control are hidden in this
+view (the `no-drone` class), and its own controls appear (`drone-only`). The Detections layer and
+Clear buffer work as on the scope. Markers are larger than on the scope, so the plot reads on a
+screen recording.
+
+### Shading is not a filter on the node
+
+The hum rows and the SNR floor clean up the picture only. The detections still reach
+retina-tracker, where steady hum lines can start false tracks. Skipping those Doppler rows in blah2
+would be the fix for that, and does not exist yet.
 
 ## What is plotted
 
@@ -373,7 +468,8 @@ The rail beside the scope lists every track in the window.
 
 View window, layer, track overlay, sort, filter, Doppler view (`tracker.dopView`), the narrow
 Doppler range (`tracker.narrowHz`), delay view (`tracker.delView`), the narrow delay range
-(`tracker.narrowKm`) and the display (`tracker.display`) are remembered in `localStorage`
+(`tracker.narrowKm`), the display (`tracker.display`) and the [Drone view](#drone-view)'s settings
+(`fade`, `floor`, `dtracks`, `droneM`, `hum`, `slowMs`) are remembered in `localStorage`
 (`tracker.*` keys) and
 restored into the controls before connecting. They are per browser: nothing about the page's
 presentation is stored on the node.
@@ -383,8 +479,8 @@ every pixel; below 900 px the rail stacks under the plot.
 
 ## Wedge view
 
-The Display control in the page header switches the panel between the Delay / Doppler scope and
-the wedge view: a map of where this node is **proven** to see, built only from ADS-B-verified
+The Display control in the page header switches the panel between the Delay / Doppler scope, the
+[Drone view](#drone-view) (developer mode only) and the wedge view: a map of where this node is **proven** to see, built only from ADS-B-verified
 detections, with the tracks drawn on it. Nothing in it comes from a declared antenna aim. The
 rail, the view window and the Tracks on/off control are shared by both displays; the Doppler,
 Detections and Clear buffer controls belong to the scope and are hidden in the wedge view, and

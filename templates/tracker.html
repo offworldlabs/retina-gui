@@ -148,7 +148,17 @@
    One panel, two displays: only the active one's controls and body show.
    See docs/features/tracker.md#wedge-view */
 .trk-panel[data-display="wedge"] .dd-only,
-.trk-panel[data-display="scope"] .wedge-only { display: none !important; }
+.trk-panel:not([data-display="wedge"]) .wedge-only { display: none !important; }
+
+/* The Drone view draws on the scope with its own controls, in developer mode
+   only. See docs/features/tracker.md#drone-view */
+.trk-panel[data-display="drone"] .no-drone,
+.trk-panel:not([data-display="drone"]) .drone-only { display: none !important; }
+.drone-key { display: inline-flex; align-items: center; gap: 6px; font-family: var(--font-mono, monospace);
+             font-size: 10.5px; color: var(--ink-2); white-space: nowrap; }
+.drone-key i { display: inline-block; width: 14px; height: 9px; border-radius: 2px; }
+.drone-key .untested { background: rgba(120, 120, 120, .22); }
+.drone-key .hum { background: rgba(217, 119, 6, .22); border: 1px dashed rgba(180, 83, 9, .7); }
 
 .wedge-wrap { display: grid; grid-template-rows: minmax(0, 1fr) auto; grid-template-columns: minmax(0, 1fr); min-width: 0; }
 .wedge-wrap .trk-foot { flex-wrap: wrap; row-gap: 4px; }
@@ -199,6 +209,10 @@
       <span class="trk-lab">Display</span>
       <div class="seg" role="group" aria-label="Display">
         <button type="button" data-display="scope" aria-pressed="true">Delay / Doppler</button>
+        {%- if drone %}
+        <button type="button" data-display="drone" aria-pressed="false"
+                title="Developer mode. The near field at the detector's own limits, with points fading by age.">Drone</button>
+        {%- endif %}
         <button type="button" data-display="wedge" aria-pressed="false"
                 title="Where this node is proven to see, from ADS-B-verified detections, with the tracks on a map.">Wedge</button>
       </div>
@@ -219,7 +233,7 @@
       </span>
       <span class="trk-spacer"></span>
 
-      <div class="trk-ctl dd-only">
+      <div class="trk-ctl dd-only no-drone">
         <span class="trk-lab">Doppler</span>
         <div class="seg" role="group" aria-label="Doppler range">
           <button type="button" data-dop="narrow" aria-pressed="true" id="dopNarrowBtn"
@@ -229,7 +243,7 @@
         </div>
       </div>
 
-      <div class="trk-ctl dd-only">
+      <div class="trk-ctl dd-only no-drone">
         <span class="trk-lab">Delay</span>
         <div class="seg" role="group" aria-label="Delay range">
           <button type="button" data-del="narrow" aria-pressed="false" id="delNarrowBtn"
@@ -239,7 +253,7 @@
         </div>
       </div>
 
-      <div class="trk-ctl">
+      <div class="trk-ctl no-drone">
         <span class="trk-lab">View</span>
         <div class="seg" role="group" aria-label="View window">
           <button type="button" data-win="300" aria-pressed="false">5m</button>
@@ -263,7 +277,7 @@
         </div>
       </div>
 
-      <div class="trk-ctl">
+      <div class="trk-ctl no-drone">
         <span class="trk-lab">Tracks</span>
         <div class="seg" role="group" aria-label="Track overlay">
           <button type="button" data-tracks="on" aria-pressed="true">On</button>
@@ -271,6 +285,37 @@
                   title="Leaves the detections alone on the scope, as the node recorded them.">Off</button>
         </div>
       </div>
+      {%- if drone %}
+
+      <div class="trk-ctl drone-only">
+        <span class="trk-lab">Fade</span>
+        <div class="seg" role="group" aria-label="Fade time">
+          <button type="button" data-fade="15" aria-pressed="false">15s</button>
+          <button type="button" data-fade="30" aria-pressed="true">30s</button>
+        </div>
+      </div>
+
+      <div class="trk-ctl drone-only">
+        <span class="trk-lab">SNR</span>
+        <div class="seg" role="group" aria-label="SNR floor"
+             title="Hides weaker detections from the plot only. The detector and the tracker still see them.">
+          <button type="button" data-floor="0" aria-pressed="true">All</button>
+          <button type="button" data-floor="5" aria-pressed="false">&ge;5</button>
+          <button type="button" data-floor="8" aria-pressed="false">&ge;8</button>
+          <button type="button" data-floor="12" aria-pressed="false">&ge;12</button>
+        </div>
+      </div>
+
+      <div class="trk-ctl drone-only">
+        <span class="trk-lab">Tracks</span>
+        <div class="seg" role="group" aria-label="Drone track overlay">
+          <button type="button" data-dtracks="all" aria-pressed="false">All</button>
+          <button type="button" data-dtracks="slow" aria-pressed="true" id="slowTracksBtn"
+                  title="Tracks not proven faster than the limit set with the gear. Doppler gives only a lower bound on speed, so a fast target crossing side-on can still show.">Slow</button>
+          <button type="button" data-dtracks="off" aria-pressed="false">Off</button>
+        </div>
+      </div>
+      {%- endif %}
 
       <span class="hold-chip wedge-only" title="Each slice holds the second-furthest range two different aircraft reached in the last 24 hours."><i></i>24 h max-hold</span>
       <button type="button" id="wedgeResetBtn" class="ds-btn danger-ghost sm wedge-only"
@@ -293,6 +338,10 @@
             <span class="snr-ramp" aria-hidden="true"></span>
             <span class="trk-lab">0 &rarr; 20 dB</span>
           </div>
+          {%- if drone %}
+          <span class="drone-key drone-only" title="Where the detector's settings (minDelay, minDoppler) let nothing be reported."><i class="untested"></i>Not tested</span>
+          <span class="drone-key drone-only" title="Doppler rows set with the gear, such as mains hum. Detections in them are drawn grey, not hidden."><i class="hum"></i>Hum rows</span>
+          {%- endif %}
           <span class="trk-spacer"></span>
           <span class="trk-lab" id="detCount"></span>
         </div>
@@ -382,6 +431,48 @@
           </div>
           <div class="dlg-err" id="narrowKmErr" role="alert" hidden></div>
         </div>
+        {%- if drone %}
+        <div class="ds-field">
+          <label class="ds-field-label" for="droneMInput">Drone view range</label>
+          <div class="dlg-input-row">
+            <span>out to</span>
+            <input class="ds-input mono" id="droneMInput" type="number" min="100" step="1"
+                   inputmode="numeric" aria-describedby="droneMHelp droneMErr">
+            <span>m</span>
+          </div>
+          <div class="ds-field-help" id="droneMHelp">
+            Bistatic range the Drone view draws. <span id="droneMReadout"></span>
+          </div>
+          <div class="dlg-err" id="droneMErr" role="alert" hidden></div>
+        </div>
+        <div class="ds-field">
+          <label class="ds-field-label" for="humInput">Hum rows</label>
+          <div class="dlg-input-row">
+            <span>&plusmn;</span>
+            <input class="ds-input mono" id="humInput" type="text" maxlength="60" placeholder="60, 120"
+                   aria-describedby="humHelp humErr">
+            <span>Hz</span>
+          </div>
+          <div class="ds-field-help" id="humHelp">
+            Doppler rows the Drone view shades, such as mains hum, separated by commas. Detections in
+            them are drawn grey, not hidden. Leave empty for none.
+          </div>
+          <div class="dlg-err" id="humErr" role="alert" hidden></div>
+        </div>
+        <div class="ds-field">
+          <label class="ds-field-label" for="slowInput">Slow track limit</label>
+          <div class="dlg-input-row">
+            <span>under</span>
+            <input class="ds-input mono" id="slowInput" type="number" min="1" step="1"
+                   inputmode="numeric" aria-describedby="slowHelp slowErr">
+            <span>m/s</span>
+          </div>
+          <div class="ds-field-help" id="slowHelp">
+            What the Drone view's Slow tracks setting keeps. Saved in this browser.
+          </div>
+          <div class="dlg-err" id="slowErr" role="alert" hidden></div>
+        </div>
+        {%- endif %}
       </div>
       <div class="dlg-foot">
         <button type="button" class="linkbtn" id="narrowResetBtn">Reset to defaults</button>
@@ -431,6 +522,9 @@
     // The node's own ambiguity bounds; null axes autoscale. Never guess a range.
     // See docs/features/tracker.md#axis-bounds
     var AXES = {{ (axes or {}) | tojson }};
+    // What the detector reports, for the Drone view; null outside developer mode.
+    // See docs/features/tracker.md#drone-view
+    var DRONE = {{ drone | tojson }};
     var csrf = document.querySelector('meta[name="csrf-token"]').content;
 
     // 15 min, not 4 h: only sets how much the node sends on open.
@@ -472,6 +566,12 @@
 
     var store = emptyStore();
     var lastTs = 0;            // newest timestamp held, used as "now"
+    var lastTsAt = 0;          // browser time when lastTs last moved
+
+    // Node time, carried forward by the browser's own elapsed time so the
+    // Drone view keeps fading through a quiet spell. Only a difference of
+    // browser times is used, so clock skew still does not matter.
+    function nowMs() { return lastTs ? lastTs + (Date.now() - lastTsAt) : 0; }
 
     var state = {
         window: DEFAULT_WINDOW,
@@ -505,7 +605,9 @@
     state.tracks = recall('tracks', 'on');
     state.sort = recall('sort', 'recent');
     state.filter = recall('filter', 'all');
-    state.display = recall('display', 'scope') === 'wedge' ? 'wedge' : 'scope';
+    state.display = recall('display', 'scope');
+    // Drone is offered only in developer mode, so a remembered one falls back.
+    if (state.display !== 'wedge' && !(state.display === 'drone' && DRONE)) state.display = 'scope';
 
     // ── Doppler view ─────────────────────────────────────────────────────
 
@@ -567,8 +669,15 @@
         return Number.isInteger(n) && n >= 1 && n <= cap ? n : null;
     }
 
+    // Clipped to the node's reach, or a node processing less than 30 km (the
+    // drone profile's delayMax) would open the gear on a value it refuses.
+    function defaultNarrowKm() {
+        var reach = delayReach();
+        return reach ? Math.min(DEFAULT_NARROW_KM, reach) : DEFAULT_NARROW_KM;
+    }
+
     state.delView = recall('delView', 'full') === 'narrow' ? 'narrow' : 'full';
-    state.narrowKm = validNarrowKm(parseInt(recall('narrowKm', DEFAULT_NARROW_KM), 10)) || DEFAULT_NARROW_KM;
+    state.narrowKm = validNarrowKm(parseInt(recall('narrowKm', defaultNarrowKm()), 10)) || defaultNarrowKm();
 
     // Starts where the node starts (a little below zero, past the direct
     // signal), clipped so narrow never draws range the node cannot see.
@@ -588,6 +697,120 @@
     function fmtKm(km) {
         return Math.round(km) + ' km';
     }
+
+    // ── Drone view ───────────────────────────────────────────────────────
+
+    // Developer mode only. Presentation only like the narrow views: the node
+    // and the stream are unchanged. See docs/features/tracker.md#drone-view
+    var DEFAULT_DRONE_M = 1000;
+    var MIN_DRONE_M = 100;
+    var MAX_DRONE_M = 1000000;     // a sanity cap, used only when the range is unknown
+    var DEFAULT_DRONE_HZ = 150;    // when the node reports its whole span
+    var DEFAULT_SLOW_MS = 20;
+    var MAX_SLOW_MS = 1000;
+    var MAX_HUM_ROWS = 8;
+    var DEFAULT_BIN_HZ = 2;        // one Doppler row at the fleet's 0.5 s cpi
+    var FADES = [15, 30];
+    var FLOORS = [0, 5, 8, 12];
+    var DRONE_TRACKS = ['all', 'slow', 'off'];
+    // Mirrors MIN_VIEW_WINDOW_S: the shortest window the node serves. The
+    // Drone view asks for that and fades a shorter one itself.
+    var SERVER_MIN_WINDOW = 60;
+    var FT_PER_M = 3.28084;
+
+    function droneReachM() {
+        return AXES.delay ? Math.ceil(AXES.delay[1] * 1000) : null;
+    }
+
+    function validDroneM(n) {
+        var cap = droneReachM() || MAX_DRONE_M;
+        return Number.isInteger(n) && n >= MIN_DRONE_M && n <= cap ? n : null;
+    }
+
+    function defaultDroneM() {
+        var reach = droneReachM();
+        return reach ? Math.max(MIN_DRONE_M, Math.min(DEFAULT_DRONE_M, reach)) : DEFAULT_DRONE_M;
+    }
+
+    function validSlow(n) {
+        return Number.isInteger(n) && n >= 1 && n <= MAX_SLOW_MS ? n : null;
+    }
+
+    // "60, 120" -> [60, 120]; null when any entry is not a Doppler the node
+    // could report. Empty is valid and means none.
+    function parseHum(text) {
+        var parts = String(text).split(/[\s,]+/).filter(Boolean);
+        if (parts.length > MAX_HUM_ROWS) return null;
+        var cap = spanHalfWidth() || MAX_NARROW_HZ, out = [];
+        for (var i = 0; i < parts.length; i++) {
+            var f = Number(parts[i]);
+            if (!isFinite(f) || f <= 0 || f > cap) return null;
+            if (out.indexOf(f) === -1) out.push(f);
+        }
+        return out.sort(function (a, b) { return a - b; });
+    }
+
+    function recallChoice(key, choices, fallback) {
+        var v = recall(key, fallback);
+        for (var i = 0; i < choices.length; i++) if (String(choices[i]) === v) return choices[i];
+        return fallback;
+    }
+
+    state.fade = recallChoice('fade', FADES, 30);
+    state.floor = recallChoice('floor', FLOORS, 0);
+    state.dtracks = recallChoice('dtracks', DRONE_TRACKS, 'slow');
+    state.droneM = validDroneM(parseInt(recall('droneM', defaultDroneM()), 10)) || defaultDroneM();
+    state.hum = parseHum(recall('hum', '')) || [];
+    state.slowMs = validSlow(parseInt(recall('slowMs', DEFAULT_SLOW_MS), 10)) || DEFAULT_SLOW_MS;
+
+    function droneOn() { return state.display === 'drone'; }
+
+    // ±maxReportedDoppler when the node reports less than its span, else
+    // ±150 Hz; clipped to the span like narrow.
+    function droneDopplerRange() {
+        var half = DRONE && DRONE.max_reported_hz, span = spanHalfWidth();
+        if (!half || (span && half >= span)) half = DEFAULT_DRONE_HZ;
+        var lo = -half, hi = half;
+        if (AXES.doppler) {
+            lo = Math.max(lo, AXES.doppler[0]);
+            hi = Math.min(hi, AXES.doppler[1]);
+            if (lo >= hi) return AXES.doppler.slice();
+        }
+        return [lo, hi];
+    }
+
+    // In metres, from zero (or the nearest range the detector can report, if
+    // that is below zero) out to the gear's range, clipped to what the node
+    // processes.
+    function droneDelayRangeM() {
+        var minM = DRONE && DRONE.near_limit_m !== null ? DRONE.near_limit_m : 0;
+        var lo = Math.min(0, minM), hi = state.droneM;
+        if (AXES.delay) {
+            lo = Math.max(lo, AXES.delay[0] * 1000);
+            hi = Math.min(hi, AXES.delay[1] * 1000);
+            if (lo >= hi) return [AXES.delay[0] * 1000, AXES.delay[1] * 1000];
+        }
+        return [lo, hi];
+    }
+
+    // A hum row is shaded one Doppler bin either side of its frequency.
+    function humHalfWidth() { return (DRONE && DRONE.bin_hz) || DEFAULT_BIN_HZ; }
+    function inHumRow(doppler) {
+        var a = Math.abs(doppler), w = humHalfWidth();
+        for (var i = 0; i < state.hum.length; i++) if (Math.abs(a - state.hum[i]) <= w) return true;
+        return false;
+    }
+
+    function droneRangeText(m) {
+        var text = '≈ ' + Math.round(m * FT_PER_M).toLocaleString() + ' ft';
+        if (DRONE && DRONE.cell_m) text += ', range bins up to ' + Math.floor(m / DRONE.cell_m);
+        return text + '.';
+    }
+
+    // The window the page holds, and the one it asks the node for. The Drone
+    // view holds only its fade time, which is shorter than the node serves.
+    function viewWindow() { return droneOn() ? state.fade : state.window; }
+    function requestWindow() { return droneOn() ? Math.max(SERVER_MIN_WINDOW, state.fade) : state.window; }
 
     // ── Column helpers ───────────────────────────────────────────────────
 
@@ -641,9 +864,11 @@
     // The browser ages points out of the window, using node time: the newest
     // point held is "now", so clock skew does not matter.
     function pruneToWindow() {
-        lastTs = newestTimestamp();
+        var newest = newestTimestamp();
+        if (newest !== lastTs) lastTsAt = Date.now();
+        lastTs = newest;
         if (!lastTs) return;
-        var cutoff = lastTs - state.window * 1000;
+        var cutoff = lastTs - viewWindow() * 1000;
         CLASSES.forEach(function (c) {
             store.det[c] = sliceCols(store.det[c], firstAtOrAfter(store.det[c].t, cutoff));
         });
@@ -925,12 +1150,28 @@
     // about what the node saw, not what this rail is listing.
     var outside = {};
 
+    // The ranges a track can escape: the narrow ones that are on, or the Drone
+    // view's. Delay in km, as the stream carries it.
+    function viewLimits() {
+        if (droneOn()) {
+            var m = droneDelayRangeM(), dop = droneDopplerRange();
+            return { dop: dop, del: [m[0] / 1000, m[1] / 1000],
+                     dopText: fmtHzRange(dop) + ' Hz', delText: Math.round(m[1]).toLocaleString() + ' m' };
+        }
+        return {
+            dop: state.dopView === 'narrow' ? narrowRange() : null,
+            del: state.delView === 'narrow' ? narrowDelayRange() : null,
+            dopText: fmtHzRange(narrowRange()) + ' Hz',
+            delText: fmtKm(narrowDelayRange()[1])
+        };
+    }
+
     // Counts per axis too, so the alert names only the ranges a track escapes.
     function markOutside(all) {
         outside = {};
-        var dop = state.dopView === 'narrow' ? narrowRange() : null;
-        var del = state.delView === 'narrow' ? narrowDelayRange() : null;
-        var out = { n: 0, dop: 0, del: 0 };
+        var limits = viewLimits();
+        var dop = limits.dop, del = limits.del;
+        var out = { n: 0, dop: 0, del: 0, limits: limits };
         if (!dop && !del) return out;
         all.forEach(function (row) {
             if (state.removed[row.id]) return;
@@ -950,8 +1191,8 @@
         oovAlert.hidden = out.n === 0;
         if (out.n) {
             var ranges = [];
-            if (out.dop) ranges.push(fmtHzRange(narrowRange()) + ' Hz');
-            if (out.del) ranges.push(fmtKm(narrowDelayRange()[1]));
+            if (out.dop) ranges.push(out.limits.dopText);
+            if (out.del) ranges.push(out.limits.delText);
             oovText.textContent = out.n + (out.n === 1 ? ' track' : ' tracks') + ' outside '
                 + ranges.join(' / ');
         }
@@ -967,6 +1208,10 @@
         // whether or not anyone can see it.
         if (state.display === 'wedge') {
             wedge.render(rows, { hidden: state.hidden, hover: state.hover, tracksOn: tracksShown() });
+            return;
+        }
+        if (droneOn()) {
+            renderDrone(rows);
             return;
         }
 
@@ -1044,6 +1289,174 @@
             + cappedNote() + heldNote();
     }
 
+    // The Drone view: the near field in metres, points fading by age, the
+    // detector's untested cells and the hum rows shaded. Same trace pooling as
+    // render(), with per-point opacity for the fade.
+    // See docs/features/tracker.md#drone-view
+    var DRONE_HUM_GREY = '#9ca3af';
+    var UNTESTED_FILL = 'rgba(120,120,120,0.14)';
+
+    function renderDrone(rows) {
+        var now = nowMs(), fadeMs = state.fade * 1000, cell = DRONE.cell_m;
+        // 1 when new, 0.15 at the fade time, 0 (not drawn) after it.
+        function alpha(t) {
+            var age = Math.max(0, now - t);
+            return age > fadeMs ? 0 : 1 - 0.85 * age / fadeMs;
+        }
+        function where(m, snr) { return [snr, m * FT_PER_M, cell ? m / cell : 0]; }
+        // `k` is where where()'s three values start in a point's customdata.
+        function hoverFrom(k) {
+            function cd(n) { return 'customdata[' + (k + n) + ']'; }
+            return 'Range: %{x:.0f} m (%{' + cd(1) + ':.0f} ft'
+                 + (cell ? ', bin %{' + cd(2) + ':.1f}' : '') + ')<br>Doppler: %{y:.1f} Hz<br>'
+                 + 'SNR: %{' + cd(0) + ':.1f} dB<extra></extra>';
+        }
+        function pts() { return { x: [], y: [], op: [], cd: [] }; }
+
+        var dop = droneDopplerRange(), del = droneDelayRangeM();
+        // Points outside the axes are still drawn, so zooming out shows them,
+        // but the footer counts them apart: on a node whose detections are
+        // all far out, a total would describe an empty plot as a busy one.
+        function inView(m, d) { return m >= del[0] && m <= del[1] && d >= dop[0] && d <= dop[1]; }
+        var traces = [], shown = 0, beyond = 0, faint = 0, hummed = 0;
+        var bands = [], hum = pts();
+        layerCols().forEach(function (cols) {
+            for (var i = 0; i < cols.t.length; i++) {
+                var a = alpha(cols.t[i]);
+                if (!a) continue;
+                if (cols.snr[i] < state.floor) { faint++; continue; }
+                var m = cols.delay[i] * 1000, bin;
+                if (state.hum.length && inHumRow(cols.doppler[i])) {
+                    bin = hum;
+                    hummed++;
+                } else {
+                    var b = bandOf(cols.snr[i]);
+                    bin = bands[b] || (bands[b] = pts());
+                }
+                bin.x.push(m);
+                bin.y.push(cols.doppler[i]);
+                bin.op.push(a);
+                bin.cd.push(where(m, cols.snr[i]));
+                if (inView(m, cols.doppler[i])) shown++; else beyond++;
+            }
+        });
+        var detOpacity = isolating() ? 0.15 : 1;
+        function detTrace(bin, color) {
+            return {
+                type: 'scattergl', mode: 'markers', x: bin.x, y: bin.y,
+                marker: { color: color, size: 9, opacity: bin.op },
+                customdata: bin.cd, hovertemplate: hoverFrom(0),
+                opacity: detOpacity, showlegend: false
+            };
+        }
+        bands.forEach(function (bin, b) { traces.push(detTrace(bin, BAND_COLOUR[b])); });
+        if (hum.x.length) traces.push(detTrace(hum, DRONE_HUM_GREY));
+
+        function pushFading(bin, id, trk) {
+            var started = false;
+            for (var i = 0; i < trk.t.length; i++) {
+                var a = alpha(trk.t[i]);
+                if (!a) continue;
+                if (!started && bin.x.length) {
+                    bin.x.push(null); bin.y.push(null); bin.op.push(0); bin.cd.push(null);
+                }
+                started = true;
+                var m = trk.delay[i] * 1000;
+                bin.x.push(m);
+                bin.y.push(trk.doppler[i]);
+                bin.op.push(a);
+                bin.cd.push([id].concat(where(m, trk.snr[i])));
+            }
+        }
+        function fadingTrackTrace(bin, color, opacity) {
+            return {
+                type: 'scattergl', mode: 'lines+markers', x: bin.x, y: bin.y,
+                line: { color: 'rgba(0,0,0,0.25)', width: 1 },
+                marker: { color: color, size: 11, opacity: bin.op, line: { color: '#ffffff', width: 0.5 } },
+                customdata: bin.cd,
+                hovertemplate: '%{customdata[0]}<br>' + hoverFrom(1),
+                opacity: opacity, showlegend: false
+            };
+        }
+        if (state.dtracks !== 'off') {
+            var tbins = {}, hovered = null;
+            rows.forEach(function (r) {
+                if (state.hidden[r.id]) return;
+                if (state.dtracks === 'slow' && (r.meta.max_velocity_ms || 0) >= state.slowMs) return;
+                if (r.id === state.hover) { hovered = r; return; }
+                var hue = hueFor(r.id);
+                pushFading(tbins[hue] || (tbins[hue] = pts()), r.id, store.tracks[r.id]);
+            });
+            Object.keys(tbins).forEach(function (hue) {
+                traces.push(fadingTrackTrace(tbins[hue], 'hsl(' + hue + ',58%,42%)', isolating() ? 0.09 : 1));
+            });
+            if (hovered) {
+                var solo = pts();
+                pushFading(solo, hovered.id, store.tracks[hovered.id]);
+                traces.push(fadingTrackTrace(solo, colorFor(hovered.id), 1));
+            }
+        }
+
+        Plotly.react(plotDiv, traces, {
+            uirevision: 'drone:' + state.droneM + ':' + dop.join(',') + ':' + state.hum.join(','),
+            showlegend: false,
+            margin: { t: 12, r: 14, b: cell ? 64 : 44, l: 58 },
+            shapes: droneShapes(del),
+            xaxis: droneXAxis(del),
+            yaxis: axis('Doppler (Hz)', dop)
+        }, { displayModeBar: false, responsive: true });
+
+        detCount.textContent = shown.toLocaleString() + ' detections in view in the last ' + state.fade + 's'
+            + ' \u00b7 ' + beyond.toLocaleString() + ' outside it'
+            + (state.floor ? ' · ' + faint.toLocaleString() + ' under ' + state.floor + ' dB not drawn' : '')
+            + (state.hum.length ? ' · ' + hummed.toLocaleString() + ' in hum rows' : '')
+            + cappedNote() + heldNote();
+    }
+
+    // Grey where the detector's settings let nothing be reported (half a cell
+    // inside minDelay and minDoppler, as blah2 interpolates), amber dotted over
+    // each hum row.
+    function droneShapes(del) {
+        var shapes = [];
+        function band(x, y, fill, line) {
+            shapes.push({
+                type: 'rect', layer: 'below', fillcolor: fill, line: line || { width: 0 },
+                xref: x ? 'x' : 'paper', x0: x ? x[0] : 0, x1: x ? x[1] : 1,
+                yref: y ? 'y' : 'paper', y0: y ? y[0] : 0, y1: y ? y[1] : 1
+            });
+        }
+        if (DRONE.slow_limit_hz) band(null, [-DRONE.slow_limit_hz, DRONE.slow_limit_hz], UNTESTED_FILL);
+        if (DRONE.near_limit_m !== null && DRONE.near_limit_m > del[0]) {
+            band([del[0], Math.min(DRONE.near_limit_m, del[1])], null, UNTESTED_FILL);
+        }
+        var w = humHalfWidth();
+        state.hum.forEach(function (f) {
+            [-f, f].forEach(function (c) {
+                band(null, [c - w, c + w], 'rgba(217,119,6,0.12)',
+                     { color: 'rgba(180,83,9,0.55)', width: 1, dash: 'dot' });
+            });
+        });
+        return shapes;
+    }
+
+    // Metres, with a tick on each range bin labelled with its number, since
+    // minDelay and the detector's cells are counted in bins.
+    function droneXAxis(range) {
+        var spec = axis(DRONE.cell_m ? 'Bistatic range (m) and range bin' : 'Bistatic range (m)', range);
+        var cell = DRONE.cell_m;
+        if (!cell) return spec;
+        var first = Math.ceil(range[0] / cell), last = Math.floor(range[1] / cell);
+        var step = Math.max(1, Math.ceil((last - first + 1) / 14));
+        spec.tickvals = [];
+        spec.ticktext = [];
+        for (var n = first; n <= last; n++) {
+            if (n % step) continue;
+            spec.tickvals.push(n * cell);
+            spec.ticktext.push(Math.round(n * cell) + ' m<br>bin ' + n);
+        }
+        return spec;
+    }
+
     // Shown so a capped backdrop is not mistaken for a quiet sky.
     function cappedNote() {
         if (!untrackedCapped) return '';
@@ -1068,8 +1481,8 @@
         });
         if (oldest === null || !lastTs) return '';
         var held = (lastTs - oldest) / 1000;
-        if (held >= state.window * 0.9) return '';
-        return ' \u00b7 ' + fmtSpan(held) + ' of ' + fmtSpan(state.window) + ' held';
+        if (held >= viewWindow() * 0.9) return '';
+        return ' \u00b7 ' + fmtSpan(held) + ' of ' + fmtSpan(viewWindow()) + ' held';
     }
 
     function fmtSpan(s) {
@@ -1184,8 +1597,30 @@
 
     wireSeg('dop', setDopView);
     wireSeg('del', setDelView);
-    // Widens both axes: the alert counts escapes from either narrow range.
+
+    // The Drone view's controls exist only in developer mode; wiring absent
+    // buttons is a no-op.
+    wireSeg('fade', function (v) {
+        state.fade = Number(v);
+        remember('fade', v);
+        // Older points were pruned at the shorter fade, so lengthening it
+        // needs them back from the node.
+        connect();
+    });
+    wireSeg('floor', function (v) {
+        state.floor = Number(v);
+        remember('floor', v);
+        scheduleRender();
+    });
+    wireSeg('dtracks', function (v) {
+        state.dtracks = v;
+        remember('dtracks', v);
+        scheduleRender();
+    });
+    // Widens both axes: the alert counts escapes from either narrow range. In
+    // the Drone view that means leaving it for the full scope.
     document.getElementById('oovShowBtn').addEventListener('click', function () {
+        if (droneOn()) setDisplay('scope');
         setDopView('full');
         setDelView('full');
     });
@@ -1197,6 +1632,8 @@
         document.getElementById('dopFullBtn').textContent = AXES.doppler ? fmtHzRange(AXES.doppler) : 'Full';
         document.getElementById('delNarrowBtn').textContent = fmtKm(narrowDelayRange()[1]);
         document.getElementById('delFullBtn').textContent = AXES.delay ? fmtKm(AXES.delay[1]) : 'Full';
+        var slowBtn = document.getElementById('slowTracksBtn');
+        if (slowBtn) slowBtn.textContent = '<' + state.slowMs + ' m/s';
     }
 
     // ── Settings ─────────────────────────────────────────────────────────
@@ -1215,6 +1652,47 @@
     function showNarrowError(text) { showFieldError(narrowInput, narrowErr, text); }
     function showNarrowKmError(text) { showFieldError(narrowKmInput, narrowKmErr, text); }
 
+    // The Drone view's fields, present only in developer mode.
+    var droneFields = DRONE ? [
+        { input: document.getElementById('droneMInput'), err: document.getElementById('droneMErr') },
+        { input: document.getElementById('humInput'), err: document.getElementById('humErr') },
+        { input: document.getElementById('slowInput'), err: document.getElementById('slowErr') }
+    ] : [];
+    var droneMReadout = document.getElementById('droneMReadout');
+
+    function fillDroneFields(m, hum, slow) {
+        if (!DRONE) return;
+        droneFields[0].input.value = m;
+        droneFields[1].input.value = hum.join(', ');
+        droneFields[2].input.value = slow;
+        droneFields.forEach(function (f) { showFieldError(f.input, f.err, ''); });
+        showDroneReadout();
+    }
+
+    function showDroneReadout() {
+        var m = validDroneM(Number(droneFields[0].input.value));
+        droneMReadout.textContent = m ? droneRangeText(m) : '';
+    }
+    if (DRONE) droneFields[0].input.addEventListener('input', showDroneReadout);
+
+    // The parsed values, or null after showing an error on each bad field.
+    function readDroneFields() {
+        if (!DRONE) return {};
+        var m = validDroneM(Number(droneFields[0].input.value));
+        var hum = parseHum(droneFields[1].input.value);
+        var slow = validSlow(Number(droneFields[2].input.value));
+        var reach = droneReachM();
+        showFieldError(droneFields[0].input, droneFields[0].err, m ? '' : reach
+            ? 'Enter a whole number from ' + MIN_DRONE_M + ' to ' + reach + ', the most the node processes.'
+            : 'Enter a whole number of metres, ' + MIN_DRONE_M + ' or more.');
+        showFieldError(droneFields[1].input, droneFields[1].err, hum ? '' :
+            'Enter up to ' + MAX_HUM_ROWS + ' frequencies in Hz, each above 0 and at most '
+            + (spanHalfWidth() || MAX_NARROW_HZ) + '.');
+        showFieldError(droneFields[2].input, droneFields[2].err, slow ? '' :
+            'Enter a whole number from 1 to ' + MAX_SLOW_MS + '.');
+        return m && hum && slow ? { m: m, hum: hum, slow: slow } : null;
+    }
+
     document.getElementById('settingsBtn').addEventListener('click', function () {
         narrowInput.value = state.narrowHz;
         var half = spanHalfWidth();
@@ -1228,15 +1706,18 @@
             AXES.delay ? 'out to ' + fmtKm(AXES.delay[1]) : 'its full range';
         showNarrowError('');
         showNarrowKmError('');
+        if (DRONE && droneReachM()) droneFields[0].input.max = droneReachM();
+        fillDroneFields(state.droneM, state.hum, state.slowMs);
         settingsDlg.showModal();
         narrowInput.select();
     });
 
     document.getElementById('narrowResetBtn').addEventListener('click', function () {
         narrowInput.value = DEFAULT_NARROW_HZ;
-        narrowKmInput.value = DEFAULT_NARROW_KM;
+        narrowKmInput.value = defaultNarrowKm();
         showNarrowError('');
         showNarrowKmError('');
+        fillDroneFields(defaultDroneM(), [], DEFAULT_SLOW_MS);
     });
 
     document.getElementById('settingsCancel').addEventListener('click', function () { settingsDlg.close(); });
@@ -1256,14 +1737,23 @@
         showNarrowKmError(kmOk ? '' : reach
             ? 'Enter a whole number from 1 to ' + reach + ', the most the node processes.'
             : 'Enter a whole number of km, from 1 to ' + MAX_NARROW_KM + '.');
-        // Nothing is saved unless both fields are valid.
-        if (!hzOk || !kmOk) return;
+        var drone = readDroneFields();
+        // Nothing is saved unless every field is valid.
+        if (!hzOk || !kmOk || !drone) return;
 
         var hzChanged = n !== state.narrowHz, kmChanged = km !== state.narrowKm;
         state.narrowHz = n;
         state.narrowKm = km;
         remember('narrowHz', n);
         remember('narrowKm', km);
+        if (DRONE) {
+            state.droneM = drone.m;
+            state.hum = drone.hum;
+            state.slowMs = drone.slow;
+            remember('droneM', drone.m);
+            remember('hum', drone.hum.join(','));
+            remember('slowMs', drone.slow);
+        }
         labelRangeButtons();
         settingsDlg.close();
         // Saving a new narrow range is asking to see it. Only the axis whose
@@ -1315,6 +1805,8 @@
     });
 
     function setDisplay(v) {
+        if (v === 'drone' && !DRONE) v = 'scope';
+        var before = requestWindow() + ':' + viewWindow();
         state.display = v;
         remember('display', v);
         panel.setAttribute('data-display', v);
@@ -1327,6 +1819,9 @@
         } else {
             wedge.hide();
         }
+        // Into or out of the Drone view changes the window held, so the
+        // stream re-seeds. Not before the first connect.
+        if (source && requestWindow() + ':' + viewWindow() !== before) connect();
         scheduleRender();
     }
 
@@ -1422,7 +1917,7 @@
         if (source) source.close();
         store = emptyStore();
         setStatus('connecting&hellip;', 'stale');
-        source = new EventSource('/tracker/events?window=' + state.window);
+        source = new EventSource('/tracker/events?window=' + requestWindow());
         // Named events: a snapshot replaces what is held (and can arrive
         // mid-stream after a clear), a delta appends.
         source.addEventListener('snapshot', onEvent(true));
@@ -1461,8 +1956,16 @@
     document.querySelectorAll('.seg [data-del]').forEach(function (b) {
         b.setAttribute('aria-pressed', String(b.getAttribute('data-del') === state.delView));
     });
+    [['fade', state.fade], ['floor', state.floor], ['dtracks', state.dtracks]].forEach(function (p) {
+        document.querySelectorAll('.seg [data-' + p[0] + ']').forEach(function (b) {
+            b.setAttribute('aria-pressed', String(b.getAttribute('data-' + p[0]) === String(p[1])));
+        });
+    });
     labelRangeButtons();
     setDisplay(state.display);
+
+    // The Drone view fades by age, so it redraws through a quiet spell too.
+    setInterval(function () { if (droneOn() && lastTs) scheduleRender(); }, 1000);
 
     render();
     connect();
