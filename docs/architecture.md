@@ -175,6 +175,7 @@ Route modules are imported at the bottom of `app.py`, after the app exists, beca
 | `mode` | [routes/sdr.py](../src/routes/sdr.py) | [sdr-mode.md](features/sdr-mode.md) |
 | `network` | [routes/network.py](../src/routes/network.py) | [sdr-mode.md](features/sdr-mode.md) |
 | `calibrate` | [routes/calibrate.py](../src/routes/calibrate.py) | [auto-calibrate.md](features/auto-calibrate.md) |
+| `radar` | [routes/radar.py](../src/routes/radar.py) | [radar.md](features/radar.md) |
 | `tracker`, `tracker_legacy` | [routes/tracker.py](../src/routes/tracker.py) | [tracker.md](features/tracker.md) |
 | `fleet` | [routes/fleet.py](../src/routes/fleet.py) | [fleet-and-naming.md](features/fleet-and-naming.md), [Summary page](#summary-page) |
 | `remote_access` | [routes/remote_access.py](../src/routes/remote_access.py) | [remote-access.md](features/remote-access.md) |
@@ -249,11 +250,12 @@ invisibly with no way to cancel it short of waiting out the budget or restarting
 - It does nothing while the setup wizard is in progress, because the wizard redirects `/config`
   back to itself and the two would bounce forever.
 - Allowed prefixes (`_CALIBRATION_ALLOWED_PREFIXES`): `/config` (the page and the status
-  endpoints its modal polls), `/calibrate`, `/static`, `/favicon`, and the fleet-scope routes
-  `/summary`, `/api/fleet` and `/healthz`. Fleet routes belong to whoever is browsing, who may
-  not be the person who started the run. `/healthz` is how every other node decides whether
+  endpoints its modal polls), `/calibrate`, `/radar`, `/static`, `/favicon`, and the fleet-scope
+  routes `/summary`, `/api/fleet` and `/healthz`. Fleet routes belong to whoever is browsing, who
+  may not be the person who started the run. `/healthz` is how every other node decides whether
   this one still exists, so redirecting it would make a calibrating node look unreachable to
-  its peers.
+  its peers. `/radar` is read-only and is how an owner watches a run, so an open display keeps
+  drawing through one. See [radar.md](features/radar.md#during-a-calibration-run).
 
 ## Sessions and CSRF
 
@@ -541,8 +543,12 @@ page. The shared alias is a way in, and the fleet banner moves you between nodes
 
 ### Service card links
 
-The service cards point at other ports on the node (blah2's web UI, tar1090). A script builds
-each link from the hostname the browser actually used, so the link stays on this node.
+Passive Radar and Max-Hold are pages of this app (see [radar.md](features/radar.md)), so their
+cards are plain links that work the same on every pathway. They keep opening a new tab, because
+the tutorial tells owners to read Max-Hold beside the ADS-B Map.
+
+The other service cards point at other ports on the node (blah2's web UI, tar1090). A script
+builds each link from the hostname the browser actually used, so the link stays on this node.
 
 Over the support tunnel those ports are not reachable: Cloudflare proxies a fixed set of ports
 and these are not among them, and an `http://` link on an `https://` page is blocked as mixed

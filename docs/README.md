@@ -21,6 +21,7 @@ shape of the app, then the feature doc for the area you are changing.
 | [features/ota-updates.md](features/ota-updates.md) | Mender OS and stack updates |
 | [features/sdr-mode.md](features/sdr-mode.md) | Radar vs spectrum mode, restarting the SDRplay service |
 | [features/towers.md](features/towers.md) | Tower finder integration and tower presets |
+| [features/radar.md](features/radar.md) | The Passive Radar and Max-Hold pages |
 | [features/tracker.md](features/tracker.md) | The Tracker Preview page |
 | [operations/node-files.md](operations/node-files.md) | Where retina-gui lives on a node, the files it reads and writes, environment variables, the CARTO key |
 | [history/](history/README.md) | The original pre-implementation plans, kept as an archive |
@@ -44,6 +45,7 @@ Use this to find the doc to update when you change a file.
 | `src/routes/sdr.py` | [features/sdr-mode.md](features/sdr-mode.md) |
 | `src/network_manager.py`, `src/routes/network.py` | No doc yet: the prose is short and stays in code. Write `features/network.md` if it grows. |
 | `src/routes/towers.py` | [features/towers.md](features/towers.md) |
+| `src/routes/radar.py`, `templates/radar.html`, `static/radar-map.js`, `static/vendor/*` | [features/radar.md](features/radar.md) |
 | `src/routes/tracker.py`, `src/retina_tracker_client.py`, `templates/tracker.html`, `static/tracker-wedge.js` | [features/tracker.md](features/tracker.md) |
 | `systemd/*.service`, anything under `/data/retina-gui` | [operations/node-files.md](operations/node-files.md) |
 

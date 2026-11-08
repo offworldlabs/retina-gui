@@ -258,6 +258,7 @@ from routes.fleet import bp as fleet_bp
 from routes.home import bp as home_bp
 from routes.mender_routes import bp as mender_bp
 from routes.network import bp as network_bp
+from routes.radar import bp as radar_bp
 from routes.remote_access import bp as remote_access_bp
 from routes.sdr import bp as mode_bp
 from routes.setup import bp as setup_bp
@@ -274,6 +275,7 @@ app.register_blueprint(towers_bp)
 app.register_blueprint(mode_bp)
 app.register_blueprint(network_bp)
 app.register_blueprint(calibrate_bp)
+app.register_blueprint(radar_bp)
 app.register_blueprint(tracker_bp)
 app.register_blueprint(tracker_legacy_bp)
 app.register_blueprint(fleet_bp)
@@ -363,6 +365,7 @@ def handle_csrf_error(e):
 _CALIBRATION_ALLOWED_PREFIXES = (
     '/config',        # the page, plus /config/apply/status and /config/rf-status
     '/calibrate',     # status, cancel, apply
+    '/radar',         # read-only, and how an owner watches a run
     '/static',
     '/favicon',
     # Fleet scope. Peers probe /healthz, so redirecting it would make a

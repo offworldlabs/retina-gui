@@ -804,11 +804,12 @@ def test_secret_key_survives_a_restart(client, temp_dir):
 
 # ── service cards, per pathway ───────────────────────────────────
 #
-# On the LAN these link to other ports on this node. Over the tunnel those
-# ports are not reachable at all: Cloudflare proxies a fixed set and 49152 is
-# not among them, and an http:// link on an https:// page is blocked as mixed
-# content regardless. The tunnel routes a few paths on the same hostname to
-# those services instead, so remotely the links must be same-origin paths.
+# Passive Radar and Max-Hold are pages of this app. The other cards link to
+# other ports on this node on the LAN. Over the tunnel those ports are not
+# reachable at all: Cloudflare proxies a fixed set and 49152 is not among them,
+# and an http:// link on an https:// page is blocked as mixed content
+# regardless. The tunnel routes a few paths on the same hostname to those
+# services instead, so remotely the links must be same-origin paths.
 
 @pytest.fixture
 def home(live, monkeypatch):
@@ -828,34 +829,56 @@ def home(live, monkeypatch):
 
 
 def _cards(html):
-    """Every service card's data attributes, keyed by its visible name."""
+    """Every service card's data attributes and href, keyed by its visible name."""
     import re
     out = {}
     for tag, rest in re.findall(r'<a class="svc-card"([^>]*)>(.*?)</a>', html, re.S):
         name = re.search(r'<div class="svc-name">([^<]*)</div>', rest)
         if name:
-            out[name.group(1).strip()] = dict(re.findall(r'data-([a-z-]+)="([^"]*)"', tag))
+            attrs = dict(re.findall(r'data-([a-z-]+)="([^"]*)"', tag))
+            attrs["href"] = re.search(r'href="([^"]*)"', tag).group(1)
+            out[name.group(1).strip()] = attrs
     return out
 
 
-def test_the_three_supported_views_have_a_remote_path(home):
-    """Passive Radar, Max-Hold and Controller are the views support asked for,
-    and the tunnel has ingress rules for exactly these paths."""
+def test_the_controller_has_a_remote_path(home):
+    """The tunnel has an ingress rule for this path."""
     cards = _cards(home())
     assert cards, "no service cards rendered"
-    for name, path in {
-        "Passive Radar": "/display/map/",
-        "Max-Hold": "/display/maxhold/",
-        "Controller": "/controller/",
-    }.items():
-        assert name in cards, f"{name} card missing"
-        assert cards[name].get("remote-path") == path, name
+    assert cards["Controller"].get("remote-path") == "/controller/"
+
+
+def _assert_radar_cards_are_local(html):
+    cards = _cards(html)
+    assert cards, "no service cards rendered"
+    for name, href in {"Passive Radar": "/radar", "Max-Hold": "/radar/maxhold"}.items():
+        assert cards[name]["href"] == href, name
+        assert "port" not in cards[name], name
+        assert "remote-path" not in cards[name], name
+
+
+def test_the_radar_cards_are_pages_of_this_app_on_the_lan(home):
+    _assert_radar_cards_are_local(home())
+
+
+def test_the_radar_cards_are_pages_of_this_app_over_the_tunnel(home, live, temp_dir, access_keys):
+    """The same link, so nothing depends on a port or an ingress rule."""
+    _arm_access(live, temp_dir, access_keys)
+    headers = {"Cf-Access-Jwt-Assertion": _assertion(access_keys)}
+    _assert_radar_cards_are_local(home(base_url=OWNER_URL, headers=headers))
+
+
+@pytest.mark.parametrize("path", ["/radar", "/radar/maxhold", "/radar/data/map"])
+def test_the_radar_is_behind_the_gate_over_the_tunnel(live, path):
+    r = live.get(path, base_url=OWNER_URL)
+    assert r.status_code == 302
+    assert "/login" in r.headers["Location"]
 
 
 def test_a_card_without_ingress_has_no_remote_path(home):
     """Anything the tunnel does not route must not claim a remote path, or it
     becomes a link that looks fine and cannot possibly work."""
-    routed = {"Passive Radar", "Max-Hold", "Controller"}
+    routed = {"Controller"}
     for name, attrs in _cards(home()).items():
         if name not in routed:
             assert "remote-path" not in attrs, f"{name} claims a remote path"
