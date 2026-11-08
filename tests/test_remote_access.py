@@ -804,7 +804,7 @@ def test_secret_key_survives_a_restart(client, temp_dir):
 
 # ── service cards, per pathway ───────────────────────────────────
 #
-# Passive Radar and Max-Hold are pages of this app. The other cards link to
+# Passive Radar opens a page of this app. The other cards link to
 # other ports on this node on the LAN. Over the tunnel those ports are not
 # reachable at all: Cloudflare proxies a fixed set and 49152 is not among them,
 # and an http:// link on an https:// page is blocked as mixed content
@@ -851,10 +851,11 @@ def test_the_controller_has_a_remote_path(home):
 def _assert_radar_cards_are_local(html):
     cards = _cards(html)
     assert cards, "no service cards rendered"
-    for name, href in {"Passive Radar": "/radar", "Max-Hold": "/radar/maxhold"}.items():
-        assert cards[name]["href"] == href, name
-        assert "port" not in cards[name], name
-        assert "remote-path" not in cards[name], name
+    assert "Max-Hold" not in cards, "Max-Hold is a view of the radar page, not a card"
+    radar = cards["Passive Radar"]
+    assert radar["href"] == "/radar"
+    assert "port" not in radar
+    assert "remote-path" not in radar
 
 
 def test_the_radar_cards_are_pages_of_this_app_on_the_lan(home):
@@ -868,7 +869,7 @@ def test_the_radar_cards_are_pages_of_this_app_over_the_tunnel(home, live, temp_
     _assert_radar_cards_are_local(home(base_url=OWNER_URL, headers=headers))
 
 
-@pytest.mark.parametrize("path", ["/radar", "/radar/maxhold", "/radar/data/map"])
+@pytest.mark.parametrize("path", ["/radar", "/radar?view=maxhold", "/radar/data/map"])
 def test_the_radar_is_behind_the_gate_over_the_tunnel(live, path):
     r = live.get(path, base_url=OWNER_URL)
     assert r.status_code == 302

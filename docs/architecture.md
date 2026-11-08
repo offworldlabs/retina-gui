@@ -530,7 +530,7 @@ redirects to `/set-up` while the setup wizard is in progress. Otherwise it shows
   the node identifier (`node_ref`) and state, and the `detail` prose from retina-telemetry
   verbatim: mapping its states to our own wording would be a second vocabulary to keep in step
   with a file we do not own. See [device-state-and-telemetry.md](features/device-state-and-telemetry.md).
-- Service cards (Passive Radar, Max-Hold, ADS-B Map, Tracker, Controller), or the spectrum
+- Service cards (Passive Radar, ADS-B Map, Tracker, Controller), or the spectrum
   iframe or SDRconnect panel in those modes (see [sdr-mode.md](features/sdr-mode.md)).
   Controller is last because it is the way into every view the other cards do not cover. The
   Tracker card reads "Live & 4hr Track Data": the 4 hours is the sidecar's limit; see
@@ -543,9 +543,10 @@ page. The shared alias is a way in, and the fleet banner moves you between nodes
 
 ### Service card links
 
-Passive Radar and Max-Hold are pages of this app (see [radar.md](features/radar.md)), so their
-cards are plain links that work the same on every pathway. They keep opening a new tab, because
-the tutorial tells owners to read Max-Hold beside the ADS-B Map.
+Passive Radar opens this app's radar page (`/radar`, see [radar.md](features/radar.md)), whose
+toggle switches between its Live and Max-Hold views, so its card is a plain link that works the
+same on every pathway. It keeps opening a new tab, because the tutorial tells owners to read
+Max-Hold beside the ADS-B Map.
 
 The other service cards point at other ports on the node (blah2's web UI, tar1090). A script
 builds each link from the hostname the browser actually used, so the link stays on this node.

@@ -21,7 +21,7 @@ shape of the app, then the feature doc for the area you are changing.
 | [features/ota-updates.md](features/ota-updates.md) | Mender OS and stack updates |
 | [features/sdr-mode.md](features/sdr-mode.md) | Radar vs spectrum mode, restarting the SDRplay service |
 | [features/towers.md](features/towers.md) | Tower finder integration and tower presets |
-| [features/radar.md](features/radar.md) | The Passive Radar and Max-Hold pages |
+| [features/radar.md](features/radar.md) | The Passive Radar page and its Live and Max-Hold views |
 | [features/tracker.md](features/tracker.md) | The Tracker Preview page |
 | [operations/node-files.md](operations/node-files.md) | Where retina-gui lives on a node, the files it reads and writes, environment variables, the CARTO key |
 | [history/](history/README.md) | The original pre-implementation plans, kept as an archive |

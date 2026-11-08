@@ -1,10 +1,13 @@
-// The Passive Radar and Max-Hold displays: blah2's delay-Doppler map, with its
+// The Passive Radar page: blah2's delay-Doppler map, live or max-hold, with its
 // detections and ADS-B truth drawn over it. A port of blah2's plot_map.js, kept
 // close to it on purpose. See docs/features/radar.md#what-was-ported
 (function () {
     'use strict';
 
-    var urlMap = window.RADAR_MAP_URL;
+    // Which map each view draws. See docs/features/radar.md#the-view-toggle
+    var MAPS = { live: '/radar/data/map', maxhold: '/radar/data/maxhold' };
+    var view = MAPS[window.RADAR_VIEW] ? window.RADAR_VIEW : 'live';
+    var urlMap = MAPS[view];
     var urlTimestamp = '/radar/data/timestamp';
     var urlDetection = '/radar/data/detection';
     var urlAdsbLink = '/radar/data/adsb';
@@ -104,11 +107,7 @@
     // Reset to full range. Plotly's own double-click reset is hidden without the
     // modebar, and it tracks click timing off raw mousedown/mouseup on the
     // drag-capture rect rather than the native dblclick event, so proxy that.
-    var resetViewBtn = document.createElement('button');
-    resetViewBtn.className = 'reset-view-btn';
-    resetViewBtn.type = 'button';
-    resetViewBtn.textContent = 'Reset View';
-    resetViewBtn.addEventListener('click', function () {
+    document.getElementById('resetViewBtn').addEventListener('click', function () {
         var dragLayer = document.querySelector('#data .nsewdrag');
         if (!dragLayer) return;
         var rect = dragLayer.getBoundingClientRect();
@@ -127,7 +126,30 @@
             dragLayer.dispatchEvent(new MouseEvent('mouseup', opts));
         }, 80);
     });
-    document.querySelector('.plot-wrapper').appendChild(resetViewBtn);
+
+    // A reply for the view just left is dropped, or it would overwrite the new one.
+    function fetchMap() {
+        var asked = urlMap;
+        getJson(asked, function (data) {
+            if (asked === urlMap) drawMap(data);
+        });
+    }
+
+    // Switching draws the other map now rather than at the next frame, and keeps
+    // the zoom, so the two can be compared at the same spot.
+    function setView(next) {
+        if (!MAPS[next] || next === view) return;
+        view = next;
+        urlMap = MAPS[view];
+        document.querySelectorAll('[data-view]').forEach(function (b) {
+            b.setAttribute('aria-pressed', String(b.getAttribute('data-view') === view));
+        });
+        history.replaceState(null, '', view === 'live' ? '/radar' : '/radar?view=' + view);
+        fetchMap();
+    }
+    document.querySelectorAll('[data-view]').forEach(function (b) {
+        b.addEventListener('click', function () { setView(b.getAttribute('data-view')); });
+    });
 
     function drawMap(data) {
         // case draw new plot
@@ -234,7 +256,7 @@
                 }
 
                 // get new map data
-                getJson(urlMap, drawMap);
+                fetchMap();
             }
         });
     }, 1000);

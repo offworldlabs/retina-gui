@@ -1,36 +1,46 @@
 {% extends "base.html" %}
-{% block title %}{{ title }} - OWL-OS{% endblock %}
+{% block title %}Passive Radar - OWL-OS{% endblock %}
 
 {% block style %}
-/* The plot takes all the height under the navigation, so the page never scrolls. */
+/* The plot takes all the height under the toolbar, so the page never scrolls. */
 .page { height: 100vh; }
+.radar-bar { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; flex-shrink: 0;
+             padding: 8px 13px; border-bottom: 1px solid var(--color-border); background: var(--color-bg-warm); }
+.radar-spacer { flex: 1 1 auto; }
+.radar-ctl { display: inline-flex; align-items: center; gap: 6px; }
+.radar-lab { font-family: var(--font-mono, monospace); font-size: 10px; letter-spacing: .08em;
+             text-transform: uppercase; color: var(--color-muted); }
+
+/* The Tracker page's segmented control. */
+.seg { display: inline-flex; border: 1px solid var(--color-border); border-radius: var(--radius-sm);
+       overflow: hidden; background: var(--color-card); }
+.seg button { font: inherit; font-size: 11.5px; padding: 4px 10px; border: 0;
+              border-right: 1px solid var(--color-border); background: transparent;
+              color: var(--color-muted); cursor: pointer; white-space: nowrap; }
+.seg button:last-child { border-right: 0; }
+.seg button:hover { color: var(--color-text); background: var(--color-bg-warm); }
+.seg button[aria-pressed="true"] { background: var(--color-text); color: var(--color-card); }
+
 .plot-wrapper { flex: 1 1 auto; min-height: 0; width: 100%; padding: 0.5rem; position: relative; }
 .plot-wrapper #data { width: 100%; height: 100%; }
-
-/* Inset from the margins Plotly reserves for axis titles and the colourbar. */
-.reset-view-btn {
-    position: absolute;
-    top: 1.5rem;
-    right: 4.5rem;
-    z-index: 10;
-    font-family: var(--font-body);
-    font-size: 0.78rem;
-    font-weight: 500;
-    color: var(--color-muted);
-    background: rgba(255, 255, 255, 0.92);
-    border: 1px solid var(--color-border);
-    border-radius: var(--radius-sm);
-    padding: 0.35rem 0.75rem;
-    cursor: pointer;
-    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
-    transition: color 0.15s, border-color 0.15s, background 0.15s;
-}
-.reset-view-btn:hover { color: var(--color-text); border-color: var(--color-light); background: #ffffff; }
 
 div.plotly-notifier { visibility: hidden; }
 {% endblock %}
 
 {% block content %}
+<div class="radar-bar">
+  <div class="radar-ctl">
+    <span class="radar-lab">View</span>
+    <div class="seg" role="group" aria-label="View">
+      <button type="button" data-view="live" aria-pressed="{{ 'true' if view == 'live' else 'false' }}"
+              title="The latest map from the radar.">Live</button>
+      <button type="button" data-view="maxhold" aria-pressed="{{ 'true' if view == 'maxhold' else 'false' }}"
+              title="The loudest each cell has been over the last 20 maps, so a moving echo leaves a trail.">Max-Hold</button>
+    </div>
+  </div>
+  <span class="radar-spacer"></span>
+  <button type="button" class="ds-btn ghost sm" id="resetViewBtn" title="Zoom back out to the whole map.">Reset View</button>
+</div>
 <div class="plot-wrapper">
   <div id="data"></div>
 </div>
@@ -42,6 +52,6 @@ div.plotly-notifier { visibility: hidden; }
 {# Bundled, not a CDN: the display must work on a node with no internet, and
    Reset View depends on this version. See docs/features/radar.md#plotly #}
 <script src="/static/vendor/plotly-2.20.0.min.js"></script>
-<script>window.RADAR_MAP_URL = {{ map_url|tojson }};</script>
+<script>window.RADAR_VIEW = {{ view|tojson }};</script>
 <script src="/static/radar-map.js"></script>
 {% endblock %}

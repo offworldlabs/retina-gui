@@ -131,14 +131,14 @@ STEPS = (
           "that aircraft.",
           ["svc-radar"],
           image=_radar([(660, 280), (1002, 232)])),
-    _step(HOME, "Max-Hold",
-          "Opens the same display holding the previous 10 seconds of detection "
+    _step(HOME, "Passive Radar: Max-Hold",
+          "The display's Max-Hold view holds the previous 10 seconds of detection "
           "data, so a moving object leaves a trail.",
-          ["svc-maxhold"],
+          ["svc-radar"],
           image=_image("max-hold.jpg", 1257, 570,
                        "The Max-Hold display: the same map with echoes drawn out into trails")),
     _step(HOME, "ADS-B Map",
-          "Opens a live map of nearby aircraft, best read with Max-Hold open "
+          "Opens a live map of nearby aircraft, best read with the radar's Max-Hold view open "
           "beside it while you think about which way your antenna is facing.",
           ["svc-adsb"],
           image=_image("adsb-map.jpg", 1045, 666,

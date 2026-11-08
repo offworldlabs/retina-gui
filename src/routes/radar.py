@@ -1,4 +1,4 @@
-"""The Passive Radar and Max-Hold pages, and a proxy for the blah2_api data they draw.
+"""The Passive Radar page (Live and Max-Hold views), and a proxy for the blah2_api data it draws.
 
 retina-gui holds no radar data. See docs/features/radar.md.
 """
@@ -16,7 +16,7 @@ bp = Blueprint('radar', __name__, url_prefix='/radar')
 
 JSON = 'application/json'
 
-# The only blah2_api paths the pages can reach. The type is set here, not relayed:
+# The only blah2_api paths the page can reach. The type is set here, not relayed:
 # older blah2_api labels these replies text/html, which must not be served from
 # this origin. See docs/features/radar.md#the-data-proxy
 SOURCES = {
@@ -28,25 +28,27 @@ SOURCES = {
     'maxhold': ('/stash/map', JSON),
 }
 
+# The page's views, by the ?view= value that opens each. The first is the default.
+# See docs/features/radar.md#the-view-toggle
+VIEWS = ('live', 'maxhold')
+
 # Logged once per outage: an open page asks several times a second.
 _unreachable = False
 
 
-def _page(title, source):
-    """A radar display, or Home when blah2 is not running in this SDR mode."""
-    if get_current_mode() != 'radar':
-        return redirect('/')
-    return render_template('radar.html', title=title, map_url=f'/radar/data/{source}')
-
-
 @bp.route('')
 def index():
-    return _page('Passive Radar', 'map')
+    """The radar page, or Home when blah2 is not running in this SDR mode."""
+    if get_current_mode() != 'radar':
+        return redirect('/')
+    view = request.args.get('view')
+    return render_template('radar.html', view=view if view in VIEWS else VIEWS[0])
 
 
 @bp.route('/maxhold')
 def maxhold():
-    return _page('Max-Hold', 'maxhold')
+    """Where Max-Hold was its own page."""
+    return redirect('/radar?view=maxhold')
 
 
 @bp.route('/data/<source>')
@@ -66,12 +68,12 @@ def data(source):
         upstream = blah2_client.get_raw(path, params=params)
     except requests.RequestException as e:
         if not _unreachable:
-            log.warning('blah2_api unreachable from the radar pages: %s', e.__class__.__name__)
+            log.warning('blah2_api unreachable from the radar page: %s', e.__class__.__name__)
         _unreachable = True
         return jsonify({'error': f'blah2_api unreachable: {e.__class__.__name__}'}), 502
 
     if _unreachable:
-        log.info('blah2_api reachable from the radar pages again')
+        log.info('blah2_api reachable from the radar page again')
     _unreachable = False
     return Response(upstream.content, status=upstream.status_code, content_type=content_type,
                     headers={'Cache-Control': 'no-store'})

@@ -1,9 +1,9 @@
-# Passive Radar and Max-Hold
+# Passive Radar
 
-The Passive Radar page (`/radar`) and the Max-Hold page (`/radar/maxhold`) draw blah2's
-delay-Doppler map with its detections and ADS-B truth over it. They are the same display fed by
-different data: Passive Radar shows the latest map, and Max-Hold shows the per-cell maximum over
-the last 20 maps, which blah2_api computes.
+The Passive Radar page (`/radar`) draws blah2's delay-Doppler map with its detections and ADS-B
+truth over it. A toggle switches it between two views of the same display fed by different data:
+Live shows the latest map, and Max-Hold shows the per-cell maximum over the last 20 maps, which
+blah2_api computes.
 
 retina-gui holds no radar data. blah2 produces it, blah2_api serves it, and retina-gui proxies it
 to the browser and draws it with Plotly.
@@ -12,9 +12,9 @@ to the browser and draws it with Plotly.
 
 | File | Role |
 | --- | --- |
-| [src/routes/radar.py](../../src/routes/radar.py) | The `/radar` blueprint: the two pages and the data proxy. |
-| [templates/radar.html](../../templates/radar.html) | The page, shared by both displays. |
-| [static/radar-map.js](../../static/radar-map.js) | The polling loop and the plot. |
+| [src/routes/radar.py](../../src/routes/radar.py) | The `/radar` blueprint: the page, the old Max-Hold address and the data proxy. |
+| [templates/radar.html](../../templates/radar.html) | The page: the toolbar and the plot. |
+| [static/radar-map.js](../../static/radar-map.js) | The polling loop, the view toggle and the plot. |
 | [static/vendor/plotly-2.20.0.min.js](../../static/vendor/plotly-2.20.0.min.js) | Plotly, unmodified. See [Plotly](#plotly). |
 | [src/blah2_client.py](../../src/blah2_client.py) | `Blah2Client.get_raw`, which the proxy goes through. |
 
@@ -25,13 +25,38 @@ blah2 --(TCP)--> blah2_api --(HTTP, localhost:3000)--> /radar/data/* --> browser
 ```
 
 Once a second the page fetches `/radar/data/timestamp`. When the timestamp has changed it fetches
-the detections, the ADS-B truth (if `truth.adsb.enabled` is on) and the map, and redraws when the
-map arrives.
+the detections, the ADS-B truth (if `truth.adsb.enabled` is on) and the current view's map
+(`/radar/data/map` for Live, `/radar/data/maxhold` for Max-Hold), and redraws when the map arrives.
+
+## The view toggle
+
+The toolbar's View control switches between Live and Max-Hold. Both views draw on the same plot
+with the same detections and ADS-B dots; only the heatmap's source changes.
+
+- **The URL carries the view.** `?view=maxhold` opens Max-Hold, and anything else, or nothing,
+  opens Live. The route checks the value against `VIEWS` and renders the pressed button, so the
+  page opens on the right view without a flash. Switching updates the address with
+  `history.replaceState`, so a reload or a bookmark keeps the view, and Back leaves the page
+  rather than stepping through toggles.
+- **Home has one card.** Passive Radar opens `/radar`, which starts on Live. There was a Max-Hold
+  card while Max-Hold was its own page; the toggle replaced it, and the tutorial's Max-Hold step now
+  points at the Passive Radar card.
+- **The old address redirects.** Max-Hold was its own page at `/radar/maxhold` before the toggle,
+  so that path redirects to `/radar?view=maxhold`.
+- **Switching draws now.** The new view's map is fetched straight away rather than at the next
+  frame, which on a quiet radar could be a second away.
+- **Switching keeps the zoom.** The two maps share axes, so the plot takes its update path and the
+  viewer's zoom survives. That is what makes comparing the views at one spot useful. A map of a
+  different size still rebuilds the plot and resets the axes, as before.
+- **A late reply is dropped.** A map requested before a switch but arriving after it would
+  overwrite the new view, so `fetchMap` draws a reply only if its view is still the current one.
+- **The view is not remembered elsewhere.** It lives in the URL only, not in `localStorage`, so the
+  Home card always opens Live.
 
 ## What was ported
 
-These pages replace the Passive Radar and Max-Hold cards' links to blah2's own web UI on port
-49152. `static/radar-map.js` is a port of blah2-arm's `web/html/js/plot_map.js`, and it was kept
+This page replaces the Passive Radar and Max-Hold cards' links to blah2's own web UI on port
+49152, and the two cards are now one. `static/radar-map.js` is a port of blah2-arm's `web/html/js/plot_map.js`, and it was kept
 close to the original on purpose, so that moving the display changed where it lives and not what
 it shows. Axes, colour scale, markers, the Reset View button and the polling are all the same.
 A change to one should be judged as a change to the display, not as tidying.
@@ -42,6 +67,9 @@ What differs from the original:
 - `common.js`'s `is_localhost` switch is gone. Everything is same-origin now.
 - The page sits inside the app's navigation rather than blah2's navbar, and has no footer, so
   the plot keeps the whole height.
+- Live and Max-Hold are one page with a toggle, not two pages. See
+  [The view toggle](#the-view-toggle).
+- Reset View sits in the toolbar rather than floating over the corner of the plot.
 - The unused ADS-B fetch at startup is gone. Its result was never read.
 
 blah2's original pages are still served on port 49152, and the Controller card still reaches them.
@@ -74,7 +102,7 @@ the data lives under `/radar/data`.
 
 ## Plotly
 
-The pages load a bundled Plotly rather than the CDN copy the Tracker page uses, for two reasons:
+The page loads a bundled Plotly rather than the CDN copy the Tracker page uses, for two reasons:
 
 - The display has to work on a node with no internet. It always has, because blah2 bundles Plotly
   too.
@@ -84,7 +112,7 @@ The file is byte-identical to the one in blah2-arm's `web/html/lib/`.
 
 ## SDR modes
 
-blah2 does not run in spectrum or SDRconnect mode, so both pages redirect to Home there rather
+blah2 does not run in spectrum or SDRconnect mode, so the page redirects to Home there rather
 than opening an empty plot that looks like a quiet sky. The Home page hides their cards in those
 modes.
 

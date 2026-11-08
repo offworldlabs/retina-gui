@@ -1,4 +1,4 @@
-"""The Passive Radar and Max-Hold pages and the proxy behind them.
+"""The Passive Radar page, its Live and Max-Hold views, and the proxy behind it.
 
 retina-gui holds no radar data, so these cover the door onto blah2_api: which
 paths it opens, what it relays, and what it does when blah2_api is not there.
@@ -40,17 +40,39 @@ def set_mode(temp_dir, mode):
         f.write(mode)
 
 
-# ── the pages ───────────────────────────────────────────────────────────────
+# ── the page ────────────────────────────────────────────────────────────────
 
-@pytest.mark.parametrize('url,title,source', [
-    ('/radar', 'Passive Radar', '/radar/data/map'),
-    ('/radar/maxhold', 'Max-Hold', '/radar/data/maxhold'),
+def pressed(body):
+    """The view buttons that render pressed."""
+    import re
+    return re.findall(r'data-view="(\w+)" aria-pressed="true"', body)
+
+
+@pytest.mark.parametrize('url,view', [
+    ('/radar', 'live'),
+    ('/radar?view=live', 'live'),
+    ('/radar?view=maxhold', 'maxhold'),
 ])
-def test_each_page_draws_its_own_map(app_client, url, title, source):
-    """The two pages are one display fed by different data."""
+def test_the_url_picks_the_view_the_page_opens_on(app_client, url, view):
+    """So a card, a reload or a bookmark lands on the view it named."""
     body = app_client.get(url).data.decode()
-    assert f'<title>{title} - OWL-OS</title>' in body
-    assert f'window.RADAR_MAP_URL = "{source}"' in body
+    assert '<title>Passive Radar - OWL-OS</title>' in body
+    assert f'window.RADAR_VIEW = "{view}"' in body
+    assert pressed(body) == [view]
+
+
+@pytest.mark.parametrize('value', ['', 'map', 'MAXHOLD', '<script>', 'maxhold&x'])
+def test_an_unknown_view_opens_live(app_client, value):
+    body = app_client.get('/radar', query_string={'view': value}).data.decode()
+    assert 'window.RADAR_VIEW = "live"' in body
+    assert pressed(body) == ['live']
+
+
+def test_the_old_max_hold_address_still_works(app_client):
+    """Max-Hold was its own page before the toggle."""
+    response = app_client.get('/radar/maxhold')
+    assert response.status_code == 302
+    assert response.headers['Location'] == '/radar?view=maxhold'
 
 
 def test_plotly_comes_from_the_node_not_a_cdn(app_client):
@@ -61,7 +83,7 @@ def test_plotly_comes_from_the_node_not_a_cdn(app_client):
 
 
 @pytest.mark.parametrize('mode', ['spectrum', 'sdrconnect'])
-@pytest.mark.parametrize('url', ['/radar', '/radar/maxhold'])
+@pytest.mark.parametrize('url', ['/radar', '/radar?view=maxhold'])
 def test_a_page_goes_home_when_blah2_is_not_running(app_client, temp_dir, url, mode):
     """A bookmark must not open an empty plot that looks like a quiet sky."""
     set_mode(temp_dir, mode)
@@ -70,7 +92,7 @@ def test_a_page_goes_home_when_blah2_is_not_running(app_client, temp_dir, url, m
     assert response.headers['Location'] == '/'
 
 
-@pytest.mark.parametrize('url', ['/radar', '/radar/maxhold', '/radar/data/timestamp'])
+@pytest.mark.parametrize('url', ['/radar', '/radar?view=maxhold', '/radar/data/timestamp'])
 def test_a_calibration_run_does_not_hold_the_display(app_client, url):
     """Watching the display during a run worked when it had its own port. An
     open page whose data was redirected would freeze with no explanation."""
