@@ -558,6 +558,28 @@ so remotely a card with `data-remote-path` becomes a same-origin link. A card wi
 path is disabled (`.disabled`, which carries `pointer-events: none`) and labelled "Only on this
 node's own network" rather than looking clickable and failing.
 
+## Scope pages
+
+The Tracker and Passive Radar pages share one frame, so the two plots read as one product. Its
+styles are the SCOPE PAGES section of `static/common.css`:
+
+| Class | Role |
+| --- | --- |
+| `scope-wrap` | Full-width page body. These pages are plots and want every pixel. |
+| `scope-head` | The heading row: the page title, then the page's top-level toggle on the right. |
+| `scope-panel` | The framed panel holding everything below the heading. |
+| `scope-bar` | The toolbar: the status line on the left, controls on the right. |
+| `scope-status` | The status line. Its dot is green, amber with `.stale`, red with `.lost`. |
+| `scope-ctl`, `scope-lab` | A labelled control group, and its small uppercase label. |
+| `.scope-wrap .seg` | A segmented control: a row of buttons, the pressed one filled (`aria-pressed`). |
+| `scope-foot` | The footer under the plot: keys on the left, a readout on the right. |
+| `scope-spacer` | Pushes what follows to the right. |
+
+The segmented control is scoped to `.scope-wrap` because `.seg` also names the Configuration
+page's peak-meter segments (`.peak-meter .seg`); a bare `.seg` rule would restyle that meter.
+`tests/test_radar_routes.py` checks no bare `.seg` rule is added. Each page keeps its own layout
+inside the panel, such as the Tracker's track rail.
+
 ## Summary page
 
 `/summary` ([routes/fleet.py](../src/routes/fleet.py),

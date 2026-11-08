@@ -6,39 +6,8 @@
 {% endblock %}
 
 {% block style %}
-/* Full width. This page is a plot with a list beside it, and both want every
-   pixel: a delay axis spanning 320 km and a rail whose rows truncate. Nothing
-   in base.html constrains the content block, so the cap was only ever here. */
-.trk-wrap { max-width: none; margin: 0; padding: 18px 20px 28px; }
-/* Centred, not baseline-aligned: a 9.5px chip sitting on a 25.6px baseline
-   hangs below the middle of the word beside it. */
-.trk-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 14px; }
-.trk-head h1 { margin: 0; font-size: 1.6rem; }
-
-.trk-panel { border: 1px solid var(--color-border); border-radius: var(--radius); background: var(--color-card); overflow: hidden; }
-
-.trk-bar { display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
-           padding: 10px 13px; border-bottom: 1px solid var(--color-border); background: var(--color-bg-warm); }
-.trk-status { font-family: var(--font-mono, monospace); font-size: 11px; color: var(--color-muted); }
-.trk-status .dot { display: inline-block; width: 6px; height: 6px; border-radius: 50%;
-                   background: var(--color-success); margin-right: 6px; vertical-align: 1px; }
-.trk-status.stale .dot { background: var(--color-warning); }
-.trk-status.lost .dot { background: var(--color-danger); }
-.trk-spacer { flex: 1 1 auto; }
-
-.trk-ctl { display: inline-flex; align-items: center; gap: 6px; }
-.trk-lab { font-family: var(--font-mono, monospace); font-size: 10px; letter-spacing: .08em;
-           text-transform: uppercase; color: var(--color-muted); }
-
-.seg { display: inline-flex; border: 1px solid var(--color-border); border-radius: var(--radius-sm);
-       overflow: hidden; background: var(--color-card); }
-.seg button { font: inherit; font-size: 11.5px; padding: 4px 10px; border: 0;
-              border-right: 1px solid var(--color-border); background: transparent;
-              color: var(--color-muted); cursor: pointer; white-space: nowrap; }
-.seg button:last-child { border-right: 0; }
-.seg button:hover { color: var(--color-text); background: var(--color-bg-warm); }
-.seg button[aria-pressed="true"] { background: var(--color-text); color: var(--color-card); }
-
+/* The heading, panel, toolbar, status line, segmented controls and footer
+   are shared with the Passive Radar page, in common.css (SCOPE PAGES). */
 /* Height follows the viewport now that width is not the limit: a fixed 640px
    left most of a large screen empty below the panel. Clamped so it stays
    usable on a laptop and does not become a letterbox on a monitor. */
@@ -52,8 +21,6 @@
 
 .trk-plotwrap { display: grid; grid-template-rows: minmax(0, 1fr) auto; min-width: 0; }
 #plot { width: 100%; height: 100%; min-height: 0; }
-.trk-foot { display: flex; align-items: center; gap: 10px; padding: 7px 13px 8px;
-            border-top: 1px solid var(--color-border-light); }
 .snr-key { display: flex; align-items: center; gap: 7px; }
 .snr-ramp { width: 96px; height: 8px; border-radius: 999px; border: 1px solid var(--color-border);
             background: linear-gradient(to right, #cde2fb, #9ec5f4, #6da7ec, #3987e5, #1c5cab, #0d366b); }
@@ -147,13 +114,13 @@
 /* ── The wedge view ───────────────────────────────────────
    One panel, two displays: only the active one's controls and body show.
    See docs/features/tracker.md#wedge-view */
-.trk-panel[data-display="wedge"] .dd-only,
-.trk-panel:not([data-display="wedge"]) .wedge-only { display: none !important; }
+.scope-panel[data-display="wedge"] .dd-only,
+.scope-panel:not([data-display="wedge"]) .wedge-only { display: none !important; }
 
 /* The Drone view draws on the scope with its own controls, in developer mode
    only. See docs/features/tracker.md#drone-view */
-.trk-panel[data-display="drone"] .no-drone,
-.trk-panel:not([data-display="drone"]) .drone-only { display: none !important; }
+.scope-panel[data-display="drone"] .no-drone,
+.scope-panel:not([data-display="drone"]) .drone-only { display: none !important; }
 .drone-key { display: inline-flex; align-items: center; gap: 6px; font-family: var(--font-mono, monospace);
              font-size: 10.5px; color: var(--ink-2); white-space: nowrap; }
 .drone-key i { display: inline-block; width: 14px; height: 9px; border-radius: 2px; }
@@ -161,7 +128,7 @@
 .drone-key .hum { background: rgba(217, 119, 6, .22); border: 1px dashed rgba(180, 83, 9, .7); }
 
 .wedge-wrap { display: grid; grid-template-rows: minmax(0, 1fr) auto; grid-template-columns: minmax(0, 1fr); min-width: 0; }
-.wedge-wrap .trk-foot { flex-wrap: wrap; row-gap: 4px; }
+.wedge-wrap .scope-foot { flex-wrap: wrap; row-gap: 4px; }
 @media (max-width: 900px) { .wedge-wrap { height: 460px; } }
 .wedge-box { position: relative; min-height: 0; }
 #wedgeMap { position: absolute; inset: 0; background: #f4f3ef; }
@@ -200,13 +167,13 @@
 {% endblock %}
 
 {% block content %}
-<div class="trk-wrap">
-  <div class="trk-head">
+<div class="scope-wrap">
+  <div class="scope-head">
     <h1>Tracker</h1>
     <span class="beta-chip">Beta</span>
-    <span class="trk-spacer"></span>
-    <div class="trk-ctl">
-      <span class="trk-lab">Display</span>
+    <span class="scope-spacer"></span>
+    <div class="scope-ctl">
+      <span class="scope-lab">Display</span>
       <div class="seg" role="group" aria-label="Display">
         <button type="button" data-display="scope" aria-pressed="true">Delay / Doppler</button>
         {%- if drone %}
@@ -223,18 +190,18 @@
     </button>
   </div>
 
-  <div class="trk-panel" id="trkPanel" data-display="scope">
-    <div class="trk-bar">
-      <span class="trk-status" id="trkStatus"><span class="dot"></span>connecting&hellip;</span>
+  <div class="scope-panel" id="trkPanel" data-display="scope">
+    <div class="scope-bar">
+      <span class="scope-status" id="trkStatus"><span class="dot"></span>connecting&hellip;</span>
       <span class="oov-alert dd-only" id="oovAlert" role="status" hidden
             title="Tracks in this window with a point outside the narrow Doppler or delay range. The node processes its full span; only the plot is narrowed.">
         <span id="oovText"></span>
         <button type="button" class="linkbtn" id="oovShowBtn">Show full span</button>
       </span>
-      <span class="trk-spacer"></span>
+      <span class="scope-spacer"></span>
 
-      <div class="trk-ctl dd-only no-drone">
-        <span class="trk-lab">Doppler</span>
+      <div class="scope-ctl dd-only no-drone">
+        <span class="scope-lab">Doppler</span>
         <div class="seg" role="group" aria-label="Doppler range">
           <button type="button" data-dop="narrow" aria-pressed="true" id="dopNarrowBtn"
                   title="The narrow range, set with the gear. Where ordinary air traffic sits.">&plusmn;300</button>
@@ -243,8 +210,8 @@
         </div>
       </div>
 
-      <div class="trk-ctl dd-only no-drone">
-        <span class="trk-lab">Delay</span>
+      <div class="scope-ctl dd-only no-drone">
+        <span class="scope-lab">Delay</span>
         <div class="seg" role="group" aria-label="Delay range">
           <button type="button" data-del="narrow" aria-pressed="false" id="delNarrowBtn"
                   title="The narrow range, set with the gear. The near part of the bistatic range axis.">30 km</button>
@@ -253,8 +220,8 @@
         </div>
       </div>
 
-      <div class="trk-ctl no-drone">
-        <span class="trk-lab">View</span>
+      <div class="scope-ctl no-drone">
+        <span class="scope-lab">View</span>
         <div class="seg" role="group" aria-label="View window">
           <button type="button" data-win="300" aria-pressed="false">5m</button>
           <button type="button" data-win="900" aria-pressed="true">15m</button>
@@ -263,8 +230,8 @@
         </div>
       </div>
 
-      <div class="trk-ctl dd-only">
-        <span class="trk-lab">Detections</span>
+      <div class="scope-ctl dd-only">
+        <span class="scope-lab">Detections</span>
         <div class="seg" role="group" aria-label="Detection layer">
           <button type="button" data-layer="all" aria-pressed="true">All</button>
           <button type="button" data-layer="unassociated" aria-pressed="false"
@@ -277,8 +244,8 @@
         </div>
       </div>
 
-      <div class="trk-ctl no-drone">
-        <span class="trk-lab">Tracks</span>
+      <div class="scope-ctl no-drone">
+        <span class="scope-lab">Tracks</span>
         <div class="seg" role="group" aria-label="Track overlay">
           <button type="button" data-tracks="on" aria-pressed="true">On</button>
           <button type="button" data-tracks="off" aria-pressed="false"
@@ -287,16 +254,16 @@
       </div>
       {%- if drone %}
 
-      <div class="trk-ctl drone-only">
-        <span class="trk-lab">Fade</span>
+      <div class="scope-ctl drone-only">
+        <span class="scope-lab">Fade</span>
         <div class="seg" role="group" aria-label="Fade time">
           <button type="button" data-fade="15" aria-pressed="false">15s</button>
           <button type="button" data-fade="30" aria-pressed="true">30s</button>
         </div>
       </div>
 
-      <div class="trk-ctl drone-only">
-        <span class="trk-lab">SNR</span>
+      <div class="scope-ctl drone-only">
+        <span class="scope-lab">SNR</span>
         <div class="seg" role="group" aria-label="SNR floor"
              title="Hides weaker detections from the plot only. The detector and the tracker still see them.">
           <button type="button" data-floor="0" aria-pressed="true">All</button>
@@ -306,8 +273,8 @@
         </div>
       </div>
 
-      <div class="trk-ctl drone-only">
-        <span class="trk-lab">Tracks</span>
+      <div class="scope-ctl drone-only">
+        <span class="scope-lab">Tracks</span>
         <div class="seg" role="group" aria-label="Drone track overlay">
           <button type="button" data-dtracks="all" aria-pressed="false">All</button>
           <button type="button" data-dtracks="slow" aria-pressed="true" id="slowTracksBtn"
@@ -332,18 +299,18 @@
     <div class="trk-body">
       <div class="trk-plotwrap dd-only">
         <div id="plot"></div>
-        <div class="trk-foot">
+        <div class="scope-foot">
           <div class="snr-key">
-            <span class="trk-lab">SNR</span>
+            <span class="scope-lab">SNR</span>
             <span class="snr-ramp" aria-hidden="true"></span>
-            <span class="trk-lab">0 &rarr; 20 dB</span>
+            <span class="scope-lab">0 &rarr; 20 dB</span>
           </div>
           {%- if drone %}
           <span class="drone-key drone-only" title="Where the detector's settings (minDelay, minDoppler) let nothing be reported."><i class="untested"></i>Not tested</span>
           <span class="drone-key drone-only" title="Doppler rows set with the gear, such as mains hum. Detections in them are drawn grey, not hidden."><i class="hum"></i>Hum rows</span>
           {%- endif %}
-          <span class="trk-spacer"></span>
-          <span class="trk-lab" id="detCount"></span>
+          <span class="scope-spacer"></span>
+          <span class="scope-lab" id="detCount"></span>
         </div>
       </div>
 
@@ -353,31 +320,31 @@
           <div class="wedge-ov wedge-hud" id="wedgeHud" role="status" hidden>
             <div class="wedge-hud-top">
               <span class="wedge-hud-dot" id="wedgeHudDot"></span><b id="wedgeHudTitle"></b>
-              <span class="trk-spacer"></span><span id="wedgeHudClock"></span>
+              <span class="scope-spacer"></span><span id="wedgeHudClock"></span>
             </div>
             <div class="wedge-hud-bar"><span id="wedgeHudBar"></span></div>
             <div class="wedge-hud-sub" id="wedgeHudSub"></div>
           </div>
           <div class="wedge-ov wedge-notice" id="wedgeNotice" role="status" hidden></div>
         </div>
-        <div class="trk-foot">
+        <div class="scope-foot">
           <span class="wedge-key"><svg viewBox="0 0 22 12" aria-hidden="true"><rect x="1" y="1" width="20" height="10" rx="2" fill="rgba(22,163,74,0.16)" stroke="#15803d"/></svg>Proven coverage</span>
           <span class="wedge-key" title="Slices proven only close to the receiver, where most detections are aircraft high overhead rather than the antenna's horizontal pattern."><svg viewBox="0 0 22 12" aria-hidden="true"><rect x="1" y="1" width="20" height="10" rx="2" fill="rgba(22,163,74,0.06)" stroke="#15803d" stroke-opacity="0.6" stroke-dasharray="2 3"/></svg>Close-in, overhead</span>
           <span class="wedge-key"><svg viewBox="0 0 22 12" aria-hidden="true"><path d="M1,9 Q11,1 21,9" fill="none" stroke="#3b6fc4" stroke-width="2.4" stroke-linecap="round"/></svg>Arc inside wedge</span>
           <span class="wedge-key"><svg viewBox="0 0 22 12" aria-hidden="true"><path d="M1,9 Q11,1 21,9" fill="none" stroke="#3b6fc4" stroke-opacity="0.45" stroke-width="1.3" stroke-dasharray="3 3"/></svg>Arc outside wedge</span>
           <span class="wedge-key"><svg viewBox="0 0 22 12" aria-hidden="true"><path d="M1,10 L14,4" fill="none" stroke="#3b6fc4" stroke-width="2.4" stroke-linecap="round"/><path d="M0,-6 L4,4 L0,2 L-4,4 Z" transform="translate(17 3) rotate(66)" fill="#3b6fc4"/></svg>ADS-B trail</span>
           <span class="wedge-key" title="The furthest bistatic range this node processes (blah2's delayMax). A slice reaching it is limited by that setting, not by the antenna."><svg viewBox="0 0 22 12" aria-hidden="true"><path d="M1,6 H21" fill="none" stroke="#6f6c65" stroke-width="1.2" stroke-dasharray="6 5"/></svg>Processed range limit</span>
-          <span class="trk-spacer"></span>
-          <span class="trk-lab" id="wedgeStat"></span>
+          <span class="scope-spacer"></span>
+          <span class="scope-lab" id="wedgeStat"></span>
         </div>
       </div>
 
       <aside class="trk-rail" aria-label="Tracks">
         <div class="rail-head">
-          <span class="trk-lab">Tracks</span>
+          <span class="scope-lab">Tracks</span>
           <span class="rail-count" id="railCount">0</span>
-          <span class="trk-spacer"></span>
-          <label class="trk-lab" for="sortSel">Sort</label>
+          <span class="scope-spacer"></span>
+          <label class="scope-lab" for="sortSel">Sort</label>
           <select class="rail-sel" id="sortSel" aria-label="Sort tracks">
             <option value="recent">newest</option>
             <option value="longest">longest</option>
@@ -476,7 +443,7 @@
       </div>
       <div class="dlg-foot">
         <button type="button" class="linkbtn" id="narrowResetBtn">Reset to defaults</button>
-        <span class="trk-spacer"></span>
+        <span class="scope-spacer"></span>
         <button type="button" class="ds-btn ghost sm" id="settingsCancel">Cancel</button>
         <button type="submit" class="ds-btn primary sm">Save</button>
       </div>
@@ -493,7 +460,7 @@
       <div class="dlg-err" id="wedgeResetErr" role="alert" hidden></div>
     </div>
     <div class="dlg-foot">
-      <span class="trk-spacer"></span>
+      <span class="scope-spacer"></span>
       <button type="button" class="ds-btn ghost sm" id="wedgeResetCancel">Cancel</button>
       <button type="button" class="ds-btn danger sm" id="wedgeResetGo">Reset wedge</button>
     </div>
@@ -1870,7 +1837,7 @@
     var source = null;
 
     function setStatus(text, cls) {
-        statusEl.className = 'trk-status' + (cls ? ' ' + cls : '');
+        statusEl.className = 'scope-status' + (cls ? ' ' + cls : '');
         statusEl.innerHTML = '<span class="dot"></span>' + text;
     }
 

@@ -15,7 +15,7 @@ surface for Auto-Calibrate.
 | File | Role |
 | --- | --- |
 | [src/routes/tracker.py](../../src/routes/tracker.py) | The `/tracker` blueprint (page, SSE proxy, one-shot snapshot, clear, and the coverage proxies) and the `/tracker-preview` redirect. Computes the plot's axis bounds, and the Drone view's detector settings, from the merged config. |
-| [templates/tracker.html](../../templates/tracker.html) | The page: controls, the Plotly scope, the wedge view's container and reset dialog, the track rail, and the EventSource client. |
+| [templates/tracker.html](../../templates/tracker.html) | The page: controls, the Plotly scope, the wedge view's container and reset dialog, the track rail, and the EventSource client. Its frame (heading, panel, toolbar, status line, segmented controls, footer) is shared with Passive Radar; see [Scope pages](../architecture.md#scope-pages). |
 | [static/tracker-wedge.js](../../static/tracker-wedge.js) | The wedge view: the Leaflet map, the wedge, trails and arcs, and the replay. |
 | [src/retina_tracker_client.py](../../src/retina_tracker_client.py) | `RetinaTrackerClient`: JSONL event tailer plus HTTP control client (`reset`). |
 | [src/services.py](../../src/services.py) | `RETINA_TRACKER_CONTROL_URL` and `RETINA_TRACKER_EVENTS_PATH`, and the single shared client instance. |

@@ -2,51 +2,61 @@
 {% block title %}Passive Radar - OWL-OS{% endblock %}
 
 {% block style %}
-/* The plot takes all the height under the toolbar, so the page never scrolls. */
-.page { height: 100vh; }
-.radar-bar { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; flex-shrink: 0;
-             padding: 8px 13px; border-bottom: 1px solid var(--color-border); background: var(--color-bg-warm); }
-.radar-spacer { flex: 1 1 auto; }
-.radar-ctl { display: inline-flex; align-items: center; gap: 6px; }
-.radar-lab { font-family: var(--font-mono, monospace); font-size: 10px; letter-spacing: .08em;
-             text-transform: uppercase; color: var(--color-muted); }
+/* The heading, panel, toolbar, status line, segmented controls and footer are
+   shared with the Tracker page, in common.css (SCOPE PAGES). */
 
-/* The Tracker page's segmented control. */
-.seg { display: inline-flex; border: 1px solid var(--color-border); border-radius: var(--radius-sm);
-       overflow: hidden; background: var(--color-card); }
-.seg button { font: inherit; font-size: 11.5px; padding: 4px 10px; border: 0;
-              border-right: 1px solid var(--color-border); background: transparent;
-              color: var(--color-muted); cursor: pointer; white-space: nowrap; }
-.seg button:last-child { border-right: 0; }
-.seg button:hover { color: var(--color-text); background: var(--color-bg-warm); }
-.seg button[aria-pressed="true"] { background: var(--color-text); color: var(--color-card); }
+/* The Tracker's plot height: follows the viewport, clamped so it stays usable on
+   a laptop and does not letterbox on a monitor. */
+.radar-plot { height: clamp(520px, 72vh, 980px); padding: 0.5rem; position: relative; }
+@media (max-width: 900px) { .radar-plot { height: 460px; } }
+.radar-plot #data { width: 100%; height: 100%; }
 
-.plot-wrapper { flex: 1 1 auto; min-height: 0; width: 100%; padding: 0.5rem; position: relative; }
-.plot-wrapper #data { width: 100%; height: 100%; }
+/* The marker key: drawn to match the plot's own markers. */
+.radar-key { display: inline-flex; align-items: center; gap: 6px; font-family: var(--font-mono, monospace);
+             font-size: 10.5px; color: var(--ink-2); white-space: nowrap; }
+.radar-key i { display: inline-block; width: 11px; height: 11px; border-radius: 50%; border: 1.5px solid #000; }
+.radar-key .det { background: #ffffff; }
+.radar-key .adsb { background: #D55E00; }
+/* Not .scope-lab: that is uppercase, and unit symbols (Hz, km) must keep their case. */
+.radar-readout { font-family: var(--font-mono, monospace); font-size: 10.5px; color: var(--ink-3); white-space: nowrap; }
 
 div.plotly-notifier { visibility: hidden; }
 {% endblock %}
 
 {% block content %}
-<div class="radar-bar">
-  <div class="radar-ctl">
-    <span class="radar-lab">View</span>
-    <div class="seg" role="group" aria-label="View">
-      <button type="button" data-view="live" aria-pressed="{{ 'true' if view == 'live' else 'false' }}"
-              title="The latest map from the radar.">Live</button>
-      <button type="button" data-view="maxhold" aria-pressed="{{ 'true' if view == 'maxhold' else 'false' }}"
-              title="The loudest each cell has been over the last 20 maps, so a moving echo leaves a trail.">Max-Hold</button>
+<div class="scope-wrap">
+  <div class="scope-head">
+    <h1>Passive Radar</h1>
+    <span class="scope-spacer"></span>
+    <div class="scope-ctl">
+      <span class="scope-lab">View</span>
+      <div class="seg" role="group" aria-label="View">
+        <button type="button" data-view="live" aria-pressed="{{ 'true' if view == 'live' else 'false' }}"
+                title="The latest map from the radar.">Live</button>
+        <button type="button" data-view="maxhold" aria-pressed="{{ 'true' if view == 'maxhold' else 'false' }}"
+                title="The loudest each cell has been over the last 20 maps, so a moving echo leaves a trail.">Max-Hold</button>
+      </div>
     </div>
   </div>
-  <span class="radar-spacer"></span>
-  <button type="button" class="ds-btn ghost sm" id="resetViewBtn" title="Zoom back out to the whole map.">Reset View</button>
-</div>
-<div class="plot-wrapper">
-  <div id="data"></div>
+
+  <div class="scope-panel">
+    <div class="scope-bar">
+      <span class="scope-status stale" id="radarStatus" role="status"><span class="dot"></span>connecting&hellip;</span>
+      <span class="scope-spacer"></span>
+      <button type="button" class="ds-btn ghost sm" id="resetViewBtn" title="Zoom back out to the whole map.">Reset View</button>
+    </div>
+    <div class="radar-plot">
+      <div id="data"></div>
+    </div>
+    <div class="scope-foot">
+      <span class="radar-key"><i class="det"></i>Detection</span>
+      <span class="radar-key" title="Where an aircraft is expected, from its ADS-B position. Hover one for its flight."><i class="adsb"></i>ADS-B aircraft</span>
+      <span class="scope-spacer"></span>
+      <span class="radar-readout" id="radarExtent"></span>
+    </div>
+  </div>
 </div>
 {% endblock %}
-
-{% block footer %}{% endblock %}
 
 {% block scripts %}
 {# Bundled, not a CDN: the display must work on a node with no internet, and

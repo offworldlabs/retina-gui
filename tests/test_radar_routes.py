@@ -181,3 +181,32 @@ def test_the_next_outage_is_logged_too(app_client, caplog):
         with failing:
             app_client.get('/radar/data/map')
     assert len([r for r in caplog.records if r.name == 'routes.radar']) == 2
+
+
+# ── the shared frame ────────────────────────────────────────────────────────
+
+@pytest.mark.parametrize('url', ['/radar', '/tracker'])
+def test_both_scope_pages_use_the_shared_frame(app_client, url):
+    """Passive Radar and the Tracker share one heading, panel and toolbar."""
+    body = app_client.get(url).data.decode()
+    for cls in ('scope-wrap', 'scope-head', 'scope-panel', 'scope-bar', 'scope-status', 'scope-foot'):
+        assert f'class="{cls}' in body, (url, cls)
+
+
+def test_the_radar_page_opens_with_a_status_line(app_client):
+    body = app_client.get('/radar').data.decode()
+    assert 'id="radarStatus"' in body
+    assert 'connecting&hellip;' in body
+
+
+def test_the_shared_segmented_control_stays_on_scope_pages():
+    """.seg also names the Configuration page's peak-meter segments, so a bare
+    .seg rule in common.css would restyle that meter."""
+    import re
+    from pathlib import Path
+    css = (Path(__file__).resolve().parent.parent / 'static' / 'common.css').read_text()
+    for rule in re.findall(r'^([^{}\n/][^{}\n]*)\{', css, re.M):
+        for selector in rule.split(','):
+            selector = selector.strip()
+            if re.search(r'(^|\s)\.seg\b', selector):
+                assert selector.startswith(('.scope-wrap ', '.peak-meter ')), selector

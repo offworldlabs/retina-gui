@@ -13,8 +13,8 @@ to the browser and draws it with Plotly.
 | File | Role |
 | --- | --- |
 | [src/routes/radar.py](../../src/routes/radar.py) | The `/radar` blueprint: the page, the old Max-Hold address and the data proxy. |
-| [templates/radar.html](../../templates/radar.html) | The page: the toolbar and the plot. |
-| [static/radar-map.js](../../static/radar-map.js) | The polling loop, the view toggle and the plot. |
+| [templates/radar.html](../../templates/radar.html) | The page, in the frame it shares with the Tracker ([Scope pages](../architecture.md#scope-pages)). |
+| [static/radar-map.js](../../static/radar-map.js) | The polling loop, the view toggle, the status line and the plot. |
 | [static/vendor/plotly-2.20.0.min.js](../../static/vendor/plotly-2.20.0.min.js) | Plotly, unmodified. See [Plotly](#plotly). |
 | [src/blah2_client.py](../../src/blah2_client.py) | `Blah2Client.get_raw`, which the proxy goes through. |
 
@@ -27,6 +27,31 @@ blah2 --(TCP)--> blah2_api --(HTTP, localhost:3000)--> /radar/data/* --> browser
 Once a second the page fetches `/radar/data/timestamp`. When the timestamp has changed it fetches
 the detections, the ADS-B truth (if `truth.adsb.enabled` is on) and the current view's map
 (`/radar/data/map` for Live, `/radar/data/maxhold` for Max-Hold), and redraws when the map arrives.
+
+## The page
+
+The page uses the frame it shares with the Tracker (see [Scope pages](../architecture.md#scope-pages)):
+the heading with the View toggle on the right, then one panel holding the toolbar, the plot and a
+footer. The toolbar has the status line and Reset View. The footer has a key for the two marker
+kinds and the extent of the map being drawn, such as `±1000 Hz · -1.5 to 60.0 km`. The plot's
+height follows the Tracker's: 72% of the viewport, clamped between 520 and 980 px.
+
+## The status line
+
+The status line says whether the picture is current, so a stopped radar or an expired session
+never passes for a quiet sky. It is redrawn every second from two facts: when the last new map was
+drawn, and whether the last timestamp request failed.
+
+| Shown | Dot | When |
+| --- | --- | --- |
+| `connecting…` | amber | No map drawn yet. |
+| `live · updated 1s ago` | green | A new map was drawn in the last 5 s (`STALE_MS`). |
+| `no new frame for 12s` | amber | blah2_api answers, but the timestamp has not moved for 5 s: blah2 is not producing maps. |
+| `cannot reach the radar · retrying` | red | The timestamp request failed (a 502 from the proxy, or the network). |
+| `signed out · reload the page to sign in` | red | The request was redirected to the login page, or refused with 401 or 403: the session has expired over the tunnel. |
+
+The plot is not cleared in any of these: the last picture stays, and the status line says how old
+it is.
 
 ## The view toggle
 
@@ -70,6 +95,7 @@ What differs from the original:
 - Live and Max-Hold are one page with a toggle, not two pages. See
   [The view toggle](#the-view-toggle).
 - Reset View sits in the toolbar rather than floating over the corner of the plot.
+- The page has a status line and a footer key, in the frame it shares with the Tracker.
 - The unused ADS-B fetch at startup is gone. Its result was never read.
 
 blah2's original pages are still served on port 49152, and the Controller card still reaches them.
@@ -126,5 +152,5 @@ with no explanation. See [Calibration hold](../architecture.md#calibration-hold)
 
 - **Cost.** A map at ±1000 Hz is about 2.2 MB, so one viewer moves that much a second through this
   app. blah2's page fetched it straight from blah2_api.
-- **Failures are silent.** The page shows no connection state, as blah2's did not. A stopped radar,
-  or an expired session over the tunnel, leaves the last picture on screen.
+- **The picture is never cleared.** A stopped radar or an expired session leaves the last picture
+  on screen. The [status line](#the-status-line) says so, but nothing on the plot itself does.

@@ -18,14 +18,57 @@
 
     // A failed request leaves the plot as it was and the next tick tries again.
     // Only the request is caught: an error while drawing still reaches the console.
-    function get(url, read, done) {
+    // A redirect to the login page means the session has expired.
+    function get(url, read, done, failed) {
         fetch(url).then(function (r) {
-            if (!r.ok) throw new Error(url + ': ' + r.status);
+            if (r.redirected && new URL(r.url).pathname.indexOf('/login') === 0) throw 'signedout';
+            if (r.status === 401 || r.status === 403) throw 'signedout';
+            if (!r.ok) throw 'unreachable';
             return read(r);
-        }).then(done, function () { /* the next tick retries */ });
+        }).then(done, function (why) { if (failed) failed(why === 'signedout' ? why : 'unreachable'); });
     }
-    function getText(url, done) { get(url, function (r) { return r.text(); }, done); }
+    function getText(url, done, failed) { get(url, function (r) { return r.text(); }, done, failed); }
     function getJson(url, done) { get(url, function (r) { return r.json(); }, done); }
+
+    // ── Status line ──────────────────────────────────────────────────────
+    // Says whether the picture is current, so a stopped radar or an expired
+    // session never passes for a quiet sky. See docs/features/radar.md#the-status-line
+    var STALE_MS = 5000;
+    var statusEl = document.getElementById('radarStatus');
+    var lastFrameAt = 0;       // browser time the last new map was drawn
+    var failure = null;        // why the last timestamp request failed, or null
+
+    function ago(ms) {
+        var s = Math.round(ms / 1000);
+        return s < 90 ? s + 's' : Math.round(s / 60) + 'm';
+    }
+
+    function renderStatus() {
+        var text, cls;
+        var since = Date.now() - lastFrameAt;
+        if (failure === 'signedout') {
+            text = 'signed out &middot; reload the page to sign in'; cls = 'lost';
+        } else if (failure) {
+            text = 'cannot reach the radar &middot; retrying'; cls = 'lost';
+        } else if (!lastFrameAt) {
+            text = 'connecting&hellip;'; cls = 'stale';
+        } else if (since > STALE_MS) {
+            text = 'no new frame for ' + ago(since); cls = 'stale';
+        } else {
+            text = 'live &middot; updated ' + ago(since) + ' ago'; cls = '';
+        }
+        statusEl.className = 'scope-status' + (cls ? ' ' + cls : '');
+        statusEl.innerHTML = '<span class="dot"></span>' + text;
+    }
+
+    // The extent of the map being drawn, so a narrow or wide span is visible.
+    var extentEl = document.getElementById('radarExtent');
+    function renderExtent(data) {
+        var d0 = data.doppler[0], d1 = data.doppler[data.doppler.length - 1];
+        var k0 = data.delay[0], k1 = data.delay[data.delay.length - 1];
+        var dop = d0 === -d1 ? '\u00b1' + d1 + ' Hz' : d0 + ' to ' + d1 + ' Hz';
+        extentEl.textContent = dop + ' \u00b7 ' + k0.toFixed(1) + ' to ' + k1.toFixed(1) + ' km';
+    }
 
     // get truth flag
     var isTruth = false;
@@ -152,6 +195,8 @@
     });
 
     function drawMap(data) {
+        lastFrameAt = Date.now();
+        renderExtent(data);
         // case draw new plot
         if (data.nRows != nRows) {
             nRows = data.nRows;
@@ -228,9 +273,11 @@
 
     // callback function
     window.setInterval(function () {
+        renderStatus();
 
         // check if timestamp is updated
         getText(urlTimestamp, function (data) {
+            failure = null;
             if (timestamp != data) {
                 timestamp = data;
 
@@ -258,6 +305,6 @@
                 // get new map data
                 fetchMap();
             }
-        });
+        }, function (why) { failure = why; renderStatus(); });
     }, 1000);
 })();
