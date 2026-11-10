@@ -211,13 +211,15 @@ Doppler control in the toolbar therefore switches what is drawn between two rang
 | Narrow (the default) | ±300 Hz, or whatever the gear sets, clipped to the node's span | `±300` |
 | Full | The node's own bounds from [Axis bounds](#axis-bounds), or autoscale if the config does not state them | `±1000` |
 
-This is presentation only. Nothing is written to config and nothing changes on the node:
+The [Passive Radar](radar.md#doppler-and-delay-views) page has the same two toggles, saved
+separately. This is presentation only. Nothing is written to config and nothing changes on the node:
 blah2, retina-tracker and the stream carry the full span whichever view is drawn. The buttons
 are labelled with the ranges they draw, so they stay truthful on a node with a different span or
 after the narrow range is changed.
 
 The gear in the page header opens Tracker settings, a native `<dialog>` (the page does not load
-Bootstrap's JavaScript), with two fields: this narrow Doppler range and the narrow delay range of
+Bootstrap's JavaScript, and the dialog's styles are shared with the Passive Radar page, see
+[Scope pages](../architecture.md#scope-pages)), with two fields: this narrow Doppler range and the narrow delay range of
 the [Delay view](#delay-view). In developer mode it also holds the [Drone view](#drone-view)'s
 range, hum rows and slow track limit. The Doppler field takes a whole number of hertz, from 1 to
 half the node's span (or up to 100,000 when the span is unknown). Saving checks every field and

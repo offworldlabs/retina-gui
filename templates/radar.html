@@ -37,13 +37,43 @@ div.plotly-notifier { visibility: hidden; }
                 title="The loudest each cell has been over the last 20 maps, so a moving echo leaves a trail.">Max-Hold</button>
       </div>
     </div>
+    <button type="button" class="ic-btn" id="settingsBtn" aria-haspopup="dialog"
+            aria-label="Radar settings" title="Radar settings">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.87l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.7 1.7 0 0 0-1.87-.34 1.7 1.7 0 0 0-1.03 1.56V21a2 2 0 1 1-4 0v-.09a1.7 1.7 0 0 0-1.11-1.56 1.7 1.7 0 0 0-1.87.34l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.7 1.7 0 0 0 .34-1.87 1.7 1.7 0 0 0-1.56-1.03H3a2 2 0 1 1 0-4h.09a1.7 1.7 0 0 0 1.56-1.11 1.7 1.7 0 0 0-.34-1.87l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.7 1.7 0 0 0 1.87.34H9a1.7 1.7 0 0 0 1.03-1.56V3a2 2 0 1 1 4 0v.09a1.7 1.7 0 0 0 1.03 1.56 1.7 1.7 0 0 0 1.87-.34l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.7 1.7 0 0 0-.34 1.87V9a1.7 1.7 0 0 0 1.56 1.03H21a2 2 0 1 1 0 4h-.09a1.7 1.7 0 0 0-1.56 1.03z"/></svg>
+    </button>
   </div>
 
   <div class="scope-panel">
     <div class="scope-bar">
       <span class="scope-status stale" id="radarStatus" role="status"><span class="dot"></span>connecting&hellip;</span>
+      <span class="oov-alert" id="oovAlert" role="status" hidden
+            title="Detections in the last 10 seconds outside the narrow Doppler or delay range. The node processes its full span; only the plot is narrowed.">
+        <span id="oovText"></span>
+        <button type="button" class="linkbtn" id="oovShowBtn">Show full span</button>
+      </span>
       <span class="scope-spacer"></span>
-      <button type="button" class="ds-btn ghost sm" id="resetViewBtn" title="Zoom back out to the whole map.">Reset View</button>
+
+      <div class="scope-ctl">
+        <span class="scope-lab">Doppler</span>
+        <div class="seg" role="group" aria-label="Doppler range">
+          <button type="button" data-dop="narrow" aria-pressed="true" id="dopNarrowBtn"
+                  title="The narrow range, set with the gear. Where ordinary air traffic sits.">&plusmn;300</button>
+          <button type="button" data-dop="full" aria-pressed="false" id="dopFullBtn"
+                  title="Everything the node processes.">Full</button>
+        </div>
+      </div>
+
+      <div class="scope-ctl">
+        <span class="scope-lab">Delay</span>
+        <div class="seg" role="group" aria-label="Delay range">
+          <button type="button" data-del="narrow" aria-pressed="false" id="delNarrowBtn"
+                  title="The narrow range, set with the gear. The near part of the bistatic range axis.">30 km</button>
+          <button type="button" data-del="full" aria-pressed="true" id="delFullBtn"
+                  title="Everything the node processes.">Full</button>
+        </div>
+      </div>
+
+      <button type="button" class="ds-btn ghost sm" id="resetViewBtn" title="Zoom back out to the whole of the Doppler and delay ranges chosen.">Reset View</button>
     </div>
     <div class="radar-plot">
       <div id="data"></div>
@@ -55,6 +85,50 @@ div.plotly-notifier { visibility: hidden; }
       <span class="radar-readout" id="radarExtent"></span>
     </div>
   </div>
+
+  <dialog class="scope-dlg" id="settingsDlg" aria-labelledby="settingsTitle">
+    <form id="settingsForm" novalidate>
+      <div class="dlg-head"><h2 id="settingsTitle">Radar settings</h2></div>
+      <div class="dlg-body">
+        <div class="ds-field">
+          <label class="ds-field-label" for="narrowHzInput">Narrow Doppler range</label>
+          <div class="dlg-input-row">
+            <span>&plusmn;</span>
+            <input class="ds-input mono" id="narrowHzInput" type="number" min="1" step="1"
+                   inputmode="numeric" aria-describedby="narrowHzHelp narrowHzErr">
+            <span>Hz</span>
+          </div>
+          <div class="ds-field-help" id="narrowHzHelp">
+            What the Doppler toggle's narrow setting shows. The node processes
+            <span id="fullSpanText">its full span</span> either way, so this changes the plot
+            only. Saved in this browser.
+          </div>
+          <div class="dlg-err" id="narrowHzErr" role="alert" hidden></div>
+        </div>
+        <div class="ds-field">
+          <label class="ds-field-label" for="narrowKmInput">Narrow delay range</label>
+          <div class="dlg-input-row">
+            <span>out to</span>
+            <input class="ds-input mono" id="narrowKmInput" type="number" min="1" step="1"
+                   inputmode="numeric" aria-describedby="narrowKmHelp narrowKmErr">
+            <span>km</span>
+          </div>
+          <div class="ds-field-help" id="narrowKmHelp">
+            What the Delay toggle's narrow setting shows, in bistatic range. The node processes
+            <span id="fullDelayText">its full range</span> either way, so this changes the plot
+            only. Saved in this browser.
+          </div>
+          <div class="dlg-err" id="narrowKmErr" role="alert" hidden></div>
+        </div>
+      </div>
+      <div class="dlg-foot">
+        <button type="button" class="linkbtn" id="narrowResetBtn">Reset to defaults</button>
+        <span class="scope-spacer"></span>
+        <button type="button" class="ds-btn ghost sm" id="settingsCancel">Cancel</button>
+        <button type="submit" class="ds-btn primary sm">Save</button>
+      </div>
+    </form>
+  </dialog>
 </div>
 {% endblock %}
 

@@ -70,11 +70,6 @@
 
 .trk-acts { display: flex; gap: 2px; opacity: .4; }
 .trk-row:hover .trk-acts, .trk-row:focus-within .trk-acts { opacity: 1; }
-.ic-btn { display: grid; place-items: center; width: 24px; height: 24px; padding: 0; border: 0;
-          border-radius: var(--radius-sm); background: transparent; color: var(--color-muted); cursor: pointer; }
-.ic-btn:hover { background: var(--color-border-light); color: var(--color-text); }
-.ic-btn.dngr:hover { color: var(--color-danger); }
-.ic-btn svg { width: 15px; height: 15px; display: block; }
 
 .trk-row.hid .trk-swatch { opacity: .3; }
 .trk-row.hid .trk-id { color: var(--color-muted); }
@@ -91,25 +86,7 @@
 
 .chip.oov { color: var(--warn-ink); background: var(--warn-soft); border-color: oklch(0.87 0.06 75); }
 
-/* Tracks the narrow Doppler view cannot show. Warning colours, because it is
-   a prompt to look, not a fault. */
-.oov-alert { display: inline-flex; align-items: center; gap: 7px; font-family: var(--font-mono, monospace);
-             font-size: 11px; color: var(--warn-ink); background: var(--warn-soft);
-             border: 1px solid oklch(0.87 0.06 75); border-radius: 999px; padding: 2px 4px 2px 9px; }
-.oov-alert[hidden] { display: none; }
-.oov-alert .linkbtn { font-size: 11px; color: var(--warn-ink); padding: 0 5px; }
 
-.trk-dlg { border: 1px solid var(--color-border); border-radius: var(--radius); padding: 0;
-           width: min(420px, calc(100vw - 32px)); background: var(--color-card); color: var(--color-text); }
-.trk-dlg::backdrop { background: rgba(20, 22, 28, 0.35); }
-.trk-dlg h2 { margin: 0; font-size: 1.05rem; }
-.dlg-head { padding: 14px 16px 0; }
-.dlg-body { padding: 12px 16px 4px; }
-.dlg-body .ds-field + .ds-field { margin-top: 16px; }
-.dlg-input-row { display: flex; align-items: center; gap: 8px; font-family: var(--font-mono, monospace); }
-.dlg-input-row .ds-input { width: 120px; }
-.dlg-err { font-size: 12px; color: var(--color-danger); }
-.dlg-foot { display: flex; align-items: center; gap: 8px; padding: 12px 16px 14px; }
 
 /* ── The wedge view ───────────────────────────────────────
    One panel, two displays: only the active one's controls and body show.
@@ -162,8 +139,6 @@
 .rail-foot { padding: 8px 11px; border-top: 1px solid var(--color-border-light);
              font-family: var(--font-mono, monospace); font-size: 10.5px; color: var(--color-muted);
              display: flex; align-items: center; gap: 8px; min-height: 36px; }
-.linkbtn { font: inherit; background: none; border: 0; padding: 0; color: var(--color-primary);
-           cursor: pointer; text-decoration: underline; text-underline-offset: 2px; }
 {% endblock %}
 
 {% block content %}
@@ -364,7 +339,7 @@
     </div>
   </div>
 
-  <dialog class="trk-dlg" id="settingsDlg" aria-labelledby="settingsTitle">
+  <dialog class="scope-dlg" id="settingsDlg" aria-labelledby="settingsTitle">
     <form id="settingsForm" novalidate>
       <div class="dlg-head"><h2 id="settingsTitle">Tracker settings</h2></div>
       <div class="dlg-body">
@@ -450,7 +425,7 @@
     </form>
   </dialog>
 
-  <dialog class="trk-dlg" id="wedgeResetDlg" aria-labelledby="wedgeResetTitle">
+  <dialog class="scope-dlg" id="wedgeResetDlg" aria-labelledby="wedgeResetTitle">
     <div class="dlg-head"><h2 id="wedgeResetTitle">Reset the wedge?</h2></div>
     <div class="dlg-body">
       <p>This clears the 24 h max-hold wedge for this node. Tracks and detections are kept.</p>

@@ -32,35 +32,81 @@ the detections, the ADS-B truth (if `truth.adsb.enabled` is on) and the current 
 ## The page
 
 The page uses the frame it shares with the Tracker (see [Scope pages](../architecture.md#scope-pages)):
-the heading with the View toggle on the right, then one panel holding the toolbar, the plot and a
-footer. The toolbar has the status line and Reset View, which returns to the fixed
-[axes](#axes). The footer has a key for the two marker
+the heading with the View toggle and the settings gear on the right, then one panel holding the
+toolbar, the plot and a footer. The toolbar has the status line, the
+[out-of-view alert](#out-of-view-alert), the [Doppler and Delay toggles](#doppler-and-delay-views)
+and Reset View, which returns to the toggles' ranges. The footer has a key for the two marker
 kinds and the extent of the map being drawn, such as `±1000 Hz · -1.5 to 60.0 km`. The plot's
 height follows the Tracker's: 72% of the viewport, clamped between 520 and 980 px.
 
 ## Axes
 
-The axes are fixed at the node's own extent: its `process.ambiguity` Doppler bounds, and its delay
-bounds converted to kilometres. They come from the same `axis_bounds()` the Tracker uses (see
+The full extent of each axis is the node's own: its `process.ambiguity` Doppler bounds, and its
+delay bounds converted to kilometres. The [Doppler and Delay toggles](#doppler-and-delay-views)
+draw either that or a narrow range within it. They come from the same `axis_bounds()` the Tracker uses (see
 [Axis bounds](tracker.md#axis-bounds)), and the route renders them into the page as
 `window.RADAR_AXES`, so the empty plot already has the right axes while it waits for the first map.
 
-- **They do not move with the data.** They are set when the plot is built and only a map of a
-  different shape (rows or columns) rebuilds it. Every frame of the same shape is drawn on
-  identical axes, and Live and Max-Hold share them.
-- **They never cut off the map.** If blah2 is running a wider extent than the config said when the
-  page loaded (the config was applied since), the axes widen to take in the whole map. A
-  narrower map leaves blank margins until the page is reloaded.
+- **They do not move with the data.** They change only when a viewer changes a toggle, or a map
+  of a different shape (rows or columns) rebuilds the plot. Every frame of the same shape is drawn
+  on identical axes, and Live and Max-Hold share them.
+- **Full never cuts off the map.** If blah2 is running a wider extent than the config said when
+  the page loaded (the config was applied since), the full extent widens to take in the whole map,
+  and the Full buttons' labels follow. A narrower map leaves blank margins until the page is
+  reloaded.
 - **An axis the config does not state follows the map,** from its first cell to its last, as
   blah2's own page did. So does a config that cannot be read.
-- **Reset View and a double-click return to these axes.** Reset View relays them to Plotly, and the
-  plot's `doubleClick: 'reset'` never autoscales. blah2's page simulated Plotly's double-click,
-  which autoscaled when not zoomed: half a cell wider, and out to any ADS-B marker beyond the map
-  (124 km and +1044 Hz on one node).
+- **Reset View and a double-click return to the toggles' ranges.** Both call `showViews()`, which
+  relays them to Plotly. Plotly's own double-click is off (`doubleClick: false`) because it returns
+  to the ranges the plot was built with, which after a toggle is the wrong view; the page listens
+  for `plotly_doubleclick` instead, which Plotly still emits. blah2's page simulated Plotly's
+  double-click, which autoscaled when not zoomed: half a cell wider, and out to any ADS-B marker
+  beyond the map (124 km and +1044 Hz on one node).
 
 The plot keeps its width from the first draw. Before the first map it holds one transparent cell
 whose only job is to draw the colour bar; without it the plot narrowed by the colour bar's width
 when the first map landed.
+
+## Doppler and delay views
+
+The toolbar's Doppler and Delay toggles are the Tracker's (see
+[Doppler view](tracker.md#doppler-view) and [Delay view](tracker.md#delay-view)), with the same
+defaults, limits, dialog and wording, so the two pages work the same way:
+
+| Toggle | Narrow | Full | Opens on |
+| --- | --- | --- | --- |
+| Doppler | ±300 Hz, set with the gear | The node's span, such as ±1000 | Narrow, where ordinary air traffic sits |
+| Delay | Out to 30 km, set with the gear | The node's furthest range, such as 60 km | Full |
+
+- **Presentation only.** blah2 processes its full span whichever is drawn, and nothing is written
+  to the node. Both views, Live and Max-Hold, draw the same ranges.
+- **The buttons name their ranges,** such as `±300 / ±1000` and `30 km / 60 km`, so they stay
+  truthful on a node with a different span and after the narrow range is changed.
+- **Narrow is clipped to the full extent,** so it never draws Doppler or range the node cannot see.
+  The narrow delay range starts where the node starts, slightly below zero, so narrowing never
+  cuts off the nearest detections.
+- **Saved in this browser,** under `radar.dopView`, `radar.delView`, `radar.narrowHz` and
+  `radar.narrowKm`. They are kept apart from the Tracker's `tracker.*` settings, as the Tracker
+  keeps its own, so changing one page never changes the other. A saved value the node's span
+  cannot draw falls back to the default.
+- **The gear opens Radar settings,** a native `<dialog>` with the two narrow ranges. The Doppler
+  field takes a whole number of hertz from 1 to half the full span; the delay field a whole number
+  of kilometres from 1 to the furthest range, rounded up. Saving checks both and saves neither
+  unless both are valid. A field whose value changed switches its toggle to Narrow, since setting
+  a range is asking to see it. Reset to defaults refills ±300 Hz and 30 km (or the furthest range,
+  if that is nearer) without saving.
+
+## Out-of-view alert
+
+A narrow view leaves part of the map off the plot, so the toolbar says when detections are there:
+`8 detections outside ±300 Hz in 10s`, with a Show full span button that sets both toggles to Full.
+It names only the ranges the detections fall outside, and is hidden when there are none or both
+toggles are on Full.
+
+It counts the detections of the last 10 seconds (`OOV_WINDOW_MS`), not of one frame. A frame
+carries only a few detections, so a per-frame count switched on and off every second. The Tracker
+counts tracks over its view window instead, since it has them; this page has only detections.
+ADS-B aircraft are not counted.
 
 ## Colour scale
 
@@ -142,6 +188,8 @@ What differs from the original:
 - The page has a status line and a footer key, in the frame it shares with the Tracker.
 - The unused ADS-B fetch at startup is gone. Its result was never read.
 - The axes are fixed at the node's extent and Reset View returns to them. See [Axes](#axes).
+- Doppler and Delay toggles narrow the plot, as on the Tracker. See
+  [Doppler and delay views](#doppler-and-delay-views).
 - The colour scale is fixed at 0-20 dB. See [Colour scale](#colour-scale).
 
 blah2's original pages are still served on port 49152, and the Controller card still reaches them.

@@ -262,3 +262,50 @@ def test_the_shared_segmented_control_stays_on_scope_pages():
             selector = selector.strip()
             if re.search(r'(^|\s)\.seg\b', selector):
                 assert selector.startswith(('.scope-wrap ', '.peak-meter ')), selector
+
+
+# ── the Doppler and delay views ────────────────────────────────────────────
+
+def script():
+    from pathlib import Path
+    return (Path(__file__).resolve().parent.parent / 'static' / 'radar-map.js').read_text()
+
+
+def test_the_page_opens_on_the_trackers_default_views(app_client):
+    """Narrow Doppler, where ordinary air traffic sits, and full delay, as the
+    Tracker opens. The script then restores whatever this browser saved."""
+    import re
+    body = app_client.get('/radar').get_data(as_text=True)
+    assert re.findall(r'data-dop="(\w+)" aria-pressed="true"', body) == ['narrow']
+    assert re.findall(r'data-del="(\w+)" aria-pressed="true"', body) == ['full']
+    assert 'id="settingsBtn"' in body
+    assert '<dialog class="scope-dlg" id="settingsDlg"' in body
+    assert 'id="oovAlert"' in body
+
+
+def test_the_views_are_saved_apart_from_the_trackers():
+    """Each page keeps its own views, as the Tracker keeps its under tracker.*,
+    so narrowing one page never narrows the other behind a viewer's back."""
+    js = script()
+    assert "localStorage.setItem('radar.' + key" in js
+    assert "'tracker." not in js
+
+
+def test_a_double_click_returns_to_the_chosen_views():
+    """Plotly's own double-click goes back to the ranges the plot was built
+    with, which after a toggle is the wrong view, so the page handles it."""
+    js = script()
+    assert "doubleClick: false" in js
+    assert "gd.on('plotly_doubleclick', showViews)" in js
+
+
+def test_the_settings_dialog_is_styled_once_for_both_pages():
+    """The gear, dialog, alert and link styles are shared, so the two pages'
+    settings cannot drift apart."""
+    from pathlib import Path
+    root = Path(__file__).resolve().parent.parent
+    css = (root / 'static' / 'common.css').read_text()
+    for rule in ('.scope-dlg {', '.ic-btn {', '.oov-alert {', '.linkbtn {', '.dlg-foot {'):
+        assert ('\n' + css).count('\n' + rule) == 1, rule
+        for page in ('tracker.html', 'radar.html'):
+            assert '\n' + rule not in (root / 'templates' / page).read_text(), (page, rule)

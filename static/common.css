@@ -1448,3 +1448,35 @@ main > .cfg-group:first-of-type { margin-top: 0; }
 
 .scope-foot { display: flex; align-items: center; gap: 10px; padding: 7px 13px 8px;
               border-top: 1px solid var(--color-border-light); }
+
+/* Icon buttons, such as the settings gear. */
+.ic-btn { display: grid; place-items: center; width: 24px; height: 24px; padding: 0; border: 0;
+          border-radius: var(--radius-sm); background: transparent; color: var(--color-muted); cursor: pointer; }
+.ic-btn:hover { background: var(--color-border-light); color: var(--color-text); }
+.ic-btn.dngr:hover { color: var(--color-danger); }
+.ic-btn svg { width: 15px; height: 15px; display: block; }
+
+.linkbtn { font: inherit; background: none; border: 0; padding: 0; color: var(--color-primary);
+           cursor: pointer; text-decoration: underline; text-underline-offset: 2px; }
+
+/* What a narrow view cannot show. Warning colours, because it is a prompt to
+   look, not a fault. */
+.oov-alert { display: inline-flex; align-items: center; gap: 7px; font-family: var(--font-mono, monospace);
+             font-size: 11px; color: var(--warn-ink); background: var(--warn-soft);
+             border: 1px solid oklch(0.87 0.06 75); border-radius: 999px; padding: 2px 4px 2px 9px; }
+.oov-alert[hidden] { display: none; }
+.oov-alert .linkbtn { font-size: 11px; color: var(--warn-ink); padding: 0 5px; }
+
+/* The settings dialog: a native <dialog>, since these pages do not load
+   Bootstrap's JavaScript. */
+.scope-dlg { border: 1px solid var(--color-border); border-radius: var(--radius); padding: 0;
+             width: min(420px, calc(100vw - 32px)); background: var(--color-card); color: var(--color-text); }
+.scope-dlg::backdrop { background: rgba(20, 22, 28, 0.35); }
+.scope-dlg h2 { margin: 0; font-size: 1.05rem; }
+.dlg-head { padding: 14px 16px 0; }
+.dlg-body { padding: 12px 16px 4px; }
+.dlg-body .ds-field + .ds-field { margin-top: 16px; }
+.dlg-input-row { display: flex; align-items: center; gap: 8px; font-family: var(--font-mono, monospace); }
+.dlg-input-row .ds-input { width: 120px; }
+.dlg-err { font-size: 12px; color: var(--color-danger); }
+.dlg-foot { display: flex; align-items: center; gap: 8px; padding: 12px 16px 14px; }

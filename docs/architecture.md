@@ -574,6 +574,10 @@ styles are the SCOPE PAGES section of `static/common.css`:
 | `.scope-wrap .seg` | A segmented control: a row of buttons, the pressed one filled (`aria-pressed`). |
 | `scope-foot` | The footer under the plot: keys on the left, a readout on the right. |
 | `scope-spacer` | Pushes what follows to the right. |
+| `ic-btn` | An icon button, such as the settings gear. |
+| `oov-alert` | The warning pill for what a narrow view leaves off the plot, with a `linkbtn` to widen it. |
+| `linkbtn` | A button drawn as a link. |
+| `scope-dlg`, `dlg-head`, `dlg-body`, `dlg-input-row`, `dlg-err`, `dlg-foot` | The settings dialog, a native `<dialog>`. |
 
 The segmented control is scoped to `.scope-wrap` because `.seg` also names the Configuration
 page's peak-meter segments (`.peak-meter .seg`); a bare `.seg` rule would restyle that meter.
