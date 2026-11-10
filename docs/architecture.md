@@ -545,8 +545,9 @@ page. The shared alias is a way in, and the fleet banner moves you between nodes
 
 Passive Radar opens this app's radar page (`/radar`, see [radar.md](features/radar.md)), whose
 toggle switches between its Live and Max-Hold views, so its card is a plain link that works the
-same on every pathway. It keeps opening a new tab, because the tutorial tells owners to read
-Max-Hold beside the ADS-B Map.
+same on every pathway. Like the Tracker's card, it opens in the same tab, since both are pages
+of this app with the app's navigation. The tutorial's advice to read Max-Hold beside the ADS-B
+Map still works: the ADS-B Map card opens a new tab.
 
 The other service cards point at other ports on the node (blah2's web UI, tar1090). A script
 builds each link from the hostname the browser actually used, so the link stays on this node.

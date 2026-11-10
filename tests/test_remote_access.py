@@ -829,7 +829,7 @@ def home(live, monkeypatch):
 
 
 def _cards(html):
-    """Every service card's data attributes and href, keyed by its visible name."""
+    """Every service card's data attributes, href and target, keyed by its visible name."""
     import re
     out = {}
     for tag, rest in re.findall(r'<a class="svc-card"([^>]*)>(.*?)</a>', html, re.S):
@@ -837,6 +837,8 @@ def _cards(html):
         if name:
             attrs = dict(re.findall(r'data-([a-z-]+)="([^"]*)"', tag))
             attrs["href"] = re.search(r'href="([^"]*)"', tag).group(1)
+            target = re.search(r'target="([^"]*)"', tag)
+            attrs["target"] = target.group(1) if target else None
             out[name.group(1).strip()] = attrs
     return out
 
@@ -856,6 +858,9 @@ def _assert_radar_cards_are_local(html):
     assert radar["href"] == "/radar"
     assert "port" not in radar
     assert "remote-path" not in radar
+    # Pages of this app open in the same tab, as the Tracker's card does.
+    assert radar["target"] is None
+    assert cards["Tracker"]["target"] is None
 
 
 def test_the_radar_cards_are_pages_of_this_app_on_the_lan(home):
