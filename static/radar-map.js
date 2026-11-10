@@ -14,7 +14,16 @@
     var urlConfig = '/radar/data/config';
 
     var timestamp = -1;
-    var nRows = 3;
+    var shape = '';            // the drawn map's rows x columns; a new shape rebuilds the plot
+
+    // The node's own extent, the same bounds the Tracker draws, so the axes do not
+    // move with the data. null on an axis the config does not state.
+    // See docs/features/radar.md#axes
+    var AXES = window.RADAR_AXES || {};
+    // Fixed, and the Tracker's detection scale, so a colour means the same SNR in
+    // every frame, in both views and on both pages. See docs/features/radar.md#colour-scale
+    var SNR_RANGE = [0, 20];
+    var ranges = { x: AXES.delay || null, y: AXES.doppler || null };
 
     // A failed request leaves the plot as it was and the next tick tries again.
     // Only the request is caught: an error while drawing still reaches the console.
@@ -107,7 +116,9 @@
                 }
             },
             ticks: '',
-            side: 'bottom'
+            side: 'bottom',
+            range: ranges.x ? ranges.x.slice() : undefined,
+            autorange: !ranges.x
         },
         yaxis: {
             title: {
@@ -118,56 +129,39 @@
             },
             ticks: '',
             ticksuffix: ' ',
+            range: ranges.y ? ranges.y.slice() : undefined,
+            autorange: !ranges.y,
             autosize: false,
             categoryorder: "total descending"
         },
         showlegend: false
     };
+    // A double-click returns to the fixed ranges rather than autoscaling, which
+    // would widen the axes by half a cell.
     var config = {
         responsive: true,
-        displayModeBar: false
+        displayModeBar: false,
+        doubleClick: 'reset'
     };
 
-    // setup plotly data
-    var data = [
-        {
-            z: [[0, 0, 0], [0, 0, 0], [0, 0, 0]],
-            colorscale: 'Jet',
-            colorbar: {
-                title: {
-                    text: 'SNR (dB)',
-                    side: 'right'
-                }
-            },
-            type: 'heatmap'
-        }
-    ];
     var detection = [];
     var adsb = {};
 
-    Plotly.newPlot('data', data, layout, config);
+    var colorbar = { title: { text: 'SNR (dB)', side: 'right' } };
 
-    // Reset to full range. Plotly's own double-click reset is hidden without the
-    // modebar, and it tracks click timing off raw mousedown/mouseup on the
-    // drag-capture rect rather than the native dblclick event, so proxy that.
+    // Empty axes at the node's extent until the first map arrives. The one
+    // transparent cell is only there to draw the colour bar, so the plot does
+    // not narrow when the first map lands.
+    Plotly.newPlot('data', [{
+        type: 'heatmap', z: [[0]], x: [0], y: [0], opacity: 0, hoverinfo: 'skip',
+        colorscale: 'Viridis', colorbar: colorbar,
+        zauto: false, zmin: SNR_RANGE[0], zmax: SNR_RANGE[1]
+    }], layout, config);
+
+    // Back to the fixed ranges: the whole map.
     document.getElementById('resetViewBtn').addEventListener('click', function () {
-        var dragLayer = document.querySelector('#data .nsewdrag');
-        if (!dragLayer) return;
-        var rect = dragLayer.getBoundingClientRect();
-        var opts = {
-            bubbles: true,
-            cancelable: true,
-            view: window,
-            clientX: rect.left + rect.width / 2,
-            clientY: rect.top + rect.height / 2,
-            button: 0
-        };
-        dragLayer.dispatchEvent(new MouseEvent('mousedown', opts));
-        dragLayer.dispatchEvent(new MouseEvent('mouseup', opts));
-        setTimeout(function () {
-            dragLayer.dispatchEvent(new MouseEvent('mousedown', opts));
-            dragLayer.dispatchEvent(new MouseEvent('mouseup', opts));
-        }, 80);
+        if (!ranges.x || !ranges.y) return;
+        Plotly.relayout('data', { 'xaxis.range': ranges.x.slice(), 'yaxis.range': ranges.y.slice() });
     });
 
     // A reply for the view just left is dropped, or it would overwrite the new one.
@@ -194,34 +188,38 @@
         b.addEventListener('click', function () { setView(b.getAttribute('data-view')); });
     });
 
+    // A fixed range, or the map's own extent where there is none; never less than the map.
+    function cover(fixed, values) {
+        var lo = values[0], hi = values[values.length - 1];
+        return fixed ? [Math.min(fixed[0], lo), Math.max(fixed[1], hi)] : [lo, hi];
+    }
+
     function drawMap(data) {
         lastFrameAt = Date.now();
         renderExtent(data);
         // case draw new plot
-        if (data.nRows != nRows) {
-            nRows = data.nRows;
+        var drawn = data.nRows + 'x' + data.nCols;
+        if (drawn !== shape) {
+            shape = drawn;
 
-            // lock range before other trace
-            var layout_update = {
-                'xaxis.range': [data.delay[0], data.delay.slice(-1)[0]],
-                'yaxis.range': [data.doppler[0], data.doppler.slice(-1)[0]]
-            };
-            Plotly.relayout('data', layout_update);
+            // The node's extent, widened to take in the whole map if blah2 is
+            // running a wider one than the config said when the page loaded.
+            ranges.x = cover(AXES.delay, data.delay);
+            ranges.y = cover(AXES.doppler, data.doppler);
+            layout.xaxis.range = ranges.x.slice();
+            layout.yaxis.range = ranges.y.slice();
+            layout.xaxis.autorange = false;
+            layout.yaxis.autorange = false;
 
             var trace1 = {
                 z: data.data,
                 x: data.delay,
                 y: data.doppler,
                 colorscale: 'Viridis',
-                colorbar: {
-                    title: {
-                        text: 'SNR (dB)',
-                        side: 'right'
-                    }
-                },
+                colorbar: colorbar,
                 zauto: false,
-                zmin: 0,
-                zmax: Math.max(13, data.maxPower),
+                zmin: SNR_RANGE[0],
+                zmax: SNR_RANGE[1],
                 type: 'heatmap'
             };
             var trace2 = {
@@ -264,7 +262,6 @@
                 x: [data.delay, detection.delay, adsb.delay],
                 y: [data.doppler, detection.doppler, adsb.doppler],
                 z: [data.data, [], []],
-                zmax: [Math.max(13, data.maxPower), [], []],
                 text: [[], [], adsb.flight]
             };
             Plotly.update('data', trace_update);

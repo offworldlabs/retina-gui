@@ -8,6 +8,7 @@ import logging
 import requests
 from flask import Blueprint, Response, abort, jsonify, redirect, render_template, request
 
+from plot_axes import axis_bounds
 from routes.sdr import get_current_mode
 
 log = logging.getLogger(__name__)
@@ -42,7 +43,7 @@ def index():
     if get_current_mode() != 'radar':
         return redirect('/')
     view = request.args.get('view')
-    return render_template('radar.html', view=view if view in VIEWS else VIEWS[0])
+    return render_template('radar.html', view=view if view in VIEWS else VIEWS[0], axes=axis_bounds())
 
 
 @bp.route('/maxhold')

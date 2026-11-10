@@ -59,9 +59,14 @@ div.plotly-notifier { visibility: hidden; }
 {% endblock %}
 
 {% block scripts %}
-{# Bundled, not a CDN: the display must work on a node with no internet, and
-   Reset View depends on this version. See docs/features/radar.md#plotly #}
+{# Bundled, not a CDN: the display must work on a node with no internet.
+   See docs/features/radar.md#plotly #}
 <script src="/static/vendor/plotly-2.20.0.min.js"></script>
-<script>window.RADAR_VIEW = {{ view|tojson }};</script>
+<script>
+  window.RADAR_VIEW = {{ view|tojson }};
+  // The node's own extent, shared with the Tracker; null axes follow the map.
+  // See docs/features/radar.md#axes
+  window.RADAR_AXES = {{ (axes or {})|tojson }};
+</script>
 <script src="/static/radar-map.js"></script>
 {% endblock %}

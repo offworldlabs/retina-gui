@@ -11,6 +11,8 @@ import re
 import requests
 from flask import Blueprint, Response, jsonify, redirect, render_template, request, stream_with_context
 
+from plot_axes import SPEED_OF_LIGHT, axis_bounds
+
 bp = Blueprint('tracker', __name__, url_prefix='/tracker')
 
 # /tracker-preview is bookmarked in the field, so it redirects permanently.
@@ -24,9 +26,6 @@ MAX_VIEW_WINDOW_S = 4 * 3600
 CONNECT_TIMEOUT_S = 5
 CONTROL_TIMEOUT_S = 5
 
-# For turning blah2's delay bins into kilometres.
-SPEED_OF_LIGHT = 299792458.0
-
 # The stream carries delay to 0.01 km: mirrors retina-tracker's
 # history.DELAY_DP (another repo).
 STREAM_DELAY_STEP_M = 10.0
@@ -34,38 +33,6 @@ STREAM_DELAY_STEP_M = 10.0
 # The sidecar mints ids like 261017-00012C. Checked here as well as there,
 # because the id is spliced into the upstream path.
 TRACK_ID = re.compile(r"[A-Za-z0-9-]{1,40}")
-
-
-def _axis_bounds():
-    """The plot's axis ranges, from the node's blah2 ambiguity bounds.
-
-    Returns {"doppler": [lo, hi] Hz, "delay": [lo, hi] km}, with None for an
-    axis the config does not state (it then autoscales). Never guess a range.
-    See docs/features/tracker.md#axis-bounds.
-    """
-    from app import app, config_mgr
-
-    blank = {"doppler": None, "delay": None}
-    try:
-        config = config_mgr.load_merged_config() or {}
-    except Exception as e:
-        app.logger.warning(f"Tracker axes unavailable, config did not load: {e}")
-        return blank
-
-    ambiguity = (config.get("process", {}) or {}).get("ambiguity", {}) or {}
-    fs = (config.get("capture", {}) or {}).get("fs")
-
-    bounds = dict(blank)
-    lo, hi = ambiguity.get("dopplerMin"), ambiguity.get("dopplerMax")
-    if _drawable(lo, hi):
-        bounds["doppler"] = [lo, hi]
-
-    lo, hi = ambiguity.get("delayMin"), ambiguity.get("delayMax")
-    if _drawable(lo, hi) and fs:
-        cell_km = SPEED_OF_LIGHT / float(fs) / 1000.0
-        bounds["delay"] = [lo * cell_km, hi * cell_km]
-
-    return bounds
 
 
 def _drone_settings():
@@ -124,11 +91,6 @@ def _positive(value):
     return _number(value) and value > 0
 
 
-def _drawable(lo, hi):
-    """Whether a pair is an axis rather than a typo: both present, hi > lo."""
-    return lo is not None and hi is not None and hi > lo
-
-
 def _tracker_url(path):
     from app import RETINA_TRACKER_CONTROL_URL
     return f"{RETINA_TRACKER_CONTROL_URL.rstrip('/')}{path}"
@@ -170,7 +132,7 @@ def index():
     /tracker/coverage, except the axis bounds and the Drone view's detector
     settings, which come from config."""
     from services import CARTO_API_KEY
-    return render_template("tracker.html", axes=_axis_bounds(), drone=_drone_settings(),
+    return render_template("tracker.html", axes=axis_bounds(), drone=_drone_settings(),
                            carto_api_key=CARTO_API_KEY)
 
 

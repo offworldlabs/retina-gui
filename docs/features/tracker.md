@@ -165,8 +165,10 @@ indistinguishable from a quiet sky.
 
 ## Axis bounds
 
-`_axis_bounds()` passes the node's ambiguity bounds from its merged blah2 config to the page,
-which uses them as the plot's initial axis ranges:
+`axis_bounds()` in [src/plot_axes.py](../../src/plot_axes.py) passes the node's ambiguity bounds
+from its merged blah2 config to the page, which uses them as the plot's initial axis ranges. The
+[Passive Radar](radar.md#axes) page draws the same bounds, so one node reads at one scale on both
+pages.
 
 | Axis | Config | Units |
 | --- | --- | --- |
@@ -180,7 +182,7 @@ at different scales and cannot be compared. The ambiguity bounds are the only ho
 draw over, and they are the node's own numbers.
 
 An axis is `None` (and autoscales) when the config does not state it, when `fs` is missing (for
-delay), or when `_drawable()` rejects the pair: both ends must be present and high must exceed
+delay), or when `drawable()` rejects the pair: both ends must be present and high must exceed
 low. A transposed pair would draw the axis backwards and a zero-width one would collapse it,
 either way a confident picture of nothing. A guessed range would misrepresent the node as badly
 as autoscaling does, only less visibly. A config that cannot be loaded leaves both axes to

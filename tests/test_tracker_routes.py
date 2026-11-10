@@ -13,6 +13,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 import requests
 
+import plot_axes
 import routes.tracker as tracker_routes
 
 SNAPSHOT = (
@@ -196,7 +197,7 @@ class TestTheAxesComeFromTheNode:
         merged = MagicMock()
         merged.load_merged_config.return_value = config
         with patch.dict('sys.modules', {'app': MagicMock(config_mgr=merged)}):
-            return tracker_routes._axis_bounds()
+            return plot_axes.axis_bounds()
 
     def test_the_doppler_span_is_the_nodes_own(self):
         config = {"process": {"ambiguity": {"dopplerMin": -300, "dopplerMax": 300}}}
@@ -247,7 +248,7 @@ class TestTheAxesComeFromTheNode:
         merged = MagicMock()
         merged.load_merged_config.side_effect = OSError("no config")
         with patch.dict('sys.modules', {'app': MagicMock(config_mgr=merged)}):
-            assert tracker_routes._axis_bounds() == {"doppler": None, "delay": None}
+            assert plot_axes.axis_bounds() == {"doppler": None, "delay": None}
 
     def test_the_page_carries_them_to_the_browser(self, app_client):
         config = {

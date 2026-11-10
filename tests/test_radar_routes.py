@@ -82,6 +82,58 @@ def test_plotly_comes_from_the_node_not_a_cdn(app_client):
     assert 'plotly.min.js"' not in body
 
 
+# ── the axes and the colour scale ──────────────────────────────────────────
+
+def rendered_axes(app_client, config):
+    """The axes the page hands its script, with the node's config set to this."""
+    import json
+    import re
+    merged = MagicMock()
+    merged.load_merged_config.return_value = config
+    with patch.dict('sys.modules', {'app': MagicMock(config_mgr=merged)}):
+        body = app_client.get('/radar').get_data(as_text=True)
+    return json.loads(re.search(r'window.RADAR_AXES = (.+?);\n', body).group(1))
+
+
+def test_the_axes_are_the_nodes_own_extent(app_client):
+    """The same bounds the Tracker draws, so one node reads at one scale on both
+    pages, and the axes stay put whatever the map holds."""
+    axes = rendered_axes(app_client, {
+        "capture": {"fs": 2000000},
+        "process": {"ambiguity": {"dopplerMin": -1000, "dopplerMax": 1000,
+                                  "delayMin": -10, "delayMax": 400}},
+    })
+    assert axes["doppler"] == [-1000, 1000]
+    assert axes["delay"][0] == pytest.approx(-1.5, abs=0.01)
+    assert axes["delay"][1] == pytest.approx(59.96, abs=0.01)
+
+
+def test_axes_the_config_does_not_state_are_left_to_the_map(app_client):
+    assert rendered_axes(app_client, {}) == {"doppler": None, "delay": None}
+
+
+def test_an_unreadable_config_still_opens_the_page(app_client):
+    """The axes are a nicety. Losing them must not lose the display."""
+    merged = MagicMock()
+    merged.load_merged_config.side_effect = OSError("no config")
+    with patch.dict('sys.modules', {'app': MagicMock(config_mgr=merged)}):
+        response = app_client.get('/radar')
+    assert response.status_code == 200
+    assert 'window.RADAR_AXES = {"delay": null, "doppler": null}' in response.get_data(as_text=True)
+
+
+def test_the_colour_scale_does_not_follow_the_data():
+    """A scale stretched to each frame's loudest cell recoloured the whole map
+    every second, and made a quiet sky look busiest. The script must set the
+    scale once and never pass a per-frame one."""
+    path = os.path.join(os.path.dirname(__file__), '..', 'static', 'radar-map.js')
+    with open(path) as f:
+        script = f.read()
+    assert 'var SNR_RANGE = [0, 20];' in script
+    assert 'zauto: false' in script
+    assert 'maxPower' not in script
+
+
 @pytest.mark.parametrize('mode', ['spectrum', 'sdrconnect'])
 @pytest.mark.parametrize('url', ['/radar', '/radar?view=maxhold'])
 def test_a_page_goes_home_when_blah2_is_not_running(app_client, temp_dir, url, mode):
