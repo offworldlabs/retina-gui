@@ -47,7 +47,7 @@ Use this to find the doc to update when you change a file.
 | `src/routes/towers.py` | [features/towers.md](features/towers.md) |
 | `src/routes/radar.py`, `templates/radar.html`, `static/radar-map.js`, `static/vendor/*` | [features/radar.md](features/radar.md) |
 | `src/plot_axes.py` | [features/tracker.md#axis-bounds](features/tracker.md#axis-bounds), [features/radar.md#axes](features/radar.md#axes) |
-| `src/routes/tracker.py`, `src/retina_tracker_client.py`, `templates/tracker.html`, `static/tracker-wedge.js` | [features/tracker.md](features/tracker.md) |
+| `src/routes/tracker.py`, `src/retina_tracker_client.py`, `templates/tracker.html`, `static/tracker-wedge.js`, `static/units.js` | [features/tracker.md](features/tracker.md) |
 | `systemd/*.service`, anything under `/data/retina-gui` | [operations/node-files.md](operations/node-files.md) |
 
 ## Conventions

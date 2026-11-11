@@ -73,6 +73,16 @@ div.plotly-notifier { visibility: hidden; }
         </div>
       </div>
 
+      {# Kilometres or miles, for this browser, shared with the Tracker.
+         See docs/features/tracker.md#units #}
+      <div class="scope-ctl">
+        <span class="scope-lab">Units</span>
+        <div class="seg" role="group" aria-label="Units">
+          <button type="button" data-units="metric" aria-pressed="true" title="Kilometres.">km</button>
+          <button type="button" data-units="imperial" aria-pressed="false" title="Miles.">mi</button>
+        </div>
+      </div>
+
       <button type="button" class="ds-btn ghost sm" id="resetViewBtn" title="Zoom back out to the whole of the Doppler and delay ranges chosen.">Reset View</button>
     </div>
     <div class="radar-plot">
@@ -111,7 +121,7 @@ div.plotly-notifier { visibility: hidden; }
             <span>out to</span>
             <input class="ds-input mono" id="narrowKmInput" type="number" min="1" step="1"
                    inputmode="numeric" aria-describedby="narrowKmHelp narrowKmErr">
-            <span>km</span>
+            <span id="narrowKmUnit">km</span>
           </div>
           <div class="ds-field-help" id="narrowKmHelp">
             What the Delay toggle's narrow setting shows, in bistatic range. The node processes
@@ -142,5 +152,6 @@ div.plotly-notifier { visibility: hidden; }
   // See docs/features/radar.md#axes
   window.RADAR_AXES = {{ (axes or {})|tojson }};
 </script>
+<script src="/static/units.js"></script>
 <script src="/static/radar-map.js"></script>
 {% endblock %}
