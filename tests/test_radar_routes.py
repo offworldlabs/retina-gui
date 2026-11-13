@@ -309,3 +309,27 @@ def test_the_settings_dialog_is_styled_once_for_both_pages():
         assert ('\n' + css).count('\n' + rule) == 1, rule
         for page in ('tracker.html', 'radar.html'):
             assert '\n' + rule not in (root / 'templates' / page).read_text(), (page, rule)
+
+
+def test_the_units_toggle_is_shared_with_the_tracker(app_client):
+    """One key, display.units, through static/units.js: the one setting the two
+    pages share. See docs/features/tracker.md#units."""
+    import re
+    body = app_client.get('/radar').get_data(as_text=True)
+    assert re.findall(r'data-units="(\w+)" aria-pressed="true"', body) == ['metric']
+    assert '<script src="/static/units.js"></script>' in body
+    assert body.index('/static/units.js') < body.index('/static/radar-map.js')
+    js = script()
+    assert "var U = DisplayUnits.current();" in js
+    assert "x: data.delay.map(U.distOf)," in js
+    assert "text: 'Bistatic Range (' + U.dist + ')'," in js
+    # A press rebuilds the plot in the new unit from the last map.
+    assert "shape = null;" in js and "if (lastMap) drawMap(lastMap);" in js
+    assert "U = DisplayUnits.current(v);" in js
+    # The narrow range stays in km whichever unit is shown.
+    assert "var km = Math.round(U.distOf(state.narrowKm)) === dist ? state.narrowKm : U.kmOf(dist);" in js
+    # Saved at the gear's cap, it reads back as the reach, not as 30 km.
+    # See docs/features/tracker.md#units
+    assert "if (reach && km > reach) km = reach;" in js
+    assert "cap = reach ? Math.ceil(reach) : MAX_NARROW_KM;" in js
+    assert "return reach ? Math.min(km, reach) : km;" in js

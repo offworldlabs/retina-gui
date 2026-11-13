@@ -86,12 +86,20 @@ defaults, limits, dialog and wording, so the two pages work the same way:
   The narrow delay range starts where the node starts, slightly below zero, so narrowing never
   cuts off the nearest detections.
 - **Saved in this browser,** under `radar.dopView`, `radar.delView`, `radar.narrowHz` and
-  `radar.narrowKm`. They are kept apart from the Tracker's `tracker.*` settings, as the Tracker
+  `radar.narrowKm` (always in km). They are kept apart from the Tracker's `tracker.*` settings, as the Tracker
   keeps its own, so changing one page never changes the other. A saved value the node's span
   cannot draw falls back to the default.
+- **Units** (`km` / `mi`) are the one setting the two pages share, under `display.units`, through
+  `static/units.js`: see [Units](tracker.md#units). On this page the choice converts the heatmap's
+  and markers' x values, the axis title, the extent readout, the Delay labels, the out-of-view
+  alert and the gear's delay field (typed in the display unit, kept in km). Pressing the toggle
+  redraws the last map in the new unit (`shape` is reset so the plot is rebuilt rather than
+  updated), and the next frame follows.
 - **The gear opens Radar settings,** a native `<dialog>` with the two narrow ranges. The Doppler
   field takes a whole number of hertz from 1 to half the full span; the delay field a whole number
-  of kilometres from 1 to the furthest range, rounded up. Saving checks both and saves neither
+  of kilometres or miles from 1 to the furthest range, rounded up in that unit, and clipped to the
+  furthest range when saved, as on the Tracker (see
+  [tracker.md](tracker.md#units)). Saving checks both and saves neither
   unless both are valid. A field whose value changed switches its toggle to Narrow, since setting
   a range is asking to see it. Reset to defaults refills ±300 Hz and 30 km (or the furthest range,
   if that is nearer) without saving.

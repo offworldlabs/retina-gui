@@ -245,14 +245,17 @@ The Delay control in the toolbar does the same for the bistatic range (x) axis:
 | Narrow | From the node's `delayMin` out to 30 km (or the node's furthest range, if that is nearer), or whatever the gear sets, clipped to the node's range | `30 km` |
 | Full (the default) | The node's own bounds from [Axis bounds](#axis-bounds), or autoscale if the config does not state them | `60 km` on a default node |
 
+Labels, the axis and the gear's field are in the browser's [units](#units); the ranges
+themselves are kept in kilometres.
+
 It is presentation only, like the Doppler view: nothing is written to config and the stream
 carries the full range either way. Full is the default because, unlike Doppler, there is no band
 where ordinary traffic sits that the rest of the axis distracts from. Narrow is for looking
 closely at near targets, and a viewer turns it on.
 
 The narrow range is a single far limit, set in the same gear dialog as a whole number of
-kilometres from 1 to the node's furthest processed range rounded up (or up to 1,000 when the range
-is unknown). The 30 km default is clipped to that furthest range, because a node set to the drone
+kilometres or miles from 1 to the node's furthest processed range rounded up in that unit (or up
+to 1,000 km when the range is unknown), and kept in kilometres. The 30 km default is clipped to that furthest range, because a node set to the drone
 profile's `delayMax` of 100 bins processes only 15 km, and a dialog opened on 30 refused every save
 until the delay field was changed by hand. The near end stays at the node's own `delayMin` (slightly below zero on a default
 node, past the direct signal), so narrowing never cuts off the nearest detections. If the node's
@@ -261,6 +264,42 @@ nearest kilometre.
 
 The view applies to the Delay / Doppler scope only. The wedge view's processed range limit is
 the node's real `delayMax` whichever view is drawn.
+
+## Units
+
+The Units control in the toolbar, `km` or `mi`, chooses what the page writes distances and speeds
+in: kilometres and km/h, or miles and mph. It is a presentation choice for this browser, like
+the Doppler and Delay views, and nothing on the node knows about it: the stream, `AXES`, the
+narrow ranges and the out-of-view test all stay in kilometres, and only what is drawn and written
+converts. It changes the range axis and its title, the Delay toggle's labels, the out-of-view
+alert, the gear dialog's narrow delay field, the hover labels, and the rail's peak velocity
+(the stream's m/s as km/h or mph). The Drone view stays in metres: it is an engineering view
+whose cells are range bins, and its own settings are typed in metres and m/s.
+
+The choice is per browser rather than per node because the person reading the miles is whoever
+has the page open: a support engineer used to kilometres, looking at a node in the United
+States, wants kilometres. A node-wide setting in `user.yml` was tried and withdrawn (#133): it
+needed a route that skipped the apply guards, lagged `config.yml` until the next apply, and
+rewrote `user.yml` unlocked beside the calibrator's safe-corner save.
+
+The conversions live in `static/units.js`, one copy for both this page and the
+[Passive Radar page](radar.md), under one `localStorage` key, `display.units`, so switching on
+either page switches both (the other page picks it up on its next load). The key is deliberately
+not a `tracker.*` or `radar.*` one: those are the pages' own view settings, and a unit is not a
+view. A blocked `localStorage` (private mode) reads as metric and the toggle still works for the
+current load. Each page owns its toggle and its handful of touch points; the helper owns the
+arithmetic. The handful: `U = DisplayUnits.current()` at load and after a press; `U.distOf` on
+the x values; `U.dist` in the axis title and hover; `U.fmtDist` for labels and alerts;
+`U.fmtSpeedMps` for speeds; and the gear's delay field, which is typed and shown as a whole
+number of the display unit but stored in km (`tracker.narrowKm`), so a browser that switches
+units keeps the same range rather than reading 30 as 30 miles. A field saved unchanged in the
+display unit leaves the stored km alone, so reopening and saving does not re-narrow. The
+validation cap is the node's reach rounded up in the display unit. That cap can lie past the
+reach (a 59.96 km reach is 37.3 mi, so 38 mi is accepted), so a save is clipped to the reach
+before it is stored. On load, a stored km up to the reach rounded up, the most the previous build
+could save, reads as the reach; anything further reads as the default. The unit is part of the
+plot's `uirevision`, so a switch redraws the axis rather than keeping a kilometre zoom over mile
+data.
 
 ## Out-of-view alert
 
@@ -465,18 +504,20 @@ The rail beside the scope lists every track in the window.
 - **Flagged tracks get a dot, not a badge.** retina-tracker's anomaly detector is not trusted
   yet, and a solid label would be read as a verdict. The expanded row lists the anomaly types
   marked "(provisional)".
-- **Clicking a row** expands a detail panel: first and last seen, length, peak velocity and
+- **Clicking a row** expands a detail panel: first and last seen, length, peak velocity (in the
+  browser's [units](#units)) and
   shadow fraction. In the wedge view it also [replays the track](#replaying-a-track).
 - **Hide** (eye) removes a track from the scope but keeps its row. **Remove** (bin) drops the row
   too; removals are per browser and can be undone with Restore in the rail footer.
 
 View window, layer, track overlay, sort, filter, Doppler view (`tracker.dopView`), the narrow
 Doppler range (`tracker.narrowHz`), delay view (`tracker.delView`), the narrow delay range
-(`tracker.narrowKm`), the display (`tracker.display`) and the [Drone view](#drone-view)'s settings
+(`tracker.narrowKm`, always in km), the display (`tracker.display`) and the [Drone view](#drone-view)'s settings
 (`fade`, `floor`, `dtracks`, `droneM`, `hum`, `slowMs`) are remembered in `localStorage`
 (`tracker.*` keys) and
-restored into the controls before connecting. They are per browser: nothing about the page's
-presentation is stored on the node.
+restored into the controls before connecting, and the [units](#units) under `display.units`,
+shared with the radar page. They are per browser: nothing about the page's presentation is
+stored on the node.
 
 The page is full width with a viewport-clamped height, since both the plot and the rail want
 every pixel; below 900 px the rail stacks under the plot.

@@ -341,7 +341,7 @@ class TestTheDelayViewMirrorsTheDopplerView:
 
     def test_the_full_view_is_the_nodes_range_not_a_constant(self, page):
         assert "state.delView === 'narrow' ? narrowDelayRange() : AXES.delay" in page
-        assert "xaxis: axis('Bistatic range (km)', delayRange())" in page
+        assert "xaxis: axis('Bistatic range (' + U.dist + ')', displayDelayRange())" in page
 
     def test_the_gear_dialog_has_a_field_for_the_narrow_delay_range(self, page):
         field = re.search(r'<input[^>]*id="narrowKmInput"[^>]*>', page).group(0)
@@ -363,7 +363,7 @@ class TestTheNarrowDelayDefaultFitsTheNode:
         page = app_client.get('/tracker').get_data(as_text=True)
         assert "Math.min(DEFAULT_NARROW_KM, reach)" in page
         assert "recall('narrowKm', defaultNarrowKm())" in page
-        assert "narrowKmInput.value = defaultNarrowKm();" in page
+        assert "narrowKmInput.value = Math.round(U.distOf(defaultNarrowKm()));" in page
 
 
 # ── the Drone view ──────────────────────────────────────────────────────────
@@ -544,3 +544,61 @@ def test_the_page_carries_the_wedge_view(app_client):
     assert 'Processed range limit' in body
     assert 'Close-in, overhead' in body
     assert re.search(r'cartoKey: "[^"]*",', body)
+
+
+# ── units ───────────────────────────────────────────────────────────────────
+
+class TestTheUnitsToggle:
+    """km or mi for this browser, shared with the radar page through
+    static/units.js. See docs/features/tracker.md#units."""
+
+    @pytest.fixture
+    def page(self, app_client):
+        return app_client.get('/tracker').get_data(as_text=True)
+
+    def test_the_toggle_opens_on_kilometres(self, page):
+        assert re.findall(r'data-units="(\w+)" aria-pressed="true"', page) == ['metric']
+        assert '<script src="/static/units.js"></script>' in page
+
+    def test_the_helper_is_served_and_keeps_one_shared_key(self, app_client):
+        js = app_client.get('/static/units.js').get_data(as_text=True)
+        assert "var KEY = 'display.units';" in js
+        # Not a page's own view setting: the two pages share it.
+        assert "'tracker." not in js and "'radar." not in js
+
+    def test_only_what_is_drawn_converts(self, page):
+        """The stream's columns go onto the plot through distOf; the narrow
+        range and the out-of-view test stay in km."""
+        assert "bin.x.push(U.distOf(trk.delay[i]));" in page
+        assert "bin.x.push(U.distOf(cols.delay[i]));" in page
+        assert "delText: U.fmtDist(narrowDelayRange()[1])" in page
+        assert "peak velocity <b>' + U.fmtSpeedMps(m.max_velocity_ms || 0)" in page
+
+    def test_the_narrow_delay_range_is_kept_in_kilometres(self, page):
+        """Typed in the display unit, stored in km, so switching units keeps
+        the same range; saved unchanged, the stored km is left alone."""
+        assert "var km = Math.round(U.distOf(state.narrowKm)) === dist ? state.narrowKm : U.kmOf(dist);" in page
+        assert "remember('narrowKm', km);" in page
+        assert "validNarrowKm(parseFloat(recall('narrowKm', defaultNarrowKm())))" in page
+
+    def test_the_narrow_delay_range_reads_back_at_the_reach(self, page):
+        """The gear accepts the reach rounded up in the display unit (60 km or
+        38 mi for a 59.96 km reach), so a save is clipped to the reach, and a
+        stored value up to the reach rounded up, which the previous build
+        saved, reads as the reach rather than falling back to 30 km."""
+        assert "if (reach && km > reach) km = reach;" in page
+        assert "cap = reach ? Math.ceil(reach) : MAX_NARROW_KM;" in page
+        assert "return reach ? Math.min(km, reach) : km;" in page
+
+    def test_a_switch_redraws_the_axis(self, page):
+        assert "+ ':' + U.name," in page
+
+    def test_a_press_switches_even_when_the_store_is_blocked(self, page):
+        """Private mode: setItem throws, so the page converts from the value
+        pressed rather than re-reading a store that cannot hold it."""
+        assert "U = DisplayUnits.current(v);" in page
+
+    def test_the_drone_view_hides_the_toggle(self, page):
+        """The Drone view works in metres and m/s; its controls are its own."""
+        ctl = re.search(r'<div class="scope-ctl no-drone">\s*<span class="scope-lab">Units</span>', page)
+        assert ctl

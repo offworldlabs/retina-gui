@@ -87,14 +87,33 @@
     var DEFAULT_NARROW_KM = 30;
     var MAX_NARROW_KM = 1000;      // a sanity cap, used only when the range is unknown
 
-    // The furthest processed range, the widest narrow range worth having.
+    // ── Units ────────────────────────────────────────────────────────────
+    // km or mi for this browser, from static/units.js, shared with the
+    // Tracker. The maps, `full` and the narrow range stay in km; only what
+    // is drawn and written converts. See docs/features/tracker.md#units
+    var U = DisplayUnits.current();
+
+    // The furthest processed range, the widest narrow range worth having, in km.
     function delayReach() {
-        return full.x ? Math.ceil(full.x[1]) : null;
+        return full.x ? full.x[1] : null;
     }
 
-    function validNarrowKm(n) {
-        var cap = delayReach() || MAX_NARROW_KM;
-        return Number.isInteger(n) && n >= 1 && n <= cap ? n : null;
+    // The narrow range is kept in km, so a browser that switches units keeps
+    // the same range. Accepted up to the reach rounded up (the previous
+    // build's cap, so its saved values still read), then clipped to the reach.
+    function validNarrowKm(km) {
+        var reach = delayReach(), cap = reach ? Math.ceil(reach) : MAX_NARROW_KM;
+        if (!(Number.isFinite(km) && km > 0 && km <= cap)) return null;
+        return reach ? Math.min(km, reach) : km;
+    }
+
+    // What the gear accepts: a whole number of the display unit, 1 to the
+    // reach rounded up in that unit.
+    function reachDist() {
+        return Math.ceil(U.distOf(delayReach() || MAX_NARROW_KM));
+    }
+    function validNarrowDist(n) {
+        return Number.isInteger(n) && n >= 1 && n <= reachDist() ? n : null;
     }
 
     // Clipped to the reach, or a node processing less than 30 km would open the
@@ -105,7 +124,7 @@
     }
 
     state.delView = recall('delView', 'full') === 'narrow' ? 'narrow' : 'full';
-    state.narrowKm = validNarrowKm(parseInt(recall('narrowKm', defaultNarrowKm()), 10)) || defaultNarrowKm();
+    state.narrowKm = validNarrowKm(parseFloat(recall('narrowKm', defaultNarrowKm()))) || defaultNarrowKm();
 
     // Starts where the node starts (a little below zero, past the direct
     // signal), clipped so narrow never draws range the node cannot see.
@@ -122,8 +141,10 @@
         return state.delView === 'narrow' ? narrowDelayRange() : full.x;
     }
 
-    function fmtKm(km) {
-        return Math.round(km) + ' km';
+    // The delay range in the display unit, for the x axis.
+    function displayDelayRange() {
+        var r = delayRange();
+        return r ? [U.distOf(r[0]), U.distOf(r[1])] : null;
     }
 
     // A failed request leaves the plot as it was and the next tick tries again.
@@ -177,7 +198,7 @@
         var d0 = data.doppler[0], d1 = data.doppler[data.doppler.length - 1];
         var k0 = data.delay[0], k1 = data.delay[data.delay.length - 1];
         var dop = d0 === -d1 ? '\u00b1' + d1 + ' Hz' : d0 + ' to ' + d1 + ' Hz';
-        extentEl.textContent = dop + ' \u00b7 ' + k0.toFixed(1) + ' to ' + k1.toFixed(1) + ' km';
+        extentEl.textContent = dop + ' \u00b7 ' + U.distOf(k0).toFixed(1) + ' to ' + U.distOf(k1).toFixed(1) + ' ' + U.dist;
     }
 
     // get truth flag
@@ -211,7 +232,7 @@
         displayModeBar: false,
         xaxis: {
             title: {
-                text: 'Bistatic Range (km)',
+                text: 'Bistatic Range (' + U.dist + ')',
                 font: {
                     size: 16
                 }
@@ -243,7 +264,7 @@
 
     // The chosen views' ranges go into the layout before a plot is built.
     function layoutRanges() {
-        var x = delayRange(), y = dopplerRange();
+        var x = displayDelayRange(), y = dopplerRange();
         layout.xaxis.range = x ? x.slice() : undefined;
         layout.xaxis.autorange = !x;
         layout.yaxis.range = y ? y.slice() : undefined;
@@ -252,7 +273,7 @@
 
     // Draw the chosen views' ranges: on a toggle, Reset View and a double-click.
     function showViews() {
-        var x = delayRange(), y = dopplerRange(), update = {};
+        var x = displayDelayRange(), y = dopplerRange(), update = {};
         if (x) update['xaxis.range'] = x.slice(); else update['xaxis.autorange'] = true;
         if (y) update['yaxis.range'] = y.slice(); else update['yaxis.autorange'] = true;
         Plotly.relayout('data', update);
@@ -317,7 +338,7 @@
         if (n) {
             var named = [];
             if (nDop) named.push(fmtHzRange(dop) + ' Hz');
-            if (nDel) named.push(fmtKm(del[1]));
+            if (nDel) named.push(U.fmtDist(del[1]));
             oovText.textContent = n + (n === 1 ? ' detection' : ' detections') + ' outside '
                 + named.join(' / ') + ' in 10s';
         }
@@ -355,6 +376,24 @@
 
     wireSeg('dop', setDopView);
     wireSeg('del', setDelView);
+
+    // Units: a presentation choice for this browser, shared with the Tracker.
+    // The next map rebuilds the plot (shape reset) so the heatmap's x values
+    // and the axis title are redrawn in the new unit.
+    var lastMap = null;
+    function setUnits(v) {
+        DisplayUnits.set(v);
+        // From the pressed value, not the store: a blocked localStorage
+        // (private mode) must still switch for this load.
+        U = DisplayUnits.current(v);
+        pressSeg('units', U.name);
+        layout.xaxis.title.text = 'Bistatic Range (' + U.dist + ')';
+        shape = null;
+        labelRangeButtons();
+        if (lastMap) drawMap(lastMap);
+    }
+    wireSeg('units', setUnits);
+    pressSeg('units', U.name);
     pressSeg('dop', state.dopView);
     pressSeg('del', state.delView);
 
@@ -368,8 +407,9 @@
     function labelRangeButtons() {
         document.getElementById('dopNarrowBtn').textContent = fmtHzRange(narrowRange());
         document.getElementById('dopFullBtn').textContent = full.y ? fmtHzRange(full.y) : 'Full';
-        document.getElementById('delNarrowBtn').textContent = fmtKm(narrowDelayRange()[1]);
-        document.getElementById('delFullBtn').textContent = full.x ? fmtKm(full.x[1]) : 'Full';
+        document.getElementById('delNarrowBtn').textContent = U.fmtDist(narrowDelayRange()[1]);
+        document.getElementById('delFullBtn').textContent = full.x ? U.fmtDist(full.x[1]) : 'Full';
+        document.getElementById('narrowKmUnit').textContent = U.dist;
     }
     labelRangeButtons();
 
@@ -393,11 +433,10 @@
         if (half) narrowInput.max = half;
         document.getElementById('fullSpanText').textContent =
             full.y ? fmtHzRange(full.y) + ' Hz' : 'its full span';
-        narrowKmInput.value = state.narrowKm;
-        var reach = delayReach();
-        if (reach) narrowKmInput.max = reach;
+        narrowKmInput.value = Math.round(U.distOf(state.narrowKm));
+        narrowKmInput.max = reachDist();
         document.getElementById('fullDelayText').textContent =
-            full.x ? 'out to ' + fmtKm(full.x[1]) : 'its full range';
+            full.x ? 'out to ' + U.fmtDist(full.x[1]) : 'its full range';
         showNarrowError('');
         showNarrowKmError('');
         settingsDlg.showModal();
@@ -406,7 +445,7 @@
 
     document.getElementById('narrowResetBtn').addEventListener('click', function () {
         narrowInput.value = DEFAULT_NARROW_HZ;
-        narrowKmInput.value = defaultNarrowKm();
+        narrowKmInput.value = Math.round(U.distOf(defaultNarrowKm()));
         showNarrowError('');
         showNarrowKmError('');
     });
@@ -419,18 +458,24 @@
     document.getElementById('settingsForm').addEventListener('submit', function (e) {
         e.preventDefault();
         var n = Number(narrowInput.value);
-        var km = Number(narrowKmInput.value);
-        var hzOk = validNarrow(n) !== null, kmOk = validNarrowKm(km) !== null;
+        var dist = Number(narrowKmInput.value);
+        var hzOk = validNarrow(n) !== null, kmOk = validNarrowDist(dist) !== null;
         var half = spanHalfWidth(), reach = delayReach();
         showNarrowError(hzOk ? '' : half
             ? 'Enter a whole number from 1 to ' + half + ', the most the node processes.'
             : 'Enter a whole number of Hz, 1 or more.');
         showNarrowKmError(kmOk ? '' : reach
-            ? 'Enter a whole number from 1 to ' + reach + ', the most the node processes.'
-            : 'Enter a whole number of km, from 1 to ' + MAX_NARROW_KM + '.');
+            ? 'Enter a whole number from 1 to ' + reachDist() + ', the most the node processes.'
+            : 'Enter a whole number of ' + U.dist + ', from 1 to ' + reachDist() + '.');
         // Nothing is saved unless every field is valid.
         if (!hzOk || !kmOk) return;
 
+        // Typed in the display unit, kept in km. Unchanged if it rounds back
+        // to what is stored, so reopening and saving does not re-narrow.
+        var km = Math.round(U.distOf(state.narrowKm)) === dist ? state.narrowKm : U.kmOf(dist);
+        // The gear's cap is the reach rounded up in the display unit, which
+        // can lie past the reach; a km stored past it would not read back.
+        if (reach && km > reach) km = reach;
         var hzChanged = n !== state.narrowHz, kmChanged = km !== state.narrowKm;
         state.narrowHz = n;
         state.narrowKm = km;
@@ -477,6 +522,7 @@
     }
 
     function drawMap(data) {
+        lastMap = data;
         lastFrameAt = Date.now();
         renderExtent(data);
         // case draw new plot
@@ -493,7 +539,7 @@
 
             var trace1 = {
                 z: data.data,
-                x: data.delay,
+                x: data.delay.map(U.distOf),
                 y: data.doppler,
                 colorscale: 'Viridis',
                 colorbar: colorbar,
@@ -503,7 +549,7 @@
                 type: 'heatmap'
             };
             var trace2 = {
-                x: detection.delay,
+                x: (detection.delay || []).map(U.distOf),
                 y: detection.doppler,
                 mode: 'markers',
                 type: 'scatter',
@@ -518,7 +564,7 @@
                 }
             };
             var trace3 = {
-                x: adsb.delay,
+                x: (adsb.delay || []).map(U.distOf),
                 y: adsb.doppler,
                 mode: 'markers',
                 type: 'scatter',
@@ -539,7 +585,7 @@
         // case update plot
         else {
             var trace_update = {
-                x: [data.delay, detection.delay, adsb.delay],
+                x: [data.delay.map(U.distOf), (detection.delay || []).map(U.distOf), (adsb.delay || []).map(U.distOf)],
                 y: [data.doppler, detection.doppler, adsb.doppler],
                 z: [data.data, [], []],
                 text: [[], [], adsb.flight]
