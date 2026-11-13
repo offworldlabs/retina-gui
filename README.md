@@ -51,3 +51,19 @@ Developer documentation lives in [docs/](docs/README.md). Start with
 [docs/architecture.md](docs/architecture.md) for how the app is put together, then the feature
 doc for the area you are changing. Files, paths and environment variables on a node are in
 [docs/operations/node-files.md](docs/operations/node-files.md).
+
+## License
+
+Copyright (C) 2026 Offworld Labs
+
+This program is free software: you can redistribute it and/or modify it
+under the terms of the GNU Affero General Public License as published by
+the Free Software Foundation, either version 3 of the License, or (at your
+option) any later version.
+
+This program is distributed in the hope that it will be useful, but
+WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU Affero
+General Public License for more details.
+
+The full licence text is in [LICENSE](LICENSE).
