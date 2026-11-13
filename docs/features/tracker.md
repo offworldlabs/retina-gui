@@ -238,6 +238,38 @@ stream updates as before, but switching either view or saving a new range redraw
 their current ranges rather than keeping the old zoom. Double-click resets to the current views'
 ranges.
 
+### Reset View
+
+Dragging a box on the plot zooms into it, and nothing on the page said how to get back out:
+double-click is Plotly's own convention and the mode bar that would offer a reset is turned off.
+So while the plot's axes differ from the ranges the current views ask for, a Reset View button
+sits in the plot's top right corner. Clicking it puts both axes back to those ranges (the same
+result as a double-click) and the button goes away again. It applies to the Drone view too, which
+is drawn on the same plot, and not to the wedge view, whose map has its own zoom controls.
+
+`drawScope()` in the page's script is the one place the scope is drawn. It records the ranges it
+was given as the plot's home (an axis with no range is one that autoscales) and, after every
+draw and every `plotly_relayout`, `syncResetView()` compares the plot's live axes with them. The
+button's visibility is therefore derived from the plot rather than tracked alongside it, so it
+is right however the zoom changed: a drag, a double-click, the button, or a view switch that
+changes `uirevision` and redraws at the new ranges. Nothing is stored: a reload starts at the
+views' ranges with the button hidden.
+
+An autoscaling axis needs one more step. Plotly's autorange fits the points drawn, and with none
+drawn (an idle node, or a filter that hides everything) it keeps whatever range the axis already
+has, so turning autorange back on would leave the zoom in place. `syncResetView()` therefore
+remembers the range each autoscaling axis last settled on, and the button first sets that range
+and then turns autorange on: with points on the plot the second step refits to them, and with
+none the axis stays at the range it had before the zoom. The range is remembered only after a
+draw, never from a `plotly_relayout`, so it is always one the plot settled on by itself.
+
+Plotly's own double-click is off (`doubleClick: false` in `drawScope()`), as on the
+[radar page](radar.md#axes). It returns to the ranges the plot was first drawn with, so after a
+Doppler or Delay switch it went back to the old view, and with nothing drawn it left an
+autoscaling axis at the first view's range with the button hidden. Plotly still emits
+`plotly_doubleclick`, and the page answers it with the same `resetView()` as the button, so a
+double-click and the button always end in the same place.
+
 ## Delay view
 
 The Delay control in the toolbar does the same for the bistatic range (x) axis:
