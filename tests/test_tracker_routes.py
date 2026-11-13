@@ -581,6 +581,15 @@ class TestTheUnitsToggle:
         assert "remember('narrowKm', km);" in page
         assert "validNarrowKm(parseFloat(recall('narrowKm', defaultNarrowKm())))" in page
 
+    def test_the_narrow_delay_range_reads_back_at_the_reach(self, page):
+        """The gear accepts the reach rounded up in the display unit (60 km or
+        38 mi for a 59.96 km reach), so a save is clipped to the reach, and a
+        stored value up to the reach rounded up, which the previous build
+        saved, reads as the reach rather than falling back to 30 km."""
+        assert "if (reach && km > reach) km = reach;" in page
+        assert "cap = reach ? Math.ceil(reach) : MAX_NARROW_KM;" in page
+        assert "return reach ? Math.min(km, reach) : km;" in page
+
     def test_a_switch_redraws_the_axis(self, page):
         assert "+ ':' + U.name," in page
 

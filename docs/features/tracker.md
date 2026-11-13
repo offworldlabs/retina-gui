@@ -294,7 +294,10 @@ the x values; `U.dist` in the axis title and hover; `U.fmtDist` for labels and a
 number of the display unit but stored in km (`tracker.narrowKm`), so a browser that switches
 units keeps the same range rather than reading 30 as 30 miles. A field saved unchanged in the
 display unit leaves the stored km alone, so reopening and saving does not re-narrow. The
-validation cap is the node's reach rounded up in the display unit. The unit is part of the
+validation cap is the node's reach rounded up in the display unit. That cap can lie past the
+reach (a 59.96 km reach is 37.3 mi, so 38 mi is accepted), so a save is clipped to the reach
+before it is stored. On load, a stored km up to the reach rounded up, the most the previous build
+could save, reads as the reach; anything further reads as the default. The unit is part of the
 plot's `uirevision`, so a switch redraws the axis rather than keeping a kilometre zoom over mile
 data.
 

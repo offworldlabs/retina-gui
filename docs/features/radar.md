@@ -97,7 +97,9 @@ defaults, limits, dialog and wording, so the two pages work the same way:
   updated), and the next frame follows.
 - **The gear opens Radar settings,** a native `<dialog>` with the two narrow ranges. The Doppler
   field takes a whole number of hertz from 1 to half the full span; the delay field a whole number
-  of kilometres or miles from 1 to the furthest range, rounded up in that unit. Saving checks both and saves neither
+  of kilometres or miles from 1 to the furthest range, rounded up in that unit, and clipped to the
+  furthest range when saved, as on the Tracker (see
+  [tracker.md](tracker.md#units)). Saving checks both and saves neither
   unless both are valid. A field whose value changed switches its toggle to Narrow, since setting
   a range is asking to see it. Reset to defaults refills ±300 Hz and 30 km (or the furthest range,
   if that is nearer) without saving.

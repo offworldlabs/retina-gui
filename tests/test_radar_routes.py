@@ -328,3 +328,8 @@ def test_the_units_toggle_is_shared_with_the_tracker(app_client):
     assert "U = DisplayUnits.current(v);" in js
     # The narrow range stays in km whichever unit is shown.
     assert "var km = Math.round(U.distOf(state.narrowKm)) === dist ? state.narrowKm : U.kmOf(dist);" in js
+    # Saved at the gear's cap, it reads back as the reach, not as 30 km.
+    # See docs/features/tracker.md#units
+    assert "if (reach && km > reach) km = reach;" in js
+    assert "cap = reach ? Math.ceil(reach) : MAX_NARROW_KM;" in js
+    assert "return reach ? Math.min(km, reach) : km;" in js
