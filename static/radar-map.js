@@ -27,125 +27,32 @@
     // arrives (see cover()). null on an axis nothing has stated yet.
     var full = { x: AXES.delay || null, y: AXES.doppler || null };
 
-    // ── Doppler and delay views ──────────────────────────────────────────
-    // The Tracker's Narrow/Full toggles, with its defaults, limits and wording.
-    // Presentation only: blah2 processes its full span whichever is drawn.
-    // Saved in this browser under radar.*. See docs/features/radar.md#doppler-and-delay-views
-
-    function remember(key, value) {
-        try { localStorage.setItem('radar.' + key, String(value)); } catch (e) { /* private mode */ }
-    }
-    function recall(key, fallback) {
-        try {
-            var v = localStorage.getItem('radar.' + key);
-            return v === null ? fallback : v;
-        } catch (e) { return fallback; }
-    }
-
+    // ── Doppler and delay views, and units ───────────────────────────────
+    // The Tracker's Narrow/Full toggles, gear and km/mi toggle, from
+    // static/scope-controls.js, so the two pages work the same way. Saved in
+    // this browser under radar.*. Presentation only: blah2 processes its full
+    // span whichever is drawn. See docs/features/radar.md#doppler-and-delay-views
     var state = {};
-
-    // Narrow is where ordinary air traffic sits, so it is the default.
-    var DEFAULT_NARROW_HZ = 300;
-    var MAX_NARROW_HZ = 100000;    // a sanity cap, used only when the span is unknown
-
-    // Half the full span, the widest narrow range worth having.
-    function spanHalfWidth() {
-        return full.y ? Math.floor(Math.max(Math.abs(full.y[0]), Math.abs(full.y[1]))) : null;
-    }
-
-    function validNarrow(n) {
-        var cap = spanHalfWidth() || MAX_NARROW_HZ;
-        return Number.isInteger(n) && n >= 1 && n <= cap ? n : null;
-    }
-
-    state.dopView = recall('dopView', 'narrow') === 'full' ? 'full' : 'narrow';
-    state.narrowHz = validNarrow(parseInt(recall('narrowHz', DEFAULT_NARROW_HZ), 10)) || DEFAULT_NARROW_HZ;
-
-    // Clipped to the full span, so narrow never draws Doppler the node cannot see.
-    // A span lying wholly to one side of the band leaves nothing to narrow to.
-    function narrowRange() {
-        var lo = -state.narrowHz, hi = state.narrowHz;
-        if (full.y) {
-            lo = Math.max(lo, full.y[0]);
-            hi = Math.min(hi, full.y[1]);
-            if (lo >= hi) return full.y.slice();
+    var views = ScopeControls.create({
+        prefix: 'radar',
+        state: state,
+        extent: function () { return full; },
+        onViewChange: function () { showViews(); renderOutsideAlert(); },
+        onUnitsChange: function (u) {
+            U = u;
+            layout.xaxis.title.text = 'Bistatic Range (' + U.dist + ')';
+            shape = null;
+            if (lastMap) drawMap(lastMap);
         }
-        return [lo, hi];
-    }
-
-    // null autoscales, as the full view does until a span is known.
-    function dopplerRange() {
-        return state.dopView === 'narrow' ? narrowRange() : full.y;
-    }
-
-    function fmtHzRange(r) {
-        var lo = Math.round(r[0]), hi = Math.round(r[1]);
-        return lo === -hi ? '\u00b1' + hi : lo + '\u2026' + hi;
-    }
-
-    // Full is the default on this axis, so nothing is hidden until a viewer asks.
-    var DEFAULT_NARROW_KM = 30;
-    var MAX_NARROW_KM = 1000;      // a sanity cap, used only when the range is unknown
-
-    // ── Units ────────────────────────────────────────────────────────────
-    // km or mi for this browser, from static/units.js, shared with the
-    // Tracker. The maps, `full` and the narrow range stay in km; only what
-    // is drawn and written converts. See docs/features/tracker.md#units
-    var U = DisplayUnits.current();
-
-    // The furthest processed range, the widest narrow range worth having, in km.
-    function delayReach() {
-        return full.x ? full.x[1] : null;
-    }
-
-    // The narrow range is kept in km, so a browser that switches units keeps
-    // the same range. Accepted up to the reach rounded up (the previous
-    // build's cap, so its saved values still read), then clipped to the reach.
-    function validNarrowKm(km) {
-        var reach = delayReach(), cap = reach ? Math.ceil(reach) : MAX_NARROW_KM;
-        if (!(Number.isFinite(km) && km > 0 && km <= cap)) return null;
-        return reach ? Math.min(km, reach) : km;
-    }
-
-    // What the gear accepts: a whole number of the display unit, 1 to the
-    // reach rounded up in that unit.
-    function reachDist() {
-        return Math.ceil(U.distOf(delayReach() || MAX_NARROW_KM));
-    }
-    function validNarrowDist(n) {
-        return Number.isInteger(n) && n >= 1 && n <= reachDist() ? n : null;
-    }
-
-    // Clipped to the reach, or a node processing less than 30 km would open the
-    // gear on a value it refuses.
-    function defaultNarrowKm() {
-        var reach = delayReach();
-        return reach ? Math.min(DEFAULT_NARROW_KM, reach) : DEFAULT_NARROW_KM;
-    }
-
-    state.delView = recall('delView', 'full') === 'narrow' ? 'narrow' : 'full';
-    state.narrowKm = validNarrowKm(parseFloat(recall('narrowKm', defaultNarrowKm()))) || defaultNarrowKm();
-
-    // Starts where the node starts (a little below zero, past the direct
-    // signal), clipped so narrow never draws range the node cannot see.
-    function narrowDelayRange() {
-        var lo = full.x ? full.x[0] : 0, hi = state.narrowKm;
-        if (full.x) {
-            hi = Math.min(hi, full.x[1]);
-            if (lo >= hi) return full.x.slice();
-        }
-        return [lo, hi];
-    }
-
-    function delayRange() {
-        return state.delView === 'narrow' ? narrowDelayRange() : full.x;
-    }
-
-    // The delay range in the display unit, for the x axis.
-    function displayDelayRange() {
-        var r = delayRange();
-        return r ? [U.distOf(r[0]), U.distOf(r[1])] : null;
-    }
+    });
+    // km or mi for this browser (static/units.js). The maps, `full` and the
+    // narrow range stay in km; only what is drawn and written converts.
+    var U = views.units();
+    var narrowRange = views.narrowRange, dopplerRange = views.dopplerRange;
+    var narrowDelayRange = views.narrowDelayRange, displayDelayRange = views.displayDelayRange;
+    var labelRangeButtons = views.labelRangeButtons;
+    var setDopView = views.setDopView, setDelView = views.setDelView;
+    var fmtHzRange = ScopeControls.fmtHzRange;
 
     // A failed request leaves the plot as it was and the next tick tries again.
     // Only the request is caught: an error while drawing still reaches the console.
@@ -344,152 +251,19 @@
         }
     }
 
-    // ── Toggles and settings ─────────────────────────────────────────────
-
-    function wireSeg(attr, apply) {
-        document.querySelectorAll('.seg [data-' + attr + ']').forEach(function (b) {
-            b.addEventListener('click', function () { apply(b.getAttribute('data-' + attr)); });
-        });
-    }
-
-    function pressSeg(attr, value) {
-        document.querySelectorAll('.seg [data-' + attr + ']').forEach(function (b) {
-            b.setAttribute('aria-pressed', String(b.getAttribute('data-' + attr) === value));
-        });
-    }
-
-    function setDopView(v) {
-        state.dopView = v;
-        remember('dopView', v);
-        pressSeg('dop', v);
-        showViews();
-        renderOutsideAlert();
-    }
-
-    function setDelView(v) {
-        state.delView = v;
-        remember('delView', v);
-        pressSeg('del', v);
-        showViews();
-        renderOutsideAlert();
-    }
-
-    wireSeg('dop', setDopView);
-    wireSeg('del', setDelView);
-
-    // Units: a presentation choice for this browser, shared with the Tracker.
-    // The next map rebuilds the plot (shape reset) so the heatmap's x values
-    // and the axis title are redrawn in the new unit.
+    // ── Toggles ──────────────────────────────────────────────────────────
+    // The Doppler, delay and units toggles and the gear are wired by
+    // ScopeControls.create above; a units press rebuilds the plot from the
+    // last map (shape reset) so the heatmap's x values and the axis title are
+    // redrawn in the new unit.
     var lastMap = null;
-    function setUnits(v) {
-        DisplayUnits.set(v);
-        // From the pressed value, not the store: a blocked localStorage
-        // (private mode) must still switch for this load.
-        U = DisplayUnits.current(v);
-        pressSeg('units', U.name);
-        layout.xaxis.title.text = 'Bistatic Range (' + U.dist + ')';
-        shape = null;
-        labelRangeButtons();
-        if (lastMap) drawMap(lastMap);
-    }
-    wireSeg('units', setUnits);
-    pressSeg('units', U.name);
-    pressSeg('dop', state.dopView);
-    pressSeg('del', state.delView);
 
     document.getElementById('oovShowBtn').addEventListener('click', function () {
         setDopView('full');
         setDelView('full');
     });
 
-    // The buttons name the ranges they draw, so the toggle reads "±300 / ±1000"
-    // on a node at ±1000 and stays truthful after the gear changes narrow.
-    function labelRangeButtons() {
-        document.getElementById('dopNarrowBtn').textContent = fmtHzRange(narrowRange());
-        document.getElementById('dopFullBtn').textContent = full.y ? fmtHzRange(full.y) : 'Full';
-        document.getElementById('delNarrowBtn').textContent = U.fmtDist(narrowDelayRange()[1]);
-        document.getElementById('delFullBtn').textContent = full.x ? U.fmtDist(full.x[1]) : 'Full';
-        document.getElementById('narrowKmUnit').textContent = U.dist;
-    }
     labelRangeButtons();
-
-    var settingsDlg = document.getElementById('settingsDlg');
-    var narrowInput = document.getElementById('narrowHzInput');
-    var narrowErr = document.getElementById('narrowHzErr');
-    var narrowKmInput = document.getElementById('narrowKmInput');
-    var narrowKmErr = document.getElementById('narrowKmErr');
-
-    function showFieldError(input, err, text) {
-        err.textContent = text;
-        err.hidden = !text;
-        input.classList.toggle('is-invalid', !!text);
-    }
-    function showNarrowError(text) { showFieldError(narrowInput, narrowErr, text); }
-    function showNarrowKmError(text) { showFieldError(narrowKmInput, narrowKmErr, text); }
-
-    document.getElementById('settingsBtn').addEventListener('click', function () {
-        narrowInput.value = state.narrowHz;
-        var half = spanHalfWidth();
-        if (half) narrowInput.max = half;
-        document.getElementById('fullSpanText').textContent =
-            full.y ? fmtHzRange(full.y) + ' Hz' : 'its full span';
-        narrowKmInput.value = Math.round(U.distOf(state.narrowKm));
-        narrowKmInput.max = reachDist();
-        document.getElementById('fullDelayText').textContent =
-            full.x ? 'out to ' + U.fmtDist(full.x[1]) : 'its full range';
-        showNarrowError('');
-        showNarrowKmError('');
-        settingsDlg.showModal();
-        narrowInput.select();
-    });
-
-    document.getElementById('narrowResetBtn').addEventListener('click', function () {
-        narrowInput.value = DEFAULT_NARROW_HZ;
-        narrowKmInput.value = Math.round(U.distOf(defaultNarrowKm()));
-        showNarrowError('');
-        showNarrowKmError('');
-    });
-
-    document.getElementById('settingsCancel').addEventListener('click', function () { settingsDlg.close(); });
-
-    // A click on the backdrop lands on the dialog element itself.
-    settingsDlg.addEventListener('click', function (e) { if (e.target === settingsDlg) settingsDlg.close(); });
-
-    document.getElementById('settingsForm').addEventListener('submit', function (e) {
-        e.preventDefault();
-        var n = Number(narrowInput.value);
-        var dist = Number(narrowKmInput.value);
-        var hzOk = validNarrow(n) !== null, kmOk = validNarrowDist(dist) !== null;
-        var half = spanHalfWidth(), reach = delayReach();
-        showNarrowError(hzOk ? '' : half
-            ? 'Enter a whole number from 1 to ' + half + ', the most the node processes.'
-            : 'Enter a whole number of Hz, 1 or more.');
-        showNarrowKmError(kmOk ? '' : reach
-            ? 'Enter a whole number from 1 to ' + reachDist() + ', the most the node processes.'
-            : 'Enter a whole number of ' + U.dist + ', from 1 to ' + reachDist() + '.');
-        // Nothing is saved unless every field is valid.
-        if (!hzOk || !kmOk) return;
-
-        // Typed in the display unit, kept in km. Unchanged if it rounds back
-        // to what is stored, so reopening and saving does not re-narrow.
-        var km = Math.round(U.distOf(state.narrowKm)) === dist ? state.narrowKm : U.kmOf(dist);
-        // The gear's cap is the reach rounded up in the display unit, which
-        // can lie past the reach; a km stored past it would not read back.
-        if (reach && km > reach) km = reach;
-        var hzChanged = n !== state.narrowHz, kmChanged = km !== state.narrowKm;
-        state.narrowHz = n;
-        state.narrowKm = km;
-        remember('narrowHz', n);
-        remember('narrowKm', km);
-        labelRangeButtons();
-        settingsDlg.close();
-        // Saving a new narrow range is asking to see it. Only the axis whose
-        // range changed switches, so editing one never narrows the other.
-        if (hzChanged) setDopView('narrow');
-        if (kmChanged) setDelView('narrow');
-        showViews();
-        renderOutsideAlert();
-    });
 
     // A reply for the view just left is dropped, or it would overwrite the new one.
     function fetchMap() {

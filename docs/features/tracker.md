@@ -17,6 +17,8 @@ surface for Auto-Calibrate.
 | [src/routes/tracker.py](../../src/routes/tracker.py) | The `/tracker` blueprint (page, SSE proxy, one-shot snapshot, clear, and the coverage proxies) and the `/tracker-preview` redirect. Computes the plot's axis bounds, and the Drone view's detector settings, from the merged config. |
 | [templates/tracker.html](../../templates/tracker.html) | The page: controls, the Plotly scope, the wedge view's container and reset dialog, the track rail, and the EventSource client. Its frame (heading, panel, toolbar, status line, segmented controls, footer) is shared with Passive Radar; see [Scope pages](../architecture.md#scope-pages). |
 | [static/tracker-wedge.js](../../static/tracker-wedge.js) | The wedge view: the Leaflet map, the wedge, trails and arcs, and the replay. |
+| [static/scope-controls.js](../../static/scope-controls.js) | The Doppler and Delay views, the gear's narrow ranges and the Units toggle, shared with Passive Radar. See [Shared controls](#shared-controls). |
+| [static/units.js](../../static/units.js) | The km and mi conversions, shared with Passive Radar. See [Units](#units). |
 | [src/retina_tracker_client.py](../../src/retina_tracker_client.py) | `RetinaTrackerClient`: JSONL event tailer plus HTTP control client (`reset`). |
 | [src/services.py](../../src/services.py) | `RETINA_TRACKER_CONTROL_URL` and `RETINA_TRACKER_EVENTS_PATH`, and the single shared client instance. |
 | [src/calibrator.py](../../src/calibrator.py) | The client's listener and `reset()` caller. See [auto-calibrate.md](auto-calibrate.md). |
@@ -287,8 +289,9 @@ The conversions live in `static/units.js`, one copy for both this page and the
 either page switches both (the other page picks it up on its next load). The key is deliberately
 not a `tracker.*` or `radar.*` one: those are the pages' own view settings, and a unit is not a
 view. A blocked `localStorage` (private mode) reads as metric and the toggle still works for the
-current load. Each page owns its toggle and its handful of touch points; the helper owns the
-arithmetic. The handful: `U = DisplayUnits.current()` at load and after a press; `U.distOf` on
+current load. The toggle itself and the gear's delay field are in `static/scope-controls.js` (see
+[Shared controls](#shared-controls)); `units.js` owns the arithmetic; each page keeps its own
+handful of touch points: its `U`, from `views.units()` at load and handed back after a press; `U.distOf` on
 the x values; `U.dist` in the axis title and hover; `U.fmtDist` for labels and alerts;
 `U.fmtSpeedMps` for speeds; and the gear's delay field, which is typed and shown as a whole
 number of the display unit but stored in km (`tracker.narrowKm`), so a browser that switches
@@ -300,6 +303,41 @@ before it is stored. On load, a stored km up to the reach rounded up, the most t
 could save, reads as the reach; anything further reads as the default. The unit is part of the
 plot's `uirevision`, so a switch redraws the axis rather than keeping a kilometre zoom over mile
 data.
+
+## Shared controls
+
+The [Doppler view](#doppler-view), the [Delay view](#delay-view), the gear's two narrow ranges and
+the [Units](#units) toggle work the same way on this page and on
+[Passive Radar](radar.md#doppler-and-delay-views), and are one copy of code:
+`static/scope-controls.js`. Each page calls `ScopeControls.create` once, and the module wires the
+toggles and the settings dialog and returns the range functions the page's drawing code reads
+(`narrowRange`, `dopplerRange`, `narrowDelayRange`, `displayDelayRange`, `spanHalfWidth`), plus
+`labelRangeButtons`, `setDopView`, `setDelView` and `units()`. It also offers the small helpers
+both pages use for their other controls: `storage(prefix)` (a page's `remember` and `recall`),
+`wireSeg`, `pressSeg`, `fmtHzRange` and `showFieldError`.
+
+What each page passes in is what differs between them:
+
+| Option | Tracker | Passive Radar |
+| --- | --- | --- |
+| `prefix` | `tracker`, so settings save as `tracker.*` | `radar`, so `radar.*` |
+| `state` | The page's state object; the module adds `dopView`, `narrowHz`, `delView` and `narrowKm` | The same |
+| `extent()` | `AXES`, fixed when the page loads | `full`, which widens to a map's own extent, so it is read on every call |
+| `onViewChange()` | `scheduleRender` | Redraw the ranges and the out-of-view alert |
+| `onUnitsChange(U)` | Take the new `U` and redraw | Take the new `U`, retitle the axis and rebuild the plot from the last map |
+| `labelExtra()` | The Drone view's slow-track button | None |
+| `dialog` | The Drone view's gear fields: `open`, `reset`, `read` (values or null after showing errors) and `save` | None |
+
+Saving the gear checks the narrow fields and then the page's own (`dialog.read`) and saves nothing
+unless every field is valid, as before. The module is loaded after `static/units.js` and before
+the page's own script.
+
+The two copies had already drifted before they were joined: the radar page rounded `fmtHzRange`
+and floored `spanHalfWidth`, because its span can widen to a map's fractional extent, while the
+Tracker did neither. The shared code keeps the radar's version; on the Tracker it changes nothing,
+because `AXES` comes from whole-number config values. The joining was prompted by the narrow-range
+fix that had to be made twice, once per copy, and `tests/test_tracker_routes.py` checks that
+neither page defines the shared functions again.
 
 ## Out-of-view alert
 

@@ -460,6 +460,7 @@
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script src="/static/tracker-wedge.js"></script>
 <script src="/static/units.js"></script>
+<script src="/static/scope-controls.js"></script>
 <script>
 (function () {
     'use strict';
@@ -540,15 +541,8 @@
         hover: null
     };
 
-    function remember(key, value) {
-        try { localStorage.setItem('tracker.' + key, String(value)); } catch (e) { /* private mode */ }
-    }
-    function recall(key, fallback) {
-        try {
-            var v = localStorage.getItem('tracker.' + key);
-            return v === null ? fallback : v;
-        } catch (e) { return fallback; }
-    }
+    var saved = ScopeControls.storage('tracker');
+    var remember = saved.remember, recall = saved.recall;
 
     state.window = parseInt(recall('window', DEFAULT_WINDOW), 10) || DEFAULT_WINDOW;
     // Only the layers that still have a button. A remembered 'below_snr' from
@@ -564,111 +558,32 @@
     // Drone is offered only in developer mode, so a remembered one falls back.
     if (state.display !== 'wedge' && !(state.display === 'drone' && DRONE)) state.display = 'scope';
 
-    // ── Doppler view ─────────────────────────────────────────────────────
+    // ── Doppler and delay views, and units ───────────────────────────────
 
-    // Presentation only: the node processes its whole span (AXES.doppler)
-    // whichever view is drawn. Narrow is where ordinary air traffic sits, so it
-    // is the default. See docs/features/tracker.md#doppler-view
-    var DEFAULT_NARROW_HZ = 300;
-    var MAX_NARROW_HZ = 100000;    // a sanity cap, used only when the span is unknown
-
-    // Half the node's span, the widest narrow range worth having.
-    function spanHalfWidth() {
-        return AXES.doppler ? Math.max(Math.abs(AXES.doppler[0]), Math.abs(AXES.doppler[1])) : null;
-    }
-
-    function validNarrow(n) {
-        var cap = spanHalfWidth() || MAX_NARROW_HZ;
-        return Number.isInteger(n) && n >= 1 && n <= cap ? n : null;
-    }
-
-    state.dopView = recall('dopView', 'narrow') === 'full' ? 'full' : 'narrow';
-    state.narrowHz = validNarrow(parseInt(recall('narrowHz', DEFAULT_NARROW_HZ), 10)) || DEFAULT_NARROW_HZ;
-
-    // Clipped to the node's span, so narrow never draws Doppler it cannot see.
-    // A span lying wholly to one side of the band leaves nothing to narrow to.
-    function narrowRange() {
-        var lo = -state.narrowHz, hi = state.narrowHz;
-        if (AXES.doppler) {
-            lo = Math.max(lo, AXES.doppler[0]);
-            hi = Math.min(hi, AXES.doppler[1]);
-            if (lo >= hi) return AXES.doppler.slice();
-        }
-        return [lo, hi];
-    }
-
-    // null autoscales, as the full view always has when the span is unknown.
-    function dopplerRange() {
-        return state.dopView === 'narrow' ? narrowRange() : AXES.doppler;
-    }
-
-    function fmtHzRange(r) {
-        return r[0] === -r[1] ? '±' + r[1] : r[0] + '…' + r[1];
-    }
-
-    // ── Delay view ───────────────────────────────────────────────────────
-
-    // The same idea on the bistatic range axis, and presentation only too.
-    // Full is the default, so nothing is hidden until a viewer asks for it.
-    // See docs/features/tracker.md#delay-view
-    var DEFAULT_NARROW_KM = 30;
-    var MAX_NARROW_KM = 1000;      // a sanity cap, used only when the span is unknown
-
-    // ── Units ────────────────────────────────────────────────────────────
-    // km or mi for this browser, from static/units.js. Everything the page
-    // reasons with (the stream, AXES, the narrow range) stays in km; only what
-    // is drawn and written converts. See docs/features/tracker.md#units
-    var U = DisplayUnits.current();
-
-    // The node's furthest processed range, the widest narrow range worth
-    // having, in km.
-    function delayReach() {
-        return AXES.delay ? AXES.delay[1] : null;
-    }
-
-    // The narrow range is kept in km, so a browser that switches units keeps
-    // the same range. Accepted up to the reach rounded up (the previous
-    // build's cap, so its saved values still read), then clipped to the reach.
-    function validNarrowKm(km) {
-        var reach = delayReach(), cap = reach ? Math.ceil(reach) : MAX_NARROW_KM;
-        if (!(Number.isFinite(km) && km > 0 && km <= cap)) return null;
-        return reach ? Math.min(km, reach) : km;
-    }
-
-    // What the gear accepts: a whole number of the display unit, 1 to the
-    // reach rounded up in that unit.
-    function reachDist() {
-        var reach = delayReach();
-        return Math.ceil(U.distOf(reach || MAX_NARROW_KM));
-    }
-    function validNarrowDist(n) {
-        return Number.isInteger(n) && n >= 1 && n <= reachDist() ? n : null;
-    }
-
-    // Clipped to the node's reach, or a node processing less than 30 km (the
-    // drone profile's delayMax) would open the gear on a value it refuses.
-    function defaultNarrowKm() {
-        var reach = delayReach();
-        return reach ? Math.min(DEFAULT_NARROW_KM, reach) : DEFAULT_NARROW_KM;
-    }
-
-    state.delView = recall('delView', 'full') === 'narrow' ? 'narrow' : 'full';
-    state.narrowKm = validNarrowKm(parseFloat(recall('narrowKm', defaultNarrowKm()))) || defaultNarrowKm();
-
-    // Starts where the node starts (a little below zero, past the direct
-    // signal), clipped so narrow never draws range the node cannot see.
-    function narrowDelayRange() {
-        var lo = AXES.delay ? AXES.delay[0] : 0, hi = state.narrowKm;
-        if (AXES.delay) {
-            hi = Math.min(hi, AXES.delay[1]);
-            if (lo >= hi) return AXES.delay.slice();
-        }
-        return [lo, hi];
-    }
-
-    function delayRange() {
-        return state.delView === 'narrow' ? narrowDelayRange() : AXES.delay;
-    }
+    // The Narrow/Full toggles, the gear's two narrow ranges and the km/mi
+    // toggle, shared with the Passive Radar page in static/scope-controls.js.
+    // Presentation only: the node processes its whole span (AXES) whichever
+    // view is drawn. See docs/features/tracker.md#shared-controls
+    var views = ScopeControls.create({
+        prefix: 'tracker',
+        state: state,
+        extent: function () { return { x: AXES.delay, y: AXES.doppler }; },
+        onViewChange: scheduleRender,
+        onUnitsChange: function (u) { U = u; scheduleRender(); },
+        labelExtra: labelSlowTracks,
+        dialog: { open: openDroneFields, reset: resetDroneFields, read: readDroneFields, save: saveDroneFields }
+    });
+    // km or mi for this browser (static/units.js). Everything the page reasons
+    // with (the stream, AXES, the narrow range) stays in km; only what is drawn
+    // and written converts. See docs/features/tracker.md#units
+    var U = views.units();
+    var spanHalfWidth = views.spanHalfWidth, narrowRange = views.narrowRange;
+    var dopplerRange = views.dopplerRange, narrowDelayRange = views.narrowDelayRange;
+    var displayDelayRange = views.displayDelayRange, labelRangeButtons = views.labelRangeButtons;
+    var setDopView = views.setDopView, setDelView = views.setDelView;
+    var fmtHzRange = ScopeControls.fmtHzRange, wireSeg = ScopeControls.wireSeg;
+    var showFieldError = ScopeControls.showFieldError;
+    var MAX_NARROW_HZ = ScopeControls.MAX_NARROW_HZ;
 
     // ── Drone view ───────────────────────────────────────────────────────
 
@@ -1443,12 +1358,6 @@
         return spec;
     }
 
-    // The delay range in the display unit, for the x axis.
-    function displayDelayRange() {
-        var r = delayRange();
-        return r ? [U.distOf(r[0]), U.distOf(r[1])] : null;
-    }
-
     // Says when the node holds less history than the window asks for (after a
     // restart, or once the sidecar's point ceiling ages points out).
     function heldNote() {
@@ -1523,17 +1432,6 @@
     });
     railList.addEventListener('pointerleave', function () { setHover(null); });
 
-    function wireSeg(attr, apply) {
-        document.querySelectorAll('.seg [data-' + attr + ']').forEach(function (b) {
-            b.addEventListener('click', function () {
-                b.parentNode.querySelectorAll('[data-' + attr + ']').forEach(function (o) {
-                    o.setAttribute('aria-pressed', String(o === b));
-                });
-                apply(b.getAttribute('data-' + attr));
-            });
-        });
-    }
-
     wireSeg('win', function (v) {
         state.window = parseInt(v, 10);
         remember('window', state.window);
@@ -1554,38 +1452,6 @@
         remember('tracks', v);
         scheduleRender();
     });
-
-    function setDopView(v) {
-        state.dopView = v;
-        remember('dopView', v);
-        document.querySelectorAll('.seg [data-dop]').forEach(function (b) {
-            b.setAttribute('aria-pressed', String(b.getAttribute('data-dop') === v));
-        });
-        scheduleRender();
-    }
-
-    function setDelView(v) {
-        state.delView = v;
-        remember('delView', v);
-        document.querySelectorAll('.seg [data-del]').forEach(function (b) {
-            b.setAttribute('aria-pressed', String(b.getAttribute('data-del') === v));
-        });
-        scheduleRender();
-    }
-
-    wireSeg('dop', setDopView);
-    wireSeg('del', setDelView);
-
-    // Units: a presentation choice for this browser, shared with the radar page.
-    function setUnits(v) {
-        DisplayUnits.set(v);
-        // From the pressed value, not the store: a blocked localStorage
-        // (private mode) must still switch for this load.
-        U = DisplayUnits.current(v);
-        labelRangeButtons();
-        scheduleRender();
-    }
-    wireSeg('units', setUnits);
 
     // The Drone view's controls exist only in developer mode; wiring absent
     // buttons is a no-op.
@@ -1614,33 +1480,14 @@
         setDelView('full');
     });
 
-    // The buttons name the ranges they draw, so the toggle reads "±300 / ±1000"
-    // on a node at ±1000 and stays truthful after the gear changes narrow.
-    function labelRangeButtons() {
-        document.getElementById('dopNarrowBtn').textContent = fmtHzRange(narrowRange());
-        document.getElementById('dopFullBtn').textContent = AXES.doppler ? fmtHzRange(AXES.doppler) : 'Full';
-        document.getElementById('delNarrowBtn').textContent = U.fmtDist(narrowDelayRange()[1]);
-        document.getElementById('delFullBtn').textContent = AXES.delay ? U.fmtDist(AXES.delay[1]) : 'Full';
-        document.getElementById('narrowKmUnit').textContent = U.dist;
+    // The Drone view's slow-track button names its limit; refreshed with the
+    // range buttons in static/scope-controls.js.
+    function labelSlowTracks() {
         var slowBtn = document.getElementById('slowTracksBtn');
         if (slowBtn) slowBtn.textContent = '<' + state.slowMs + ' m/s';
     }
 
     // ── Settings ─────────────────────────────────────────────────────────
-
-    var settingsDlg = document.getElementById('settingsDlg');
-    var narrowInput = document.getElementById('narrowHzInput');
-    var narrowErr = document.getElementById('narrowHzErr');
-    var narrowKmInput = document.getElementById('narrowKmInput');
-    var narrowKmErr = document.getElementById('narrowKmErr');
-
-    function showFieldError(input, err, text) {
-        err.textContent = text;
-        err.hidden = !text;
-        input.classList.toggle('is-invalid', !!text);
-    }
-    function showNarrowError(text) { showFieldError(narrowInput, narrowErr, text); }
-    function showNarrowKmError(text) { showFieldError(narrowKmInput, narrowKmErr, text); }
 
     // The Drone view's fields, present only in developer mode.
     var droneFields = DRONE ? [
@@ -1683,80 +1530,26 @@
         return m && hum && slow ? { m: m, hum: hum, slow: slow } : null;
     }
 
-    document.getElementById('settingsBtn').addEventListener('click', function () {
-        narrowInput.value = state.narrowHz;
-        var half = spanHalfWidth();
-        if (half) narrowInput.max = half;
-        document.getElementById('fullSpanText').textContent =
-            AXES.doppler ? fmtHzRange(AXES.doppler) + ' Hz' : 'its full span';
-        narrowKmInput.value = Math.round(U.distOf(state.narrowKm));
-        narrowKmInput.max = reachDist();
-        document.getElementById('fullDelayText').textContent =
-            AXES.delay ? 'out to ' + U.fmtDist(AXES.delay[1]) : 'its full range';
-        showNarrowError('');
-        showNarrowKmError('');
+    // The gear's Drone view fields, opened, reset, checked and saved with the
+    // narrow ranges by static/scope-controls.js, which takes these as hooks.
+    function openDroneFields() {
         if (DRONE && droneReachM()) droneFields[0].input.max = droneReachM();
         fillDroneFields(state.droneM, state.hum, state.slowMs);
-        settingsDlg.showModal();
-        narrowInput.select();
-    });
+    }
 
-    document.getElementById('narrowResetBtn').addEventListener('click', function () {
-        narrowInput.value = DEFAULT_NARROW_HZ;
-        narrowKmInput.value = Math.round(U.distOf(defaultNarrowKm()));
-        showNarrowError('');
-        showNarrowKmError('');
+    function resetDroneFields() {
         fillDroneFields(defaultDroneM(), [], DEFAULT_SLOW_MS);
-    });
+    }
 
-    document.getElementById('settingsCancel').addEventListener('click', function () { settingsDlg.close(); });
-
-    // A click on the backdrop lands on the dialog element itself.
-    settingsDlg.addEventListener('click', function (e) { if (e.target === settingsDlg) settingsDlg.close(); });
-
-    document.getElementById('settingsForm').addEventListener('submit', function (e) {
-        e.preventDefault();
-        var n = Number(narrowInput.value);
-        var dist = Number(narrowKmInput.value);
-        var hzOk = validNarrow(n) !== null, kmOk = validNarrowDist(dist) !== null;
-        var half = spanHalfWidth(), reach = delayReach();
-        showNarrowError(hzOk ? '' : half
-            ? 'Enter a whole number from 1 to ' + half + ', the most the node processes.'
-            : 'Enter a whole number of Hz, 1 or more.');
-        showNarrowKmError(kmOk ? '' : reach
-            ? 'Enter a whole number from 1 to ' + reachDist() + ', the most the node processes.'
-            : 'Enter a whole number of ' + U.dist + ', from 1 to ' + reachDist() + '.');
-        var drone = readDroneFields();
-        // Nothing is saved unless every field is valid.
-        if (!hzOk || !kmOk || !drone) return;
-
-        // Typed in the display unit, kept in km. Unchanged if it rounds back
-        // to what is stored, so reopening and saving does not re-narrow.
-        var km = Math.round(U.distOf(state.narrowKm)) === dist ? state.narrowKm : U.kmOf(dist);
-        // The gear's cap is the reach rounded up in the display unit, which
-        // can lie past the reach; a km stored past it would not read back.
-        if (reach && km > reach) km = reach;
-        var hzChanged = n !== state.narrowHz, kmChanged = km !== state.narrowKm;
-        state.narrowHz = n;
-        state.narrowKm = km;
-        remember('narrowHz', n);
-        remember('narrowKm', km);
-        if (DRONE) {
-            state.droneM = drone.m;
-            state.hum = drone.hum;
-            state.slowMs = drone.slow;
-            remember('droneM', drone.m);
-            remember('hum', drone.hum.join(','));
-            remember('slowMs', drone.slow);
-        }
-        labelRangeButtons();
-        settingsDlg.close();
-        // Saving a new narrow range is asking to see it. Only the axis whose
-        // range changed switches, so editing one never narrows the other.
-        if (hzChanged) setDopView('narrow');
-        if (kmChanged) setDelView('narrow');
-        scheduleRender();
-    });
+    function saveDroneFields(drone) {
+        if (!DRONE) return;
+        state.droneM = drone.m;
+        state.hum = drone.hum;
+        state.slowMs = drone.slow;
+        remember('droneM', drone.m);
+        remember('hum', drone.hum.join(','));
+        remember('slowMs', drone.slow);
+    }
 
     document.querySelectorAll('.fchip').forEach(function (b) {
         b.addEventListener('click', function () {
@@ -1945,13 +1738,7 @@
         b.setAttribute('aria-pressed', String(b.getAttribute('data-filter') === state.filter));
     });
     document.getElementById('sortSel').value = state.sort;
-    document.querySelectorAll('.seg [data-dop]').forEach(function (b) {
-        b.setAttribute('aria-pressed', String(b.getAttribute('data-dop') === state.dopView));
-    });
-    document.querySelectorAll('.seg [data-del]').forEach(function (b) {
-        b.setAttribute('aria-pressed', String(b.getAttribute('data-del') === state.delView));
-    });
-    [['units', U.name], ['fade', state.fade], ['floor', state.floor], ['dtracks', state.dtracks]].forEach(function (p) {
+    [['fade', state.fade], ['floor', state.floor], ['dtracks', state.dtracks]].forEach(function (p) {
         document.querySelectorAll('.seg [data-' + p[0] + ']').forEach(function (b) {
             b.setAttribute('aria-pressed', String(b.getAttribute('data-' + p[0]) === String(p[1])));
         });

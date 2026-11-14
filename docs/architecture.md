@@ -585,6 +585,10 @@ page's peak-meter segments (`.peak-meter .seg`); a bare `.seg` rule would restyl
 `tests/test_radar_routes.py` checks no bare `.seg` rule is added. Each page keeps its own layout
 inside the panel, such as the Tracker's track rail.
 
+The pages share behaviour as well as styles, in two scripts: `static/units.js`, the km and mi
+conversions, and `static/scope-controls.js`, the Doppler and Delay views, the gear's narrow ranges
+and the Units toggle. See [Shared controls](features/tracker.md#shared-controls).
+
 ## Summary page
 
 `/summary` ([routes/fleet.py](../src/routes/fleet.py),

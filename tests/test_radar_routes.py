@@ -283,12 +283,18 @@ def test_the_page_opens_on_the_trackers_default_views(app_client):
     assert 'id="oovAlert"' in body
 
 
+def controls():
+    from pathlib import Path
+    return (Path(__file__).resolve().parent.parent / 'static' / 'scope-controls.js').read_text()
+
+
 def test_the_views_are_saved_apart_from_the_trackers():
     """Each page keeps its own views, as the Tracker keeps its under tracker.*,
     so narrowing one page never narrows the other behind a viewer's back."""
     js = script()
-    assert "localStorage.setItem('radar.' + key" in js
+    assert "prefix: 'radar'," in js
     assert "'tracker." not in js
+    assert "localStorage.setItem(prefix + '.' + key" in controls()
 
 
 def test_a_double_click_returns_to_the_chosen_views():
@@ -318,18 +324,18 @@ def test_the_units_toggle_is_shared_with_the_tracker(app_client):
     body = app_client.get('/radar').get_data(as_text=True)
     assert re.findall(r'data-units="(\w+)" aria-pressed="true"', body) == ['metric']
     assert '<script src="/static/units.js"></script>' in body
-    assert body.index('/static/units.js') < body.index('/static/radar-map.js')
+    assert (body.index('/static/units.js') < body.index('/static/scope-controls.js')
+            < body.index('/static/radar-map.js'))
     js = script()
-    assert "var U = DisplayUnits.current();" in js
+    assert "var U = views.units();" in js
     assert "x: data.delay.map(U.distOf)," in js
     assert "text: 'Bistatic Range (' + U.dist + ')'," in js
     # A press rebuilds the plot in the new unit from the last map.
     assert "shape = null;" in js and "if (lastMap) drawMap(lastMap);" in js
-    assert "U = DisplayUnits.current(v);" in js
-    # The narrow range stays in km whichever unit is shown.
-    assert "var km = Math.round(U.distOf(state.narrowKm)) === dist ? state.narrowKm : U.kmOf(dist);" in js
-    # Saved at the gear's cap, it reads back as the reach, not as 30 km.
-    # See docs/features/tracker.md#units
-    assert "if (reach && km > reach) km = reach;" in js
-    assert "cap = reach ? Math.ceil(reach) : MAX_NARROW_KM;" in js
-    assert "return reach ? Math.min(km, reach) : km;" in js
+    assert "U = u;" in js
+    # The toggle, the km storage and the reach clip are the Tracker's own,
+    # from static/scope-controls.js. See docs/features/tracker.md#units
+    shared = controls()
+    assert "U = DisplayUnits.current(v);" in shared
+    assert "var km = Math.round(U.distOf(state.narrowKm)) === dist ? state.narrowKm : U.kmOf(dist);" in shared
+    assert "if (reach && km > reach) km = reach;" in shared

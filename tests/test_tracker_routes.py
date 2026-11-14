@@ -269,6 +269,55 @@ class TestTheAxesComeFromTheNode:
 
 # ── the Doppler view ────────────────────────────────────────────────────────
 
+def controls():
+    """static/scope-controls.js: the views, gear and units toggle the Tracker
+    shares with the Passive Radar page. See docs/features/tracker.md#shared-controls."""
+    from pathlib import Path
+    return (Path(__file__).resolve().parent.parent / 'static' / 'scope-controls.js').read_text()
+
+
+class TestTheScopeControlsAreShared:
+    """One copy of the narrow views, the gear's narrow ranges and the units
+    toggle, for both scope pages, so a fix lands on both at once."""
+
+    SHARED = ('function spanHalfWidth', 'function validNarrow', 'function narrowRange',
+              'function delayReach', 'function validNarrowKm', 'function narrowDelayRange',
+              'function displayDelayRange', 'function labelRangeButtons', 'function setDopView',
+              'function setDelView', 'function setUnits', 'function wireSeg',
+              "getElementById('settingsForm')")
+
+    def test_the_script_is_served_and_loaded_after_units(self, app_client):
+        resp = app_client.get('/static/scope-controls.js')
+        assert resp.status_code == 200
+        assert 'window.ScopeControls' in resp.get_data(as_text=True)
+        page = app_client.get('/tracker').get_data(as_text=True)
+        assert (page.index('/static/units.js') < page.index('/static/scope-controls.js')
+                < page.index('ScopeControls.create('))
+
+    def test_neither_page_keeps_its_own_copy(self, app_client):
+        from pathlib import Path
+        page = app_client.get('/tracker').get_data(as_text=True)
+        radar = (Path(__file__).resolve().parent.parent / 'static' / 'radar-map.js').read_text()
+        shared = controls()
+        for name in self.SHARED:
+            assert name in shared, name
+            assert name not in page, ('tracker.html', name)
+            assert name not in radar, ('radar-map.js', name)
+
+    def test_the_tracker_keeps_its_own_settings_and_drone_fields(self, app_client):
+        """Saved under tracker.*, and the Drone view's gear fields ride along
+        through the dialog hooks."""
+        page = app_client.get('/tracker').get_data(as_text=True)
+        assert "prefix: 'tracker'," in page
+        assert "ScopeControls.storage('tracker')" in page
+        assert ("dialog: { open: openDroneFields, reset: resetDroneFields, "
+                "read: readDroneFields, save: saveDroneFields }") in page
+        js = controls()
+        assert "var extra = dialog.read ? dialog.read() : {};" in js
+        assert "if (!hzOk || !kmOk || !extra) return;" in js
+        assert "if (dialog.save) dialog.save(extra);" in js
+
+
 class TestTheDopplerViewIsPresentationOnly:
     """The node processes its whole span; the page chooses how much to draw.
     The behaviour lives in the page's script, so these pin the contract the
@@ -289,12 +338,13 @@ class TestTheDopplerViewIsPresentationOnly:
         assert 'aria-pressed="false"' in full
 
     def test_narrow_defaults_to_300_hz(self, page):
-        assert re.search(r'var DEFAULT_NARROW_HZ = 300;', page)
+        assert re.search(r'var DEFAULT_NARROW_HZ = 300;', controls())
 
     def test_the_full_view_is_the_nodes_span_not_a_constant(self, page):
         """Full draws AXES.doppler, so a node at another span is drawn at its own."""
         assert json.loads(re.search(r'var AXES = (.+?);\n', page).group(1))["doppler"] == [-1000, 1000]
-        assert "state.dopView === 'narrow' ? narrowRange() : AXES.doppler" in page
+        assert "extent: function () { return { x: AXES.delay, y: AXES.doppler }; }," in page
+        assert "state.dopView === 'narrow' ? narrowRange() : opts.extent().y" in controls()
 
     def test_the_gear_opens_a_settings_dialog_for_the_narrow_range(self, page):
         assert 'id="settingsBtn"' in page and 'aria-haspopup="dialog"' in page
@@ -302,10 +352,12 @@ class TestTheDopplerViewIsPresentationOnly:
         assert 'type="number"' in field and 'min="1"' in field
 
     def test_the_setting_is_kept_in_the_browser_and_never_posted(self, page):
-        assert "remember('narrowHz', n)" in page
-        assert "remember('dopView', v)" in page
-        assert "remember('narrowKm', km)" in page
-        assert "remember('delView', v)" in page
+        js = controls()
+        assert "saved.remember('narrowHz', n)" in js
+        assert "saved.remember('dopView', v)" in js
+        assert "saved.remember('narrowKm', km)" in js
+        assert "saved.remember('delView', v)" in js
+        assert "fetch(" not in js
         # The only requests the page makes besides the stream are Reset wedge
         # and Clear buffer; the wedge view's reads live in static/tracker-wedge.js.
         assert re.findall(r"fetch\('([^']+)'", page) == ['/tracker/coverage/reset', '/tracker/clear']
@@ -334,13 +386,13 @@ class TestTheDelayViewMirrorsTheDopplerView:
         full = re.search(r'<button[^>]*data-del="full"[^>]*>', page).group(0)
         assert 'aria-pressed="false"' in narrow
         assert 'aria-pressed="true"' in full
-        assert "recall('delView', 'full') === 'narrow' ? 'narrow' : 'full'" in page
+        assert "saved.recall('delView', 'full') === 'narrow' ? 'narrow' : 'full'" in controls()
 
     def test_narrow_defaults_to_30_km(self, page):
-        assert re.search(r'var DEFAULT_NARROW_KM = 30;', page)
+        assert re.search(r'var DEFAULT_NARROW_KM = 30;', controls())
 
     def test_the_full_view_is_the_nodes_range_not_a_constant(self, page):
-        assert "state.delView === 'narrow' ? narrowDelayRange() : AXES.delay" in page
+        assert "state.delView === 'narrow' ? narrowDelayRange() : opts.extent().x" in controls()
         assert "xaxis: axis('Bistatic range (' + U.dist + ')', displayDelayRange())" in page
 
     def test_the_gear_dialog_has_a_field_for_the_narrow_delay_range(self, page):
@@ -359,11 +411,11 @@ class TestTheNarrowDelayDefaultFitsTheNode:
     than the 30 km default. Opened on 30, the gear refused every save until
     the delay field was edited by hand."""
 
-    def test_the_default_is_clipped_to_what_the_node_processes(self, app_client):
-        page = app_client.get('/tracker').get_data(as_text=True)
-        assert "Math.min(DEFAULT_NARROW_KM, reach)" in page
-        assert "recall('narrowKm', defaultNarrowKm())" in page
-        assert "narrowKmInput.value = Math.round(U.distOf(defaultNarrowKm()));" in page
+    def test_the_default_is_clipped_to_what_the_node_processes(self):
+        js = controls()
+        assert "Math.min(DEFAULT_NARROW_KM, reach)" in js
+        assert "saved.recall('narrowKm', defaultNarrowKm())" in js
+        assert "narrowKmInput.value = Math.round(U.distOf(defaultNarrowKm()));" in js
 
 
 # ── the Drone view ──────────────────────────────────────────────────────────
@@ -574,21 +626,23 @@ class TestTheUnitsToggle:
         assert "delText: U.fmtDist(narrowDelayRange()[1])" in page
         assert "peak velocity <b>' + U.fmtSpeedMps(m.max_velocity_ms || 0)" in page
 
-    def test_the_narrow_delay_range_is_kept_in_kilometres(self, page):
+    def test_the_narrow_delay_range_is_kept_in_kilometres(self):
         """Typed in the display unit, stored in km, so switching units keeps
         the same range; saved unchanged, the stored km is left alone."""
-        assert "var km = Math.round(U.distOf(state.narrowKm)) === dist ? state.narrowKm : U.kmOf(dist);" in page
-        assert "remember('narrowKm', km);" in page
-        assert "validNarrowKm(parseFloat(recall('narrowKm', defaultNarrowKm())))" in page
+        js = controls()
+        assert "var km = Math.round(U.distOf(state.narrowKm)) === dist ? state.narrowKm : U.kmOf(dist);" in js
+        assert "saved.remember('narrowKm', km);" in js
+        assert "validNarrowKm(parseFloat(saved.recall('narrowKm', defaultNarrowKm())))" in js
 
-    def test_the_narrow_delay_range_reads_back_at_the_reach(self, page):
+    def test_the_narrow_delay_range_reads_back_at_the_reach(self):
         """The gear accepts the reach rounded up in the display unit (60 km or
         38 mi for a 59.96 km reach), so a save is clipped to the reach, and a
         stored value up to the reach rounded up, which the previous build
         saved, reads as the reach rather than falling back to 30 km."""
-        assert "if (reach && km > reach) km = reach;" in page
-        assert "cap = reach ? Math.ceil(reach) : MAX_NARROW_KM;" in page
-        assert "return reach ? Math.min(km, reach) : km;" in page
+        js = controls()
+        assert "if (reach && km > reach) km = reach;" in js
+        assert "cap = reach ? Math.ceil(reach) : MAX_NARROW_KM;" in js
+        assert "return reach ? Math.min(km, reach) : km;" in js
 
     def test_a_switch_redraws_the_axis(self, page):
         assert "+ ':' + U.name," in page
@@ -596,7 +650,8 @@ class TestTheUnitsToggle:
     def test_a_press_switches_even_when_the_store_is_blocked(self, page):
         """Private mode: setItem throws, so the page converts from the value
         pressed rather than re-reading a store that cannot hold it."""
-        assert "U = DisplayUnits.current(v);" in page
+        assert "U = DisplayUnits.current(v);" in controls()
+        assert "onUnitsChange: function (u) { U = u; scheduleRender(); }," in page
 
     def test_the_drone_view_hides_the_toggle(self, page):
         """The Drone view works in metres and m/s; its controls are its own."""

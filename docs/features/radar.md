@@ -15,6 +15,7 @@ to the browser and draws it with Plotly.
 | [src/routes/radar.py](../../src/routes/radar.py) | The `/radar` blueprint: the page, the old Max-Hold address and the data proxy. |
 | [templates/radar.html](../../templates/radar.html) | The page, in the frame it shares with the Tracker ([Scope pages](../architecture.md#scope-pages)). |
 | [static/radar-map.js](../../static/radar-map.js) | The polling loop, the view toggle, the status line and the plot. |
+| [static/scope-controls.js](../../static/scope-controls.js) | The Doppler and Delay views, the gear and the Units toggle, shared with the Tracker. See [Shared controls](tracker.md#shared-controls). |
 | [static/vendor/plotly-2.20.0.min.js](../../static/vendor/plotly-2.20.0.min.js) | Plotly, unmodified. See [Plotly](#plotly). |
 | [src/blah2_client.py](../../src/blah2_client.py) | `Blah2Client.get_raw`, which the proxy goes through. |
 | [src/plot_axes.py](../../src/plot_axes.py) | The node's extent, shared with the Tracker. See [Axes](#axes). |
@@ -70,8 +71,9 @@ when the first map landed.
 ## Doppler and delay views
 
 The toolbar's Doppler and Delay toggles are the Tracker's (see
-[Doppler view](tracker.md#doppler-view) and [Delay view](tracker.md#delay-view)), with the same
-defaults, limits, dialog and wording, so the two pages work the same way:
+[Doppler view](tracker.md#doppler-view) and [Delay view](tracker.md#delay-view)), from the same
+code, `static/scope-controls.js` (see [Shared controls](tracker.md#shared-controls)), so the two
+pages work the same way:
 
 | Toggle | Narrow | Full | Opens on |
 | --- | --- | --- | --- |
