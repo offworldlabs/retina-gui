@@ -24,9 +24,12 @@ class Blah2Client:
         except (requests.RequestException, ValueError):
             return None
 
-    def get_raw(self, path, params=None):
-        """The reply to a GET, whatever its status. Raises requests.RequestException."""
-        return requests.get(f"{self.base_url}{path}", params=params, timeout=self.timeout)
+    def get_raw(self, path, params=None, timeout=None):
+        """The reply to a GET, whatever its status. Raises requests.RequestException.
+
+        timeout overrides the client's default, for a path blah2_api is slow to answer.
+        """
+        return requests.get(f"{self.base_url}{path}", params=params, timeout=timeout or self.timeout)
 
     def retune(self, fc, gain_a, gain_b, lna_state):
         """Request a live retune. Returns (generation, error)."""

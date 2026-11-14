@@ -26,9 +26,9 @@ def upstream(body=b'{}', status=200, content_type='application/json'):
 @pytest.fixture(autouse=True)
 def blah2_reachable():
     """Each test starts with no outage on record."""
-    radar_routes._unreachable = False
+    radar_routes._down.clear()
     yield
-    radar_routes._unreachable = False
+    radar_routes._down.clear()
 
 
 def relaying(response):
@@ -218,7 +218,7 @@ def test_an_outage_is_a_502_logged_once(app_client, caplog):
         first = app_client.get('/radar/data/map')
         app_client.get('/radar/data/map')
     assert first.status_code == 502
-    assert first.get_json()['error'] == 'blah2_api unreachable: ConnectionError'
+    assert first.get_json()['error'] == 'blah2_api /api/map unreachable: ConnectionError'
     assert len([r for r in caplog.records if r.name == 'routes.radar']) == 1
 
 
@@ -233,6 +233,48 @@ def test_the_next_outage_is_logged_too(app_client, caplog):
         with failing:
             app_client.get('/radar/data/map')
     assert len([r for r in caplog.records if r.name == 'routes.radar']) == 2
+
+
+def test_one_failing_source_does_not_flap_the_log(app_client, caplog):
+    """A slow ADS-B lookup while the map answers: each second the page asks for
+    both. One warning naming the ADS-B path, not a warning and a "reachable
+    again" every second. See docs/features/radar.md#the-data-proxy"""
+    def only_adsb_fails(path, params=None, timeout=None):
+        if path == '/api/adsb2dd':
+            raise requests.Timeout('slow')
+        return upstream()
+    with patch.object(app_module.blah2_client, 'get_raw', side_effect=only_adsb_fails), \
+            caplog.at_level(logging.INFO, logger='routes.radar'):
+        for _ in range(3):
+            assert app_client.get('/radar/data/timestamp').status_code == 200
+            assert app_client.get('/radar/data/adsb').status_code == 502
+    logged = [r for r in caplog.records if r.name == 'routes.radar']
+    assert [(r.levelname, r.getMessage()) for r in logged] == [
+        ('WARNING', 'blah2_api /api/adsb2dd unreachable from the radar page: Timeout')]
+
+
+def test_the_end_of_an_outage_names_its_source(app_client, caplog):
+    with caplog.at_level(logging.INFO, logger='routes.radar'):
+        with patch.object(app_module.blah2_client, 'get_raw', side_effect=requests.Timeout('slow')):
+            app_client.get('/radar/data/adsb')
+        with relaying(upstream()):
+            app_client.get('/radar/data/map')
+            app_client.get('/radar/data/adsb')
+    messages = [r.getMessage() for r in caplog.records if r.name == 'routes.radar']
+    assert messages[-1] == 'blah2_api /api/adsb2dd reachable from the radar page again'
+    assert len(messages) == 2
+
+
+def test_the_adsb_source_waits_past_blah2_apis_own_lookup_timeout(app_client):
+    """blah2_api gives up on the lookup after 5 s and answers {}; cut off at the
+    client's 3 s default, the page would never draw ADS-B truth on a node
+    whose lookup is slow."""
+    with relaying(upstream()) as get_raw:
+        app_client.get('/radar/data/adsb')
+        assert get_raw.call_args.kwargs['timeout'] == 7
+        app_client.get('/radar/data/map')
+        assert get_raw.call_args.kwargs['timeout'] is None
+    assert radar_routes.TIMEOUTS_S['adsb'] > 5
 
 
 # ── the shared frame ────────────────────────────────────────────────────────

@@ -219,9 +219,21 @@ The content type is set by `SOURCES` rather than relayed. Older blah2_api labels
 are marked `no-store`, as blah2_api marks its own.
 
 `/api/adsb2dd` answers 400 when ADS-B truth is off. That is relayed as it is, because it is not an
-outage. When blah2_api cannot be reached the route answers 502 and logs one warning per outage,
-since an open page asks several times a second. The page treats any failure as blah2's page did:
-it keeps the last picture and tries again on the next tick.
+outage. When a source cannot be reached the route answers 502 naming the blah2_api path. Outages
+are kept per source and logged once when each starts and once when it ends, naming the path,
+since an open page asks several times a second. They were once one flag for the whole proxy, and
+a slow ADS-B lookup while the map answered then logged "unreachable" and "reachable again" every
+second, blaming blah2_api as a whole. The page treats any failure as blah2's page did: it keeps
+the last picture and tries again on the next tick.
+
+The ADS-B source waits 7 s (`TIMEOUTS_S` in `routes/radar.py`); the others use the client's 3 s.
+blah2_api gives up on its own ADS-B lookup after 5 s (`HTTP_TIMEOUT` in blah2-arm's
+`api/server.js`) and answers `{}`, and a lookup through the rate-limited adsb.lol fallback can
+take that long. Cut off at 3 s, the page would never draw ADS-B truth on such a node, where
+blah2's own page, which had no timeout, did. The two values are coupled across repositories with
+nothing enforcing it: if blah2_api's timeout grows, this one must grow with it. While a lookup
+is slow, the page's once-a-second polls overlap, so up to seven ADS-B requests can be waiting in
+retina-gui at once.
 
 ### Choosing paths on this app
 
