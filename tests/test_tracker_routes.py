@@ -362,6 +362,18 @@ class TestTheDopplerViewIsPresentationOnly:
         # and Clear buffer; the wedge view's reads live in static/tracker-wedge.js.
         assert re.findall(r"fetch\('([^']+)'", page) == ['/tracker/coverage/reset', '/tracker/clear']
 
+    def test_reset_view_is_on_the_page_and_hidden_until_the_plot_is_zoomed(self, page):
+        """Inside the plot's box, so it sits over the plot's corner. The script
+        shows it. See docs/features/tracker.md#reset-view."""
+        box = re.search(r'<div class="trk-plotbox">(.+?)</button>', page, re.S).group(1)
+        assert '<div id="plot"></div>' in box
+        button = re.search(r'<button[^>]*id="resetViewBtn"[^>]*>', box).group(0)
+        assert ' hidden' in button
+        assert "plotDiv.on('plotly_doubleclick', resetView)" in page
+        assert "resetViewBtn.addEventListener('click', resetView)" in page
+        # Plotly's own double-click returns to the first draw's ranges, not the views'.
+        assert 'doubleClick: false' in page
+
     def test_the_out_of_view_alert_is_on_the_page_and_hidden_until_needed(self, page):
         alert = re.search(r'<span[^>]*id="oovAlert"[^>]*>', page).group(0)
         assert 'hidden' in alert

@@ -20,7 +20,14 @@
 }
 
 .trk-plotwrap { display: grid; grid-template-rows: minmax(0, 1fr) auto; min-width: 0; }
+.trk-plotbox { position: relative; min-height: 0; }
 #plot { width: 100%; height: 100%; min-height: 0; }
+/* Inside the plot area's top right corner (the plot's own margins are 12px and
+   14px). Shown only while the viewer's zoom differs from the current views.
+   See docs/features/tracker.md#reset-view */
+.trk-resetview { position: absolute; top: 20px; right: 24px; z-index: 5;
+                 box-shadow: 0 1px 4px rgba(0,0,0,0.12); }
+.trk-resetview[hidden] { display: none; }
 .snr-key { display: flex; align-items: center; gap: 7px; }
 .snr-ramp { width: 96px; height: 8px; border-radius: 999px; border: 1px solid var(--color-border);
             background: linear-gradient(to right, #cde2fb, #9ec5f4, #6da7ec, #3987e5, #1c5cab, #0d366b); }
@@ -285,7 +292,13 @@
 
     <div class="trk-body">
       <div class="trk-plotwrap dd-only">
-        <div id="plot"></div>
+        <div class="trk-plotbox">
+          <div id="plot"></div>
+          <button type="button" id="resetViewBtn" class="ds-btn ghost sm trk-resetview" hidden
+                  title="Zooms back out to the ranges set by the toolbar. Double-clicking the plot does the same.">
+            Reset View
+          </button>
+        </div>
         <div class="scope-foot">
           <div class="snr-key">
             <span class="scope-lab">SNR</span>
@@ -1163,14 +1176,14 @@
         // keeping the old zoom. The legend is off: the rail owns identity now,
         // which is what lets the plot keep its full height and the SNR scale
         // sit under it instead of fighting for the right-hand strip.
-        Plotly.react(plotDiv, traces, {
+        drawScope(traces, {
             uirevision: 'tracker:' + state.dopView + ':' + state.narrowHz
                       + ':' + state.delView + ':' + state.narrowKm + ':' + U.name,
             showlegend: false,
             margin: { t: 12, r: 14, b: 44, l: 58 },
             xaxis: axis('Bistatic range (' + U.dist + ')', displayDelayRange()),
             yaxis: axis('Doppler (Hz)', dopplerRange())
-        }, { displayModeBar: false, responsive: true });
+        });
 
         detCount.textContent = shown.toLocaleString() + ' detections shown'
             + cappedNote() + heldNote();
@@ -1284,14 +1297,14 @@
             }
         }
 
-        Plotly.react(plotDiv, traces, {
+        drawScope(traces, {
             uirevision: 'drone:' + state.droneM + ':' + dop.join(',') + ':' + state.hum.join(','),
             showlegend: false,
             margin: { t: 12, r: 14, b: cell ? 64 : 44, l: 58 },
             shapes: droneShapes(del),
             xaxis: droneXAxis(del),
             yaxis: axis('Doppler (Hz)', dop)
-        }, { displayModeBar: false, responsive: true });
+        });
 
         detCount.textContent = shown.toLocaleString() + ' detections in view in the last ' + state.fade + 's'
             + ' \u00b7 ' + beyond.toLocaleString() + ' outside it'
@@ -1299,6 +1312,73 @@
             + (state.hum.length ? ' · ' + hummed.toLocaleString() + ' in hum rows' : '')
             + cappedNote() + heldNote();
     }
+
+    // ── Reset View ───────────────────────────────────────────────────────
+    //
+    // The one place the scope is drawn, so the Reset View button always knows
+    // the ranges the current views asked for (its "home"). An axis with no
+    // range autoscales. See docs/features/tracker.md#reset-view
+    var resetViewBtn = document.getElementById('resetViewBtn');
+    var homeRange = { xaxis: null, yaxis: null };
+    // The last range each axis autoscaled to, for an autoscaling axis with
+    // nothing drawn: Plotly's autorange then keeps whatever range it has.
+    var autoRange = { xaxis: null, yaxis: null };
+    var scopeListening = false;
+
+    function drawScope(traces, layout) {
+        // Copies: Plotly keeps the layout it is given and writes a zoom into it.
+        homeRange = {
+            xaxis: layout.xaxis.range ? layout.xaxis.range.slice() : null,
+            yaxis: layout.yaxis.range ? layout.yaxis.range.slice() : null
+        };
+        // Plotly's own double-click is off: it returns to the ranges of the
+        // plot's first draw, not the current views. It still emits the event.
+        var config = { displayModeBar: false, responsive: true, doubleClick: false };
+        Plotly.react(plotDiv, traces, layout, config)
+            .then(function () {
+                // plotDiv.on exists only once Plotly has drawn into the div.
+                if (!scopeListening) {
+                    scopeListening = true;
+                    plotDiv.on('plotly_relayout', function () { syncResetView(false); });
+                    plotDiv.on('plotly_doubleclick', resetView);
+                }
+                syncResetView(true);
+            });
+    }
+
+    // drawn: called after a draw, the only time an autoscaled range is
+    // remembered. Mid-gesture an axis can say autorange with a stale range.
+    function axisZoomed(name, drawn) {
+        var ax = plotDiv._fullLayout && plotDiv._fullLayout[name];
+        if (!ax || !ax.range) return false;
+        var home = homeRange[name];
+        if (!home) {
+            if (drawn && ax.autorange !== false) autoRange[name] = ax.range.slice();
+            return ax.autorange === false;
+        }
+        var tol = Math.abs(home[1] - home[0]) * 1e-6;
+        return Math.abs(ax.range[0] - home[0]) > tol || Math.abs(ax.range[1] - home[1]) > tol;
+    }
+
+    function syncResetView(drawn) {
+        var x = axisZoomed('xaxis', drawn), y = axisZoomed('yaxis', drawn);
+        resetViewBtn.hidden = !(x || y);
+    }
+
+    function resetView() {
+        var ranges = {}, auto = {};
+        ['xaxis', 'yaxis'].forEach(function (name) {
+            if (homeRange[name]) { ranges[name + '.range'] = homeRange[name].slice(); return; }
+            if (autoRange[name]) ranges[name + '.range'] = autoRange[name].slice();
+            auto[name + '.autorange'] = true;
+        });
+        // Ranges first, then autorange: with points drawn the second step
+        // refits to them, with none it keeps the range the first step set.
+        Plotly.relayout(plotDiv, ranges).then(function () {
+            if (Object.keys(auto).length) Plotly.relayout(plotDiv, auto);
+        });
+    }
+    resetViewBtn.addEventListener('click', resetView);
 
     // Grey where the detector's settings let nothing be reported (half a cell
     // inside minDelay and minDoppler, as blah2 interpolates), amber dotted over
