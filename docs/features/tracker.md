@@ -15,8 +15,10 @@ surface for Auto-Calibrate.
 | File | Role |
 | --- | --- |
 | [src/routes/tracker.py](../../src/routes/tracker.py) | The `/tracker` blueprint (page, SSE proxy, one-shot snapshot, clear, and the coverage proxies) and the `/tracker-preview` redirect. Computes the plot's axis bounds, and the Drone view's detector settings, from the merged config. |
-| [templates/tracker.html](../../templates/tracker.html) | The page: controls, the Plotly scope, the wedge view's container and reset dialog, the track rail, and the EventSource client. |
+| [templates/tracker.html](../../templates/tracker.html) | The page: controls, the Plotly scope, the wedge view's container and reset dialog, the track rail, and the EventSource client. Its frame (heading, panel, toolbar, status line, segmented controls, footer) is shared with Passive Radar; see [Scope pages](../architecture.md#scope-pages). |
 | [static/tracker-wedge.js](../../static/tracker-wedge.js) | The wedge view: the Leaflet map, the wedge, trails and arcs, and the replay. |
+| [static/scope-controls.js](../../static/scope-controls.js) | The Doppler and Delay views, the gear's narrow ranges and the Units toggle, shared with Passive Radar. See [Shared controls](#shared-controls). |
+| [static/units.js](../../static/units.js) | The km and mi conversions, shared with Passive Radar. See [Units](#units). |
 | [src/retina_tracker_client.py](../../src/retina_tracker_client.py) | `RetinaTrackerClient`: JSONL event tailer plus HTTP control client (`reset`). |
 | [src/services.py](../../src/services.py) | `RETINA_TRACKER_CONTROL_URL` and `RETINA_TRACKER_EVENTS_PATH`, and the single shared client instance. |
 | [src/calibrator.py](../../src/calibrator.py) | The client's listener and `reset()` caller. See [auto-calibrate.md](auto-calibrate.md). |
@@ -165,8 +167,10 @@ indistinguishable from a quiet sky.
 
 ## Axis bounds
 
-`_axis_bounds()` passes the node's ambiguity bounds from its merged blah2 config to the page,
-which uses them as the plot's initial axis ranges:
+`axis_bounds()` in [src/plot_axes.py](../../src/plot_axes.py) passes the node's ambiguity bounds
+from its merged blah2 config to the page, which uses them as the plot's initial axis ranges. The
+[Passive Radar](radar.md#axes) page draws the same bounds, so one node reads at one scale on both
+pages.
 
 | Axis | Config | Units |
 | --- | --- | --- |
@@ -180,7 +184,7 @@ at different scales and cannot be compared. The ambiguity bounds are the only ho
 draw over, and they are the node's own numbers.
 
 An axis is `None` (and autoscales) when the config does not state it, when `fs` is missing (for
-delay), or when `_drawable()` rejects the pair: both ends must be present and high must exceed
+delay), or when `drawable()` rejects the pair: both ends must be present and high must exceed
 low. A transposed pair would draw the axis backwards and a zero-width one would collapse it,
 either way a confident picture of nothing. A guessed range would misrepresent the node as badly
 as autoscaling does, only less visibly. A config that cannot be loaded leaves both axes to
@@ -209,13 +213,15 @@ Doppler control in the toolbar therefore switches what is drawn between two rang
 | Narrow (the default) | ±300 Hz, or whatever the gear sets, clipped to the node's span | `±300` |
 | Full | The node's own bounds from [Axis bounds](#axis-bounds), or autoscale if the config does not state them | `±1000` |
 
-This is presentation only. Nothing is written to config and nothing changes on the node:
+The [Passive Radar](radar.md#doppler-and-delay-views) page has the same two toggles, saved
+separately. This is presentation only. Nothing is written to config and nothing changes on the node:
 blah2, retina-tracker and the stream carry the full span whichever view is drawn. The buttons
 are labelled with the ranges they draw, so they stay truthful on a node with a different span or
 after the narrow range is changed.
 
 The gear in the page header opens Tracker settings, a native `<dialog>` (the page does not load
-Bootstrap's JavaScript), with two fields: this narrow Doppler range and the narrow delay range of
+Bootstrap's JavaScript, and the dialog's styles are shared with the Passive Radar page, see
+[Scope pages](../architecture.md#scope-pages)), with two fields: this narrow Doppler range and the narrow delay range of
 the [Delay view](#delay-view). In developer mode it also holds the [Drone view](#drone-view)'s
 range, hum rows and slow track limit. The Doppler field takes a whole number of hertz, from 1 to
 half the node's span (or up to 100,000 when the span is unknown). Saving checks every field and
@@ -241,14 +247,17 @@ The Delay control in the toolbar does the same for the bistatic range (x) axis:
 | Narrow | From the node's `delayMin` out to 30 km (or the node's furthest range, if that is nearer), or whatever the gear sets, clipped to the node's range | `30 km` |
 | Full (the default) | The node's own bounds from [Axis bounds](#axis-bounds), or autoscale if the config does not state them | `60 km` on a default node |
 
+Labels, the axis and the gear's field are in the browser's [units](#units); the ranges
+themselves are kept in kilometres.
+
 It is presentation only, like the Doppler view: nothing is written to config and the stream
 carries the full range either way. Full is the default because, unlike Doppler, there is no band
 where ordinary traffic sits that the rest of the axis distracts from. Narrow is for looking
 closely at near targets, and a viewer turns it on.
 
 The narrow range is a single far limit, set in the same gear dialog as a whole number of
-kilometres from 1 to the node's furthest processed range rounded up (or up to 1,000 when the range
-is unknown). The 30 km default is clipped to that furthest range, because a node set to the drone
+kilometres or miles from 1 to the node's furthest processed range rounded up in that unit (or up
+to 1,000 km when the range is unknown), and kept in kilometres. The 30 km default is clipped to that furthest range, because a node set to the drone
 profile's `delayMax` of 100 bins processes only 15 km, and a dialog opened on 30 refused every save
 until the delay field was changed by hand. The near end stays at the node's own `delayMin` (slightly below zero on a default
 node, past the direct signal), so narrowing never cuts off the nearest detections. If the node's
@@ -257,6 +266,78 @@ nearest kilometre.
 
 The view applies to the Delay / Doppler scope only. The wedge view's processed range limit is
 the node's real `delayMax` whichever view is drawn.
+
+## Units
+
+The Units control in the toolbar, `km` or `mi`, chooses what the page writes distances and speeds
+in: kilometres and km/h, or miles and mph. It is a presentation choice for this browser, like
+the Doppler and Delay views, and nothing on the node knows about it: the stream, `AXES`, the
+narrow ranges and the out-of-view test all stay in kilometres, and only what is drawn and written
+converts. It changes the range axis and its title, the Delay toggle's labels, the out-of-view
+alert, the gear dialog's narrow delay field, the hover labels, and the rail's peak velocity
+(the stream's m/s as km/h or mph). The Drone view stays in metres: it is an engineering view
+whose cells are range bins, and its own settings are typed in metres and m/s.
+
+The choice is per browser rather than per node because the person reading the miles is whoever
+has the page open: a support engineer used to kilometres, looking at a node in the United
+States, wants kilometres. A node-wide setting in `user.yml` was tried and withdrawn (#133): it
+needed a route that skipped the apply guards, lagged `config.yml` until the next apply, and
+rewrote `user.yml` unlocked beside the calibrator's safe-corner save.
+
+The conversions live in `static/units.js`, one copy for both this page and the
+[Passive Radar page](radar.md), under one `localStorage` key, `display.units`, so switching on
+either page switches both (the other page picks it up on its next load). The key is deliberately
+not a `tracker.*` or `radar.*` one: those are the pages' own view settings, and a unit is not a
+view. A blocked `localStorage` (private mode) reads as metric and the toggle still works for the
+current load. The toggle itself and the gear's delay field are in `static/scope-controls.js` (see
+[Shared controls](#shared-controls)); `units.js` owns the arithmetic; each page keeps its own
+handful of touch points: its `U`, from `views.units()` at load and handed back after a press; `U.distOf` on
+the x values; `U.dist` in the axis title and hover; `U.fmtDist` for labels and alerts;
+`U.fmtSpeedMps` for speeds; and the gear's delay field, which is typed and shown as a whole
+number of the display unit but stored in km (`tracker.narrowKm`), so a browser that switches
+units keeps the same range rather than reading 30 as 30 miles. A field saved unchanged in the
+display unit leaves the stored km alone, so reopening and saving does not re-narrow. The
+validation cap is the node's reach rounded up in the display unit. That cap can lie past the
+reach (a 59.96 km reach is 37.3 mi, so 38 mi is accepted), so a save is clipped to the reach
+before it is stored. On load, a stored km up to the reach rounded up, the most the previous build
+could save, reads as the reach; anything further reads as the default. The unit is part of the
+plot's `uirevision`, so a switch redraws the axis rather than keeping a kilometre zoom over mile
+data.
+
+## Shared controls
+
+The [Doppler view](#doppler-view), the [Delay view](#delay-view), the gear's two narrow ranges and
+the [Units](#units) toggle work the same way on this page and on
+[Passive Radar](radar.md#doppler-and-delay-views), and are one copy of code:
+`static/scope-controls.js`. Each page calls `ScopeControls.create` once, and the module wires the
+toggles and the settings dialog and returns the range functions the page's drawing code reads
+(`narrowRange`, `dopplerRange`, `narrowDelayRange`, `displayDelayRange`, `spanHalfWidth`), plus
+`labelRangeButtons`, `setDopView`, `setDelView` and `units()`. It also offers the small helpers
+both pages use for their other controls: `storage(prefix)` (a page's `remember` and `recall`),
+`wireSeg`, `pressSeg`, `fmtHzRange` and `showFieldError`.
+
+What each page passes in is what differs between them:
+
+| Option | Tracker | Passive Radar |
+| --- | --- | --- |
+| `prefix` | `tracker`, so settings save as `tracker.*` | `radar`, so `radar.*` |
+| `state` | The page's state object; the module adds `dopView`, `narrowHz`, `delView` and `narrowKm` | The same |
+| `extent()` | `AXES`, fixed when the page loads | `full`, which widens to a map's own extent, so it is read on every call |
+| `onViewChange()` | `scheduleRender` | Redraw the ranges and the out-of-view alert |
+| `onUnitsChange(U)` | Take the new `U` and redraw | Take the new `U`, retitle the axis and rebuild the plot from the last map |
+| `labelExtra()` | The Drone view's slow-track button | None |
+| `dialog` | The Drone view's gear fields: `open`, `reset`, `read` (values or null after showing errors) and `save` | None |
+
+Saving the gear checks the narrow fields and then the page's own (`dialog.read`) and saves nothing
+unless every field is valid, as before. The module is loaded after `static/units.js` and before
+the page's own script.
+
+The two copies had already drifted before they were joined: the radar page rounded `fmtHzRange`
+and floored `spanHalfWidth`, because its span can widen to a map's fractional extent, while the
+Tracker did neither. The shared code keeps the radar's version; on the Tracker it changes nothing,
+because `AXES` comes from whole-number config values. The joining was prompted by the narrow-range
+fix that had to be made twice, once per copy, and `tests/test_tracker_routes.py` checks that
+neither page defines the shared functions again.
 
 ## Out-of-view alert
 
@@ -461,18 +542,20 @@ The rail beside the scope lists every track in the window.
 - **Flagged tracks get a dot, not a badge.** retina-tracker's anomaly detector is not trusted
   yet, and a solid label would be read as a verdict. The expanded row lists the anomaly types
   marked "(provisional)".
-- **Clicking a row** expands a detail panel: first and last seen, length, peak velocity and
+- **Clicking a row** expands a detail panel: first and last seen, length, peak velocity (in the
+  browser's [units](#units)) and
   shadow fraction. In the wedge view it also [replays the track](#replaying-a-track).
 - **Hide** (eye) removes a track from the scope but keeps its row. **Remove** (bin) drops the row
   too; removals are per browser and can be undone with Restore in the rail footer.
 
 View window, layer, track overlay, sort, filter, Doppler view (`tracker.dopView`), the narrow
 Doppler range (`tracker.narrowHz`), delay view (`tracker.delView`), the narrow delay range
-(`tracker.narrowKm`), the display (`tracker.display`) and the [Drone view](#drone-view)'s settings
+(`tracker.narrowKm`, always in km), the display (`tracker.display`) and the [Drone view](#drone-view)'s settings
 (`fade`, `floor`, `dtracks`, `droneM`, `hum`, `slowMs`) are remembered in `localStorage`
 (`tracker.*` keys) and
-restored into the controls before connecting. They are per browser: nothing about the page's
-presentation is stored on the node.
+restored into the controls before connecting, and the [units](#units) under `display.units`,
+shared with the radar page. They are per browser: nothing about the page's presentation is
+stored on the node.
 
 The page is full width with a viewport-clamped height, since both the plot and the rail want
 every pixel; below 900 px the rail stacks under the plot.

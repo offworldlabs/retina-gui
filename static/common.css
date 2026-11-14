@@ -1403,3 +1403,80 @@ main > .cfg-group:first-of-type { margin-top: 0; }
 .sim-readout .v { font-family: var(--font-mono); font-weight: 500; color: var(--ink);
                   font-variant-numeric: tabular-nums; }
 .sim-hint { margin: 10px 0 0; font-size: 11.5px; color: var(--ink-3); max-width: 64ch; }
+
+/* ══════════════════════════════════════════════
+   SCOPE PAGES (Tracker, Passive Radar)
+   A heading row, then one framed panel: a toolbar with a status line and
+   segmented controls, the plot, and a footer key.
+   See docs/architecture.md#scope-pages
+   ══════════════════════════════════════════════ */
+/* Full width. These pages are plots, and want every pixel: a delay axis
+   spanning hundreds of km. Nothing in base.html constrains the content block. */
+.scope-wrap { max-width: none; margin: 0; padding: 18px 20px 28px; }
+/* Centred, not baseline-aligned: a 9.5px chip sitting on a 25.6px baseline
+   hangs below the middle of the word beside it. */
+.scope-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 14px; }
+.scope-head h1 { margin: 0; font-size: 1.6rem; }
+
+.scope-panel { border: 1px solid var(--color-border); border-radius: var(--radius); background: var(--color-card); overflow: hidden; }
+
+.scope-bar { display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+             padding: 10px 13px; border-bottom: 1px solid var(--color-border); background: var(--color-bg-warm); }
+/* The dot is green by default: .stale is amber, .lost is red. */
+.scope-status { font-family: var(--font-mono, monospace); font-size: 11px; color: var(--color-muted); }
+.scope-status .dot { display: inline-block; width: 6px; height: 6px; border-radius: 50%;
+                     background: var(--color-success); margin-right: 6px; vertical-align: 1px; }
+.scope-status.stale .dot { background: var(--color-warning); }
+.scope-status.lost .dot { background: var(--color-danger); }
+.scope-spacer { flex: 1 1 auto; }
+
+.scope-ctl { display: inline-flex; align-items: center; gap: 6px; }
+.scope-lab { font-family: var(--font-mono, monospace); font-size: 10px; letter-spacing: .08em;
+             text-transform: uppercase; color: var(--color-muted); }
+
+/* A segmented control: buttons in a group, the pressed one filled. Scoped to
+   these pages because .seg also names the Configuration page's peak-meter
+   segments (.peak-meter .seg). */
+.scope-wrap .seg { display: inline-flex; border: 1px solid var(--color-border); border-radius: var(--radius-sm);
+                   overflow: hidden; background: var(--color-card); }
+.scope-wrap .seg button { font: inherit; font-size: 11.5px; padding: 4px 10px; border: 0;
+                          border-right: 1px solid var(--color-border); background: transparent;
+                          color: var(--color-muted); cursor: pointer; white-space: nowrap; }
+.scope-wrap .seg button:last-child { border-right: 0; }
+.scope-wrap .seg button:hover { color: var(--color-text); background: var(--color-bg-warm); }
+.scope-wrap .seg button[aria-pressed="true"] { background: var(--color-text); color: var(--color-card); }
+
+.scope-foot { display: flex; align-items: center; gap: 10px; padding: 7px 13px 8px;
+              border-top: 1px solid var(--color-border-light); }
+
+/* Icon buttons, such as the settings gear. */
+.ic-btn { display: grid; place-items: center; width: 24px; height: 24px; padding: 0; border: 0;
+          border-radius: var(--radius-sm); background: transparent; color: var(--color-muted); cursor: pointer; }
+.ic-btn:hover { background: var(--color-border-light); color: var(--color-text); }
+.ic-btn.dngr:hover { color: var(--color-danger); }
+.ic-btn svg { width: 15px; height: 15px; display: block; }
+
+.linkbtn { font: inherit; background: none; border: 0; padding: 0; color: var(--color-primary);
+           cursor: pointer; text-decoration: underline; text-underline-offset: 2px; }
+
+/* What a narrow view cannot show. Warning colours, because it is a prompt to
+   look, not a fault. */
+.oov-alert { display: inline-flex; align-items: center; gap: 7px; font-family: var(--font-mono, monospace);
+             font-size: 11px; color: var(--warn-ink); background: var(--warn-soft);
+             border: 1px solid oklch(0.87 0.06 75); border-radius: 999px; padding: 2px 4px 2px 9px; }
+.oov-alert[hidden] { display: none; }
+.oov-alert .linkbtn { font-size: 11px; color: var(--warn-ink); padding: 0 5px; }
+
+/* The settings dialog: a native <dialog>, since these pages do not load
+   Bootstrap's JavaScript. */
+.scope-dlg { border: 1px solid var(--color-border); border-radius: var(--radius); padding: 0;
+             width: min(420px, calc(100vw - 32px)); background: var(--color-card); color: var(--color-text); }
+.scope-dlg::backdrop { background: rgba(20, 22, 28, 0.35); }
+.scope-dlg h2 { margin: 0; font-size: 1.05rem; }
+.dlg-head { padding: 14px 16px 0; }
+.dlg-body { padding: 12px 16px 4px; }
+.dlg-body .ds-field + .ds-field { margin-top: 16px; }
+.dlg-input-row { display: flex; align-items: center; gap: 8px; font-family: var(--font-mono, monospace); }
+.dlg-input-row .ds-input { width: 120px; }
+.dlg-err { font-size: 12px; color: var(--color-danger); }
+.dlg-foot { display: flex; align-items: center; gap: 8px; padding: 12px 16px 14px; }

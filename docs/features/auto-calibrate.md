@@ -16,7 +16,7 @@ is now).
 | --- | --- |
 | [src/calibrator.py](../../src/calibrator.py) | `Calibrator`: the search engine. Runs in a background thread, keeps status in an in-memory dict under a lock. Imports no Flask, subprocess or Docker. |
 | [src/routes/calibrate.py](../../src/routes/calibrate.py) | `/calibrate/start`, `/status`, `/cancel`, `/apply`. Guards, candidate tower list, persisting a result to `user.yml`. |
-| [src/blah2_client.py](../../src/blah2_client.py) | `Blah2Client`: thin HTTP wrapper over blah2_api (retune, retune status, overload status, detections, ADS-B). Every getter returns `None` on failure so the engine can be tested against a fake. |
+| [src/blah2_client.py](../../src/blah2_client.py) | `Blah2Client`: thin HTTP wrapper over blah2_api (retune, retune status, overload status, detections, ADS-B). Every getter returns `None` on failure so the engine can be tested against a fake. `get_raw` is the exception: it serves the [radar pages](radar.md), which relay the reply rather than read it. |
 | [src/retina_tracker_client.py](../../src/retina_tracker_client.py) | Shared client for the retina-tracker sidecar. The engine registers a listener for confirmed-track events and calls `reset()`. |
 | [static/calibrate.js](../../static/calibrate.js) | `window.RetinaCalibrate`: shared driver for all UI entry points (run shapes, phase and outcome labels, result interpretation, fetch and poll calls). |
 | [templates/setup/_calibrate.html](../../templates/setup/_calibrate.html) | The setup wizard's "Optimise reception" step: the two notch filters, then the run. |

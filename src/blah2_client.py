@@ -2,7 +2,8 @@
 
 Isolates all blah2_api HTTP calls so the calibrator can be tested against a
 fake client. Getters return parsed JSON dicts, or None on any transport or
-parse failure, which callers treat as "no data yet".
+parse failure, which callers treat as "no data yet". get_raw is the exception:
+the radar pages relay the reply rather than read it.
 """
 
 import requests
@@ -22,6 +23,13 @@ class Blah2Client:
             return resp.json()
         except (requests.RequestException, ValueError):
             return None
+
+    def get_raw(self, path, params=None, timeout=None):
+        """The reply to a GET, whatever its status. Raises requests.RequestException.
+
+        timeout overrides the client's default, for a path blah2_api is slow to answer.
+        """
+        return requests.get(f"{self.base_url}{path}", params=params, timeout=timeout or self.timeout)
 
     def retune(self, fc, gain_a, gain_b, lna_state):
         """Request a live retune. Returns (generation, error)."""

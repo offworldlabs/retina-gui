@@ -280,6 +280,7 @@ class TestHomepageModeRendering:
 
         response = app_client.get('/')
         assert b'Passive Radar' not in response.data
+        assert b'href="/radar' not in response.data
         assert b'49152' not in response.data
 
 

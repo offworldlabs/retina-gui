@@ -175,6 +175,7 @@ Route modules are imported at the bottom of `app.py`, after the app exists, beca
 | `mode` | [routes/sdr.py](../src/routes/sdr.py) | [sdr-mode.md](features/sdr-mode.md) |
 | `network` | [routes/network.py](../src/routes/network.py) | [sdr-mode.md](features/sdr-mode.md) |
 | `calibrate` | [routes/calibrate.py](../src/routes/calibrate.py) | [auto-calibrate.md](features/auto-calibrate.md) |
+| `radar` | [routes/radar.py](../src/routes/radar.py) | [radar.md](features/radar.md) |
 | `tracker`, `tracker_legacy` | [routes/tracker.py](../src/routes/tracker.py) | [tracker.md](features/tracker.md) |
 | `fleet` | [routes/fleet.py](../src/routes/fleet.py) | [fleet-and-naming.md](features/fleet-and-naming.md), [Summary page](#summary-page) |
 | `remote_access` | [routes/remote_access.py](../src/routes/remote_access.py) | [remote-access.md](features/remote-access.md) |
@@ -249,11 +250,12 @@ invisibly with no way to cancel it short of waiting out the budget or restarting
 - It does nothing while the setup wizard is in progress, because the wizard redirects `/config`
   back to itself and the two would bounce forever.
 - Allowed prefixes (`_CALIBRATION_ALLOWED_PREFIXES`): `/config` (the page and the status
-  endpoints its modal polls), `/calibrate`, `/static`, `/favicon`, and the fleet-scope routes
-  `/summary`, `/api/fleet` and `/healthz`. Fleet routes belong to whoever is browsing, who may
-  not be the person who started the run. `/healthz` is how every other node decides whether
+  endpoints its modal polls), `/calibrate`, `/radar`, `/static`, `/favicon`, and the fleet-scope
+  routes `/summary`, `/api/fleet` and `/healthz`. Fleet routes belong to whoever is browsing, who
+  may not be the person who started the run. `/healthz` is how every other node decides whether
   this one still exists, so redirecting it would make a calibrating node look unreachable to
-  its peers.
+  its peers. `/radar` is read-only and is how an owner watches a run, so an open display keeps
+  drawing through one. See [radar.md](features/radar.md#during-a-calibration-run).
 
 ## Sessions and CSRF
 
@@ -528,7 +530,7 @@ redirects to `/set-up` while the setup wizard is in progress. Otherwise it shows
   the node identifier (`node_ref`) and state, and the `detail` prose from retina-telemetry
   verbatim: mapping its states to our own wording would be a second vocabulary to keep in step
   with a file we do not own. See [device-state-and-telemetry.md](features/device-state-and-telemetry.md).
-- Service cards (Passive Radar, Max-Hold, ADS-B Map, Tracker, Controller), or the spectrum
+- Service cards (Passive Radar, ADS-B Map, Tracker, Controller), or the spectrum
   iframe or SDRconnect panel in those modes (see [sdr-mode.md](features/sdr-mode.md)).
   Controller is last because it is the way into every view the other cards do not cover. The
   Tracker card reads "Live & 4hr Track Data": the 4 hours is the sidecar's limit; see
@@ -541,8 +543,14 @@ page. The shared alias is a way in, and the fleet banner moves you between nodes
 
 ### Service card links
 
-The service cards point at other ports on the node (blah2's web UI, tar1090). A script builds
-each link from the hostname the browser actually used, so the link stays on this node.
+Passive Radar opens this app's radar page (`/radar`, see [radar.md](features/radar.md)), whose
+toggle switches between its Live and Max-Hold views, so its card is a plain link that works the
+same on every pathway. Like the Tracker's card, it opens in the same tab, since both are pages
+of this app with the app's navigation. The tutorial's advice to read Max-Hold beside the ADS-B
+Map still works: the ADS-B Map card opens a new tab.
+
+The other service cards point at other ports on the node (blah2's web UI, tar1090). A script
+builds each link from the hostname the browser actually used, so the link stays on this node.
 
 Over the support tunnel those ports are not reachable: Cloudflare proxies a fixed set of ports
 and these are not among them, and an `http://` link on an `https://` page is blocked as mixed
@@ -550,6 +558,36 @@ content anyway. The tunnel instead routes a few paths on the same hostname to th
 so remotely a card with `data-remote-path` becomes a same-origin link. A card with no remote
 path is disabled (`.disabled`, which carries `pointer-events: none`) and labelled "Only on this
 node's own network" rather than looking clickable and failing.
+
+## Scope pages
+
+The Tracker and Passive Radar pages share one frame, so the two plots read as one product. Its
+styles are the SCOPE PAGES section of `static/common.css`:
+
+| Class | Role |
+| --- | --- |
+| `scope-wrap` | Full-width page body. These pages are plots and want every pixel. |
+| `scope-head` | The heading row: the page title, then the page's top-level toggle on the right. |
+| `scope-panel` | The framed panel holding everything below the heading. |
+| `scope-bar` | The toolbar: the status line on the left, controls on the right. |
+| `scope-status` | The status line. Its dot is green, amber with `.stale`, red with `.lost`. |
+| `scope-ctl`, `scope-lab` | A labelled control group, and its small uppercase label. |
+| `.scope-wrap .seg` | A segmented control: a row of buttons, the pressed one filled (`aria-pressed`). |
+| `scope-foot` | The footer under the plot: keys on the left, a readout on the right. |
+| `scope-spacer` | Pushes what follows to the right. |
+| `ic-btn` | An icon button, such as the settings gear. |
+| `oov-alert` | The warning pill for what a narrow view leaves off the plot, with a `linkbtn` to widen it. |
+| `linkbtn` | A button drawn as a link. |
+| `scope-dlg`, `dlg-head`, `dlg-body`, `dlg-input-row`, `dlg-err`, `dlg-foot` | The settings dialog, a native `<dialog>`. |
+
+The segmented control is scoped to `.scope-wrap` because `.seg` also names the Configuration
+page's peak-meter segments (`.peak-meter .seg`); a bare `.seg` rule would restyle that meter.
+`tests/test_radar_routes.py` checks no bare `.seg` rule is added. Each page keeps its own layout
+inside the panel, such as the Tracker's track rail.
+
+The pages share behaviour as well as styles, in two scripts: `static/units.js`, the km and mi
+conversions, and `static/scope-controls.js`, the Doppler and Delay views, the gear's narrow ranges
+and the Units toggle. See [Shared controls](features/tracker.md#shared-controls).
 
 ## Summary page
 

@@ -155,7 +155,7 @@ Summary and on Home is a [click-through step](#click-through-steps).
 | Home | Passive Radar: detections | Its service card, and white dots in the example image |
 | Home | Passive Radar: expected flights | Its service card, and orange dots in the example image |
 | Home | Passive Radar: do they line up? | Its service card, and a matched and an unmatched dot |
-| Home | Max-Hold | Its service card, with an example image |
+| Home | Passive Radar: Max-Hold | The Passive Radar card, with an example image of the Max-Hold view |
 | Home | ADS-B Map | Its service card, with an example image |
 | Home | Tracker | Its service card, with an example image |
 | Home | Controller | Its service card, with a link to the wiki's Understanding Node Data page |

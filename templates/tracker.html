@@ -6,39 +6,8 @@
 {% endblock %}
 
 {% block style %}
-/* Full width. This page is a plot with a list beside it, and both want every
-   pixel: a delay axis spanning 320 km and a rail whose rows truncate. Nothing
-   in base.html constrains the content block, so the cap was only ever here. */
-.trk-wrap { max-width: none; margin: 0; padding: 18px 20px 28px; }
-/* Centred, not baseline-aligned: a 9.5px chip sitting on a 25.6px baseline
-   hangs below the middle of the word beside it. */
-.trk-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 14px; }
-.trk-head h1 { margin: 0; font-size: 1.6rem; }
-
-.trk-panel { border: 1px solid var(--color-border); border-radius: var(--radius); background: var(--color-card); overflow: hidden; }
-
-.trk-bar { display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
-           padding: 10px 13px; border-bottom: 1px solid var(--color-border); background: var(--color-bg-warm); }
-.trk-status { font-family: var(--font-mono, monospace); font-size: 11px; color: var(--color-muted); }
-.trk-status .dot { display: inline-block; width: 6px; height: 6px; border-radius: 50%;
-                   background: var(--color-success); margin-right: 6px; vertical-align: 1px; }
-.trk-status.stale .dot { background: var(--color-warning); }
-.trk-status.lost .dot { background: var(--color-danger); }
-.trk-spacer { flex: 1 1 auto; }
-
-.trk-ctl { display: inline-flex; align-items: center; gap: 6px; }
-.trk-lab { font-family: var(--font-mono, monospace); font-size: 10px; letter-spacing: .08em;
-           text-transform: uppercase; color: var(--color-muted); }
-
-.seg { display: inline-flex; border: 1px solid var(--color-border); border-radius: var(--radius-sm);
-       overflow: hidden; background: var(--color-card); }
-.seg button { font: inherit; font-size: 11.5px; padding: 4px 10px; border: 0;
-              border-right: 1px solid var(--color-border); background: transparent;
-              color: var(--color-muted); cursor: pointer; white-space: nowrap; }
-.seg button:last-child { border-right: 0; }
-.seg button:hover { color: var(--color-text); background: var(--color-bg-warm); }
-.seg button[aria-pressed="true"] { background: var(--color-text); color: var(--color-card); }
-
+/* The heading, panel, toolbar, status line, segmented controls and footer
+   are shared with the Passive Radar page, in common.css (SCOPE PAGES). */
 /* Height follows the viewport now that width is not the limit: a fixed 640px
    left most of a large screen empty below the panel. Clamped so it stays
    usable on a laptop and does not become a letterbox on a monitor. */
@@ -52,8 +21,6 @@
 
 .trk-plotwrap { display: grid; grid-template-rows: minmax(0, 1fr) auto; min-width: 0; }
 #plot { width: 100%; height: 100%; min-height: 0; }
-.trk-foot { display: flex; align-items: center; gap: 10px; padding: 7px 13px 8px;
-            border-top: 1px solid var(--color-border-light); }
 .snr-key { display: flex; align-items: center; gap: 7px; }
 .snr-ramp { width: 96px; height: 8px; border-radius: 999px; border: 1px solid var(--color-border);
             background: linear-gradient(to right, #cde2fb, #9ec5f4, #6da7ec, #3987e5, #1c5cab, #0d366b); }
@@ -103,11 +70,6 @@
 
 .trk-acts { display: flex; gap: 2px; opacity: .4; }
 .trk-row:hover .trk-acts, .trk-row:focus-within .trk-acts { opacity: 1; }
-.ic-btn { display: grid; place-items: center; width: 24px; height: 24px; padding: 0; border: 0;
-          border-radius: var(--radius-sm); background: transparent; color: var(--color-muted); cursor: pointer; }
-.ic-btn:hover { background: var(--color-border-light); color: var(--color-text); }
-.ic-btn.dngr:hover { color: var(--color-danger); }
-.ic-btn svg { width: 15px; height: 15px; display: block; }
 
 .trk-row.hid .trk-swatch { opacity: .3; }
 .trk-row.hid .trk-id { color: var(--color-muted); }
@@ -124,36 +86,18 @@
 
 .chip.oov { color: var(--warn-ink); background: var(--warn-soft); border-color: oklch(0.87 0.06 75); }
 
-/* Tracks the narrow Doppler view cannot show. Warning colours, because it is
-   a prompt to look, not a fault. */
-.oov-alert { display: inline-flex; align-items: center; gap: 7px; font-family: var(--font-mono, monospace);
-             font-size: 11px; color: var(--warn-ink); background: var(--warn-soft);
-             border: 1px solid oklch(0.87 0.06 75); border-radius: 999px; padding: 2px 4px 2px 9px; }
-.oov-alert[hidden] { display: none; }
-.oov-alert .linkbtn { font-size: 11px; color: var(--warn-ink); padding: 0 5px; }
 
-.trk-dlg { border: 1px solid var(--color-border); border-radius: var(--radius); padding: 0;
-           width: min(420px, calc(100vw - 32px)); background: var(--color-card); color: var(--color-text); }
-.trk-dlg::backdrop { background: rgba(20, 22, 28, 0.35); }
-.trk-dlg h2 { margin: 0; font-size: 1.05rem; }
-.dlg-head { padding: 14px 16px 0; }
-.dlg-body { padding: 12px 16px 4px; }
-.dlg-body .ds-field + .ds-field { margin-top: 16px; }
-.dlg-input-row { display: flex; align-items: center; gap: 8px; font-family: var(--font-mono, monospace); }
-.dlg-input-row .ds-input { width: 120px; }
-.dlg-err { font-size: 12px; color: var(--color-danger); }
-.dlg-foot { display: flex; align-items: center; gap: 8px; padding: 12px 16px 14px; }
 
 /* ── The wedge view ───────────────────────────────────────
    One panel, two displays: only the active one's controls and body show.
    See docs/features/tracker.md#wedge-view */
-.trk-panel[data-display="wedge"] .dd-only,
-.trk-panel:not([data-display="wedge"]) .wedge-only { display: none !important; }
+.scope-panel[data-display="wedge"] .dd-only,
+.scope-panel:not([data-display="wedge"]) .wedge-only { display: none !important; }
 
 /* The Drone view draws on the scope with its own controls, in developer mode
    only. See docs/features/tracker.md#drone-view */
-.trk-panel[data-display="drone"] .no-drone,
-.trk-panel:not([data-display="drone"]) .drone-only { display: none !important; }
+.scope-panel[data-display="drone"] .no-drone,
+.scope-panel:not([data-display="drone"]) .drone-only { display: none !important; }
 .drone-key { display: inline-flex; align-items: center; gap: 6px; font-family: var(--font-mono, monospace);
              font-size: 10.5px; color: var(--ink-2); white-space: nowrap; }
 .drone-key i { display: inline-block; width: 14px; height: 9px; border-radius: 2px; }
@@ -161,7 +105,7 @@
 .drone-key .hum { background: rgba(217, 119, 6, .22); border: 1px dashed rgba(180, 83, 9, .7); }
 
 .wedge-wrap { display: grid; grid-template-rows: minmax(0, 1fr) auto; grid-template-columns: minmax(0, 1fr); min-width: 0; }
-.wedge-wrap .trk-foot { flex-wrap: wrap; row-gap: 4px; }
+.wedge-wrap .scope-foot { flex-wrap: wrap; row-gap: 4px; }
 @media (max-width: 900px) { .wedge-wrap { height: 460px; } }
 .wedge-box { position: relative; min-height: 0; }
 #wedgeMap { position: absolute; inset: 0; background: #f4f3ef; }
@@ -195,18 +139,16 @@
 .rail-foot { padding: 8px 11px; border-top: 1px solid var(--color-border-light);
              font-family: var(--font-mono, monospace); font-size: 10.5px; color: var(--color-muted);
              display: flex; align-items: center; gap: 8px; min-height: 36px; }
-.linkbtn { font: inherit; background: none; border: 0; padding: 0; color: var(--color-primary);
-           cursor: pointer; text-decoration: underline; text-underline-offset: 2px; }
 {% endblock %}
 
 {% block content %}
-<div class="trk-wrap">
-  <div class="trk-head">
+<div class="scope-wrap">
+  <div class="scope-head">
     <h1>Tracker</h1>
     <span class="beta-chip">Beta</span>
-    <span class="trk-spacer"></span>
-    <div class="trk-ctl">
-      <span class="trk-lab">Display</span>
+    <span class="scope-spacer"></span>
+    <div class="scope-ctl">
+      <span class="scope-lab">Display</span>
       <div class="seg" role="group" aria-label="Display">
         <button type="button" data-display="scope" aria-pressed="true">Delay / Doppler</button>
         {%- if drone %}
@@ -223,18 +165,18 @@
     </button>
   </div>
 
-  <div class="trk-panel" id="trkPanel" data-display="scope">
-    <div class="trk-bar">
-      <span class="trk-status" id="trkStatus"><span class="dot"></span>connecting&hellip;</span>
+  <div class="scope-panel" id="trkPanel" data-display="scope">
+    <div class="scope-bar">
+      <span class="scope-status" id="trkStatus"><span class="dot"></span>connecting&hellip;</span>
       <span class="oov-alert dd-only" id="oovAlert" role="status" hidden
             title="Tracks in this window with a point outside the narrow Doppler or delay range. The node processes its full span; only the plot is narrowed.">
         <span id="oovText"></span>
         <button type="button" class="linkbtn" id="oovShowBtn">Show full span</button>
       </span>
-      <span class="trk-spacer"></span>
+      <span class="scope-spacer"></span>
 
-      <div class="trk-ctl dd-only no-drone">
-        <span class="trk-lab">Doppler</span>
+      <div class="scope-ctl dd-only no-drone">
+        <span class="scope-lab">Doppler</span>
         <div class="seg" role="group" aria-label="Doppler range">
           <button type="button" data-dop="narrow" aria-pressed="true" id="dopNarrowBtn"
                   title="The narrow range, set with the gear. Where ordinary air traffic sits.">&plusmn;300</button>
@@ -243,8 +185,8 @@
         </div>
       </div>
 
-      <div class="trk-ctl dd-only no-drone">
-        <span class="trk-lab">Delay</span>
+      <div class="scope-ctl dd-only no-drone">
+        <span class="scope-lab">Delay</span>
         <div class="seg" role="group" aria-label="Delay range">
           <button type="button" data-del="narrow" aria-pressed="false" id="delNarrowBtn"
                   title="The narrow range, set with the gear. The near part of the bistatic range axis.">30 km</button>
@@ -253,8 +195,20 @@
         </div>
       </div>
 
-      <div class="trk-ctl no-drone">
-        <span class="trk-lab">View</span>
+      {# Kilometres or miles, for this browser, shared with the Passive Radar page.
+         See docs/features/tracker.md#units #}
+      <div class="scope-ctl no-drone">
+        <span class="scope-lab">Units</span>
+        <div class="seg" role="group" aria-label="Units">
+          <button type="button" data-units="metric" aria-pressed="true"
+                  title="Kilometres and km/h.">km</button>
+          <button type="button" data-units="imperial" aria-pressed="false"
+                  title="Miles and mph. The Drone view stays in metres.">mi</button>
+        </div>
+      </div>
+
+      <div class="scope-ctl no-drone">
+        <span class="scope-lab">View</span>
         <div class="seg" role="group" aria-label="View window">
           <button type="button" data-win="300" aria-pressed="false">5m</button>
           <button type="button" data-win="900" aria-pressed="true">15m</button>
@@ -263,8 +217,8 @@
         </div>
       </div>
 
-      <div class="trk-ctl dd-only">
-        <span class="trk-lab">Detections</span>
+      <div class="scope-ctl dd-only">
+        <span class="scope-lab">Detections</span>
         <div class="seg" role="group" aria-label="Detection layer">
           <button type="button" data-layer="all" aria-pressed="true">All</button>
           <button type="button" data-layer="unassociated" aria-pressed="false"
@@ -277,8 +231,8 @@
         </div>
       </div>
 
-      <div class="trk-ctl no-drone">
-        <span class="trk-lab">Tracks</span>
+      <div class="scope-ctl no-drone">
+        <span class="scope-lab">Tracks</span>
         <div class="seg" role="group" aria-label="Track overlay">
           <button type="button" data-tracks="on" aria-pressed="true">On</button>
           <button type="button" data-tracks="off" aria-pressed="false"
@@ -287,16 +241,16 @@
       </div>
       {%- if drone %}
 
-      <div class="trk-ctl drone-only">
-        <span class="trk-lab">Fade</span>
+      <div class="scope-ctl drone-only">
+        <span class="scope-lab">Fade</span>
         <div class="seg" role="group" aria-label="Fade time">
           <button type="button" data-fade="15" aria-pressed="false">15s</button>
           <button type="button" data-fade="30" aria-pressed="true">30s</button>
         </div>
       </div>
 
-      <div class="trk-ctl drone-only">
-        <span class="trk-lab">SNR</span>
+      <div class="scope-ctl drone-only">
+        <span class="scope-lab">SNR</span>
         <div class="seg" role="group" aria-label="SNR floor"
              title="Hides weaker detections from the plot only. The detector and the tracker still see them.">
           <button type="button" data-floor="0" aria-pressed="true">All</button>
@@ -306,8 +260,8 @@
         </div>
       </div>
 
-      <div class="trk-ctl drone-only">
-        <span class="trk-lab">Tracks</span>
+      <div class="scope-ctl drone-only">
+        <span class="scope-lab">Tracks</span>
         <div class="seg" role="group" aria-label="Drone track overlay">
           <button type="button" data-dtracks="all" aria-pressed="false">All</button>
           <button type="button" data-dtracks="slow" aria-pressed="true" id="slowTracksBtn"
@@ -332,18 +286,18 @@
     <div class="trk-body">
       <div class="trk-plotwrap dd-only">
         <div id="plot"></div>
-        <div class="trk-foot">
+        <div class="scope-foot">
           <div class="snr-key">
-            <span class="trk-lab">SNR</span>
+            <span class="scope-lab">SNR</span>
             <span class="snr-ramp" aria-hidden="true"></span>
-            <span class="trk-lab">0 &rarr; 20 dB</span>
+            <span class="scope-lab">0 &rarr; 20 dB</span>
           </div>
           {%- if drone %}
           <span class="drone-key drone-only" title="Where the detector's settings (minDelay, minDoppler) let nothing be reported."><i class="untested"></i>Not tested</span>
           <span class="drone-key drone-only" title="Doppler rows set with the gear, such as mains hum. Detections in them are drawn grey, not hidden."><i class="hum"></i>Hum rows</span>
           {%- endif %}
-          <span class="trk-spacer"></span>
-          <span class="trk-lab" id="detCount"></span>
+          <span class="scope-spacer"></span>
+          <span class="scope-lab" id="detCount"></span>
         </div>
       </div>
 
@@ -353,31 +307,31 @@
           <div class="wedge-ov wedge-hud" id="wedgeHud" role="status" hidden>
             <div class="wedge-hud-top">
               <span class="wedge-hud-dot" id="wedgeHudDot"></span><b id="wedgeHudTitle"></b>
-              <span class="trk-spacer"></span><span id="wedgeHudClock"></span>
+              <span class="scope-spacer"></span><span id="wedgeHudClock"></span>
             </div>
             <div class="wedge-hud-bar"><span id="wedgeHudBar"></span></div>
             <div class="wedge-hud-sub" id="wedgeHudSub"></div>
           </div>
           <div class="wedge-ov wedge-notice" id="wedgeNotice" role="status" hidden></div>
         </div>
-        <div class="trk-foot">
+        <div class="scope-foot">
           <span class="wedge-key"><svg viewBox="0 0 22 12" aria-hidden="true"><rect x="1" y="1" width="20" height="10" rx="2" fill="rgba(22,163,74,0.16)" stroke="#15803d"/></svg>Proven coverage</span>
           <span class="wedge-key" title="Slices proven only close to the receiver, where most detections are aircraft high overhead rather than the antenna's horizontal pattern."><svg viewBox="0 0 22 12" aria-hidden="true"><rect x="1" y="1" width="20" height="10" rx="2" fill="rgba(22,163,74,0.06)" stroke="#15803d" stroke-opacity="0.6" stroke-dasharray="2 3"/></svg>Close-in, overhead</span>
           <span class="wedge-key"><svg viewBox="0 0 22 12" aria-hidden="true"><path d="M1,9 Q11,1 21,9" fill="none" stroke="#3b6fc4" stroke-width="2.4" stroke-linecap="round"/></svg>Arc inside wedge</span>
           <span class="wedge-key"><svg viewBox="0 0 22 12" aria-hidden="true"><path d="M1,9 Q11,1 21,9" fill="none" stroke="#3b6fc4" stroke-opacity="0.45" stroke-width="1.3" stroke-dasharray="3 3"/></svg>Arc outside wedge</span>
           <span class="wedge-key"><svg viewBox="0 0 22 12" aria-hidden="true"><path d="M1,10 L14,4" fill="none" stroke="#3b6fc4" stroke-width="2.4" stroke-linecap="round"/><path d="M0,-6 L4,4 L0,2 L-4,4 Z" transform="translate(17 3) rotate(66)" fill="#3b6fc4"/></svg>ADS-B trail</span>
           <span class="wedge-key" title="The furthest bistatic range this node processes (blah2's delayMax). A slice reaching it is limited by that setting, not by the antenna."><svg viewBox="0 0 22 12" aria-hidden="true"><path d="M1,6 H21" fill="none" stroke="#6f6c65" stroke-width="1.2" stroke-dasharray="6 5"/></svg>Processed range limit</span>
-          <span class="trk-spacer"></span>
-          <span class="trk-lab" id="wedgeStat"></span>
+          <span class="scope-spacer"></span>
+          <span class="scope-lab" id="wedgeStat"></span>
         </div>
       </div>
 
       <aside class="trk-rail" aria-label="Tracks">
         <div class="rail-head">
-          <span class="trk-lab">Tracks</span>
+          <span class="scope-lab">Tracks</span>
           <span class="rail-count" id="railCount">0</span>
-          <span class="trk-spacer"></span>
-          <label class="trk-lab" for="sortSel">Sort</label>
+          <span class="scope-spacer"></span>
+          <label class="scope-lab" for="sortSel">Sort</label>
           <select class="rail-sel" id="sortSel" aria-label="Sort tracks">
             <option value="recent">newest</option>
             <option value="longest">longest</option>
@@ -397,7 +351,7 @@
     </div>
   </div>
 
-  <dialog class="trk-dlg" id="settingsDlg" aria-labelledby="settingsTitle">
+  <dialog class="scope-dlg" id="settingsDlg" aria-labelledby="settingsTitle">
     <form id="settingsForm" novalidate>
       <div class="dlg-head"><h2 id="settingsTitle">Tracker settings</h2></div>
       <div class="dlg-body">
@@ -422,7 +376,7 @@
             <span>out to</span>
             <input class="ds-input mono" id="narrowKmInput" type="number" min="1" step="1"
                    inputmode="numeric" aria-describedby="narrowKmHelp narrowKmErr">
-            <span>km</span>
+            <span id="narrowKmUnit">km</span>
           </div>
           <div class="ds-field-help" id="narrowKmHelp">
             What the Delay toggle's narrow setting shows, in bistatic range. The node processes
@@ -476,14 +430,14 @@
       </div>
       <div class="dlg-foot">
         <button type="button" class="linkbtn" id="narrowResetBtn">Reset to defaults</button>
-        <span class="trk-spacer"></span>
+        <span class="scope-spacer"></span>
         <button type="button" class="ds-btn ghost sm" id="settingsCancel">Cancel</button>
         <button type="submit" class="ds-btn primary sm">Save</button>
       </div>
     </form>
   </dialog>
 
-  <dialog class="trk-dlg" id="wedgeResetDlg" aria-labelledby="wedgeResetTitle">
+  <dialog class="scope-dlg" id="wedgeResetDlg" aria-labelledby="wedgeResetTitle">
     <div class="dlg-head"><h2 id="wedgeResetTitle">Reset the wedge?</h2></div>
     <div class="dlg-body">
       <p>This clears the 24 h max-hold wedge for this node. Tracks and detections are kept.</p>
@@ -493,7 +447,7 @@
       <div class="dlg-err" id="wedgeResetErr" role="alert" hidden></div>
     </div>
     <div class="dlg-foot">
-      <span class="trk-spacer"></span>
+      <span class="scope-spacer"></span>
       <button type="button" class="ds-btn ghost sm" id="wedgeResetCancel">Cancel</button>
       <button type="button" class="ds-btn danger sm" id="wedgeResetGo">Reset wedge</button>
     </div>
@@ -505,6 +459,8 @@
 <script src="https://cdn.jsdelivr.net/npm/plotly.js-dist-min@3.7.0/plotly.min.js"></script>
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script src="/static/tracker-wedge.js"></script>
+<script src="/static/units.js"></script>
+<script src="/static/scope-controls.js"></script>
 <script>
 (function () {
     'use strict';
@@ -585,15 +541,8 @@
         hover: null
     };
 
-    function remember(key, value) {
-        try { localStorage.setItem('tracker.' + key, String(value)); } catch (e) { /* private mode */ }
-    }
-    function recall(key, fallback) {
-        try {
-            var v = localStorage.getItem('tracker.' + key);
-            return v === null ? fallback : v;
-        } catch (e) { return fallback; }
-    }
+    var saved = ScopeControls.storage('tracker');
+    var remember = saved.remember, recall = saved.recall;
 
     state.window = parseInt(recall('window', DEFAULT_WINDOW), 10) || DEFAULT_WINDOW;
     // Only the layers that still have a button. A remembered 'below_snr' from
@@ -609,94 +558,32 @@
     // Drone is offered only in developer mode, so a remembered one falls back.
     if (state.display !== 'wedge' && !(state.display === 'drone' && DRONE)) state.display = 'scope';
 
-    // ── Doppler view ─────────────────────────────────────────────────────
+    // ── Doppler and delay views, and units ───────────────────────────────
 
-    // Presentation only: the node processes its whole span (AXES.doppler)
-    // whichever view is drawn. Narrow is where ordinary air traffic sits, so it
-    // is the default. See docs/features/tracker.md#doppler-view
-    var DEFAULT_NARROW_HZ = 300;
-    var MAX_NARROW_HZ = 100000;    // a sanity cap, used only when the span is unknown
-
-    // Half the node's span, the widest narrow range worth having.
-    function spanHalfWidth() {
-        return AXES.doppler ? Math.max(Math.abs(AXES.doppler[0]), Math.abs(AXES.doppler[1])) : null;
-    }
-
-    function validNarrow(n) {
-        var cap = spanHalfWidth() || MAX_NARROW_HZ;
-        return Number.isInteger(n) && n >= 1 && n <= cap ? n : null;
-    }
-
-    state.dopView = recall('dopView', 'narrow') === 'full' ? 'full' : 'narrow';
-    state.narrowHz = validNarrow(parseInt(recall('narrowHz', DEFAULT_NARROW_HZ), 10)) || DEFAULT_NARROW_HZ;
-
-    // Clipped to the node's span, so narrow never draws Doppler it cannot see.
-    // A span lying wholly to one side of the band leaves nothing to narrow to.
-    function narrowRange() {
-        var lo = -state.narrowHz, hi = state.narrowHz;
-        if (AXES.doppler) {
-            lo = Math.max(lo, AXES.doppler[0]);
-            hi = Math.min(hi, AXES.doppler[1]);
-            if (lo >= hi) return AXES.doppler.slice();
-        }
-        return [lo, hi];
-    }
-
-    // null autoscales, as the full view always has when the span is unknown.
-    function dopplerRange() {
-        return state.dopView === 'narrow' ? narrowRange() : AXES.doppler;
-    }
-
-    function fmtHzRange(r) {
-        return r[0] === -r[1] ? '±' + r[1] : r[0] + '…' + r[1];
-    }
-
-    // ── Delay view ───────────────────────────────────────────────────────
-
-    // The same idea on the bistatic range axis, and presentation only too.
-    // Full is the default, so nothing is hidden until a viewer asks for it.
-    // See docs/features/tracker.md#delay-view
-    var DEFAULT_NARROW_KM = 30;
-    var MAX_NARROW_KM = 1000;      // a sanity cap, used only when the span is unknown
-
-    // The node's furthest processed range, the widest narrow range worth having.
-    function delayReach() {
-        return AXES.delay ? Math.ceil(AXES.delay[1]) : null;
-    }
-
-    function validNarrowKm(n) {
-        var cap = delayReach() || MAX_NARROW_KM;
-        return Number.isInteger(n) && n >= 1 && n <= cap ? n : null;
-    }
-
-    // Clipped to the node's reach, or a node processing less than 30 km (the
-    // drone profile's delayMax) would open the gear on a value it refuses.
-    function defaultNarrowKm() {
-        var reach = delayReach();
-        return reach ? Math.min(DEFAULT_NARROW_KM, reach) : DEFAULT_NARROW_KM;
-    }
-
-    state.delView = recall('delView', 'full') === 'narrow' ? 'narrow' : 'full';
-    state.narrowKm = validNarrowKm(parseInt(recall('narrowKm', defaultNarrowKm()), 10)) || defaultNarrowKm();
-
-    // Starts where the node starts (a little below zero, past the direct
-    // signal), clipped so narrow never draws range the node cannot see.
-    function narrowDelayRange() {
-        var lo = AXES.delay ? AXES.delay[0] : 0, hi = state.narrowKm;
-        if (AXES.delay) {
-            hi = Math.min(hi, AXES.delay[1]);
-            if (lo >= hi) return AXES.delay.slice();
-        }
-        return [lo, hi];
-    }
-
-    function delayRange() {
-        return state.delView === 'narrow' ? narrowDelayRange() : AXES.delay;
-    }
-
-    function fmtKm(km) {
-        return Math.round(km) + ' km';
-    }
+    // The Narrow/Full toggles, the gear's two narrow ranges and the km/mi
+    // toggle, shared with the Passive Radar page in static/scope-controls.js.
+    // Presentation only: the node processes its whole span (AXES) whichever
+    // view is drawn. See docs/features/tracker.md#shared-controls
+    var views = ScopeControls.create({
+        prefix: 'tracker',
+        state: state,
+        extent: function () { return { x: AXES.delay, y: AXES.doppler }; },
+        onViewChange: scheduleRender,
+        onUnitsChange: function (u) { U = u; scheduleRender(); },
+        labelExtra: labelSlowTracks,
+        dialog: { open: openDroneFields, reset: resetDroneFields, read: readDroneFields, save: saveDroneFields }
+    });
+    // km or mi for this browser (static/units.js). Everything the page reasons
+    // with (the stream, AXES, the narrow range) stays in km; only what is drawn
+    // and written converts. See docs/features/tracker.md#units
+    var U = views.units();
+    var spanHalfWidth = views.spanHalfWidth, narrowRange = views.narrowRange;
+    var dopplerRange = views.dopplerRange, narrowDelayRange = views.narrowDelayRange;
+    var displayDelayRange = views.displayDelayRange, labelRangeButtons = views.labelRangeButtons;
+    var setDopView = views.setDopView, setDelView = views.setDelView;
+    var fmtHzRange = ScopeControls.fmtHzRange, wireSeg = ScopeControls.wireSeg;
+    var showFieldError = ScopeControls.showFieldError;
+    var MAX_NARROW_HZ = ScopeControls.MAX_NARROW_HZ;
 
     // ── Drone view ───────────────────────────────────────────────────────
 
@@ -965,7 +852,7 @@
     function pushTrack(bin, id, trk) {
         if (bin.x.length) { bin.x.push(null); bin.y.push(null); bin.cd.push(null); }
         for (var i = 0; i < trk.delay.length; i++) {
-            bin.x.push(trk.delay[i]);
+            bin.x.push(U.distOf(trk.delay[i]));
             bin.y.push(trk.doppler[i]);
             bin.cd.push([id, trk.snr[i]]);
         }
@@ -978,7 +865,7 @@
             line: { color: 'rgba(0,0,0,0.25)', width: 1 },
             marker: { color: color, size: 7, line: { color: '#ffffff', width: 0.5 } },
             customdata: bin.cd,
-            hovertemplate: '%{customdata[0]}<br>Delay: %{x:.2f}<br>Doppler: %{y:.2f} Hz<br>'
+            hovertemplate: '%{customdata[0]}<br>Range: %{x:.2f} ' + U.dist + '<br>Doppler: %{y:.2f} Hz<br>'
                          + 'SNR: %{customdata[1]:.1f} dB<extra></extra>',
             opacity: opacity,
             showlegend: false
@@ -1064,7 +951,7 @@
         var out = '<div class="trk-detail">';
         out += '<div>first <b>' + clockOf(r.first) + '</b> &middot; last <b>' + clockOf(r.last) + '</b></div>';
         out += '<div>length <b>' + (m.length != null ? m.length : r.n) + '</b>'
-             + ' &middot; peak velocity <b>' + (m.max_velocity_ms || 0).toFixed(0) + ' m/s</b></div>';
+             + ' &middot; peak velocity <b>' + U.fmtSpeedMps(m.max_velocity_ms || 0) + '</b></div>';
         out += '<div>shadow fraction <b>' + (m.shadow_fraction || 0).toFixed(2) + '</b></div>';
         if (m.anomaly_types && m.anomaly_types.length) {
             out += '<div>flagged <b>' + esc(m.anomaly_types.join(', ')) + '</b> (provisional)</div>';
@@ -1162,7 +1049,7 @@
             dop: state.dopView === 'narrow' ? narrowRange() : null,
             del: state.delView === 'narrow' ? narrowDelayRange() : null,
             dopText: fmtHzRange(narrowRange()) + ' Hz',
-            delText: fmtKm(narrowDelayRange()[1])
+            delText: U.fmtDist(narrowDelayRange()[1])
         };
     }
 
@@ -1228,7 +1115,7 @@
             for (var i = 0; i < cols.delay.length; i++) {
                 var b = bandOf(cols.snr[i]);
                 var bin = bands[b] || (bands[b] = { x: [], y: [], snr: [] });
-                bin.x.push(cols.delay[i]);
+                bin.x.push(U.distOf(cols.delay[i]));
                 bin.y.push(cols.doppler[i]);
                 bin.snr.push(cols.snr[i]);
             }
@@ -1239,7 +1126,7 @@
                 x: bin.x, y: bin.y,
                 marker: { color: BAND_COLOUR[b], size: 4, opacity: 0.4 },
                 customdata: bin.snr,
-                hovertemplate: 'Delay: %{x:.2f}<br>Doppler: %{y:.2f} Hz<br>SNR: %{customdata:.1f} dB<extra></extra>',
+                hovertemplate: 'Range: %{x:.2f} ' + U.dist + '<br>Doppler: %{y:.2f} Hz<br>SNR: %{customdata:.1f} dB<extra></extra>',
                 opacity: detectionOpacity(),
                 showlegend: false
             });
@@ -1278,10 +1165,10 @@
         // sit under it instead of fighting for the right-hand strip.
         Plotly.react(plotDiv, traces, {
             uirevision: 'tracker:' + state.dopView + ':' + state.narrowHz
-                      + ':' + state.delView + ':' + state.narrowKm,
+                      + ':' + state.delView + ':' + state.narrowKm + ':' + U.name,
             showlegend: false,
             margin: { t: 12, r: 14, b: 44, l: 58 },
-            xaxis: axis('Bistatic range (km)', delayRange()),
+            xaxis: axis('Bistatic range (' + U.dist + ')', displayDelayRange()),
             yaxis: axis('Doppler (Hz)', dopplerRange())
         }, { displayModeBar: false, responsive: true });
 
@@ -1545,17 +1432,6 @@
     });
     railList.addEventListener('pointerleave', function () { setHover(null); });
 
-    function wireSeg(attr, apply) {
-        document.querySelectorAll('.seg [data-' + attr + ']').forEach(function (b) {
-            b.addEventListener('click', function () {
-                b.parentNode.querySelectorAll('[data-' + attr + ']').forEach(function (o) {
-                    o.setAttribute('aria-pressed', String(o === b));
-                });
-                apply(b.getAttribute('data-' + attr));
-            });
-        });
-    }
-
     wireSeg('win', function (v) {
         state.window = parseInt(v, 10);
         remember('window', state.window);
@@ -1576,27 +1452,6 @@
         remember('tracks', v);
         scheduleRender();
     });
-
-    function setDopView(v) {
-        state.dopView = v;
-        remember('dopView', v);
-        document.querySelectorAll('.seg [data-dop]').forEach(function (b) {
-            b.setAttribute('aria-pressed', String(b.getAttribute('data-dop') === v));
-        });
-        scheduleRender();
-    }
-
-    function setDelView(v) {
-        state.delView = v;
-        remember('delView', v);
-        document.querySelectorAll('.seg [data-del]').forEach(function (b) {
-            b.setAttribute('aria-pressed', String(b.getAttribute('data-del') === v));
-        });
-        scheduleRender();
-    }
-
-    wireSeg('dop', setDopView);
-    wireSeg('del', setDelView);
 
     // The Drone view's controls exist only in developer mode; wiring absent
     // buttons is a no-op.
@@ -1625,32 +1480,14 @@
         setDelView('full');
     });
 
-    // The buttons name the ranges they draw, so the toggle reads "±300 / ±1000"
-    // on a node at ±1000 and stays truthful after the gear changes narrow.
-    function labelRangeButtons() {
-        document.getElementById('dopNarrowBtn').textContent = fmtHzRange(narrowRange());
-        document.getElementById('dopFullBtn').textContent = AXES.doppler ? fmtHzRange(AXES.doppler) : 'Full';
-        document.getElementById('delNarrowBtn').textContent = fmtKm(narrowDelayRange()[1]);
-        document.getElementById('delFullBtn').textContent = AXES.delay ? fmtKm(AXES.delay[1]) : 'Full';
+    // The Drone view's slow-track button names its limit; refreshed with the
+    // range buttons in static/scope-controls.js.
+    function labelSlowTracks() {
         var slowBtn = document.getElementById('slowTracksBtn');
         if (slowBtn) slowBtn.textContent = '<' + state.slowMs + ' m/s';
     }
 
     // ── Settings ─────────────────────────────────────────────────────────
-
-    var settingsDlg = document.getElementById('settingsDlg');
-    var narrowInput = document.getElementById('narrowHzInput');
-    var narrowErr = document.getElementById('narrowHzErr');
-    var narrowKmInput = document.getElementById('narrowKmInput');
-    var narrowKmErr = document.getElementById('narrowKmErr');
-
-    function showFieldError(input, err, text) {
-        err.textContent = text;
-        err.hidden = !text;
-        input.classList.toggle('is-invalid', !!text);
-    }
-    function showNarrowError(text) { showFieldError(narrowInput, narrowErr, text); }
-    function showNarrowKmError(text) { showFieldError(narrowKmInput, narrowKmErr, text); }
 
     // The Drone view's fields, present only in developer mode.
     var droneFields = DRONE ? [
@@ -1693,75 +1530,26 @@
         return m && hum && slow ? { m: m, hum: hum, slow: slow } : null;
     }
 
-    document.getElementById('settingsBtn').addEventListener('click', function () {
-        narrowInput.value = state.narrowHz;
-        var half = spanHalfWidth();
-        if (half) narrowInput.max = half;
-        document.getElementById('fullSpanText').textContent =
-            AXES.doppler ? fmtHzRange(AXES.doppler) + ' Hz' : 'its full span';
-        narrowKmInput.value = state.narrowKm;
-        var reach = delayReach();
-        if (reach) narrowKmInput.max = reach;
-        document.getElementById('fullDelayText').textContent =
-            AXES.delay ? 'out to ' + fmtKm(AXES.delay[1]) : 'its full range';
-        showNarrowError('');
-        showNarrowKmError('');
+    // The gear's Drone view fields, opened, reset, checked and saved with the
+    // narrow ranges by static/scope-controls.js, which takes these as hooks.
+    function openDroneFields() {
         if (DRONE && droneReachM()) droneFields[0].input.max = droneReachM();
         fillDroneFields(state.droneM, state.hum, state.slowMs);
-        settingsDlg.showModal();
-        narrowInput.select();
-    });
+    }
 
-    document.getElementById('narrowResetBtn').addEventListener('click', function () {
-        narrowInput.value = DEFAULT_NARROW_HZ;
-        narrowKmInput.value = defaultNarrowKm();
-        showNarrowError('');
-        showNarrowKmError('');
+    function resetDroneFields() {
         fillDroneFields(defaultDroneM(), [], DEFAULT_SLOW_MS);
-    });
+    }
 
-    document.getElementById('settingsCancel').addEventListener('click', function () { settingsDlg.close(); });
-
-    // A click on the backdrop lands on the dialog element itself.
-    settingsDlg.addEventListener('click', function (e) { if (e.target === settingsDlg) settingsDlg.close(); });
-
-    document.getElementById('settingsForm').addEventListener('submit', function (e) {
-        e.preventDefault();
-        var n = Number(narrowInput.value);
-        var km = Number(narrowKmInput.value);
-        var hzOk = validNarrow(n) !== null, kmOk = validNarrowKm(km) !== null;
-        var half = spanHalfWidth(), reach = delayReach();
-        showNarrowError(hzOk ? '' : half
-            ? 'Enter a whole number from 1 to ' + half + ', the most the node processes.'
-            : 'Enter a whole number of Hz, 1 or more.');
-        showNarrowKmError(kmOk ? '' : reach
-            ? 'Enter a whole number from 1 to ' + reach + ', the most the node processes.'
-            : 'Enter a whole number of km, from 1 to ' + MAX_NARROW_KM + '.');
-        var drone = readDroneFields();
-        // Nothing is saved unless every field is valid.
-        if (!hzOk || !kmOk || !drone) return;
-
-        var hzChanged = n !== state.narrowHz, kmChanged = km !== state.narrowKm;
-        state.narrowHz = n;
-        state.narrowKm = km;
-        remember('narrowHz', n);
-        remember('narrowKm', km);
-        if (DRONE) {
-            state.droneM = drone.m;
-            state.hum = drone.hum;
-            state.slowMs = drone.slow;
-            remember('droneM', drone.m);
-            remember('hum', drone.hum.join(','));
-            remember('slowMs', drone.slow);
-        }
-        labelRangeButtons();
-        settingsDlg.close();
-        // Saving a new narrow range is asking to see it. Only the axis whose
-        // range changed switches, so editing one never narrows the other.
-        if (hzChanged) setDopView('narrow');
-        if (kmChanged) setDelView('narrow');
-        scheduleRender();
-    });
+    function saveDroneFields(drone) {
+        if (!DRONE) return;
+        state.droneM = drone.m;
+        state.hum = drone.hum;
+        state.slowMs = drone.slow;
+        remember('droneM', drone.m);
+        remember('hum', drone.hum.join(','));
+        remember('slowMs', drone.slow);
+    }
 
     document.querySelectorAll('.fchip').forEach(function (b) {
         b.addEventListener('click', function () {
@@ -1870,7 +1658,7 @@
     var source = null;
 
     function setStatus(text, cls) {
-        statusEl.className = 'trk-status' + (cls ? ' ' + cls : '');
+        statusEl.className = 'scope-status' + (cls ? ' ' + cls : '');
         statusEl.innerHTML = '<span class="dot"></span>' + text;
     }
 
@@ -1950,12 +1738,6 @@
         b.setAttribute('aria-pressed', String(b.getAttribute('data-filter') === state.filter));
     });
     document.getElementById('sortSel').value = state.sort;
-    document.querySelectorAll('.seg [data-dop]').forEach(function (b) {
-        b.setAttribute('aria-pressed', String(b.getAttribute('data-dop') === state.dopView));
-    });
-    document.querySelectorAll('.seg [data-del]').forEach(function (b) {
-        b.setAttribute('aria-pressed', String(b.getAttribute('data-del') === state.delView));
-    });
     [['fade', state.fade], ['floor', state.floor], ['dtracks', state.dtracks]].forEach(function (p) {
         document.querySelectorAll('.seg [data-' + p[0] + ']').forEach(function (b) {
             b.setAttribute('aria-pressed', String(b.getAttribute('data-' + p[0]) === String(p[1])));

@@ -13,7 +13,7 @@ def test_the_cards_run_from_the_live_views_to_the_controller(app_client):
     cover. Demo mode, because the cards are only drawn once the radar is
     installed."""
     body = app_client.get("/?demo=1").data.decode()
-    assert card_names(body) == ["Passive Radar", "Max-Hold", "ADS-B Map", "Tracker", "Controller"]
+    assert card_names(body) == ["Passive Radar", "ADS-B Map", "Tracker", "Controller"]
 
 
 def test_the_tracker_card_says_how_much_it_keeps(app_client):
