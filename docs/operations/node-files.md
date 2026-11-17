@@ -86,7 +86,7 @@ Local services the GUI calls over HTTP:
 | URL | Env var | Service |
 | --- | --- | --- |
 | `http://localhost:3000` | `BLAH2_API_URL` | blah2_api, directly. It runs with `network_mode: host`. This is not the `:8080` blah2_host nginx proxy, which does not forward `/capture/*`. |
-| `http://localhost:30101` | `RETINA_TRACKER_CONTROL_URL` | retina-tracker's control surface. Its ingest socket is not used here: blah2_api forwards detections to it directly, and it accepts one connection at a time. |
+| `http://localhost:30101` | `RETINA_TRACKER_CONTROL_URL` | retina-tracker's control surface. Its ingest socket is not used here: blah2_api forwards detections to it directly, and it accepts one connection at a time. Stored Detections reads the tracker's on-disk store (`outside_tracks.sqlite` in its output directory) only through this surface, never the file. |
 | `http://localhost:3020` | `RETINA_SPECTRUM_URL` | retina-spectrum, in spectrum mode |
 
 Track events are tailed from the file rather than read over TCP because retina-tracker's

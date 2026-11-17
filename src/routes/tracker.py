@@ -26,6 +26,11 @@ MAX_VIEW_WINDOW_S = 4 * 3600
 CONNECT_TIMEOUT_S = 5
 CONTROL_TIMEOUT_S = 5
 
+# Mirror retina-tracker's outside.MAX_LIST_LIMIT and control.RECORD_ID (another
+# repo); it checks both again on its side.
+OUTSIDE_MAX_LIST_LIMIT = 500
+OUTSIDE_ID = re.compile(r"[0-9]{1,18}")
+
 # The stream carries delay to 0.01 km: mirrors retina-tracker's
 # history.DELAY_DP (another repo).
 STREAM_DELAY_STEP_M = 10.0
@@ -232,6 +237,59 @@ def coverage_track(track_id):
     if not TRACK_ID.fullmatch(track_id):
         return jsonify({"error": "bad track id"}), 400
     return _proxy_json(f"/coverage/track/{track_id}")
+
+
+def _positive_int_arg(name):
+    """A query argument as a whole number of at least 1, None when absent, or
+    ValueError when it is anything else."""
+    raw = request.args.get(name)
+    if raw is None:
+        return None
+    if not OUTSIDE_ID.fullmatch(raw) or int(raw) < 1:
+        raise ValueError(name)
+    return int(raw)
+
+
+@bp.route("/outside")
+def outside_list():
+    """Stored Detections: one page of the sidecar's stored records, newest first.
+
+    See docs/features/tracker.md#stored-detections.
+    """
+    try:
+        before = _positive_int_arg("before")
+        limit = _positive_int_arg("limit")
+    except ValueError as e:
+        return jsonify({"error": f"bad {e}"}), 400
+    params = {}
+    if before is not None:
+        params["before"] = before
+    if limit is not None:
+        params["limit"] = min(limit, OUTSIDE_MAX_LIST_LIMIT)
+    return _proxy_json("/outside", params=params or None)
+
+
+@bp.route("/outside/<int:record_id>")
+def outside_record(record_id):
+    """One whole stored record. The int converter is what keeps the path safe."""
+    return _proxy_json(f"/outside/{record_id}")
+
+
+@bp.route("/outside/status")
+def outside_status():
+    """The store's counters and sizes from the sidecar's /health.
+
+    404 when the sidecar has no store at all, which is a tracker older than it.
+    """
+    try:
+        response = requests.get(_tracker_url("/health"), timeout=CONTROL_TIMEOUT_S)
+        response.raise_for_status()
+        outside = response.json().get("outside")
+    except (requests.RequestException, ValueError, AttributeError) as e:
+        return jsonify({"error": f"tracker unreachable: {e.__class__.__name__}"}), 502
+    if outside is None:
+        return jsonify({"error": "this tracker keeps no stored detections"}), 404
+    return jsonify({"outside": outside})
 
 
 @bp.route("/coverage/reset", methods=["POST"])
