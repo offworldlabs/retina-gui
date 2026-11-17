@@ -142,6 +142,81 @@
 .wedge-plane span { position: absolute; left: 14px; top: -14px; font-family: var(--font-mono, monospace); font-size: 10.5px;
                     font-weight: 600; white-space: nowrap; text-shadow: 0 0 3px #fff, 0 0 3px #fff; }
 .ds-btn.danger { background: var(--danger); color: #fff; border-color: var(--danger); }
+/* ── Stored Detections ───────────────────────────────────
+   Records retina-tracker kept on disk, read from its store.
+   See docs/features/tracker.md#stored-detections */
+.scope-panel[data-display="stored"] .no-stored,
+.scope-panel:not([data-display="stored"]) .stored-only { display: none !important; }
+.sd-wrap [hidden] { display: none !important; }
+.sd-explain { margin: 0; padding: 11px 14px; border-bottom: 1px solid var(--color-border-light);
+              font-size: 13px; line-height: 1.5; color: var(--ink-2); }
+.sd-explain b { color: var(--color-text); font-weight: 600; }
+.sd-filters { display: flex; align-items: center; gap: 5px; padding: 6px 12px; flex-wrap: wrap;
+              border-bottom: 1px solid var(--color-border-light); background: var(--color-bg-warm); }
+.sd-filters .scope-lab { margin-right: 4px; }
+.sd-chip { font-family: var(--font-mono, monospace); font-size: 10px; font-weight: 600; letter-spacing: .04em;
+           padding: 3px 8px; border-radius: 999px; border: 1px solid var(--color-border);
+           background: var(--color-card); color: var(--color-muted); cursor: pointer; }
+.sd-chip:hover { color: var(--color-text); }
+.sd-chip[aria-pressed="true"] { background: var(--color-text); color: var(--color-card); border-color: var(--color-text); }
+.sd-tbl { overflow: auto; max-height: 302px; }
+.sd-table { width: 100%; border-collapse: collapse; font-family: var(--font-mono, monospace); font-size: 11.5px;
+            font-variant-numeric: tabular-nums; }
+.sd-table th { position: sticky; top: 0; z-index: 1; background: var(--color-card); text-align: left;
+               font-size: 9.5px; font-weight: 600; letter-spacing: .07em; text-transform: uppercase;
+               color: var(--color-muted); padding: 8px 12px 7px; border-bottom: 1px solid var(--color-border);
+               white-space: nowrap; }
+.sd-table td { padding: 0 12px; height: 34px; border-bottom: 1px solid var(--color-border-light);
+               white-space: nowrap; color: var(--ink-2); }
+.sd-table .n { text-align: right; }
+.sd-row { cursor: pointer; }
+.sd-row:hover td { background: var(--color-bg-warm); }
+.sd-row.sel td { background: var(--color-primary-wash); }
+.sd-row td.t { color: var(--color-text); font-weight: 500; }
+.sd-rowbtn { font: inherit; color: inherit; background: none; border: 0; padding: 0; cursor: pointer;
+             display: inline-flex; align-items: center; gap: 8px; min-height: 32px; }
+.sd-sw { display: inline-block; width: 9px; height: 9px; border-radius: 3px; flex: none; }
+.sd-sw.lg { width: 11px; height: 11px; }
+.sd-table .pos { color: oklch(0.45 0.13 30); }
+.sd-table .neg { color: oklch(0.45 0.13 250); }
+.sd-none { color: var(--color-muted); }
+.sd-empty { text-align: center !important; color: var(--color-muted); height: 60px !important; }
+.chip.part { color: var(--warn-ink); background: var(--warn-soft); border-color: oklch(0.87 0.06 75); }
+.sd-foot { display: flex; align-items: center; gap: 10px; padding: 7px 12px; min-height: 40px; box-sizing: border-box;
+           border-bottom: 1px solid var(--color-border); font-family: var(--font-mono, monospace);
+           font-size: 10.5px; color: var(--color-muted); }
+.sd-msg, .sd-dmsg { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px;
+                    text-align: center; padding: 32px 22px; min-height: 120px; }
+.sd-msg p, .sd-dmsg p { margin: 0; font-size: 13px; line-height: 1.5; color: var(--ink-2); max-width: 420px; }
+.sd-msg p.sd-msg-main, .sd-dmsg p.sd-msg-main { color: var(--color-text); font-weight: 500; }
+.sd-reason { font-family: var(--font-mono, monospace); font-size: 11px; color: var(--ink-2);
+             background: var(--color-bg-warm); border: 1px solid var(--color-border-light);
+             border-radius: 6px; padding: 4px 8px; }
+.sd-detail { padding: 14px 16px 16px; }
+.sd-body { display: flex; flex-wrap: wrap; gap: 16px; }
+.sd-dplot { flex: 999 1 600px; min-width: 0; display: flex; flex-direction: column; gap: 6px; }
+.sd-side { flex: 1 1 260px; max-width: 340px; min-width: 0; }
+.sd-dhead { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 4px; }
+.sd-dhead h2 { margin: 0; font-size: 15px; font-weight: 600; }
+.sd-sub { font-family: var(--font-mono, monospace); font-size: 11px; color: var(--color-muted); }
+.sd-plotlab { font-family: var(--font-mono, monospace); font-size: 11px; color: var(--ink-2); margin-top: 4px; }
+.sd-plotlab b { color: var(--color-text); font-weight: 600; margin-right: 8px; }
+#sdPlot { width: 100%; height: 380px; }
+.sd-key { display: flex; flex-wrap: wrap; gap: 6px 16px; font-family: var(--font-mono, monospace);
+          font-size: 10.5px; color: var(--ink-2); padding-top: 2px; }
+.sd-key span { display: inline-flex; align-items: center; gap: 6px; }
+.sd-key i { display: inline-block; width: 9px; height: 9px; border-radius: 50%; background: #6b7280; }
+.sd-key i.ring { background: #6b7280; box-shadow: 0 0 0 2px #b45309; }
+.sd-key i.other { background: rgba(107,114,128,0.6); width: 7px; height: 7px; }
+.sd-key i.lim { width: 18px; height: 0; border-radius: 0; background: none; border-top: 1.5px dashed rgba(161,98,7,0.85); }
+.sd-facts { margin: 0; border: 1px solid var(--color-border-light); border-radius: 8px; background: var(--color-bg-warm); }
+.sd-facts div { display: flex; justify-content: space-between; gap: 12px; padding: 8px 12px;
+                border-bottom: 1px solid var(--color-border-light); }
+.sd-facts div:last-child { border-bottom: 0; }
+.sd-facts dt { font-family: var(--font-mono, monospace); font-size: 10px; letter-spacing: .06em;
+               text-transform: uppercase; color: var(--color-muted); padding-top: 1px; }
+.sd-facts dd { margin: 0; font-family: var(--font-mono, monospace); font-size: 12px; color: var(--color-text); text-align: right; }
+.sd-facts dd small { display: block; font-size: 10.5px; color: var(--color-muted); margin-top: 1px; }
 
 .rail-foot { padding: 8px 11px; border-top: 1px solid var(--color-border-light);
              font-family: var(--font-mono, monospace); font-size: 10.5px; color: var(--color-muted);
@@ -164,6 +239,8 @@
         {%- endif %}
         <button type="button" data-display="wedge" aria-pressed="false"
                 title="Where this node is proven to see, from ADS-B-verified detections, with the tracks on a map.">Wedge</button>
+        <button type="button" data-display="stored" aria-pressed="false"
+                title="Tracks this node kept on disk for going beyond the Doppler limit, with everything detected around them.">Stored Detections</button>
       </div>
     </div>
     <button type="button" class="ic-btn" id="settingsBtn" aria-haspopup="dialog"
@@ -174,15 +251,16 @@
 
   <div class="scope-panel" id="trkPanel" data-display="scope">
     <div class="scope-bar">
-      <span class="scope-status" id="trkStatus"><span class="dot"></span>connecting&hellip;</span>
-      <span class="oov-alert dd-only" id="oovAlert" role="status" hidden
+      <span class="scope-status no-stored" id="trkStatus"><span class="dot"></span>connecting&hellip;</span>
+      <span class="scope-status stored-only" id="sdStatus"><span class="dot"></span>loading&hellip;</span>
+      <span class="oov-alert dd-only no-stored" id="oovAlert" role="status" hidden
             title="Tracks in this window with a point outside the narrow Doppler or delay range. The node processes its full span; only the plot is narrowed.">
         <span id="oovText"></span>
         <button type="button" class="linkbtn" id="oovShowBtn">Show full span</button>
       </span>
       <span class="scope-spacer"></span>
 
-      <div class="scope-ctl dd-only no-drone">
+      <div class="scope-ctl dd-only no-drone no-stored">
         <span class="scope-lab">Doppler</span>
         <div class="seg" role="group" aria-label="Doppler range">
           <button type="button" data-dop="narrow" aria-pressed="true" id="dopNarrowBtn"
@@ -192,7 +270,7 @@
         </div>
       </div>
 
-      <div class="scope-ctl dd-only no-drone">
+      <div class="scope-ctl dd-only no-drone no-stored">
         <span class="scope-lab">Delay</span>
         <div class="seg" role="group" aria-label="Delay range">
           <button type="button" data-del="narrow" aria-pressed="false" id="delNarrowBtn"
@@ -214,7 +292,7 @@
         </div>
       </div>
 
-      <div class="scope-ctl no-drone">
+      <div class="scope-ctl no-drone no-stored">
         <span class="scope-lab">View</span>
         <div class="seg" role="group" aria-label="View window">
           <button type="button" data-win="300" aria-pressed="false">5m</button>
@@ -224,7 +302,7 @@
         </div>
       </div>
 
-      <div class="scope-ctl dd-only">
+      <div class="scope-ctl dd-only no-stored">
         <span class="scope-lab">Detections</span>
         <div class="seg" role="group" aria-label="Detection layer">
           <button type="button" data-layer="all" aria-pressed="true">All</button>
@@ -238,7 +316,7 @@
         </div>
       </div>
 
-      <div class="scope-ctl no-drone">
+      <div class="scope-ctl no-drone no-stored">
         <span class="scope-lab">Tracks</span>
         <div class="seg" role="group" aria-label="Track overlay">
           <button type="button" data-tracks="on" aria-pressed="true">On</button>
@@ -284,13 +362,13 @@
         Reset wedge
       </button>
 
-      <button type="button" id="clearBufferBtn" class="ds-btn danger-ghost sm dd-only"
+      <button type="button" id="clearBufferBtn" class="ds-btn danger-ghost sm dd-only no-stored"
               title="Clears only what's displayed here. Tracking keeps running, so an active aircraft will reappear on its own.">
         Clear buffer
       </button>
     </div>
 
-    <div class="trk-body">
+    <div class="trk-body no-stored">
       <div class="trk-plotwrap dd-only">
         <div class="trk-plotbox">
           <div id="plot"></div>
@@ -361,6 +439,65 @@
         <div class="rail-list" id="railList"></div>
         <div class="rail-foot" id="railFoot">Hover a row to isolate it.</div>
       </aside>
+    </div>
+
+    {# Stored Detections: the sidecar's on-disk store, read through /tracker/outside.
+       See docs/features/tracker.md#stored-detections #}
+    <div class="sd-wrap stored-only">
+      <p class="sd-explain"><b>Stored Detections.</b> Every confirmed track that went beyond
+        <span id="sdLimText">&plusmn;300 Hz</span> of Doppler is kept on this node, with everything the
+        radar detected from 10 s before it to 10 s after. Records survive restarts and updates, and the
+        oldest roll off when the store is full. Nothing is filtered out, so some will be interference.</p>
+      <div class="sd-filters" id="sdFilters" role="group" aria-label="Filter stored records">
+        <span class="scope-lab">Show</span>
+        <button type="button" class="sd-chip" data-sfilter="all" aria-pressed="true">ALL</button>
+        <button type="button" class="sd-chip" data-sfilter="adsb" aria-pressed="false">ADS-B</button>
+        <button type="button" class="sd-chip" data-sfilter="none" aria-pressed="false">NO ADS-B</button>
+      </div>
+      <div class="sd-msg" id="sdMsg" role="status" hidden></div>
+      <div class="sd-tbl" id="sdTbl">
+        <table class="sd-table">
+          <thead>
+            <tr>
+              <th scope="col">Time &darr;</th>
+              <th scope="col" class="n">Lasted</th>
+              <th scope="col" class="n">Peak Doppler</th>
+              <th scope="col" class="n" id="sdLimHead">Beyond &plusmn;300 Hz</th>
+              <th scope="col" class="n">Points</th>
+              <th scope="col" class="n">Detections around it</th>
+              <th scope="col">ADS-B</th>
+              <th scope="col">Track</th>
+              <th scope="col" class="n">Record</th>
+            </tr>
+          </thead>
+          <tbody id="sdRows"></tbody>
+        </table>
+      </div>
+      <div class="sd-foot" id="sdFoot" hidden>
+        <span id="sdCount"></span>
+        <span class="scope-spacer"></span>
+        <button type="button" class="ds-btn ghost sm" id="sdOlder">Load older</button>
+      </div>
+      <div class="sd-detail" id="sdDetail" hidden>
+        <div class="sd-dhead" id="sdHead"></div>
+        <div class="sd-dmsg" id="sdDetailMsg" role="status" hidden></div>
+        <div class="sd-body" id="sdBody">
+          <div class="sd-dplot">
+            <div class="sd-plotlab"><b>Delay / Doppler</b></div>
+            <div id="sdPlot"></div>
+            <div class="sd-key">
+              <span><i id="sdKeyTrack"></i>This track</span>
+              <span><i class="ring" id="sdKeyRing"></i>Detections beyond the limit</span>
+              <span><i class="other"></i>Other tracks</span>
+              <span><span class="snr-ramp" aria-hidden="true"></span>Every other detection, by SNR</span>
+              <span><i class="lim"></i>Storage limit</span>
+            </div>
+          </div>
+          <div class="sd-side">
+            <dl class="sd-facts" id="sdFacts"></dl>
+          </div>
+        </div>
+      </div>
     </div>
   </div>
 
@@ -472,6 +609,7 @@
 <script src="https://cdn.jsdelivr.net/npm/plotly.js-dist-min@3.7.0/plotly.min.js"></script>
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script src="/static/tracker-wedge.js"></script>
+<script src="/static/tracker-stored.js"></script>
 <script src="/static/units.js"></script>
 <script src="/static/scope-controls.js"></script>
 <script>
@@ -569,7 +707,16 @@
     state.filter = recall('filter', 'all');
     state.display = recall('display', 'scope');
     // Drone is offered only in developer mode, so a remembered one falls back.
-    if (state.display !== 'wedge' && !(state.display === 'drone' && DRONE)) state.display = 'scope';
+    if (['wedge', 'stored'].indexOf(state.display) === -1 && !(state.display === 'drone' && DRONE)) {
+        state.display = 'scope';
+    }
+    // ?record=<id> opens Stored Detections on that record, so a link to one
+    // works. See docs/features/tracker.md#linking-to-a-record
+    var linkedRecord = (function () {
+        var raw = new URLSearchParams(location.search).get('record');
+        return raw && /^[0-9]{1,18}$/.test(raw) && Number(raw) > 0 ? Number(raw) : null;
+    })();
+    if (linkedRecord !== null) state.display = 'stored';
 
     // ── Doppler and delay views, and units ───────────────────────────────
 
@@ -1106,6 +1253,10 @@
 
         // The scope is not drawn while hidden: a Plotly redraw costs the same
         // whether or not anyone can see it.
+        if (state.display === 'stored') {
+            stored.render();
+            return;
+        }
         if (state.display === 'wedge') {
             wedge.render(rows, { hidden: state.hidden, hover: state.hover, tracksOn: tracksShown() });
             return;
@@ -1672,6 +1823,49 @@
         windowS: function () { return state.window; }
     });
 
+    // Stored Detections. Reads the sidecar's store, never the stream. Draws
+    // the node's full span, so it shares only the units toggle.
+    // See docs/features/tracker.md#stored-detections
+    var stored = TrackerStored.create({
+        el: {
+            status: document.getElementById('sdStatus'),
+            filters: document.getElementById('sdFilters'),
+            filterBtns: Array.prototype.slice.call(document.querySelectorAll('.sd-chip')),
+            msg: document.getElementById('sdMsg'),
+            table: document.getElementById('sdTbl'),
+            rows: document.getElementById('sdRows'),
+            limitHead: document.getElementById('sdLimHead'),
+            limitText: document.getElementById('sdLimText'),
+            foot: document.getElementById('sdFoot'),
+            count: document.getElementById('sdCount'),
+            older: document.getElementById('sdOlder'),
+            detail: document.getElementById('sdDetail'),
+            head: document.getElementById('sdHead'),
+            detailMsg: document.getElementById('sdDetailMsg'),
+            body: document.getElementById('sdBody'),
+            plot: document.getElementById('sdPlot'),
+            keyTrack: document.getElementById('sdKeyTrack'),
+            keyRing: document.getElementById('sdKeyRing'),
+            facts: document.getElementById('sdFacts')
+        },
+        colorFor: colorFor,
+        fmtDur: fmtDur,
+        bandOf: bandOf,
+        bandColour: BAND_COLOUR,
+        units: function () { return U; },
+        extent: function () { return { x: AXES.delay, y: AXES.doppler }; },
+        onSelect: function (id) { setRecordParam(id); }
+    });
+
+    // The open record rides in the URL while Stored Detections is shown, and
+    // leaves it with the display.
+    function setRecordParam(id) {
+        var url = new URL(location.href);
+        if (id === null) url.searchParams.delete('record');
+        else url.searchParams.set('record', String(id));
+        if (url.href !== location.href) history.replaceState(null, '', url.href);
+    }
+
     function setDisplay(v) {
         if (v === 'drone' && !DRONE) v = 'scope';
         var before = requestWindow() + ':' + viewWindow();
@@ -1686,6 +1880,13 @@
             if (state.expanded) wedge.replay(state.expanded);
         } else {
             wedge.hide();
+        }
+        if (v === 'stored') {
+            stored.show();
+            setRecordParam(stored.selected());
+        } else {
+            stored.hide();
+            setRecordParam(null);
         }
         // Into or out of the Drone view changes the window held, so the
         // stream re-seeds. Not before the first connect.
@@ -1738,7 +1939,7 @@
     var source = null;
 
     function setStatus(text, cls) {
-        statusEl.className = 'scope-status' + (cls ? ' ' + cls : '');
+        statusEl.className = 'scope-status no-stored' + (cls ? ' ' + cls : '');
         statusEl.innerHTML = '<span class="dot"></span>' + text;
     }
 
@@ -1824,6 +2025,7 @@
         });
     });
     labelRangeButtons();
+    if (linkedRecord !== null) stored.open(linkedRecord);
     setDisplay(state.display);
 
     // The Drone view fades by age, so it redraws through a quiet spell too.

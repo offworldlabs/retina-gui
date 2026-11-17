@@ -6,7 +6,9 @@ data: the record lives in the retina-tracker sidecar container, which serves it 
 SSE endpoint, and retina-gui proxies that stream to the browser and draws it with Plotly. A
 second display, the [wedge view](#wedge-view), draws the node's ADS-B-proven coverage and its
 tracks on a map with Leaflet. A third, the [Drone view](#drone-view), exists only in developer mode
-and draws the near field at the detector's own limits for drone testing.
+and draws the near field at the detector's own limits for drone testing. A fourth,
+[Stored Detections](#stored-detections), lists the tracks the sidecar kept on disk for going
+beyond its Doppler limit and draws one at a time with everything detected around it.
 Separately, `RetinaTrackerClient` tails the sidecar's track-event file and drives its control
 surface for Auto-Calibrate.
 
@@ -14,9 +16,10 @@ surface for Auto-Calibrate.
 
 | File | Role |
 | --- | --- |
-| [src/routes/tracker.py](../../src/routes/tracker.py) | The `/tracker` blueprint (page, SSE proxy, one-shot snapshot, clear, and the coverage proxies) and the `/tracker-preview` redirect. Computes the plot's axis bounds, and the Drone view's detector settings, from the merged config. |
+| [src/routes/tracker.py](../../src/routes/tracker.py) | The `/tracker` blueprint (page, SSE proxy, one-shot snapshot, clear, the coverage proxies and the Stored Detections proxies) and the `/tracker-preview` redirect. Computes the plot's axis bounds, and the Drone view's detector settings, from the merged config. |
 | [templates/tracker.html](../../templates/tracker.html) | The page: controls, the Plotly scope, the wedge view's container and reset dialog, the track rail, and the EventSource client. Its frame (heading, panel, toolbar, status line, segmented controls, footer) is shared with Passive Radar; see [Scope pages](../architecture.md#scope-pages). |
 | [static/tracker-wedge.js](../../static/tracker-wedge.js) | The wedge view: the Leaflet map, the wedge, trails and arcs, and the replay. |
+| [static/tracker-stored.js](../../static/tracker-stored.js) | Stored Detections: the table of stored records, its states, and the plot of the open record. |
 | [static/scope-controls.js](../../static/scope-controls.js) | The Doppler and Delay views, the gear's narrow ranges and the Units toggle, shared with Passive Radar. See [Shared controls](#shared-controls). |
 | [static/units.js](../../static/units.js) | The km and mi conversions, shared with Passive Radar. See [Units](#units). |
 | [src/retina_tracker_client.py](../../src/retina_tracker_client.py) | `RetinaTrackerClient`: JSONL event tailer plus HTTP control client (`reset`). |
@@ -38,6 +41,8 @@ blah2 -> blah2_api --(network.tracker_forward, TCP)--> retina-tracker sidecar
    /tracker/clear             --- HTTP POST /history/clear --->+
    /tracker/coverage*         --- HTTP GET  /coverage* ------->+
    /tracker/coverage/reset    --- HTTP POST /coverage/reset -->+
+   /tracker/outside*          --- HTTP GET  /outside* -------->+
+   /tracker/outside/status    --- HTTP GET  /health ---------->+
 ```
 
 Detections travel from blah2 through blah2_api straight to retina-tracker
@@ -595,12 +600,14 @@ every pixel; below 900 px the rail stacks under the plot.
 ## Wedge view
 
 The Display control in the page header switches the panel between the Delay / Doppler scope, the
-[Drone view](#drone-view) (developer mode only) and the wedge view: a map of where this node is **proven** to see, built only from ADS-B-verified
+[Drone view](#drone-view) (developer mode only), the wedge view and
+[Stored Detections](#stored-detections). The wedge view is a map of where this node is **proven** to see, built only from ADS-B-verified
 detections, with the tracks drawn on it. Nothing in it comes from a declared antenna aim. The
-rail, the view window and the Tracks on/off control are shared by both displays; the Doppler,
+rail, the view window and the Tracks on/off control are shared by the scope and the wedge view; the Doppler,
 Detections and Clear buffer controls belong to the scope and are hidden in the wedge view, and
 the wedge view adds a "24 h max-hold" chip and Reset wedge. The panel's `data-display`
-attribute drives which controls and which body show (`.dd-only`, `.wedge-only`). The scope is
+attribute drives which controls and which body show (`.dd-only`, `.wedge-only`, and
+`.no-stored` / `.stored-only` for Stored Detections). The scope is
 not redrawn while hidden, since a Plotly redraw costs the same whether or not it is seen.
 
 Every shape arrives ready made from retina-tracker, which owns the maths
@@ -676,6 +683,112 @@ page are untouched, which is why it is separate from Clear buffer. Use it after 
 re-aiming the antenna; otherwise the old lobe would hold for up to a day. The sidecar also
 restarts the wedge by itself when the receiver or transmitter position changes. If the sidecar
 does not confirm, the dialog says nothing was cleared and stays open.
+
+## Stored Detections
+
+The fourth display. retina-tracker keeps every confirmed track that took a detection beyond
+±300 Hz of Doppler in a SQLite store on the node, with every detection the node classified from
+10 s before the track to 10 s after, and every other track in that window. retina-tracker's
+`docs/outside-store.md` has the trigger, the record format, the size limits and the roll-over.
+This display reads that store; retina-gui keeps no copy, the same as for the live record.
+
+It is offered to every owner, not only in developer mode. The records are deliberately
+unfiltered: interference, shadow tracks and ADS-B aircraft are all kept, and the short
+explanation above the table says so.
+
+### What it shows
+
+From the top of the panel:
+
+- **Status line**: how many records the store holds and how much of its cap they use, from
+  `/health`'s `outside` block, and when the newest started. It replaces the live stream's status
+  line while this display is shown.
+- **Explanation**: one paragraph saying what is kept and that nothing is filtered.
+- **Filter chips**: All, ADS-B, No ADS-B, over the rows loaded. ADS-B is the only filter the
+  list allows: the interference and shadow fractions are inside each compressed record, not in
+  the list's summary columns, so filtering on them would mean fetching every record.
+- **Table**, newest first: time (the track's first detection, in the viewer's time zone, UTC on
+  hover), how long it lasted, peak Doppler with its sign, detections beyond the limit, points
+  held (with a "partial" chip when the history had dropped some before the record was built),
+  detections around it, ADS-B hex, track id and record number. It scrolls inside about 300 px so
+  the plot stays near the top. The heading of the limit column takes `limit_hz` from the list
+  rather than assuming 300.
+- **Load older**: the next 50, paged with the tracker's `before` cursor. Shown while the last
+  page was full.
+- **The open record**: its time, record number, track and chips, then a Delay / Doppler plot
+  and a facts column.
+
+The plot draws the track in its own colour, ringed where a detection went beyond the limit,
+every other detection in the window by SNR band, as on the live scope, the other tracks in grey,
+and the ±limit lines dashed. A second plot of Doppler against time was tried in the first
+iteration and taken out on review.
+
+The facts column comes from the record itself: duration, detections and frames, peak Doppler
+and the range rate it means at the record's own centre frequency (300 Hz is a different speed
+on each band), detections beyond the limit, mean SNR, the tracker's max velocity estimate, ADS-B hex, how many
+detections and other tracks were around it. Speeds follow the Units toggle. A record the
+history could not give every point of carries the "partial" chip, in its heading and its row.
+
+The record's `interference_fraction` and `shadow_fraction` are not shown. Both check the
+tracker's own heuristics (whether its Doppler occupancy map or its shadow thresholds misfire at a
+site; retina-tracker's `track.py` says how each is meant to be read), but beside an owner's track
+they read as verdicts, such as "18% interference". They stay in every record and in
+`/tracker/outside/<id>`.
+
+The first row opens when the list loads. Selecting a row fetches that record (one to a few
+hundred kB of JSON); the last six opened are kept in the browser, so going back to one does not
+fetch it again. Each time the display is chosen the list reloads, so records stored since it
+was last open appear; there is no polling while it is open.
+
+### Why it draws the full span
+
+The Doppler and Delay toggles, the View window, the Detections layer, Tracks on/off and Clear
+buffer all act on the live stream and are hidden here. The only toolbar control left is Units.
+Every stored record goes beyond ±300 Hz by definition, so drawing it in the narrow view hides
+the part it was kept for. The plot uses the node's full span from [Axis bounds](#axis-bounds),
+widened to fit the record's track if it reaches further (a record kept before a config change),
+and autoscales when the node does not state its span. Plotly's own zoom still works within it.
+
+### The routes
+
+| Route | Sidecar | Notes |
+| --- | --- | --- |
+| `GET /tracker/outside?before=&limit=` | `GET /outside` | `before` and `limit` must be whole numbers from 1, up to 18 digits (the sidecar's own rule), or the route answers 400 without asking. `limit` is capped at 500, the sidecar's cap. |
+| `GET /tracker/outside/<id>` | `GET /outside/<id>` | Flask's `int` converter is what keeps anything but a number out of the upstream path. |
+| `GET /tracker/outside/status` | `GET /health` | Returns `{"outside": ...}`, 404 when `/health` has no `outside` block (a tracker without the store), 502 when unreachable. |
+
+The first two relay the sidecar's status and body untouched (`_proxy_json`), so the page can
+word each refusal. All three are reads: the store has no delete or annotate, and this display
+adds none.
+
+### What each answer means
+
+| Answer to the list | The page says |
+| --- | --- |
+| 200, no records | Nothing stored yet, and when a track would appear |
+| 404 | This node's tracker does not keep Stored Detections yet. The store arrived in a retina-tracker release after v0.6.0, so a node can run this page before its tracker has the routes |
+| 503 naming "opening" | The store is opening, which takes seconds after a tracker restart on a full store. It tries again every 5 s |
+| 503 with any other reason | Stored Detections is off on this node, with the sidecar's reason (for example a store that could not be opened, or a tracker started without one) |
+| 502, or no answer | The tracker cannot be reached. It tries again every 10 s |
+
+| Answer for one record | The page says |
+| --- | --- |
+| 404 | The record is no longer held: the oldest roll off when the store is full. Offers the newest |
+| 500, or anything else | The record cannot be read, with the sidecar's reason. The others are unaffected |
+
+The retries run only while the display is shown. Each was forced in a browser against a real
+retina-tracker: the states by answering the list route with each status, the retry by stopping
+the tracker and starting it again (the page recovered within one retry).
+
+### Linking to a record
+
+While Stored Detections is shown, the open record's id rides in the URL as `?record=<id>`
+(`history.replaceState`, so it adds no Back step), and leaving the display removes it. Opening
+`/tracker?record=<id>` shows Stored Detections on that record whatever display the browser last
+used. Store ids are never reused, so a link keeps meaning the same record until it rolls off,
+and then it shows the "no longer held" message rather than another record. The remembered
+display (`tracker.display` in localStorage) can now be `stored`; a build without this display
+reads that as the scope.
 
 ## Clearing the buffer
 

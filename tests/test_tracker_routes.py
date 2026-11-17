@@ -669,3 +669,138 @@ class TestTheUnitsToggle:
         """The Drone view works in metres and m/s; its controls are its own."""
         ctl = re.search(r'<div class="scope-ctl no-drone">\s*<span class="scope-lab">Units</span>', page)
         assert ctl
+
+
+# ── Stored Detections ───────────────────────────────────────────────────────
+
+class TestStoredDetectionsRoutes:
+    """The door onto retina-tracker's outside store: one page of the list, one
+    whole record, and the store's counters. Nothing is cached or reshaped here,
+    and every refusal keeps its status so the page can word each one.
+    See docs/features/tracker.md#stored-detections."""
+
+    LIST = {"schema": 1, "limit_hz": 300, "records": [{"id": 7, "track_id": "261117-000107"}]}
+
+    def test_the_list_is_relayed_untouched(self, app_client):
+        with patch.object(tracker_routes.requests, "get", return_value=fake_reply(self.LIST)) as mock_get:
+            response = app_client.get('/tracker/outside')
+        assert response.status_code == 200
+        assert response.get_json() == self.LIST
+        assert mock_get.call_args.args[0].endswith("/outside")
+        assert mock_get.call_args.kwargs["params"] is None
+
+    def test_paging_is_forwarded_and_the_limit_capped(self, app_client):
+        """500 mirrors the tracker's own page cap; it clamps again on its side."""
+        with patch.object(tracker_routes.requests, "get", return_value=fake_reply(self.LIST)) as mock_get:
+            app_client.get('/tracker/outside?before=120&limit=9999')
+        assert mock_get.call_args.kwargs["params"] == {"before": 120, "limit": 500}
+
+    @pytest.mark.parametrize("query", ["before=abc", "before=0", "before=-3", "limit=1.5",
+                                       "before=" + "9" * 19, "limit=%C2%B2", "before="])
+    def test_a_malformed_cursor_is_refused_before_the_tracker_is_asked(self, app_client, query):
+        with patch.object(tracker_routes.requests, "get") as mock_get:
+            response = app_client.get('/tracker/outside?' + query)
+        assert response.status_code == 400
+        mock_get.assert_not_called()
+
+    @pytest.mark.parametrize("status,error", [
+        (404, "not found"),                       # a tracker older than the store
+        (503, "outside store opening"),           # seconds after a restart
+        (503, "unable to open database file"),    # the store stood down
+    ])
+    def test_a_refusal_keeps_its_status_and_reason(self, app_client, status, error):
+        with patch.object(tracker_routes.requests, "get",
+                          return_value=fake_reply({"error": error}, status=status)):
+            response = app_client.get('/tracker/outside')
+        assert response.status_code == status
+        assert response.get_json() == {"error": error}
+
+    def test_an_unreachable_tracker_is_a_502(self, app_client):
+        with patch.object(tracker_routes.requests, "get", side_effect=requests.ConnectionError("refused")):
+            response = app_client.get('/tracker/outside')
+        assert response.status_code == 502
+        assert "unreachable" in response.get_json()["error"]
+
+    def test_one_record_is_fetched_by_its_id(self, app_client):
+        record = {"id": 7, "track": {"t": [1]}, "neighbours": {"total": 0}}
+        with patch.object(tracker_routes.requests, "get", return_value=fake_reply(record)) as mock_get:
+            response = app_client.get('/tracker/outside/7')
+        assert response.status_code == 200
+        assert response.get_json() == record
+        assert mock_get.call_args.args[0].endswith("/outside/7")
+
+    def test_a_record_that_rolled_off_is_a_404(self, app_client):
+        with patch.object(tracker_routes.requests, "get",
+                          return_value=fake_reply({"error": "record not held"}, status=404)):
+            assert app_client.get('/tracker/outside/118').status_code == 404
+
+    @pytest.mark.parametrize("record_id", ["abc", "-1", "1.5", "..%2Fhealth", "status%2F..%2F..%2Fhealth"])
+    def test_an_id_that_is_not_a_number_never_reaches_the_tracker(self, app_client, record_id):
+        with patch.object(tracker_routes.requests, "get") as mock_get:
+            response = app_client.get('/tracker/outside/' + record_id)
+        assert response.status_code == 404
+        mock_get.assert_not_called()
+
+    def test_the_status_is_the_outside_block_of_health(self, app_client):
+        health = MagicMock()
+        health.json.return_value = {"ok": True, "outside": {"state": "open", "records": 37, "used_bytes": 1024}}
+        with patch.object(tracker_routes.requests, "get", return_value=health) as mock_get:
+            response = app_client.get('/tracker/outside/status')
+        assert response.status_code == 200
+        assert response.get_json() == {"outside": {"state": "open", "records": 37, "used_bytes": 1024}}
+        assert mock_get.call_args.args[0].endswith("/health")
+
+    def test_a_tracker_without_a_store_has_no_status(self, app_client):
+        health = MagicMock()
+        health.json.return_value = {"ok": True}
+        with patch.object(tracker_routes.requests, "get", return_value=health):
+            assert app_client.get('/tracker/outside/status').status_code == 404
+
+    def test_an_unreachable_tracker_has_no_status(self, app_client):
+        with patch.object(tracker_routes.requests, "get", side_effect=requests.ConnectionError("refused")):
+            assert app_client.get('/tracker/outside/status').status_code == 502
+
+
+class TestStoredDetectionsDisplay:
+    """The display is a fourth button on the Tracker page, offered to every
+    owner, reading through static/tracker-stored.js."""
+
+    @pytest.fixture
+    def page(self, app_client):
+        return app_client.get('/tracker').get_data(as_text=True)
+
+    def test_it_is_offered_to_everyone(self, page):
+        assert 'data-display="stored"' in page
+        assert '>Stored Detections</button>' in page
+
+    def test_the_script_is_served_and_loaded(self, app_client, page):
+        resp = app_client.get('/static/tracker-stored.js')
+        assert resp.status_code == 200
+        js = resp.get_data(as_text=True)
+        assert 'window.TrackerStored' in js
+        assert page.index('/static/tracker-stored.js') < page.index('TrackerStored.create(')
+
+    def test_it_reads_only_and_never_writes(self, app_client):
+        """No POST anywhere: the store has no delete or annotate, and a
+        display must not grow one."""
+        js = app_client.get('/static/tracker-stored.js').get_data(as_text=True)
+        assert 'POST' not in js and 'method:' not in js
+        assert set(re.findall(r"getJson\('([^'?]+)", js)) == {'/tracker/outside', '/tracker/outside/', '/tracker/outside/status'}
+
+    def test_a_remembered_choice_survives_the_display_check(self, page):
+        """The display is remembered per browser; 'stored' must not fall back
+        to the scope on the next load."""
+        assert "['wedge', 'stored'].indexOf(state.display) === -1" in page
+
+    def test_a_link_to_a_record_opens_it(self, page):
+        assert "new URLSearchParams(location.search).get('record')" in page
+        assert "if (linkedRecord !== null) stored.open(linkedRecord);" in page
+
+    def test_the_live_stream_controls_are_hidden_in_this_display(self, page):
+        for label in ('Doppler', 'Delay', 'View', 'Detections'):
+            ctl = re.search(r'<div class="scope-ctl[^"]*">\s*<span class="scope-lab">' + label + '</span>', page)
+            assert ctl and 'no-stored' in ctl.group(0), label
+        assert re.search(r'id="clearBufferBtn" class="[^"]*no-stored', page)
+        assert '<div class="trk-body no-stored">' in page
+        # The stream rewrites its status line's class; the hiding class must survive that.
+        assert "statusEl.className = 'scope-status no-stored'" in page
