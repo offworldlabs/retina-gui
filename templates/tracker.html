@@ -133,6 +133,9 @@
 .wedge-key { display: inline-flex; align-items: center; gap: 6px; font-family: var(--font-mono, monospace);
              font-size: 10.5px; color: var(--ink-2); white-space: nowrap; }
 .wedge-key svg { width: 22px; height: 12px; display: block; }
+.wedge-area { font-family: var(--font-mono, monospace); font-size: 11px; color: var(--color-muted); white-space: nowrap; }
+.wedge-area b { font-size: 15px; font-weight: 600; color: var(--color-text); margin-right: 5px; }
+.wedge-area[hidden] { display: none; }
 .hold-chip { font-family: var(--font-mono, monospace); font-size: 10.5px; color: var(--ink-2); white-space: nowrap;
              background: var(--ok-soft); border: 1px solid var(--ok-edge); border-radius: 999px; padding: 3px 9px; }
 .hold-chip i { display: inline-block; width: 8px; height: 8px; border-radius: 2px; margin-right: 6px; vertical-align: -1px;
@@ -259,6 +262,11 @@
         <button type="button" class="linkbtn" id="oovShowBtn">Show full span</button>
       </span>
       <span class="scope-spacer"></span>
+      {# Between two spacers, so it sits in the middle of the bar.
+         See docs/features/tracker.md#coverage-area #}
+      <span class="wedge-area wedge-only" id="wedgeArea" role="status" hidden
+            title="Estimated ground area of the proven coverage drawn below, close-in slices included. It covers the slices proven in the last 24 hours, so it grows as more aircraft pass and restarts with the wedge."><b id="wedgeAreaValue"></b>proven coverage</span>
+      <span class="scope-spacer wedge-only"></span>
 
       <div class="scope-ctl dd-only no-drone no-stored">
         <span class="scope-lab">Doppler</span>
@@ -355,6 +363,17 @@
         </div>
       </div>
       {%- endif %}
+
+      {# The delay ellipses of unlabelled tracks. See docs/features/tracker.md#the-arcs-control #}
+      <div class="scope-ctl wedge-only">
+        <span class="scope-lab">Arcs</span>
+        <div class="seg" role="group" aria-label="Arcs of unlabelled tracks">
+          <button type="button" data-arcs="on" aria-pressed="true"
+                  title="Each unlabelled track's delay ellipse: solid inside the wedge, dashed outside it.">On</button>
+          <button type="button" data-arcs="off" aria-pressed="false"
+                  title="No ellipses: only ADS-B trails are drawn. A replay still draws its own.">Off</button>
+        </div>
+      </div>
 
       <span class="hold-chip wedge-only" title="Each slice holds the second-furthest range two different aircraft reached in the last 24 hours."><i></i>24 h max-hold</span>
       <button type="button" id="wedgeResetBtn" class="ds-btn danger-ghost sm wedge-only"
@@ -684,6 +703,7 @@
         window: DEFAULT_WINDOW,
         layer: 'all',
         tracks: 'on',
+        arcs: 'on',
         sort: 'recent',
         filter: 'all',
         hidden: {},
@@ -703,6 +723,8 @@
     state.layer = recall('layer', 'all');
     if (OFFERED_LAYERS.indexOf(state.layer) === -1) state.layer = 'all';
     state.tracks = recall('tracks', 'on');
+    // The wedge view's Arcs control. See docs/features/tracker.md#the-arcs-control
+    state.arcs = recall('arcs', 'on') === 'off' ? 'off' : 'on';
     state.sort = recall('sort', 'recent');
     state.filter = recall('filter', 'all');
     state.display = recall('display', 'scope');
@@ -1258,7 +1280,7 @@
             return;
         }
         if (state.display === 'wedge') {
-            wedge.render(rows, { hidden: state.hidden, hover: state.hover, tracksOn: tracksShown() });
+            wedge.render(rows, { hidden: state.hidden, hover: state.hover, tracksOn: tracksShown(), arcs: state.arcs });
             return;
         }
         if (droneOn()) {
@@ -1684,6 +1706,12 @@
         scheduleRender();
     });
 
+    wireSeg('arcs', function (v) {
+        state.arcs = v;
+        remember('arcs', v);
+        scheduleRender();
+    });
+
     // The Drone view's controls exist only in developer mode; wiring absent
     // buttons is a no-op.
     wireSeg('fade', function (v) {
@@ -1805,6 +1833,9 @@
         mapEl: document.getElementById('wedgeMap'),
         noticeEl: document.getElementById('wedgeNotice'),
         statEl: document.getElementById('wedgeStat'),
+        areaEl: document.getElementById('wedgeArea'),
+        areaValueEl: document.getElementById('wedgeAreaValue'),
+        units: function () { return U; },
         hud: {
             el: document.getElementById('wedgeHud'),
             dot: document.getElementById('wedgeHudDot'),
@@ -2014,6 +2045,9 @@
     });
     document.querySelectorAll('.seg [data-tracks]').forEach(function (b) {
         b.setAttribute('aria-pressed', String(b.getAttribute('data-tracks') === state.tracks));
+    });
+    document.querySelectorAll('.seg [data-arcs]').forEach(function (b) {
+        b.setAttribute('aria-pressed', String(b.getAttribute('data-arcs') === state.arcs));
     });
     document.querySelectorAll('.fchip').forEach(function (b) {
         b.setAttribute('aria-pressed', String(b.getAttribute('data-filter') === state.filter));

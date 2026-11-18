@@ -311,8 +311,9 @@ in: kilometres and km/h, or miles and mph. It is a presentation choice for this 
 the Doppler and Delay views, and nothing on the node knows about it: the stream, `AXES`, the
 narrow ranges and the out-of-view test all stay in kilometres, and only what is drawn and written
 converts. It changes the range axis and its title, the Delay toggle's labels, the out-of-view
-alert, the gear dialog's narrow delay field, the hover labels, and the rail's peak velocity
-(the stream's m/s as km/h or mph). The Drone view stays in metres: it is an engineering view
+alert, the gear dialog's narrow delay field, the hover labels, the rail's peak velocity
+(the stream's m/s as km/h or mph), and the wedge view's [coverage area](#coverage-area)
+(km² or square miles, `U.fmtArea`). The Drone view stays in metres: it is an engineering view
 whose cells are range bins, and its own settings are typed in metres and m/s.
 
 The choice is per browser rather than per node because the person reading the miles is whoever
@@ -605,7 +606,8 @@ The Display control in the page header switches the panel between the Delay / Do
 detections, with the tracks drawn on it. Nothing in it comes from a declared antenna aim. The
 rail, the view window and the Tracks on/off control are shared by the scope and the wedge view; the Doppler,
 Detections and Clear buffer controls belong to the scope and are hidden in the wedge view, and
-the wedge view adds a "24 h max-hold" chip and Reset wedge. The panel's `data-display`
+the wedge view adds the [coverage area](#coverage-area) in the middle of the bar, the
+[Arcs control](#the-arcs-control), a "24 h max-hold" chip and Reset wedge. The panel's `data-display`
 attribute drives which controls and which body show (`.dd-only`, `.wedge-only`, and
 `.no-stored` / `.stored-only` for Stored Detections). The scope is
 not redrawn while hidden, since a Plotly redraw costs the same whether or not it is seen.
@@ -656,6 +658,36 @@ the first time it has a geometry. Before any slice is proven it fits a 120 km bo
 receiver instead, and it refits once, to the lobes, when the first ones appear. After that it
 keeps the viewer's pan and zoom. Fitting the box alone left a short-range wedge small in the
 middle of the map.
+
+### Coverage area
+
+The middle of the toolbar states the ground area of the proven coverage, for example
+"≈ 1,315 km² proven coverage", in km² or square miles with the [Units](#units) control: a whole
+number from 10 up and two significant figures below ("≈ 4.4 km²"), so a wedge of a few close-in
+slices never reads as zero. It is the
+area of the rings the map draws, `lobes` and `close_lobes` together, so it always agrees with the
+green shapes: close-in slices count, and so do slices at the processed range limit. Slices are
+sectors about the receiver and never overlap, so the rings are summed. `ringAreaKm2` in
+`static/tracker-wedge.js` measures each ring on a sphere; retina-tracker serves no area, and
+this is the one piece of arithmetic the page does on the wedge.
+
+It is an estimate, and the "≈" says so: it is the flat map's area (target altitude is ignored,
+as for the arcs), each slice is a whole 5 degree sector out to its held range, and it describes
+the last 24 hours, so it grows as more aircraft pass and starts again after a reset. It is
+hidden rather than zero while no slice is proven, when the node has no geometry and when the
+coverage cannot be read; the notice over the map says why.
+
+### The Arcs control
+
+Arcs, in the wedge view's toolbar, turns the delay ellipses of unlabelled tracks `On` (the
+default) or `Off`. With many unlabelled tracks the ellipses ring the receiver and transmitter
+many times over and bury the map. ADS-B trails, the wedge and the processed range limit are
+never affected, and Tracks off still hides everything.
+
+The choice is this browser's, saved as `tracker.arcs`; anything but `off` reads as `On`. It
+applies to the standing tracks only: a [replay](#replaying-a-track) always draws its own arc,
+since otherwise replaying an unlabelled track with Arcs off would show nothing. The page still
+polls `/tracker/coverage/arcs` while Arcs is off, so switching back draws at once.
 
 ### Replaying a track
 
