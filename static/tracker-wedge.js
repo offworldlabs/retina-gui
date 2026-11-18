@@ -28,6 +28,7 @@
     var WEDGE_FILL = '#16a34a';
     var SITE_INK = '#22252c';
     var SPAN_INK = '#6f6c65';
+    var EARTH_R_KM = 6371.0088;
 
     function esc(s) {
         return String(s).replace(/[&<>"]/g, function (c) {
@@ -67,6 +68,18 @@
         return segs;
     }
 
+    // Ground area of one [lat, lon] ring in km², on a sphere. The rings are
+    // retina-tracker's; this only measures what is drawn.
+    // See docs/features/tracker.md#coverage-area
+    function ringAreaKm2(ring) {
+        var sum = 0, rad = Math.PI / 180;
+        for (var i = 0; i < ring.length; i++) {
+            var a = ring[i], b = ring[(i + 1) % ring.length];
+            sum += (b[1] - a[1]) * rad * (2 + Math.sin(a[0] * rad) + Math.sin(b[0] * rad));
+        }
+        return Math.abs(sum) * EARTH_R_KM * EARTH_R_KM / 2;
+    }
+
     function lastAtOrBefore(items, t) {
         var lo = 0, hi = items.length;
         while (lo < hi) {
@@ -96,7 +109,8 @@
         var fittedTo = null;
         var replay = null;
         var rows = [];
-        var view = { hidden: {}, hover: null, tracksOn: true };
+        var view = { hidden: {}, hover: null, tracksOn: true, arcs: 'on' };
+        var areaKm2 = 0;
 
         function ensureMap() {
             if (map) return;
@@ -160,8 +174,21 @@
                 siteMarker(g.tx, 'TX').addTo(layers.sites);
                 fit(g);
             }
+            areaKm2 = 0;
+            if (g) {
+                (coverage.lobes || []).concat(coverage.close_lobes || []).forEach(function (ring) {
+                    areaKm2 += ringAreaKm2(ring);
+                });
+            }
             renderNotice();
             renderStat();
+            renderArea();
+        }
+
+        // Hidden until a slice is proven, so the bar never states a zero.
+        function renderArea() {
+            opts.areaEl.hidden = !(areaKm2 > 0);
+            if (areaKm2 > 0) opts.areaValueEl.textContent = '\u2248 ' + opts.units().fmtArea(areaKm2);
         }
 
         // Fit to the lobes once there are any, else a default box around the
@@ -285,7 +312,7 @@
                 if (view.hidden[r.id] || (replay && replay.id === r.id)) return;
                 var color = opts.colorFor(r.id), op = opacityFor(r.id);
                 if (r.meta.adsb_hex) drawTrail(r, color, op);
-                else drawArc(latestArcs[r.id] && latestArcs[r.id].arc, color, op, layers.tracks);
+                else if (view.arcs !== 'off') drawArc(latestArcs[r.id] && latestArcs[r.id].arc, color, op, layers.tracks);
             });
         }
 
@@ -422,7 +449,9 @@
             render: function (nextRows, nextView) {
                 rows = nextRows;
                 view = nextView;
-                if (visible) drawTracks();
+                if (!visible) return;
+                drawTracks();
+                renderArea();
             },
             replay: replayTrack,
             stopReplay: stopReplay,

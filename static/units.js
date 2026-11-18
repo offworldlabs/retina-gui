@@ -42,6 +42,13 @@
             kmOf: function (dist) { return dist * kmPerDist; },
             // A whole number of the unit, for button labels and alerts.
             fmtDist: function (km) { return Math.round(distOf(km)) + (imperial ? ' mi' : ' km'); },
+            // An area in km², as km² or square miles: a whole number from 10 up,
+            // two significant figures below, so a small wedge never reads as 0.
+            fmtArea: function (km2) {
+                var v = km2 / (kmPerDist * kmPerDist);
+                var text = v >= 9.95 ? Math.round(v).toLocaleString('en-US') : String(Number(v.toPrecision(2)));
+                return text + (imperial ? ' sq mi' : ' km\u00b2');
+            },
             // A speed in m/s, as the stream reports it, as a whole number of km/h or mph.
             fmtSpeedMps: function (mps) { return Math.round(mps / mpsPerSpeed) + (imperial ? ' mph' : ' km/h'); }
         };
