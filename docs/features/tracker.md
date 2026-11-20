@@ -39,6 +39,7 @@ blah2 -> blah2_api --(network.tracker_forward, TCP)--> retina-tracker sidecar
                                                                |
    RetinaTrackerClient.reset() --- HTTP POST /reset ---------->+
    /tracker/clear             --- HTTP POST /history/clear --->+
+   /tracker/download          --- HTTP GET  /events, 1st msg ->+
    /tracker/coverage*         --- HTTP GET  /coverage* ------->+
    /tracker/coverage/reset    --- HTTP POST /coverage/reset -->+
    /tracker/outside*          --- HTTP GET  /outside* -------->+
@@ -789,6 +790,46 @@ used. Store ids are never reused, so a link keeps meaning the same record until 
 and then it shows the "no longer held" message rather than another record. The remembered
 display (`tracker.display` in localStorage) can now be `stored`; a build without this display
 reads that as the scope.
+
+## Downloading detections
+
+Download detections, beside Clear buffer on the Delay / Doppler and Drone displays, saves the
+node's record as a JSON file. It has a window of its own (5 min, 15 min, 1 h, or the 4 h the node
+holds, which is the default) rather than following View: the point is to keep what the node has,
+for example before a configuration apply restarts the stack and empties it (the record is in
+the sidecar's memory), and the Drone view only ever holds a minute.
+
+`GET /tracker/download?window=<seconds>` opens the sidecar's stream at that window, takes the
+first message and hangs up, and returns it as an attachment named
+`detections-<node id>-<UTC time>-<window>s.json`. The window is clamped like the page's
+([View window](#view-window)). The read timeout is `DOWNLOAD_TIMEOUT_S` (60 s), longer than a
+control call's because a four-hour snapshot is megabytes the sidecar builds before its first
+byte. `_first_message` reads the stream chunk by chunk, as `events()` does (the sidecar frames
+each message as its own chunk), and cuts at the blank line that ends the message, so the stream
+going quiet after its snapshot does not hold the file back. The same 60 s also bounds the whole
+wait for a snapshot, because a stream of keepalives alone would satisfy the read timeout for
+ever.
+
+The file is one object:
+
+| Key | Holds |
+| --- | --- |
+| `format`, `version` | `"retina-gui tracker download"`, `1` |
+| `node_id`, `exported_at` | Which node, and when (UTC, ISO 8601) |
+| `requested_window_s` | The window asked for, after clamping. The snapshot's own `window_s` is what the sidecar served |
+| `units` | What `t`, `delay`, `doppler` and `snr` are measured in |
+| `settings` | `capture.fc`, `capture.fs` and the whole `process` section of config.yml at the time of the download, so the file says what the detector was reporting. Not necessarily what it was set to when each detection was made |
+| `snapshot` | The sidecar's snapshot exactly as sent ([Message format](#message-format)): `detections` by class and `tracks` by id |
+
+The snapshot is spliced into the body as bytes, not parsed and re-encoded, for the same reason
+the stream is carried untouched; it is parsed once only to refuse a reply that is not JSON. No
+file is sent when the sidecar is unreachable or sends no snapshot: the route answers 502 with
+`{"error": ...}`.
+
+The page fetches the file and hands the browser a blob, rather than linking to the route, so a
+502 is said beside the button ("Not downloaded: tracker unreachable: ...") instead of replacing
+the page. A node that holds less than the window gives a shorter file, as on the plot; the
+oldest `t` in it says how far back it goes.
 
 ## Clearing the buffer
 

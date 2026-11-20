@@ -133,6 +133,137 @@ def test_data_json_reports_an_unreachable_sidecar(app_client):
     assert "error" in response.get_json()
 
 
+# ── the download ────────────────────────────────────────────────────────────
+
+SNAPSHOT_JSON = SNAPSHOT.split("data: ", 1)[1].strip()
+
+
+def fake_snapshot_stream(chunks=None):
+    """requests.get(..., stream=True) handing over the stream in the given
+    chunks. By default the snapshot arrives split mid-message, as it does off
+    a socket."""
+    whole = b"event: snapshot\ndata: " + SNAPSHOT_JSON.encode() + b"\n\n"
+    return fake_upstream([whole[:40], whole[40:]] if chunks is None else chunks)
+
+
+def test_the_download_is_a_json_file_named_for_the_node_and_window(app_client):
+    with patch.object(tracker_routes.requests, "get",
+                      return_value=fake_snapshot_stream()) as mock_get:
+        response = app_client.get('/tracker/download?window=3600')
+
+    assert response.status_code == 200
+    assert response.content_type == "application/json"
+    assert re.fullmatch(
+        r'attachment; filename="detections-ret7a000001-\d{8}T\d{6}Z-3600s\.json"',
+        response.headers["Content-Disposition"])
+    assert mock_get.call_args.kwargs["params"] == {"window": 3600}
+
+
+def test_the_download_carries_the_snapshot_as_the_sidecar_sent_it(app_client):
+    with patch.object(tracker_routes.requests, "get", return_value=fake_snapshot_stream()):
+        response = app_client.get('/tracker/download?window=900')
+
+    assert SNAPSHOT_JSON.encode() in response.data, "spliced in byte for byte"
+    body = response.get_json()
+    assert body["snapshot"] == json.loads(SNAPSHOT_JSON)
+    assert body["format"] == "retina-gui tracker download"
+    assert body["version"] == 1
+    assert body["node_id"] == "ret7a000001"
+    assert body["requested_window_s"] == 900
+    assert body["exported_at"].endswith("+00:00")
+
+
+def test_the_download_says_what_the_detector_was_set_to(app_client):
+    """A file read weeks later has to say what the radar was reporting."""
+    with patch.object(tracker_routes.requests, "get", return_value=fake_snapshot_stream()):
+        settings = app_client.get('/tracker/download?window=900').get_json()["settings"]
+    assert settings["capture"] == {"fc": 503000000, "fs": 2000000}
+    assert settings["process"]["detection"]["minDoppler"] == 15
+
+
+def test_the_download_does_not_wait_for_the_stream_to_say_more(app_client):
+    """The stream goes quiet after its snapshot. The file must be cut at the
+    message's blank line, not when a read buffer happens to fill."""
+    def chunks():
+        yield b": keepalive\n\n"
+        yield b"event: snapshot\r\ndata: " + SNAPSHOT_JSON.encode() + b"\r\n\r\n"
+        raise AssertionError("read past the first message")
+
+    upstream = fake_upstream([])
+    upstream.iter_content.return_value = chunks()
+    with patch.object(tracker_routes.requests, "get", return_value=upstream):
+        response = app_client.get('/tracker/download?window=900')
+    assert response.get_json()["snapshot"] == json.loads(SNAPSHOT_JSON)
+
+
+def test_the_download_gives_up_on_a_stream_of_nothing_but_keepalives(app_client, monkeypatch):
+    """Each keepalive satisfies the read timeout, so without a limit on the
+    whole wait the request would never end."""
+    def keepalives():
+        while True:
+            yield b": keepalive\n\n"
+
+    upstream = fake_upstream([])
+    upstream.iter_content.return_value = keepalives()
+    monkeypatch.setattr(tracker_routes, "DOWNLOAD_TIMEOUT_S", 0)
+    with patch.object(tracker_routes.requests, "get", return_value=upstream):
+        response = app_client.get('/tracker/download?window=900')
+    assert response.status_code == 502
+    assert response.get_json() == {"error": "no snapshot"}
+
+
+def test_the_download_clamps_its_window_like_the_page(app_client):
+    with patch.object(tracker_routes.requests, "get",
+                      return_value=fake_snapshot_stream()) as mock_get:
+        response = app_client.get('/tracker/download?window=999999')
+    assert mock_get.call_args.kwargs["params"] == {"window": tracker_routes.MAX_VIEW_WINDOW_S}
+    assert "-14400s.json" in response.headers["Content-Disposition"]
+
+
+def test_the_download_without_a_window_takes_what_the_sidecar_sends(app_client):
+    with patch.object(tracker_routes.requests, "get",
+                      return_value=fake_snapshot_stream()) as mock_get:
+        response = app_client.get('/tracker/download')
+    assert mock_get.call_args.kwargs["params"] is None
+    assert response.get_json()["requested_window_s"] is None
+    assert "-default.json" in response.headers["Content-Disposition"]
+
+
+def test_the_download_gives_up_on_a_sidecar_that_never_answers(app_client):
+    """Unlike the stream, it has a read timeout: nobody is waiting on a quiet sky."""
+    with patch.object(tracker_routes.requests, "get",
+                      return_value=fake_snapshot_stream()) as mock_get:
+        app_client.get('/tracker/download?window=900')
+    _connect, read = mock_get.call_args.kwargs["timeout"]
+    assert read == tracker_routes.DOWNLOAD_TIMEOUT_S
+
+
+def test_the_download_reports_an_unreachable_sidecar(app_client):
+    with patch.object(tracker_routes.requests, "get",
+                      side_effect=requests.ConnectionError("refused")):
+        response = app_client.get('/tracker/download?window=900')
+    assert response.status_code == 502
+    assert "Content-Disposition" not in response.headers
+    assert "tracker unreachable" in response.get_json()["error"]
+
+
+@pytest.mark.parametrize("chunks", [
+    [], [b": keepalive\n\n"], [b"event: snapshot\ndata: {not json\n\n"],
+    [b"event: snapshot\ndata: {\"cut\": \"off before the blank line\"}\n"]])
+def test_the_download_refuses_to_write_a_file_without_a_snapshot(app_client, chunks):
+    with patch.object(tracker_routes.requests, "get", return_value=fake_snapshot_stream(chunks)):
+        response = app_client.get('/tracker/download?window=900')
+    assert response.status_code == 502
+    assert "Content-Disposition" not in response.headers
+
+
+def test_the_page_offers_the_download_with_a_window_of_its_own(app_client):
+    page = app_client.get('/tracker').data.decode()
+    assert 'id="downloadBtn"' in page
+    assert re.findall(r'<option value="(\d+)"', page.split('id="downloadWindow"')[1].split("</select>")[0]) \
+        == ["300", "900", "3600", "14400"]
+
+
 # ── clear ───────────────────────────────────────────────────────────────────
 
 def test_clear_wipes_the_record_in_the_sidecar(app_client):
@@ -358,9 +489,10 @@ class TestTheDopplerViewIsPresentationOnly:
         assert "saved.remember('narrowKm', km)" in js
         assert "saved.remember('delView', v)" in js
         assert "fetch(" not in js
-        # The only requests the page makes besides the stream are Reset wedge
-        # and Clear buffer; the wedge view's reads live in static/tracker-wedge.js.
-        assert re.findall(r"fetch\('([^']+)'", page) == ['/tracker/coverage/reset', '/tracker/clear']
+        # The only requests the page makes besides the stream are Reset wedge,
+        # Download detections and Clear buffer; the wedge view's reads live in static/tracker-wedge.js.
+        assert re.findall(r"fetch\('([^']+)'", page) == [
+            '/tracker/coverage/reset', '/tracker/download?window=', '/tracker/clear']
 
     def test_reset_view_is_on_the_page_and_hidden_until_the_plot_is_zoomed(self, page):
         """Inside the plot's box, so it sits over the plot's corner. The script
@@ -533,7 +665,8 @@ class TestTheDroneViewFollowsTheDetector:
         page = app_client.get('/tracker').get_data(as_text=True)
         for key in ('fade', 'floor', 'dtracks', 'droneM', 'hum', 'slowMs'):
             assert "remember('" + key + "'" in page
-        assert re.findall(r"fetch\('([^']+)'", page) == ['/tracker/coverage/reset', '/tracker/clear']
+        assert re.findall(r"fetch\('([^']+)'", page) == [
+            '/tracker/coverage/reset', '/tracker/download?window=', '/tracker/clear']
 
 
 # ── the coverage wedge ──────────────────────────────────────────────────────

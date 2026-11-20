@@ -107,6 +107,9 @@
 .scope-panel:not([data-display="drone"]) .drone-only { display: none !important; }
 .drone-key { display: inline-flex; align-items: center; gap: 6px; font-family: var(--font-mono, monospace);
              font-size: 10.5px; color: var(--ink-2); white-space: nowrap; }
+.trk-download { flex-wrap: wrap; max-width: 100%; }
+.trk-download select { width: auto; padding: 4px 8px; font-size: 12.5px; }
+.trk-download-msg { font-size: 12px; color: var(--color-muted); min-width: 0; overflow-wrap: anywhere; }
 .drone-key i { display: inline-block; width: 14px; height: 9px; border-radius: 2px; }
 .drone-key .untested { background: rgba(120, 120, 120, .22); }
 .drone-key .hum { background: rgba(217, 119, 6, .22); border: 1px dashed rgba(180, 83, 9, .7); }
@@ -361,6 +364,23 @@
               title="Clears the wedge for this node, after moving or re-aiming the antenna. Tracks are kept.">
         Reset wedge
       </button>
+
+      {# The record as a file, for the window picked here rather than the one
+         on screen. See docs/features/tracker.md#downloading-detections #}
+      <div class="scope-ctl dd-only no-stored trk-download">
+        <select id="downloadWindow" class="ds-input sm" aria-label="How much of the record to download"
+                title="How far back the file goes. The node holds four hours.">
+          <option value="300">Last 5 min</option>
+          <option value="900">Last 15 min</option>
+          <option value="3600">Last 1 h</option>
+          <option value="14400" selected>Last 4 h (everything held)</option>
+        </select>
+        <button type="button" id="downloadBtn" class="ds-btn ghost sm"
+                title="Saves every detection and track the node holds for that time as a JSON file. Do it before applying a configuration change, which empties the record.">
+          Download detections
+        </button>
+        <span class="trk-download-msg" id="downloadMsg" role="status" hidden></span>
+      </div>
 
       <button type="button" id="clearBufferBtn" class="ds-btn danger-ghost sm dd-only no-stored"
               title="Clears only what's displayed here. Tracking keeps running, so an active aircraft will reappear on its own.">
@@ -1922,6 +1942,41 @@
             })
             .finally(function () { btn.disabled = false; });
     });
+
+    // Fetched rather than linked, so a tracker that cannot answer is said
+    // here instead of leaving the page for an error.
+    // See docs/features/tracker.md#downloading-detections
+    (function () {
+        var btn = document.getElementById('downloadBtn');
+        var pick = document.getElementById('downloadWindow');
+        var msg = document.getElementById('downloadMsg');
+        function say(text) { msg.textContent = text; msg.hidden = !text; }
+        btn.addEventListener('click', function () {
+            btn.disabled = true;
+            say('Preparing\u2026');
+            fetch('/tracker/download?window=' + encodeURIComponent(pick.value), { cache: 'no-store' })
+                .then(function (r) {
+                    if (!r.ok) {
+                        return r.json().catch(function () { return {}; }).then(function (body) {
+                            throw new Error(body.error || 'the node answered ' + r.status);
+                        });
+                    }
+                    var named = /filename="([^"]+)"/.exec(r.headers.get('Content-Disposition') || '');
+                    return r.blob().then(function (blob) {
+                        var a = document.createElement('a');
+                        a.href = URL.createObjectURL(blob);
+                        a.download = named ? named[1] : 'detections.json';
+                        document.body.appendChild(a);
+                        a.click();
+                        a.remove();
+                        setTimeout(function () { URL.revokeObjectURL(a.href); }, 60000);
+                        say('Saved ' + a.download + ' (' + (blob.size / 1048576).toFixed(blob.size < 104858 ? 2 : 1) + ' MB)');
+                    });
+                })
+                .catch(function (e) { say('Not downloaded: ' + (e && e.message ? e.message : 'no answer from the node')); })
+                .finally(function () { btn.disabled = false; });
+        });
+    })();
 
     document.getElementById('clearBufferBtn').addEventListener('click', function () {
         var btn = this;

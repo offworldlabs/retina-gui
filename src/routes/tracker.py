@@ -7,6 +7,7 @@ See docs/features/tracker.md#why-the-page-is-proxied.
 import json
 import math
 import re
+import time
 
 import requests
 from flask import Blueprint, Response, jsonify, redirect, render_template, request, stream_with_context
@@ -189,6 +190,95 @@ def data():
     except requests.RequestException as e:
         return jsonify({"error": f"tracker unreachable: {e.__class__.__name__}"}), 502
     return jsonify({"error": "no snapshot"}), 502
+
+
+def _first_message(upstream, deadline_s):
+    """The `data:` payload of a stream's first message, as bytes, or None.
+
+    Read as the chunks arrive (the sidecar frames each message as its own)
+    and cut at the blank line that ends a message, so the stream going quiet
+    after its snapshot does not hold the answer back. Gives up after
+    `deadline_s` in all: keepalives satisfy a read timeout for ever.
+    """
+    give_up = time.monotonic() + deadline_s
+    buffer = b""
+    for chunk in upstream.iter_content(chunk_size=None):
+        buffer += chunk.replace(b"\r\n", b"\n")
+        while b"\n\n" in buffer:
+            message, buffer = buffer.split(b"\n\n", 1)
+            for line in message.split(b"\n"):
+                if line.startswith(b"data: "):
+                    return line[6:]
+        if time.monotonic() > give_up:
+            return None
+    return None
+
+
+# A four-hour snapshot is megabytes the sidecar has to build before its first
+# byte, so the download waits longer than the page's control calls. Used both
+# as the read timeout and as the limit on the whole wait for a snapshot.
+DOWNLOAD_TIMEOUT_S = 60
+
+
+@bp.route("/download")
+def download():
+    """The sidecar's record for ?window= seconds, as a JSON file to keep.
+
+    The snapshot goes into the file as the sidecar sent it, under a header
+    saying what was asked for and what the detector was set to.
+    See docs/features/tracker.md#downloading-detections.
+    """
+    from datetime import datetime, timezone
+
+    from app import app, config_mgr, get_node_id
+
+    window_s = _view_window()
+    params = {"window": window_s} if window_s else None
+    snapshot = None
+    try:
+        with requests.get(_tracker_url("/events"), params=params, stream=True,
+                          timeout=(CONNECT_TIMEOUT_S, DOWNLOAD_TIMEOUT_S)) as upstream:
+            upstream.raise_for_status()
+            snapshot = _first_message(upstream, DOWNLOAD_TIMEOUT_S)
+    except requests.RequestException as e:
+        return jsonify({"error": f"tracker unreachable: {e.__class__.__name__}"}), 502
+    if snapshot is None:
+        return jsonify({"error": "no snapshot"}), 502
+    try:
+        json.loads(snapshot)
+    except ValueError:
+        return jsonify({"error": "the tracker's snapshot was not JSON"}), 502
+
+    try:
+        config = config_mgr.load_merged_config() or {}
+    except Exception as e:
+        app.logger.warning(f"Detections download has no settings, config did not load: {e}")
+        config = {}
+    capture = config.get("capture", {}) or {}
+    now = datetime.now(timezone.utc)
+    node_id = get_node_id() or "node"
+    header = {
+        "format": "retina-gui tracker download",
+        "version": 1,
+        "node_id": node_id,
+        "exported_at": now.isoformat(timespec="seconds"),
+        # None is "whatever the sidecar sends when not asked for a window".
+        "requested_window_s": window_s,
+        "units": {"t": "ms since the Unix epoch, node clock", "delay": "km, bistatic",
+                  "doppler": "Hz", "snr": "dB"},
+        "settings": {"capture": {"fc": capture.get("fc"), "fs": capture.get("fs")},
+                     "process": config.get("process")},
+    }
+    label = f"{window_s}s" if window_s else "default"
+    safe_id = re.sub(r"[^A-Za-z0-9_-]", "", str(node_id)) or "node"
+    filename = f"detections-{safe_id}-{now.strftime('%Y%m%dT%H%M%SZ')}-{label}.json"
+    # Spliced, not re-encoded: the snapshot stays byte for byte what the
+    # sidecar sent, like the stream.
+    body = json.dumps(header)[:-1].encode() + b', "snapshot": ' + snapshot + b"}"
+    return Response(body, content_type="application/json", headers={
+        "Content-Disposition": f'attachment; filename="{filename}"',
+        "Cache-Control": "no-store",
+    })
 
 
 @bp.route("/clear", methods=["POST"])
