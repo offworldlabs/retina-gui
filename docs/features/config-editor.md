@@ -310,6 +310,7 @@ merged.
 ```
 Apply changes (submit)
   -> [mode changed?] POST /api/mode, then form.submit()
+  -> [Processing edited?] copy its fields into the form (developer mode)
   -> POST /config/save          validate, write user.yml, redirect to /config?saved=1
   -> page load sees ?saved=1    POST /config/apply (202), poll /config/apply/status every 1 s
   -> state done                 "Applied successfully!", reload /config
@@ -373,7 +374,8 @@ a form.
 
 ### Unsaved changes
 
-The save bar counts inputs whose value differs from a snapshot taken on load. Discard reloads the
+The save bar counts inputs whose value differs from a snapshot taken on load, plus the Processing
+section's in developer mode (see [One save for both forms](#one-save-for-both-forms)). Discard reloads the
 page. `window.RetinaConfigForm.adoptSaved(values)` lets other code on the page change fields and
 move the snapshot with them; today only Auto-Calibrate uses it (see
 [Auto-Calibrate on this page](#auto-calibrate-on-this-page)). The snapshot records the element's
@@ -443,10 +445,43 @@ every Doppler row and uses no window, as it did before the keys existed.
 
 **Its own form.** The section is above the Node group, whose panels have forms of their own, so it
 cannot be inside `#configForm`. It posts to `/config/processing/save` with its own Save and apply
-button, which stays disabled until a field in the section changes (or after a rejected save, whose
-values are not what is saved). The route redirects to `/config?saved=1`, so the usual auto-apply
-runs and its progress shows on the save bar. Apply changes does not save this section, and Save and
-apply does not save the others; the text beside the button says so.
+button, which stays disabled until a field in the section changes, or after a refused save, whose
+values are not what is saved. A refused save is recognised by a field marked invalid or by the
+`data-submitted` attribute the route puts on the form whenever it renders a submission: a refusal
+for another reason (a calibration, another section's field) marks nothing in the section. The
+route redirects to `/config?saved=1`, so the usual auto-apply runs and its progress shows on the
+save bar.
+
+### One save for both forms
+
+Two forms used to mean two traps: Apply changes reloaded the page without the Processing edits,
+and Save and apply reloaded it without everyone else's, each without a word. Now either button
+saves everything that is unsaved, in one write followed by one apply:
+
+- The save bar's count includes the section's edits (`window.RetinaProcessingForm.changes()`; the
+  section announces each edit with a `retina:processing-change` event).
+- When `#configForm` is submitted and the section has edits or holds a refused submission
+  (`pending()`), its fields are copied into `#configForm` as hidden inputs, as a browser would
+  post them: an unchecked Clutter Filter sends nothing. The copy runs in a `submit` listener, so
+  it also covers the Safe settings button's `requestSubmit()` and the mode switch, whose later
+  `form.submit()` posts the copies already made.
+- `/config/save` validates `process.*` fields when any are posted, with the same code as
+  `/config/processing/save` (`_validate_processing`), and writes the `process` section with the
+  others (`_with_processing`). One bad value anywhere refuses the whole save before anything is
+  written, and the page comes back showing every submitted value. Outside developer mode the
+  fields are ignored, as `/config/processing/save` is not found there.
+- When Save and apply is pressed while the other sections have edits
+  (`window.RetinaConfigForm.changes()`), it submits `#configForm` instead, which carries both.
+  With no other edits it posts the section alone, as before.
+
+A `/config/save` that posts no `process.*` field leaves `user.yml`'s `process` section untouched,
+which is every save outside developer mode and every save with no Processing edit.
+
+**Plain decimals.** `_processing_fields` passes each value, `min` and `max` through
+`form_utils.plain_decimal`, so a False Alarm Probability of 1e-05 is shown as `0.00001`, the way
+the field's own description writes it, whether config.yml holds it as a number or as the text
+`1e-05` (PyYAML reads an exponent written without a dot as a string). Either spelling saves: see
+Saving below.
 
 **Saving.** `ConfigManager.parse_processing_form` reads the `process.` fields. Unlike
 `parse_flat_form_data` it tries int and then float for every number, so a pfa written `1e-05` is a

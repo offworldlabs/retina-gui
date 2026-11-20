@@ -3,8 +3,15 @@
 Tests the form field generation from flat Pydantic schemas.
 """
 
+import pytest
+
 from config_schema import AdsbTruthConfig, CaptureFormConfig, LocationFormConfig, Tar1090Config
-from form_utils import get_field_constraints, get_field_input_type, schema_to_form_fields
+from form_utils import (
+    get_field_constraints,
+    get_field_input_type,
+    plain_decimal,
+    schema_to_form_fields,
+)
 
 
 class TestGetFieldInputType:
@@ -260,3 +267,23 @@ class TestSchemaToFormFields:
         # dabNotch does not have readonly
         dab_field = next(f for f in fields if f['name'] == 'device_dabNotch')
         assert dab_field.get('readonly') is False
+
+
+class TestPlainDecimal:
+    """Small numbers as the Processing section shows them.
+    See docs/features/config-editor.md#one-save-for-both-forms."""
+
+    @pytest.mark.parametrize("value, shown", [
+        (1e-05, "0.00001"), (1e-07, "0.0000001"), (2.5e-06, "0.0000025"),
+        ("1e-05", "0.00001"), ("1E-4", "0.0001"),
+    ])
+    def test_an_exponent_is_written_out(self, value, shown):
+        assert plain_decimal(value) == shown
+
+    @pytest.mark.parametrize("value", [0.001, 0.5, 4.0, 20, True, None, "hann", "none", "", "1e", "e5"])
+    def test_everything_else_is_left_as_it_is(self, value):
+        assert plain_decimal(value) is value
+
+    def test_it_reads_back_as_the_same_number(self):
+        for value in (1e-05, 1e-07, 3.3e-06, 1.25e-05):
+            assert float(plain_decimal(value)) == value

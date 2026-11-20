@@ -217,8 +217,10 @@ manual step lights the notch filter switches along with the gain rows, since the
 signal level as much as the gain does.
 
 The Apply step says "a setting on this page", which is simpler than what is true. Apply changes
-submits the Radar and ADS-B groups only; the other sections each save on their own as soon as
-they are changed (see [config-editor.md](config-editor.md#administration-sections)). The step
+submits the Radar and ADS-B groups only (and, in developer mode, the Processing section when it
+has edits: see [config-editor.md](config-editor.md#one-save-for-both-forms)); the other sections
+each save on their own as soon as they are changed (see
+[config-editor.md](config-editor.md#administration-sections)). The step
 used to say "a radar setting" for that reason, and was reworded:
 an owner who presses Apply after changing one of the others loses nothing, and "radar setting"
 left them to work out which settings those were.

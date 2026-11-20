@@ -160,7 +160,7 @@
                 <span class="desc">How the radar decides what to report. For testing detection: every setting here changes what the radar reports. Saving restarts the radar.</span>
             </div>
             <div class="cfg-body" {% if not retina_installed %}style="opacity:.5;pointer-events:none;"{% endif %}>
-                <form action="/config/processing/save" method="post" id="processingForm" novalidate>
+                <form action="/config/processing/save" method="post" id="processingForm" novalidate{% if processing_submitted %} data-submitted{% endif %}>
                     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                     <div class="ds-label-micro" style="margin-bottom:14px;">What is reported</div>
                     {% for name in ['detection_minDoppler', 'detection_maxReportedDoppler', 'detection_minDelay', 'ambiguity_delayMax'] %}
@@ -183,7 +183,7 @@
                     <div class="divider"></div>
                     <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
                         <button type="submit" class="ds-btn primary" id="processingSaveBtn" disabled>Save and apply</button>
-                        <span class="help" id="processingSaveHelp" style="margin:0;">No changes. Saving here does not save the other sections, and their Apply changes does not save this one.</span>
+                        <span class="help" id="processingSaveHelp" style="margin:0;">No changes. Apply changes at the bottom of the page saves this section too.</span>
                     </div>
                 </form>
             </div>
@@ -1813,7 +1813,9 @@ if (window.location.search.includes('saved=1')) {
     var fields = form.querySelectorAll('input[name^="process."], select[name^="process."]');
     var initial = Array.prototype.map.call(fields, read);
     // A rejected save re-renders the submission, which is not what is saved.
-    var rejected = !!form.querySelector('.is-invalid');
+    // data-submitted covers a save refused for another reason (another
+    // section's field, a calibration), where nothing here is marked.
+    var rejected = form.hasAttribute('data-submitted') || !!form.querySelector('.is-invalid');
     function track() {
         var n = 0;
         fields.forEach(function(el, i) { if (read(el) !== initial[i]) n++; });
@@ -1821,9 +1823,37 @@ if (window.location.search.includes('saved=1')) {
         help.textContent = n ? n + ' unsaved change' + (n === 1 ? '' : 's') + ' in this section.' : idle;
     }
 
-    function onChange() { update(); track(); }
+    // For the save bar: one press saves both forms.
+    // See docs/features/config-editor.md#one-save-for-both-forms
+    window.RetinaProcessingForm = {
+        changes: function() {
+            var n = 0;
+            fields.forEach(function(el, i) { if (read(el) !== initial[i]) n++; });
+            return n;
+        },
+        // After a rejected save the fields hold the submission, not what is
+        // saved, so it still has to be sent.
+        pending: function() { return rejected || this.changes() > 0; },
+        fields: function() { return fields; }
+    };
+
+    function onChange() {
+        update();
+        track();
+        document.dispatchEvent(new Event('retina:processing-change'));
+    }
     form.addEventListener('input', onChange);
     form.addEventListener('change', onChange);
+    // With edits waiting in the other sections, Save and apply hands over to
+    // Apply changes, which sends both. Otherwise it would reload the page and
+    // lose them.
+    form.addEventListener('submit', function(e) {
+        var other = window.RetinaConfigForm;
+        var main = document.getElementById('configForm');
+        if (!main || !other || !other.changes()) return;
+        e.preventDefault();
+        main.requestSubmit();
+    });
     // fc and fs are set in the Tower and Capture sections.
     ['capture.fc', 'capture.fs'].forEach(function(name) {
         var el = document.querySelector('[name="' + name + '"]');
@@ -1861,8 +1891,13 @@ if (window.location.search.includes('saved=1')) {
         return n;
     }
 
+    // The Processing section is a form of its own (developer mode). Its edits
+    // count here and are sent with this form, so Apply changes cannot drop
+    // them. See docs/features/config-editor.md#one-save-for-both-forms
+    function processing() { return window.RetinaProcessingForm || null; }
+
     function update() {
-        const n = countChanges();
+        const n = countChanges() + (processing() ? processing().changes() : 0);
         if (n > 0) {
             countEl.textContent = n;
             pluralEl.style.display = n === 1 ? 'none' : '';
@@ -1874,11 +1909,29 @@ if (window.location.search.includes('saved=1')) {
 
     form.addEventListener('input', update);
     form.addEventListener('change', update);
+    document.addEventListener('retina:processing-change', update);
+
+    form.addEventListener('submit', function() {
+        form.querySelectorAll('input[data-from-processing]').forEach(function(el) { el.remove(); });
+        const proc = processing();
+        if (!proc || !proc.pending()) return;
+        proc.fields().forEach(function(el) {
+            // As a browser posts them: an unchecked box sends nothing.
+            if (el.type === 'checkbox' && !el.checked) return;
+            const copy = document.createElement('input');
+            copy.type = 'hidden';
+            copy.name = el.name;
+            copy.value = el.type === 'checkbox' ? 'on' : el.value;
+            copy.setAttribute('data-from-processing', '');
+            form.appendChild(copy);
+        });
+    });
 
     // Adopt values written to config by something else (today, Auto-Calibrate
     // saving a run). Change the fields AND move the baseline, or a later Save
     // undoes them. See docs/features/config-editor.md#adopting-the-persisted-values
     window.RetinaConfigForm = {
+        changes: countChanges,
         adoptSaved: function(values) {
             Object.keys(values).forEach(function(name) {
                 if (values[name] === null || values[name] === undefined) return;

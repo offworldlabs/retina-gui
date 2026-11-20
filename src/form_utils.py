@@ -3,7 +3,10 @@
 Must work on Pydantic v1 (nodes, Debian Bookworm apt) and v2.
 See docs/features/config-editor.md#form-generation.
 """
+import math
+import re
 import types
+from decimal import Decimal
 from typing import Literal, Union, get_args, get_origin
 
 # Detect Pydantic version
@@ -120,6 +123,29 @@ def get_field_constraints(field_info):
         constraints['step'] = 'any'  # Allow any decimal
 
     return constraints
+
+
+_EXPONENT_NUMBER = re.compile(r'[+-]?(\d+\.?\d*|\.\d+)[eE][+-]?\d+')
+
+
+def plain_decimal(value):
+    """A float as plain decimal text (1e-05 as "0.00001"); anything else unchanged.
+
+    Whole floats keep their ".0" and no digits are invented: it is repr()
+    without the exponent. A string holding such a number is converted too.
+    """
+    if isinstance(value, str):
+        # PyYAML reads an exponent written without a dot ("1e-05") as text.
+        if not _EXPONENT_NUMBER.fullmatch(value):
+            return value
+        text = value
+    elif isinstance(value, float) and math.isfinite(value):
+        text = repr(value)
+    else:
+        return value
+    if 'e' not in text.lower():
+        return value
+    return format(Decimal(text), 'f')
 
 
 def get_model_fields(model_class):

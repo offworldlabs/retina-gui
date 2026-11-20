@@ -85,8 +85,34 @@ def test_the_section_is_the_first_on_the_page(page):
 def test_the_fields_show_the_running_values(page):
     section = processing(page)
     assert re.search(r'name="process.detection_minDoppler"[^>]*value="15', section)
-    assert re.search(r'name="process.detection_pfa"[^>]*value="1e-05"', section)
+    assert re.search(r'name="process.detection_pfa"[^>]*value="0.00001"', section)
     assert re.search(r'<option value="none" selected>none</option>', section)
+
+
+def test_small_numbers_are_shown_in_plain_decimal(page):
+    """1e-05 reads as a different setting from the 0.00001 the copy gives."""
+    field = re.search(r'<input[^>]*name="process.detection_pfa"[^>]*>', processing(page)).group(0)
+    assert 'value="0.00001"' in field
+    assert 'min="0.0000001"' in field
+    assert "e-0" not in field
+
+
+def test_a_pfa_the_merger_wrote_as_text_is_shown_in_plain_decimal(app_client, config_files):
+    """PyYAML reads an exponent without a dot ("1e-05") as a string."""
+    _, merged_path = config_files
+    merged = load(merged_path)
+    merged["process"]["detection"]["pfa"] = "1e-05"
+    with open(merged_path, "w") as f:
+        yaml.dump(merged, f)
+    assert re.search(r'name="process.detection_pfa"[^>]*value="0.00001"',
+                     processing(app_client.get("/config").data.decode()))
+
+
+@pytest.mark.parametrize("shown", ["0.00001", "1e-05"])
+def test_the_value_the_page_shows_saves_back_unchanged(app_client, user_config_file, shown):
+    response = post(app_client, detection_pfa=shown)
+    assert response.status_code == 302
+    assert "process" not in load(user_config_file)
 
 
 def test_every_editable_number_has_a_readout(page):
@@ -188,6 +214,106 @@ def test_an_empty_optional_setting_is_not_written(app_client, config_files, user
         yaml.dump(merged, f)
     post(app_client, detection_maxReportedDoppler="", detection_minDoppler="5")
     assert load(user_config_file)["process"]["detection"] == {"minDoppler": 5}
+
+
+# ── Apply changes saves this section too ───────────────────────
+
+# What #configForm posts for the capture section when nothing on it changed.
+CAPTURE_UNCHANGED = {
+    "capture.fs": "2000000", "capture.fc": "503000000", "capture.device_type": "RspDuo",
+    "capture.device_agcSetPoint": "-50", "capture.device_gainReductionA": "40",
+    "capture.device_gainReductionB": "40", "capture.device_lnaState": "4",
+    "capture.device_bandwidthNumber": "0",
+}
+
+
+def post_both(app_client, capture=None, **changes):
+    data = dict(UNCHANGED)
+    data.update({f"process.{k}": v for k, v in changes.items()})
+    data.update(CAPTURE_UNCHANGED)
+    data.update(capture or {})
+    return app_client.post("/config/save", data=data, follow_redirects=False)
+
+
+def test_apply_changes_saves_processing_edits_posted_with_it(app_client, user_config_file):
+    """The page sends the section along when it has edits; before, pressing
+    Apply changes dropped them without a word."""
+    response = post_both(app_client, detection_minDoppler="5", ambiguity_dopplerWindow="hann")
+    assert response.status_code == 302
+    assert response.headers["Location"].endswith("/config?saved=1")
+    assert load(user_config_file)["process"] == {
+        "detection": {"minDoppler": 5}, "ambiguity": {"dopplerWindow": "hann"}}
+
+
+def test_apply_changes_saves_both_forms_in_one_write(app_client, user_config_file):
+    response = post_both(app_client, capture={"capture.fc": "545000000"}, detection_minDoppler="5")
+    assert response.status_code == 302
+    saved = load(user_config_file)
+    assert saved["process"] == {"detection": {"minDoppler": 5}}
+    assert saved["capture"]["fc"] == 545000000
+
+
+def test_apply_changes_without_processing_fields_leaves_the_section_alone(app_client, first_boot_user):
+    before = load(first_boot_user)["process"]
+    response = app_client.post("/config/save", data=dict(CAPTURE_UNCHANGED, **{"capture.fc": "545000000"}))
+    assert response.status_code == 302
+    assert load(first_boot_user)["process"] == before
+
+
+def test_apply_changes_keeps_process_keys_the_section_does_not_edit(app_client, first_boot_user):
+    post_both(app_client, detection_minDoppler="5")
+    saved = load(first_boot_user)["process"]
+    assert saved["data"] == {"cpi": 0.5, "buffer": 1.5, "overlap": 0}
+    assert saved["detection"]["minDoppler"] == 5
+
+
+def test_a_bad_processing_value_refuses_the_whole_apply(app_client, user_config_file):
+    """Refuse before writing: the other sections must not be saved either."""
+    before = load(user_config_file)
+    response = post_both(app_client, capture={"capture.fc": "545000000"}, detection_nTrain="0",
+                         detection_minDoppler="7")
+    body = refused(response, user_config_file, before)
+    section = processing(body)
+    assert re.search(r'name="process.detection_nTrain"[^>]*is-invalid', section)
+    assert re.search(r'name="process.detection_minDoppler"[^>]*value="7"', section), \
+        "the submission is shown, not the running value"
+    assert re.search(r'name="capture.fc"[^>]*value="545000000"', body)
+
+
+def test_a_bad_value_elsewhere_keeps_the_processing_edit_pending(app_client, user_config_file):
+    """Nothing in the section is marked, so the form itself says its values
+    are not the saved ones and the next Apply changes sends them again."""
+    before = load(user_config_file)
+    response = post_both(app_client, capture={"capture.fc": "not-a-number"}, detection_minDoppler="7")
+    body = refused(response, user_config_file, before)
+    assert re.search(r'<form[^>]*id="processingForm"[^>]*data-submitted', body)
+    assert re.search(r'name="process.detection_minDoppler"[^>]*value="7"', processing(body))
+
+
+def test_the_form_is_not_marked_submitted_on_a_plain_load(page):
+    assert not re.search(r'<form[^>]*id="processingForm"[^>]*data-submitted', page)
+
+
+def test_a_save_refused_by_a_calibration_keeps_the_edit_pending(app_client, user_config_file, monkeypatch):
+    import app as app_module
+    monkeypatch.setattr(app_module.calibrator, "is_running", lambda: True)
+    body = post(app_client, detection_minDoppler="5").data.decode()
+    assert re.search(r'<form[^>]*id="processingForm"[^>]*data-submitted', body)
+
+
+def test_apply_changes_ignores_processing_fields_outside_developer_mode(app_client, user_config_file):
+    import os
+
+    import app as app_module
+    os.remove(app_module.device_state.developer_mode_flag)
+    response = post_both(app_client, detection_minDoppler="5")
+    assert response.status_code == 302
+    assert "process" not in load(user_config_file)
+
+
+def test_the_page_says_apply_changes_covers_the_section(page):
+    assert "Apply changes at the bottom of the page saves this section too." in processing(page)
+    assert "does not save this one" not in page
 
 
 # ── Refusals ───────────────────────────────────────────────────

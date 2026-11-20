@@ -13,7 +13,7 @@ from config_schema import (
     Tar1090Config,
     model_values,
 )
-from form_utils import schema_to_form_fields
+from form_utils import plain_decimal, schema_to_form_fields
 from node_name import MAX_LENGTH as NAME_MAX_LENGTH
 from node_name import receiver_name
 
@@ -100,7 +100,14 @@ def _processing_fields(config, processing_flat=None):
         return None
     if processing_flat is None:
         processing_flat = ConfigManager.flatten_processing_for_form(config.get('process', {}))
-    return schema_to_form_fields(ProcessingFormConfig, processing_flat)
+    fields = schema_to_form_fields(ProcessingFormConfig, processing_flat)
+    # Small floats print as 1e-05, which reads as a different setting from the
+    # 0.00001 the copy gives. See docs/features/config-editor.md#processing-section
+    for field in fields:
+        for key in ('value', 'min', 'max'):
+            if key in field:
+                field[key] = plain_decimal(field[key])
+    return fields
 
 
 def _render_config_page(config_errors=None, processing_flat=None):
@@ -126,6 +133,7 @@ def _render_config_page(config_errors=None, processing_flat=None):
     return render_template("config.html",
                            retina_installed=retina_installed,
                            processing_fields=_processing_fields(config, processing_flat),
+                           processing_submitted=processing_flat is not None,
                            capture_fields=capture_fields,
                            location_fields=location_fields,
                            truth_fields=truth_fields,
@@ -246,7 +254,8 @@ def save_config():
     from app import config_mgr, get_node_id, node_name
     from config_manager import ConfigManager
 
-    capture_flat, location_flat, truth_data, tar1090_data = ConfigManager.parse_flat_form_data(request.form.to_dict())
+    form = request.form.to_dict()
+    capture_flat, location_flat, truth_data, tar1090_data = ConfigManager.parse_flat_form_data(form)
 
     # The receiver is this node, so its name is decided here rather than posted:
     # the browser cannot send a different one, and it stays a string. Only when
@@ -293,11 +302,21 @@ def save_config():
             all_errors.update(ConfigManager.format_validation_errors(e, 'tar1090'))
         all_errors.update(_adsb_source_errors(tar1090_data))
 
+    # The page posts the Processing section here as well when it has unsaved
+    # edits, so one press saves everything and applies once. Developer mode
+    # only, as for /config/processing/save.
+    # See docs/features/config-editor.md#one-save-for-both-forms
+    processing_flat = processing_values = None
+    if _device_state.is_developer_mode() and any(k.startswith('process.') for k in form):
+        processing_flat, processing_values, processing_errors = _validate_processing(form)
+        all_errors.update(processing_errors)
+
     if all_errors:
         from app import DEV_MODE, device_state, ssh_keys
         return render_template("config.html",
                                retina_installed=config_mgr.is_retina_node_installed() or DEV_MODE or request.args.get('demo') == '1',
-                               processing_fields=_processing_fields(config_mgr.load_merged_config()),
+                               processing_fields=_processing_fields(config_mgr.load_merged_config(), processing_flat),
+                               processing_submitted=processing_flat is not None,
                                capture_fields=schema_to_form_fields(CaptureFormConfig, capture_flat),
                                location_fields=schema_to_form_fields(LocationFormConfig, location_flat),
                                truth_fields=schema_to_form_fields(AdsbTruthConfig, truth_data),
@@ -354,6 +373,9 @@ def save_config():
         if tar1090_overrides:
             new_user_config['tar1090'] = tar1090_overrides
 
+    if processing_values is not None:
+        _with_processing(new_user_config, processing_values, merged_config, existing_user)
+
     config_mgr.save_user_config(new_user_config)
     return redirect(url_for("config.config_page") + "?saved=1")
 
@@ -370,6 +392,41 @@ def _processing_errors(values):
     return errors
 
 
+def _validate_processing(form):
+    """The Processing fields of a posted form as (submitted, values, errors).
+
+    `values` is None when they do not validate. Shared by both save routes so
+    they cannot drift apart.
+    """
+    from config_manager import ConfigManager
+
+    submitted = ConfigManager.parse_processing_form(form)
+    errors = {}
+    values = None
+    try:
+        values = model_values(ProcessingFormConfig(**submitted))
+    except ValidationError as e:
+        errors.update(ConfigManager.format_validation_errors(e, 'process'))
+    if values is not None:
+        errors.update(_processing_errors(values))
+    return submitted, (None if errors else values), errors
+
+
+def _with_processing(user_config, values, merged_config, existing_user):
+    """`user_config` with its `process` section rebuilt from validated values."""
+    from app import config_mgr
+    from config_manager import ConfigManager
+
+    nested = ConfigManager.unflatten_processing_from_form(values)
+    overrides = config_mgr.compute_user_overrides(nested, merged_config, existing_user, 'process')
+    process = ConfigManager.merge_processing_overrides(existing_user.get('process'), overrides)
+    if process:
+        user_config['process'] = process
+    else:
+        user_config.pop('process', None)
+    return user_config
+
+
 @bp.route("/config/processing/save", methods=["POST"])
 def save_processing():
     """Save the Processing section to user.yml on its own, then apply.
@@ -380,42 +437,24 @@ def save_processing():
     page hiding it.
     """
     from app import calibrator, config_mgr, device_state
-    from config_manager import ConfigManager
 
     if not device_state.is_developer_mode():
         abort(404)
 
-    processing_flat = ConfigManager.parse_processing_form(request.form.to_dict())
-    errors = {}
+    processing_flat, values, errors = _validate_processing(request.form.to_dict())
 
     # Same guard as /config/save. See docs/features/config-editor.md#guards
     if calibrator.is_running() or device_state.is_calibration_locked()[0]:
         errors['_form'] = ("Auto-calibration is running. Cancel it before "
                            "changing configuration.")
 
-    values = None
-    try:
-        values = model_values(ProcessingFormConfig(**processing_flat))
-    except ValidationError as e:
-        errors.update(ConfigManager.format_validation_errors(e, 'process'))
-    if values is not None:
-        errors.update(_processing_errors(values))
-
     if errors:
         return _render_config_page(config_errors=errors, processing_flat=processing_flat)
 
     merged_config = config_mgr.load_merged_config()
     existing_user = config_mgr.load_user_config()
-    nested = ConfigManager.unflatten_processing_from_form(values)
-    overrides = config_mgr.compute_user_overrides(nested, merged_config, existing_user, 'process')
-    process = ConfigManager.merge_processing_overrides(existing_user.get('process'), overrides)
-
-    new_user_config = dict(existing_user)
-    if process:
-        new_user_config['process'] = process
-    else:
-        new_user_config.pop('process', None)
-    config_mgr.save_user_config(new_user_config)
+    config_mgr.save_user_config(
+        _with_processing(dict(existing_user), values, merged_config, existing_user))
     return redirect(url_for("config.config_page") + "?saved=1")
 
 
