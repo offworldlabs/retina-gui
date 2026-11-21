@@ -16,12 +16,11 @@ import pytest
 # The side nav, as (group, [(section id, label), ...]).
 LAYOUT = [
     ("Node", [("identifiers", "Identifiers"), ("mode", "Mode"), ("claim", "Node Claim"),
-              ("network", "Network")]),
+              ("contact", "How We Reach You"), ("network", "Network")]),
     ("Radar", [("cached-towers", "Cached Towers"), ("tower", "Tower"), ("capture", "Capture")]),
     ("ADS-B", [("truth", "ADS-B Truth"), ("tar1090", "tar1090")]),
     ("Other", [("ssh", "SSH Access"), ("wizard", "Setup Wizard"), ("tutorial", "Tutorial")]),
-    ("Support", [("cloud", "Cloud Services"), ("remote", "Remote Support"),
-                 ("contact", "How We Reach You")]),
+    ("Support", [("cloud", "Cloud Services"), ("remote", "Remote Support")]),
 ]
 # The groups Apply changes saves: their sections are the form's, in this order.
 FORM_GROUPS = ("Radar", "ADS-B")

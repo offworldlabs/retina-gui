@@ -1,24 +1,28 @@
-<!-- Node claim step -->
-{# Optional, and the last thing before completion. Shares /set-up/claim with
-   the configuration page. An owned node can only be skipped past.
-   See docs/features/setup-wizard.md#node-claim #}
+<!-- Your email step -->
+{# The one place the wizard asks for an email. It does two jobs: it is how we
+   contact the owner, and sending it starts the claim. Optional, and the last
+   thing before completion. Shares /set-up/claim with the Configuration page's
+   Node Claim section. An owned node can only be skipped past.
+   See docs/features/setup-wizard.md#your-email #}
 <div data-step="account" class="step-panel" style="display:none;">
     <div class="wiz-title-row">
-        <h1>Connect your node to your account</h1>
-        <p>We will email you a link. Opening it connects this node to your account on the <a href="{{ dashboard_url }}" target="_blank" rel="noopener" style="color:var(--accent);">Network Map and Dashboard</a>. If you do not have an account yet, that is fine: one will be made for you.</p>
+        <h1>Your email</h1>
+        <p>We use this address to contact you about your node, and we email it a link. Opening the link connects this node to your account on the <a href="{{ dashboard_url }}" target="_blank" rel="noopener" style="color:var(--accent);">Network Map and Dashboard</a>. If you do not have an account yet, that is fine: one will be made for you.</p>
     </div>
     <div class="step-stack">
         <div class="ds-field">
             <label class="ds-field-label" for="wizClaimEmail">Email</label>
-            <input type="email" class="ds-input" id="wizClaimEmail" value="{{ claim.get('email', '') }}" maxlength="255" autocomplete="email"{% if claim_owned %} readonly{% endif %}>
+            {# data-stored: the address a link was already asked for, so the
+               button can say Resend when the box still holds it. #}
+            <input type="email" class="ds-input" id="wizClaimEmail" value="{{ claim.get('email', '') }}" data-stored="{{ '' if claim_owned else claim.get('email', '') }}" maxlength="255" autocomplete="email"{% if claim_owned %} readonly{% endif %}>
         </div>
 
         {% if claim_owned %}
         <p style="font-size:13px;margin:4px 0 0;">
             <span style="color:var(--ok);font-weight:600;">Already claimed.</span>
-            This node is connected to the account above, so there is nothing to do here.
-            To hand it to somebody else, release it from your
-            <a href="{{ dashboard_url }}" target="_blank" rel="noopener" style="color:var(--accent);">dashboard</a> first.
+            This node is connected to the account above, and that is the address we contact
+            about it, so there is nothing to do here. To hand it to somebody else, release it
+            from your <a href="{{ dashboard_url }}" target="_blank" rel="noopener" style="color:var(--accent);">dashboard</a> first.
         </p>
         {% else %}
         {# Where the node ends up, so the owner knows which account the link
@@ -32,10 +36,15 @@
                 </div>
             </div>
         </div>
+        {# Shown by setup.js while the box holds the address already asked for. #}
+        <p id="wizClaimResendNote" style="display:none;font-size:13px;color:var(--ink-2);margin:0;">
+            We have already sent a link to this address. Resend it if it never arrived or has
+            expired, or skip this step to keep waiting for the first one.
+        </p>
         <p style="font-size:12.5px;color:var(--ink-3);margin:0;">
             Use an address you own, because whoever opens the link owns the node.
-            This step is optional. If you skip it or enter the wrong address, you can
-            do it later under Node Claim on the Configuration page.
+            This step is optional. If you skip it, we have no email for you. You can add
+            or change it later under Node Claim on the Configuration page.
         </p>
         {% endif %}
 

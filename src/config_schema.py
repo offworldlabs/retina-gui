@@ -280,7 +280,6 @@ class LocationFormConfig(BaseModel):
 #: Copied from the node-ingest spec's `NodeContact`; move only when the spec
 #: does. See docs/features/config-editor.md#how-we-reach-you.
 CONTACT_NAME_MAX_LENGTH = 64
-CONTACT_EMAIL_MAX_LENGTH = 255
 CONTACT_PHONE_MAX_LENGTH = 32
 
 #: ISO 3166-1 alpha-2 country of the *phone number*, not of the owner.
@@ -288,7 +287,9 @@ CONTACT_PHONE_MAX_LENGTH = 32
 #: pydantic version. See docs/features/config-editor.md#pydantic-v1-and-v2.
 CONTACT_COUNTRY_PATTERN = r"^[A-Za-z]{2}$"
 
-CONTACT_FIELDS = ("first_name", "last_name", "email", "phone", "country")
+#: No email: the owner gives one address, the claim's, and it serves both.
+#: See docs/features/config-editor.md#one-email.
+CONTACT_FIELDS = ("first_name", "last_name", "phone", "country")
 
 
 class ContactFormConfig(BaseModel):
@@ -300,7 +301,6 @@ class ContactFormConfig(BaseModel):
     """
     first_name: str | None = Field(None, max_length=CONTACT_NAME_MAX_LENGTH, title="First Name")
     last_name: str | None = Field(None, max_length=CONTACT_NAME_MAX_LENGTH, title="Last Name")
-    email: str | None = Field(None, max_length=CONTACT_EMAIL_MAX_LENGTH, title="Email")
     phone: str | None = Field(None, max_length=CONTACT_PHONE_MAX_LENGTH, title="Phone")
     country: str | None = Field(
         None, max_length=2, title="Country",
@@ -322,10 +322,10 @@ CLAIM_EMAIL_PATTERN = r"^[^@\s]+@[^@\s]+$"
 
 
 class ClaimFormConfig(BaseModel):
-    """The address that owns this node: the server mails it a claim link.
+    """The owner's one email: the server mails it a claim link, and it is how we reach them.
 
-    **Not the contact email.** Kept in its own file; never copy one into the
-    other. See docs/features/config-editor.md#node-claim.
+    Kept out of the contact file: on the wire it is the claim, which binds the
+    node. See docs/features/config-editor.md#one-email.
     """
     email: str | None = Field(None, max_length=CLAIM_EMAIL_MAX_LENGTH, title="Email")
 

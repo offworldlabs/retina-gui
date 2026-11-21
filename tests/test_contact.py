@@ -1,6 +1,7 @@
 """POST /set-up/contact, and the file it writes.
 
-Whom to contact about this node. Optional everywhere: the node-ingest spec says
+Whom to contact about this node, less an email: the owner gives one address,
+the claim's, and it serves both. Optional everywhere: the node-ingest spec says
 a node with nothing to report never calls the contact endpoint at all, so an
 absent file is a legitimate steady state rather than a gap, and most of what is
 worth pinning here is what happens when an owner gives us nothing.
@@ -24,7 +25,6 @@ def stored(app_module):
 FULL = {
     "first_name": "Ada",
     "last_name": "Lovelace",
-    "email": "ada@example.com",
     "phone": "+441234567890",
     "country": "GB",
 }
@@ -45,17 +45,17 @@ class TestStoringContactDetails:
         post(app_client, FULL)
 
         assert set(stored(app_module)) <= {
-            "first_name", "last_name", "email", "phone", "country"
+            "first_name", "last_name", "phone", "country"
         }
 
     def test_a_partial_document_stores_only_what_was_given(self, app_client):
-        """Every field is independently optional. An owner who gives an email
-        and nothing else is a normal owner, not a half-filled form."""
+        """Every field is independently optional. An owner who gives a phone
+        number and nothing else is a normal owner, not a half-filled form."""
         import app as app_module
 
-        post(app_client, {"email": "ada@example.com"})
+        post(app_client, {"phone": "+15550100"})
 
-        assert stored(app_module) == {"email": "ada@example.com"}
+        assert stored(app_module) == {"phone": "+15550100"}
 
     def test_a_later_save_replaces_rather_than_merges(self, app_client):
         """The endpoint replaces the document wholesale, so this end has to as
@@ -64,9 +64,9 @@ class TestStoringContactDetails:
         import app as app_module
         post(app_client, FULL)
 
-        post(app_client, {"email": "grace@example.com"})
+        post(app_client, {"first_name": "Grace"})
 
-        assert stored(app_module) == {"email": "grace@example.com"}
+        assert stored(app_module) == {"first_name": "Grace"}
 
 
 class TestGivingUsNothing:
@@ -100,11 +100,11 @@ class TestGivingUsNothing:
         assert "country" not in stored(app_module)
 
     def test_whitespace_is_not_a_detail(self, app_client):
-        """A space in the email box would otherwise be stored, sent, and shown
+        """A space in the phone box would otherwise be stored, sent, and shown
         back to the owner as though it were something."""
         import app as app_module
 
-        post(app_client, {"email": "   ", "first_name": "  Ada  "})
+        post(app_client, {"phone": "   ", "first_name": "  Ada  "})
 
         assert stored(app_module) == {"first_name": "Ada"}
 
@@ -135,7 +135,7 @@ class TestRefusals:
         assert stored(app_module)["country"] == "GB"
 
     @pytest.mark.parametrize("field,length", [
-        ("first_name", 65), ("last_name", 65), ("email", 256), ("phone", 33),
+        ("first_name", 65), ("last_name", 65), ("phone", 33),
     ])
     def test_a_value_past_the_wire_cap_is_refused(self, app_client, field, length):
         """The caps are the spec's. A value past one of them means
@@ -161,6 +161,51 @@ class TestRefusals:
                                    content_type='application/json')
 
         assert response.status_code == 400
+
+
+class TestNoEmailOfItsOwn:
+    """The owner gives one address, the claim's. See
+    docs/features/config-editor.md#one-email."""
+
+    def test_an_email_posted_here_is_not_stored(self, app_client):
+        """A tab opened on the previous build still posts one."""
+        import app as app_module
+
+        post(app_client, {**FULL, "email": "engineer@example.com"})
+
+        assert stored(app_module) == FULL
+
+    def test_saving_drops_an_email_an_older_build_stored(self, app_client):
+        """Older builds kept a contact email. It goes at the next save, so the
+        server's site contact stops carrying an address the owner cannot see."""
+        import app as app_module
+        app_module.device_state.save_telemetry_contact(
+            {**FULL, "email": "engineer@example.com"})
+
+        post(app_client, FULL)
+
+        assert "email" not in stored(app_module)
+
+    def test_an_email_is_not_written_to_the_claim(self, app_client):
+        """Claiming mails a link, which only the owner's press may ask for."""
+        import app as app_module
+
+        post(app_client, {**FULL, "email": "engineer@example.com"})
+
+        assert app_module.device_state.get_telemetry_claim() == {}
+
+    def test_neither_page_has_a_contact_email_box(self, app_client):
+        for url in ('/set-up', '/config'):
+            assert 'id="contactEmail"' not in app_client.get(url).data.decode(), url
+
+    def test_an_older_contact_email_is_not_shown(self, app_client):
+        """It is no longer the owner's to edit here, so it is not offered."""
+        import app as app_module
+        app_module.device_state.save_telemetry_contact(
+            {**FULL, "email": "engineer@example.com"})
+
+        for url in ('/set-up', '/config'):
+            assert 'engineer@example.com' not in app_client.get(url).data.decode(), url
 
 
 class TestIndependenceFromTheRestOfSetup:
@@ -204,7 +249,7 @@ class TestBothSurfacesRender:
         page = app_client.get('/set-up').data.decode()
 
         assert 'value="Ada"' in page
-        assert 'value="ada@example.com"' in page
+        assert 'value="+441234567890"' in page
 
     def test_the_config_page_gives_it_a_section_of_its_own(self, app_client):
         page = app_client.get('/config').data.decode()

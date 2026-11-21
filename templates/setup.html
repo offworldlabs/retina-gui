@@ -123,13 +123,14 @@
                 <button type="button" class="ds-btn primary" id="wizNodeNameSaveBtn">Save and continue</button>
             </div>
 
-            {# Claim. Optional in the same way; an owned node gets Skip only.
-               Last before completion, so the owner connects a node that is
-               already sited, tuned and named. #}
+            {# Your email. Optional in the same way, Skip on every run; an owned
+               node gets Skip only. Last before completion, so the owner
+               connects a node that is already sited, tuned and named. setup.js
+               relabels Send as Resend while the box holds the stored address. #}
             <div id="stepBtns-account" class="step-foot-btns" style="display:none;">
                 <button type="button" class="ds-btn ghost"   id="wizClaimSkipBtn">Skip</button>
                 {% if not claim_owned %}
-                <button type="button" class="ds-btn primary" id="wizClaimSendBtn">Send link and continue</button>
+                <button type="button" class="ds-btn primary" id="wizClaimSendBtn">{% if claim.get('email') %}Resend link and continue{% else %}Send link and continue{% endif %}</button>
                 {% endif %}
             </div>
 
