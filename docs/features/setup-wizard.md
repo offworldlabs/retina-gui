@@ -47,7 +47,7 @@ the `[data-step]` elements in document order, so reordering the includes reorder
 | 6 | `towers` | Choose a tower | Yes | Receiver and transmitter location, frequency (`/towers/select`); the cached tower list (`/towers/cache/set`) |
 | 7 | `calibrate` | Optimise reception | Yes | The two notch filters (`/set-up/filters`); gain settings, persisted automatically |
 | 8 | `name` | Name your node | Yes | The node's name (`/node-name`), or nothing on Skip |
-| 9 | `account` | Connect your node to your account | Yes | Claim record, or nothing on Skip |
+| 9 | `account` | Your email | Yes | Claim record, or nothing on Skip |
 | 10 | `complete` | You're all set | n/a | Completion flag; the receiver name; forces radar mode |
 
 The order is deliberate. The owner answers about themselves first (agreements, contact,
@@ -141,7 +141,7 @@ case. The support switches come from `remote_access.status()`, the filters from 
 config and the name from `node_name.get()`. Claim comes from the stored claim address, except
 when `status.json` from retina-telemetry reports the node as `owned`: then the owner's address
 from that status is shown instead and the step can only be skipped (see
-[Node claim](#node-claim)).
+[Your email](#your-email)).
 
 ## Page chrome
 
@@ -231,9 +231,14 @@ the button is restored.
 ## Contact details
 
 Two sections on one step: **Contact** and **Support** (the latter below). Contact is an optional
-name, email, phone and a two-letter phone country, placed straight after the agreements so it is
-asked while the owner is still answering questions about themselves rather than about the radar.
+name, phone and a two-letter phone country, placed straight after the agreements so it is asked
+while the owner is still answering questions about themselves rather than about the radar.
 Nothing downstream blocks on it.
+
+There is no email box. The owner gives one email, on the [last step](#your-email), and it both
+claims the node and is how we contact them (see
+[config-editor.md](config-editor.md#one-email)). The step says the email comes at the end, so an
+owner does not read its absence as "they never want my email".
 
 - **Save and continue** posts to `/set-up/contact`, the same route the "How We Reach You"
   section on the Configuration page uses, so the two surfaces cannot drift into storing
@@ -304,10 +309,13 @@ without it). The lines go to retina-gui's log, which on a node is its systemd jo
 watchdog's 130 s: completion answered success after 100 s, the name was in `user.yml` but not
 `config.yml`, no container had restarted, and the journal held only the access log.
 
-## Node claim
+## Your email
 
-Asks for an email address to send a claim link to. Opening the link binds the node to the
-account behind that address, creating one if needed. The last step before completion: the step
+The one place the wizard asks for an email, and it does two jobs: it is how we contact the owner,
+and sending it starts the claim. The step leads with both, and says plainly that a link is
+emailed, so nobody presses Send not knowing a mail goes out. Opening the link binds the node to
+the account behind that address, creating one if needed. The step key is still `account` (see
+[Persistence and resume](#persistence-and-resume)). The last step before completion: the step
 names the Network Map and Dashboard (`DASHBOARD_URL` in `routes/fleet.py`, the same address as
 the Resources card and the fleet bar's button) and says that the node will appear there under
 the account for the address typed, so the owner knows which account and which site the link
@@ -315,8 +323,17 @@ binds the node to before sending it. An owned node's "release it from your dashb
 there too.
 
 - Posts to `/set-up/claim`, the same route as the Node Claim section on the Configuration page.
-- An empty box is filled with the contact email from the previous step as a suggestion only.
-  Nothing is sent until **Send link and continue** is pressed.
+- The box is prefilled with the stored claim address. Nothing is sent until the button is pressed.
+- The button reads **Send link and continue**, or **Resend link and continue** while the box holds
+  the address a link was already asked for (`data-stored`, the stored claim address, empty on an
+  owned node). Every press mails, so a re-run owner pressing it only to get past the step would
+  otherwise get a second email without being told. A note under the box says a link was already
+  sent and that Skip keeps waiting for the first one. Editing the address turns it back into Send.
+- Skip is offered on every run, first or re-run, owned or not, and writes nothing.
+- After a send the wizard moves on at once, so the complete step says it instead: a line naming
+  the address, saying to open the link, and pointing at the spam folder and at Node Claim on the
+  Configuration page if it never arrives. It says "on its way" rather than "sent", because
+  retina-telemetry acts on the file on its next pass and only once the node is registered.
 - Send with an empty box is refused on the page ("Enter an email address, or skip this step"),
   because on this route an empty value clears the stored address, which is not what Send means.
   Skip is the way past with nothing, and writes nothing.
@@ -818,5 +835,5 @@ mode the link carries `demo=1` so the tour runs in demo mode too.
 Demo mode is meant to be safe to show on a live node, which is why it skips the consent write
 and also fakes `/set-up/filters` (a stack restart), `/towers/cache/set`, `/node-name` and the
 two `/remote-access/*` switches. Requests it does not fake still reach the node, so in demo mode
-Save on the contact step, Send on the claim step, the tower search, the address and elevation
+Save on the contact step, Send on the email step, the tower search, the address and elevation
 lookups, and Optimise reception are all real actions.

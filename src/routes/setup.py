@@ -63,7 +63,7 @@ def wizard():
     towers_cache = device_state.get_towers_cache()
     contact = device_state.get_telemetry_contact()
     # An owned node shows its owner and can only be skipped past.
-    # See docs/features/setup-wizard.md#node-claim
+    # See docs/features/setup-wizard.md#your-email
     claim = device_state.get_telemetry_claim()
     claim_state = (telemetry_status.read() or {}).get('claim') or {}
     claim_owned = claim_state.get('state') == 'owned'
@@ -183,8 +183,9 @@ def contact():
     """Record whom to contact about this node, from the wizard or Settings.
 
     One route for both surfaces so they store the same shape. Every field is
-    optional, and all-empty removes the record.
-    See docs/features/setup-wizard.md#contact-details.
+    optional, and all-empty removes the record. An `email` is ignored: the
+    owner's one address is the claim's, so a save drops any older contact
+    email. See docs/features/setup-wizard.md#contact-details.
     """
     from app import device_state
 
@@ -222,7 +223,7 @@ def claim():
     Shared by the wizard and the configuration page. Every address is an ask
     for a link; an empty box removes the record. The shape is checked here
     because a wrong address hands the node to a stranger.
-    See docs/features/setup-wizard.md#node-claim.
+    See docs/features/setup-wizard.md#your-email.
     """
     from app import device_state
 

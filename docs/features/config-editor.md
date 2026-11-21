@@ -123,11 +123,11 @@ The side nav and the page share one order, in six groups:
 | Group | Sections | Saved by |
 | --- | --- | --- |
 | Testing | Processing | Its own Save and apply, see [Processing section](#processing-section). [Developer mode](#developer-mode) only. |
-| Node | Identifiers, Mode, Node Claim, Network | Each on its own (Mode on Apply changes, see [Mode switch](#mode-switch)) |
+| Node | Identifiers, Mode, Node Claim, How We Reach You, Network | Each on its own (Mode on Apply changes, see [Mode switch](#mode-switch)) |
 | Radar | Cached Towers, Tower, Capture | Apply changes |
 | ADS-B | ADS-B Truth, tar1090 | Apply changes |
 | Other | SSH Access, Setup Wizard, Tutorial | Each on its own |
-| Support | Cloud Services, Remote Support, How We Reach You | Each on its own |
+| Support | Cloud Services, Remote Support | Each on its own |
 
 The groups are how an owner thinks about the node (what it is, what it listens to, what it is
 checked against, who can help with it), not how the settings are stored. Support is last: it is
@@ -674,14 +674,14 @@ together. These sections are spread across the Node, Support and Other groups (s
 | Section | Group | Endpoint | Notes |
 | --- | --- | --- | --- |
 | Identifiers | Node | `POST /node-name` | See below. |
-| Node Claim | Node | `POST /set-up/claim` | The address that owns the node. |
+| Node Claim | Node | `POST /set-up/claim` | The owner's one email: it claims the node and is how we reach them. |
+| How We Reach You | Node | `POST /set-up/contact` | Optional name and phone. No email, see [One email](#one-email). |
 | Network | Node | (page script) | Status, scan, manual entry, connect. |
 | SSH Access | Other | `POST /ssh-keys`, `/ssh-keys/delete` | Form posts that redirect back to `/config`. |
 | Setup Wizard | Other | link to `/set-up` | |
 | Tutorial | Other | link to `/tutorial` | Runs the guided tutorial alone. See [tutorial.md](tutorial.md). |
 | Cloud Services | Support | (page script) | Disabling also switches off Remote Support. |
 | Remote Support | Support | `/remote-access/toggle`, `/remote-access/shell` | Two independent toggles. |
-| How We Reach You | Support | `POST /set-up/contact` | Optional owner contact details. |
 
 The Remote Support, contact and claim template variables come from the blueprint's context
 processor `_remote_access_context`, not from each `render_template` call. `config.html` has two
@@ -738,10 +738,12 @@ shows.
 
 ### How We Reach You
 
-The other half of Remote Support: those settings are how support reaches the node, this is how
-support reaches the owner. It is its own section because it is the only block about a person rather
-than the radar, and because the `name`/`desc`/`help` classes it used inside Remote Support are only
-styled within a `toggle-row`, so it rendered as unstyled text there.
+How support reaches the owner: who to ask for, and a phone number for when email cannot reach them.
+It has no email box. The owner's one email is Node Claim's (see [One email](#one-email)), so the
+section sits directly below Node Claim, in the Node group, rather than in Support beside Remote
+Support where it began. It is its own section because it is about a person rather than the radar,
+and because the `name`/`desc`/`help` classes it used inside Remote Support are only styled within a
+`toggle-row`, so it rendered as unstyled text there.
 
 `ContactFormConfig` is optional and nullable throughout, and empty is the steady state: a node with
 nothing to report never calls the contact endpoint. Nothing in it is verified, identifies anyone to
@@ -758,19 +760,43 @@ mutable optional document beside them would let a malformed contact stop a node 
 to record which country a contact's phone number is in). Asking it as "where do you live" would put
 a wrong answer against a real person.
 
-The length caps (`CONTACT_NAME_MAX_LENGTH` 64, `CONTACT_EMAIL_MAX_LENGTH` 255,
-`CONTACT_PHONE_MAX_LENGTH` 32) are copied from the node-ingest spec's `NodeContact`. Past one of
+The length caps (`CONTACT_NAME_MAX_LENGTH` 64, `CONTACT_PHONE_MAX_LENGTH` 32) are copied from the
+node-ingest spec's `NodeContact`. Past one of
 them retina-telemetry cannot build the payload, so the whole document is refused and the owner is
 unreachable. They move only when the spec does.
 
+### One email
+
+The owner gives one email address, and it does two jobs: it claims the node, and it is how we
+contact them about it. It is the Node Claim address. How We Reach You and the wizard's contact step
+have no email box, and the wizard asks for it once, on its last step (see
+[setup-wizard.md](setup-wizard.md#your-email)).
+
+Earlier builds asked twice: a contact email that granted nothing, and a separate claim address. An
+owner had to give the same address twice, and an owner who skipped the claim step could only claim
+the node by finding Node Claim on this page or re-running the wizard.
+
+The two stay apart on the wire. The server keeps the claim (`/v1/nodes/claim`) and the site contact
+(`/v1/nodes/contact`) as separate resources, because one binds the node and the other grants
+nothing, and its design note leaves it to the node's UI to ask once. So this is a retina-gui change
+only:
+
+- `CONTACT_FIELDS` and `ContactFormConfig` have no `email`. `/set-up/contact` ignores one if it is
+  posted (a tab opened on the previous build still sends it), and never copies it into the claim,
+  because a claim write mails a link and only the owner's press may ask for that.
+- The contact document stops carrying an email. One stored by an older build is not shown and is
+  dropped at the next save of How We Reach You, since `/set-up/contact` replaces the document whole.
+  Until then the server's site contact keeps it, which is harmless: it is the owner's own address.
+- The server's admin page shows the owner email only once a link has been opened. Support finding
+  the address of a node whose link is still pending needs the server to show the claim address
+  there.
+
 ### Node Claim
 
-**Not the contact email**, however alike the boxes look. The contact answers "whom do we ring about
-this node", is optional and grants nothing. The claim answers "who owns it": the server mails the
-address a link, and opening it binds the node to the account behind that address. A wrong value
-mails a stranger a link that hands them somebody's node. So `ClaimFormConfig` lives in a file of its
-own, and nothing copies one address into the other, even though an owner may well give the same
-address twice.
+The owner's one email (see [One email](#one-email)). The server mails the address a link, and
+opening it binds the node to the account behind that address. A wrong value mails a stranger a link
+that hands them somebody's node. `ClaimFormConfig` lives in a file of its own, apart from the
+contact document, because the claim is the part that binds.
 
 - `CLAIM_EMAIL_MAX_LENGTH` (255) is copied from `NodeClaimRequest.email` in the spec, for the same
   reason as the contact caps.

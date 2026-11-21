@@ -1,7 +1,7 @@
 """POST /set-up/claim, and the file it writes.
 
-The address that owns the node, which is a different question from the contact
-details and carries a worse failure: the server mails this address a link, and
+The owner's one email. It is how we contact them as well as the claim, and the
+claim carries the worse failure: the server mails this address a link, and
 opening it binds the node to the account behind it. A wrong value here mails a
 stranger a link that hands them somebody's node.
 
@@ -252,3 +252,70 @@ class TestTheWizardStep:
 
         assert 'wizClaimSendBtn' in page
         assert 'Already claimed' not in page
+
+
+class TestTheOneEmail:
+    """The wizard asks for an email once, here, and says it does two jobs.
+    See docs/features/setup-wizard.md#your-email."""
+
+    def _step(self, app_client):
+        page = app_client.get('/set-up').data.decode()
+        return page[page.index('data-step="account"'):page.index('data-step="complete"')]
+
+    def _button(self, app_client):
+        page = app_client.get('/set-up').data.decode()
+        button = page[page.index('id="wizClaimSendBtn"'):]
+        return button[button.index('>') + 1:button.index('</button>')]
+
+    def test_the_step_says_it_is_also_how_we_contact_the_owner(self, app_client):
+        step = self._step(app_client)
+
+        assert '<h1>Your email</h1>' in step
+        assert 'contact you about your node' in step
+        assert 'email it a link' in step
+
+    def test_the_contact_step_says_the_email_comes_later(self, app_client):
+        page = app_client.get('/set-up').data.decode()
+        contact = page[page.index('data-step="contact"'):page.index('data-step="system"')]
+
+        assert 'ask for your email at the end of setup' in contact
+        assert 'type="email"' not in contact
+
+    def test_a_first_send_says_send(self, app_client):
+        assert self._button(app_client) == 'Send link and continue'
+        assert 'data-stored=""' in self._step(app_client)
+
+    def test_a_rerun_with_an_address_on_file_says_resend(self, app_client):
+        """Every press mails, so a re-run owner pressing it just to get past
+        the step must be told it sends another email. Skip stays."""
+        post(app_client, {"email": ADDRESS})
+
+        assert self._button(app_client) == 'Resend link and continue'
+        step = self._step(app_client)
+        assert f'data-stored="{ADDRESS}"' in step
+        assert 'wizClaimResendNote' in step
+        assert 'wizClaimSkipBtn' in app_client.get('/set-up').data.decode()
+
+    def test_an_owned_node_offers_no_resend(self, app_client, monkeypatch):
+        import app as app_module
+        post(app_client, {"email": ADDRESS})
+        monkeypatch.setattr(app_module.telemetry_status, 'read',
+                            lambda: {'stale': False, 'claim': {
+                                'state': 'owned', 'email': ADDRESS, 'undeliverable': False}})
+
+        step = self._step(app_client)
+
+        assert 'data-stored=""' in step
+        assert 'wizClaimResendNote' not in step
+
+    def test_completion_has_room_to_say_a_link_is_coming(self, app_client):
+        page = app_client.get('/set-up').data.decode()
+
+        assert 'id="completeClaimNote"' in page[page.index('data-step="complete"'):]
+
+    def test_the_config_page_says_the_claim_address_is_the_contact_address(self, app_client):
+        page = app_client.get('/config').data.decode()
+        claim = page[page.index('<section id="claim"'):page.index('<section id="contact"')]
+
+        assert 'how we reach you' in claim
+        assert 'contact you about this node' in claim

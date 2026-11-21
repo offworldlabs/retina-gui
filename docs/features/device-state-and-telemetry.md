@@ -33,7 +33,7 @@ All paths are relative to `DATA_DIR` (`/data/retina-gui` on a node) unless state
 | `setup-wizard-completed` | Plain text, an ISO timestamp | `mark_setup_wizard_completed`, `backfill_setup_wizard_completed` | GUI, and retina-telemetry (registration gate) |
 | `towers-cache.json` | JSON `{lat, lon, cached_at, towers[]}` | `save_towers_cache`, `add_tower_to_cache`, `remove_tower_from_cache` | GUI (wizard, config tower picker, Auto-Calibrate) |
 | `telemetry-consent.json` | JSON, three records (see below) | `save_telemetry_consent` | retina-telemetry (registration gate) |
-| `telemetry-contact.json` | JSON, the wire's `NodeContact` | `save_telemetry_contact` | GUI, retina-telemetry |
+| `telemetry-contact.json` | JSON, the wire's `NodeContact` without `email` (older builds may have left one) | `save_telemetry_contact` | GUI, retina-telemetry |
 | `telemetry-claim.json` | JSON `{email, send_requested_at}` | `save_telemetry_claim` | GUI, retina-telemetry |
 | `telemetry-node-ref` | Plain text, one node reference | `TelemetryStatus._remember_node_ref` | GUI only |
 | `/data/retina-telemetry/status.json` | JSON status document | retina-telemetry | GUI only (read-only to us) |
@@ -153,14 +153,14 @@ The checkbox wording and this constant are a matched pair across a template and 
 
 ## Contact details
 
-`telemetry-contact.json` records whom to contact about the node. It is written by one route, `/set-up/contact`, used by both the wizard step and the How We Reach You section on the configuration page, so the two cannot drift into storing different shapes. The shape mirrors the wire's `NodeContact`.
+`telemetry-contact.json` records whom to contact about the node. It is written by one route, `/set-up/contact`, used by both the wizard step and the How We Reach You section on the configuration page, so the two cannot drift into storing different shapes. The shape mirrors the wire's `NodeContact` less its `email`: the owner gives one address, the claim's (see [config-editor.md](config-editor.md#one-email)). The route ignores an `email` if one is posted, and a save drops one an older build stored.
 
 - It is kept out of `telemetry-consent.json` on purpose. The consent records are versioned acceptances neither end may invent, and retina-telemetry refuses to register without all three. A mutable optional document sharing that file would let a malformed contact stop a node registering. The wire treats them as separate endpoints too.
 - Empty values are dropped rather than written as null, and a document with nothing left in it removes the file. The spec says a node with nothing to report never calls the endpoint, so no file is the honest way to say that. It is what an owner who skipped the step and an owner who cleared every box both mean, which is also why `get_telemetry_contact` returns `{}` rather than `None`: "never given" and "cleared" are the same downstream. Clearing is a real outcome rather than a no-op.
 
 ## Node claim
 
-`telemetry-claim.json` holds the address that owns the node. It is not the contact email, however alike the boxes look. The contact email answers "whom do we ring"; the claim answers "who owns this node": the server mails the address a link, and opening it binds the node to the account behind the address. A wrong value mails a stranger a link that hands them somebody's node. So the two live in separate files and nothing copies one into the other. See `ClaimFormConfig` in [config_schema.py](../../src/config_schema.py).
+`telemetry-claim.json` holds the owner's one email. It claims the node and is also how we contact the owner, so the contact document carries no email of its own (see [config-editor.md](config-editor.md#one-email)). The server mails the address a link, and opening it binds the node to the account behind the address. A wrong value mails a stranger a link that hands them somebody's node. It stays a file of its own, apart from the contact document, because on the wire the claim and the site contact are separate resources and only the claim binds. Nothing writes it except an owner's press. See `ClaimFormConfig` in [config_schema.py](../../src/config_schema.py).
 
 ### Every write is an ask
 

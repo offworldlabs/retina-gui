@@ -104,6 +104,7 @@
         <a href="#identifiers">Identifiers</a>
         <a href="#mode" data-tutorial="cfg-mode-nav">Mode</a>
         <a href="#claim">Node Claim</a>
+        <a href="#contact">How We Reach You</a>
         <a href="#network" data-tutorial="cfg-network-nav">Network</a>
         <h3>Radar</h3>
         <a href="#cached-towers" data-tutorial="cfg-cached-nav">Cached Towers</a>
@@ -119,7 +120,6 @@
         <h3>Support</h3>
         <a href="#cloud">Cloud Services</a>
         <a href="#remote">Remote Support</a>
-        <a href="#contact">How We Reach You</a>
     </aside>
 
     {# ── Main ── #}
@@ -296,20 +296,20 @@
         </section>
 
         {# ── Node claim ──
-           Not the contact email: this address is mailed a link that binds the
-           node to its account, so nothing copies the contact email in here.
-           One button, every press asks for a link.
-           See docs/features/config-editor.md#node-claim #}
+           The owner's one email: it is mailed a link that binds the node to
+           its account, and it is how we contact them. One button, every
+           press asks for a link. See docs/features/config-editor.md#one-email #}
         <section id="claim" class="cfg-section">
             <div class="cfg-section-head">
                 <h2>Node Claim</h2>
-                <span class="desc">Links this node to your account, so it appears as yours.</span>
+                <span class="desc">Your email. It links this node to your account, and it is how we reach you.</span>
             </div>
             <div class="cfg-body">
                 <p style="font-size:13px;color:var(--ink-2);margin:0 0 16px;max-width:70ch;">
                     We email the address below a link. Opening it claims this node for whoever
-                    owns that address, so use one you own. Nothing here changes how the node
-                    runs: an unclaimed node records and reports exactly as a claimed one does.
+                    owns that address, so use one you own. It is also the address we use to
+                    contact you about this node. Nothing here changes how the node runs: an
+                    unclaimed node records and reports exactly as a claimed one does.
                 </p>
 
                 <div class="cfg-row">
@@ -359,7 +359,7 @@
                 <div class="cfg-row">
                     <div class="label-col">
                         <label for="claimEmail">Email</label>
-                        <span class="help">The address that will own this node.</span>
+                        <span class="help">The address that owns this node, and the one we contact.</span>
                     </div>
                     <div>
                         <input type="email" class="ds-input" id="claimEmail" value="{{ claim.get('email', '') }}" maxlength="255" autocomplete="email" style="width:100%;">
@@ -383,6 +383,74 @@
                         <button type="button" class="ds-btn primary" id="claimSendBtn"
                                 {% if claim_state and claim_state.state == 'owned' %}disabled{% endif %}>Send link</button>
                         <span id="claimMsg" style="font-size:12.5px;display:none;"></span>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        {# ── How we reach you ── #}
+        {# Optional throughout; empty means the node never calls the contact
+           endpoint. No email here: the owner's one address is Node Claim's,
+           directly above. See docs/features/config-editor.md#how-we-reach-you #}
+        <section id="contact" class="cfg-section">
+            <div class="cfg-section-head">
+                <h2>How We Reach You</h2>
+                <span class="desc">Never published, and only used to support you with your device.</span>
+            </div>
+            <div class="cfg-body">
+                <p style="font-size:13px;color:var(--ink-2);margin:0 0 16px;max-width:70ch;">
+                    If we can see a problem with your node and you cannot, we email the address
+                    under Node Claim above. These details tell us who to ask for and give us a
+                    number for when email cannot reach you. Every box is optional.
+                </p>
+
+                <div class="cfg-row">
+                    <div class="label-col">
+                        <label for="contactFirstName">Name</label>
+                        <span class="help">Who to ask for when we get in touch.</span>
+                    </div>
+                    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+                        <div class="ds-field">
+                            <label class="ds-field-label" for="contactFirstName">First name</label>
+                            <input type="text" class="ds-input" id="contactFirstName" value="{{ contact.get('first_name', '') }}" maxlength="64" autocomplete="given-name">
+                        </div>
+                        <div class="ds-field">
+                            <label class="ds-field-label" for="contactLastName">Last name</label>
+                            <input type="text" class="ds-input" id="contactLastName" value="{{ contact.get('last_name', '') }}" maxlength="64" autocomplete="family-name">
+                        </div>
+                    </div>
+                </div>
+
+                <div class="cfg-row">
+                    <div class="label-col">
+                        <label for="contactPhone">Phone</label>
+                        <span class="help">
+                            For when email cannot reach you. The country is the two-letter code the
+                            number belongs to, for example US or GB.
+                        </span>
+                    </div>
+                    <div style="display:grid;grid-template-columns:2fr 1fr;gap:12px;">
+                        <div class="ds-field">
+                            <label class="ds-field-label" for="contactPhone">Number</label>
+                            <input type="tel" class="ds-input" id="contactPhone" value="{{ contact.get('phone', '') }}" maxlength="32" autocomplete="tel">
+                        </div>
+                        <div class="ds-field">
+                            <label class="ds-field-label" for="contactCountry">Country</label>
+                            <input type="text" class="ds-input mono" id="contactCountry" value="{{ contact.get('country', '') }}" maxlength="2" placeholder="US" autocomplete="country" style="text-transform:uppercase;">
+                        </div>
+                    </div>
+                </div>
+
+                <div class="cfg-row">
+                    <div class="label-col">
+                        <span class="help">
+                            Clearing a box and saving removes that detail. Emptying every box
+                            removes the record entirely.
+                        </span>
+                    </div>
+                    <div style="display:flex;align-items:center;gap:12px;">
+                        <button type="button" class="ds-btn primary" id="contactSaveBtn">Save</button>
+                        <span id="contactMsg" style="font-size:12.5px;display:none;"></span>
                     </div>
                 </div>
             </div>
@@ -931,82 +999,6 @@
                     Software updates and registration continue whichever way these are set. What
                     you are choosing here is whether a person can reach the node, not whether it
                     stays up to date.
-                </div>
-            </div>
-        </section>
-
-        {# ── How we reach you ── #}
-        {# Optional throughout; empty means the node never calls the contact
-           endpoint. See docs/features/config-editor.md#how-we-reach-you #}
-        <section id="contact" class="cfg-section">
-            <div class="cfg-section-head">
-                <h2>How We Reach You</h2>
-                <span class="desc">Never published, and only used to support you with your device.</span>
-            </div>
-            <div class="cfg-body">
-                <p style="font-size:13px;color:var(--ink-2);margin:0 0 16px;max-width:70ch;">
-                    If we can see a problem with your node and you cannot, this is where we get in
-                    touch. Every box is optional: leave them all empty and we hold nothing at all.
-                </p>
-
-                <div class="cfg-row">
-                    <div class="label-col">
-                        <label for="contactFirstName">Name</label>
-                        <span class="help">Who to ask for when we get in touch.</span>
-                    </div>
-                    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
-                        <div class="ds-field">
-                            <label class="ds-field-label" for="contactFirstName">First name</label>
-                            <input type="text" class="ds-input" id="contactFirstName" value="{{ contact.get('first_name', '') }}" maxlength="64" autocomplete="given-name">
-                        </div>
-                        <div class="ds-field">
-                            <label class="ds-field-label" for="contactLastName">Last name</label>
-                            <input type="text" class="ds-input" id="contactLastName" value="{{ contact.get('last_name', '') }}" maxlength="64" autocomplete="family-name">
-                        </div>
-                    </div>
-                </div>
-
-                <div class="cfg-row">
-                    <div class="label-col">
-                        <label for="contactEmail">Email</label>
-                        <span class="help">The first thing we try.</span>
-                    </div>
-                    <div>
-                        <input type="email" class="ds-input" id="contactEmail" value="{{ contact.get('email', '') }}" maxlength="255" autocomplete="email" style="width:100%;">
-                    </div>
-                </div>
-
-                <div class="cfg-row">
-                    <div class="label-col">
-                        <label for="contactPhone">Phone</label>
-                        <span class="help">
-                            For when email cannot reach you. The country is the two-letter code the
-                            number belongs to, for example US or GB.
-                        </span>
-                    </div>
-                    <div style="display:grid;grid-template-columns:2fr 1fr;gap:12px;">
-                        <div class="ds-field">
-                            <label class="ds-field-label" for="contactPhone">Number</label>
-                            <input type="tel" class="ds-input" id="contactPhone" value="{{ contact.get('phone', '') }}" maxlength="32" autocomplete="tel">
-                        </div>
-                        <div class="ds-field">
-                            <label class="ds-field-label" for="contactCountry">Country</label>
-                            <input type="text" class="ds-input mono" id="contactCountry" value="{{ contact.get('country', '') }}" maxlength="2" placeholder="US" autocomplete="country" style="text-transform:uppercase;">
-                        </div>
-                    </div>
-                </div>
-
-                <div class="cfg-row">
-                    <div class="label-col">
-                        <span class="help">
-                            Clearing a box and saving removes that detail. Emptying every box
-                            removes the record entirely.
-                        </span>
-                    </div>
-                    <div style="display:flex;align-items:center;gap:12px;">
-                        <button type="button" class="ds-btn primary" id="contactSaveBtn">Save</button>
-                        <span id="contactMsg" style="font-size:12.5px;display:none;"></span>
-                    </div>
                 </div>
             </div>
         </section>
@@ -1960,8 +1952,8 @@ if (discardBtn) discardBtn.addEventListener('click', () => location.reload());
 // Side-nav scrollspy
 (function() {
     // Page order: the first of these on screen is the one marked active.
-    var sectionIds = [{% if developer_mode %}'processing',{% endif %}'identifiers','mode','claim','network','cached-towers','tower','capture',
-                      'truth','tar1090','ssh','wizard','tutorial','cloud','remote','contact'];
+    var sectionIds = [{% if developer_mode %}'processing',{% endif %}'identifiers','mode','claim','contact','network','cached-towers','tower','capture',
+                      'truth','tar1090','ssh','wizard','tutorial','cloud','remote'];
     var links = {};
     sectionIds.forEach(function(id) {
         var a = document.querySelector('.side a[href="#' + id + '"]');
@@ -2724,7 +2716,6 @@ if (discardBtn) discardBtn.addEventListener('click', () => location.reload());
     var fields = {
         first_name: 'contactFirstName',
         last_name:  'contactLastName',
-        email:      'contactEmail',
         phone:      'contactPhone',
         country:    'contactCountry'
     };

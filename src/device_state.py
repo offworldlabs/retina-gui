@@ -77,8 +77,8 @@ class DeviceState:
         # Cross-repo contract, read by retina-telemetry. Kept apart from the
         # consent records on purpose: see save_telemetry_contact.
         self.telemetry_contact_file = os.path.join(data_dir, "telemetry-contact.json")
-        # Cross-repo contract, read by retina-telemetry. The address that owns
-        # the node; never mixed with the contact document.
+        # Cross-repo contract, read by retina-telemetry. The owner's one email,
+        # which also claims the node; the contact document carries none.
         self.telemetry_claim_file = os.path.join(data_dir, "telemetry-claim.json")
         self.dev_mode = dev_mode
 
@@ -462,9 +462,10 @@ class DeviceState:
     def save_telemetry_contact(self, contact: dict):
         """Record whom to contact about this node, or remove the record.
 
-        Shape mirrors the wire's `NodeContact`. Empty values are dropped, and
-        nothing left removes the file. Never merge this into the consent file,
-        or a malformed contact could stop a node registering.
+        Shape mirrors the wire's `NodeContact`, less its email, which the owner
+        gives once as the claim. Empty values are dropped, and nothing left
+        removes the file. Never merge this into the consent file, or a
+        malformed contact could stop a node registering.
         See docs/features/device-state-and-telemetry.md#contact-details.
         """
         populated = {k: v for k, v in contact.items() if v not in (None, "")}
@@ -494,9 +495,9 @@ class DeviceState:
 
         Every write is an ask: it stamps `send_requested_at` beside `email`, so
         one press mails once even for an unchanged address. Which server call
-        that becomes is decided only in retina-telemetry. Never copy between
-        this and the contact file: a wrong address here hands a stranger the
-        node. See docs/features/device-state-and-telemetry.md#node-claim.
+        that becomes is decided only in retina-telemetry. This is the owner's
+        only email; a wrong one here hands a stranger the node.
+        See docs/features/device-state-and-telemetry.md#node-claim.
         """
         email = (email or "").strip()
         if not email:

@@ -90,7 +90,7 @@ function initSetupWizard(resumeStep, devMode, isRerun, demoMode) {
         towers: 'Choose a tower',
         calibrate: 'Optimise reception',
         name: 'Name your node',
-        account: 'Connect your account',
+        account: 'Your email',
         complete: 'You\'re all set'
     };
 
@@ -382,13 +382,12 @@ function initSetupWizard(resumeStep, devMode, isRerun, demoMode) {
         });
     };
 
-    // Contact details. Optional, and skipping writes nothing.
-    // See docs/features/setup-wizard.md#contact-details
+    // Contact details. Optional, and skipping writes nothing. No email: that
+    // is asked once, on the last step. See docs/features/setup-wizard.md#contact-details
     enterHooks.contact = function() {
         var fields = {
             first_name: 'contactFirstName',
             last_name:  'contactLastName',
-            email:      'contactEmail',
             phone:      'contactPhone',
             country:    'contactCountry'
         };
@@ -552,15 +551,17 @@ function initSetupWizard(resumeStep, devMode, isRerun, demoMode) {
         });
     };
 
-    // Node claim. Optional; skipping writes nothing. The last step before
-    // completion. The step key is `account`, not `claim`: the old flow had
-    // the claim third, and its saved step name must not match this one.
-    // See docs/features/setup-wizard.md#node-claim
+    // Your email: the owner's one address, which also claims the node.
+    // Optional; skipping writes nothing. The last step before completion. The
+    // step key is `account`, not `claim`: the old flow had the claim third,
+    // and its saved step name must not match this one.
+    // See docs/features/setup-wizard.md#your-email
     enterHooks.account = function() {
         var box = document.getElementById('wizClaimEmail');
         var sendBtn = document.getElementById('wizClaimSendBtn');
         var skipBtn = document.getElementById('wizClaimSkipBtn');
         var msg = document.getElementById('wizClaimMsg');
+        var resendNote = document.getElementById('wizClaimResendNote');
 
         function say(text, danger) {
             msg.textContent = text;
@@ -568,29 +569,35 @@ function initSetupWizard(resumeStep, devMode, isRerun, demoMode) {
             msg.style.display = text ? '' : 'none';
         }
 
+        // Every press mails, so while the box still holds the address a link
+        // was already asked for, the button says Resend rather than surprise a
+        // re-run owner with a second email. Skip is the quiet way through.
+        function isResend() {
+            var stored = box.getAttribute('data-stored') || '';
+            return stored !== '' && box.value.trim() === stored;
+        }
+
         function reset() {
             sendBtn.disabled = false;
-            sendBtn.textContent = 'Send link and continue';
+            sendBtn.textContent = isResend() ? 'Resend link and continue' : 'Send link and continue';
+            resendNote.style.display = isResend() ? '' : 'none';
         }
 
         say('');
 
         // No Send button means the node is already claimed: the page shows the
         // owner and offers only Skip. See templates/setup/_claim.html.
-        if (sendBtn) {
-            reset();
-            // Suggest the email from the contact step when nothing is stored
-            // yet. Only a suggestion: nothing is sent until Send is pressed.
-            if (!box.value.trim()) {
-                box.value = document.getElementById('contactEmail').value.trim();
-            }
-        }
+        if (sendBtn) reset();
 
         if (hookInitialized.account) return;
         hookInitialized.account = true;
 
         skipBtn.addEventListener('click', function() { advance(); });
         if (!sendBtn) return;
+
+        box.addEventListener('input', function() {
+            if (!sendBtn.disabled) reset();
+        });
 
         sendBtn.addEventListener('click', function() {
             // An empty box would clear the stored address on this route, which
@@ -604,8 +611,20 @@ function initSetupWizard(resumeStep, devMode, isRerun, demoMode) {
             say('');
             // postJSON rejects on any refusal, carrying the server's per-field
             // reason when there is one, such as a malformed address.
-            postJSON('/set-up/claim', { email: box.value })
-            .then(function() { advance(); })
+            var address = box.value.trim();
+            postJSON('/set-up/claim', { email: address })
+            .then(function() {
+                // Back onto this step now offers a resend of this address.
+                box.setAttribute('data-stored', address);
+                // Said on the next step, since this one is left at once.
+                var note = document.getElementById('completeClaimNote');
+                note.textContent = 'A link is on its way to ' + address + '. Open it to '
+                    + 'connect this node to your account. If it has not arrived in a few '
+                    + 'minutes, check your spam folder, or send another from Node Claim '
+                    + 'on the Configuration page.';
+                note.style.display = '';
+                advance();
+            })
             .catch(function(err) {
                 var errors = err.errors || {};
                 var first = Object.keys(errors)[0];

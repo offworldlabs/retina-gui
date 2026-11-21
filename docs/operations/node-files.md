@@ -48,8 +48,8 @@ locations are cross-repo contracts: do not rename them without changing the othe
 | `setup-wizard.json` | `DeviceState` | retina-gui | Wizard progress, for resuming. |
 | `setup-wizard-completed` | `DeviceState` | retina-gui, **retina-telemetry** | Setup finished. retina-telemetry will not register a node without it. |
 | `telemetry-consent.json` | `DeviceState` | retina-gui, **retina-telemetry** | Consent records. Required for registration. |
-| `telemetry-contact.json` | `DeviceState` | retina-gui, **retina-telemetry** | Owner contact details. |
-| `telemetry-claim.json` | `DeviceState` | retina-gui, **retina-telemetry** | The address that owns the node. |
+| `telemetry-contact.json` | `DeviceState` | retina-gui, **retina-telemetry** | Owner contact details: name and phone. The owner's email is in `telemetry-claim.json`. |
+| `telemetry-claim.json` | `DeviceState` | retina-gui, **retina-telemetry** | The owner's one email: it claims the node and is how we contact them. |
 | `telemetry-node-ref` | `TelemetryStatus` | retina-gui | Cached node identifier, so the home page can show it while `status.json` is briefly empty after a restart. |
 | `towers-cache.json` | `DeviceState` | retina-gui | Cached tower search results. |
 | `authorized_keys` | `SSHKeyManager` | retina-gui, sshd | SSH public keys, mode 0644 so sshd can read it. |
