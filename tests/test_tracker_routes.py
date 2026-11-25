@@ -630,6 +630,33 @@ def test_the_wedge_view_states_its_area_and_offers_the_arcs_control(app_client):
     assert 'fmtArea' in app_client.get('/static/units.js').get_data(as_text=True)
 
 
+def test_the_wedge_view_states_an_effective_boresight(app_client):
+    """See docs/features/tracker.md#effective-boresight."""
+    body = app_client.get('/tracker').get_data(as_text=True)
+    # Hidden until the script has a lobe to take a direction from, wedge view only,
+    # and after the area so the two sit together in the middle of the bar.
+    readout = '<span class="wedge-area wedge-only" id="wedgeBoresight" role="status" hidden'
+    assert readout in body
+    assert body.index('id="wedgeArea"') < body.index(readout) < body.index('data-arcs="on"')
+    assert "boresightEl: document.getElementById('wedgeBoresight')," in body
+    assert "boresightValueEl: document.getElementById('wedgeBoresightValue')," in body
+    assert '</b>effective boresight</span>' in body
+    assert '>Effective boresight</span>' in body
+
+    js = app_client.get('/static/tracker-wedge.js').get_data(as_text=True)
+    assert 'function boresightOf' in js
+    # Close-in slices are overhead traffic, not pattern: they never steer it.
+    assert 'function main(i) { return held[i] > 0 && !close[i]; }' in js
+    # Cleared before every draw, so a wedge that stops answering leaves no line or number.
+    assert '            boresight = null;\n            if (g) {' in js
+    # Not in the wedge's first hour, when every new slice would move it.
+    assert 'var BORESIGHT_MIN_AGE_MS = 3600 * 1000;' in js
+    assert ('boresight = coverage.now_ms - coverage.since_ms >= BORESIGHT_MIN_AGE_MS'
+            ' ? boresightOf(coverage) : null;') in js
+    assert js.count('boresightOf(coverage)') == 1
+    assert 'opts.boresightEl.hidden = !boresight;' in js
+
+
 # ── units ───────────────────────────────────────────────────────────────────
 
 class TestTheUnitsToggle:

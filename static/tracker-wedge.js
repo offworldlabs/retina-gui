@@ -1,6 +1,7 @@
 // The Tracker page's wedge view: the node's ADS-B-proven coverage on a map,
 // its tracks over it, and a replay of one track through it. Every shape
-// (wedge lobes, arcs) arrives ready made from retina-tracker; this only draws.
+// (wedge lobes, arcs) arrives ready made from retina-tracker; this draws them,
+// and works out two figures from them: the area and the effective boresight.
 // See docs/features/tracker.md#wedge-view
 (function () {
     'use strict';
@@ -29,6 +30,19 @@
     var SITE_INK = '#22252c';
     var SPAN_INK = '#6f6c65';
     var EARTH_R_KM = 6371.0088;
+    var BORESIGHT_INK = '#22252c';
+    // A lobe needs this many slices before it has a direction worth stating,
+    // and survives a gap of this many unproven slices (a bearing nobody flew).
+    var BORESIGHT_MIN_BINS = 3;
+    var BORESIGHT_GAP_BINS = 2;
+    // 1 is a single bearing, 0 is all round. Below this the lobe is too wide
+    // to point anywhere (about 215 degrees of even coverage).
+    var BORESIGHT_MIN_FOCUS = 0.5;
+    var BORESIGHT_OVERSHOOT = 1.12;
+    // Not stated until the wedge holds this much evidence: a young wedge's
+    // centre jumps with every new slice.
+    var BORESIGHT_MIN_AGE_MS = 3600 * 1000;
+    var COMPASS = ['N', 'NNE', 'NE', 'ENE', 'E', 'ESE', 'SE', 'SSE', 'S', 'SSW', 'SW', 'WSW', 'W', 'WNW', 'NW', 'NNW'];
 
     function esc(s) {
         return String(s).replace(/[&<>"]/g, function (c) {
@@ -80,6 +94,69 @@
         return Math.abs(sum) * EARTH_R_KM * EARTH_R_KM / 2;
     }
 
+    // Spherical, as retina-tracker's coverage geometry is.
+    function destination(lat, lon, bearingDeg, km) {
+        var rad = Math.PI / 180, d = km / EARTH_R_KM, b = bearingDeg * rad, p1 = lat * rad;
+        var p2 = Math.asin(Math.sin(p1) * Math.cos(d) + Math.cos(p1) * Math.sin(d) * Math.cos(b));
+        var dl = Math.atan2(Math.sin(b) * Math.sin(d) * Math.cos(p1), Math.cos(d) - Math.sin(p1) * Math.sin(p2));
+        return [p2 / rad, ((lon + dl / rad + 540) % 360) - 180];
+    }
+
+    // The effective boresight: the bearing the strongest main lobe is centred
+    // on, each slice weighted by its held range squared (its area). Null when
+    // no lobe is big or narrow enough to point anywhere. It is where the node
+    // sees best, whichever way the antenna is aimed.
+    // See docs/features/tracker.md#effective-boresight
+    function boresightOf(cov) {
+        var held = (cov && cov.held_km) || [], close = (cov && cov.close_in) || [];
+        var n = held.length, binDeg = cov ? cov.bin_deg : 0;
+        if (!n || !(binDeg > 0)) return null;
+        function main(i) { return held[i] > 0 && !close[i]; }
+
+        // Start scanning just after a gap that ends a lobe, so a lobe lying
+        // across north is one run and not two.
+        var from = 0, i, k;
+        for (i = 0; i < n; i++) {
+            for (k = 0; k <= BORESIGHT_GAP_BINS && !main((i + k) % n); k++) { /* count the gap */ }
+            if (k > BORESIGHT_GAP_BINS) { from = (i + k) % n; break; }
+        }
+        var runs = [], cur = null, miss = 0;
+        for (k = 0; k < n; k++) {
+            i = (from + k) % n;
+            if (main(i)) {
+                if (!cur) { cur = []; runs.push(cur); }
+                cur.push(i);
+                miss = 0;
+            } else if (cur && ++miss > BORESIGHT_GAP_BINS) {
+                cur = null;
+            }
+        }
+
+        var best = null;
+        runs.forEach(function (run) {
+            var x = 0, y = 0, w = 0, far = 0;
+            run.forEach(function (b) {
+                var th = (b + 0.5) * binDeg * Math.PI / 180, wb = held[b] * held[b];
+                x += wb * Math.sin(th);
+                y += wb * Math.cos(th);
+                w += wb;
+                far = Math.max(far, held[b]);
+            });
+            if (!best || w > best.weight) {
+                best = { weight: w, bins: run.length, reachKm: far, focus: Math.sqrt(x * x + y * y) / w,
+                         deg: (Math.atan2(x, y) * 180 / Math.PI + 360) % 360 };
+            }
+        });
+        if (!best || best.bins < BORESIGHT_MIN_BINS || best.focus < BORESIGHT_MIN_FOCUS) return null;
+        return best;
+    }
+
+    // "66° ENE": a whole degree from true north and the nearest of 16 points.
+    function fmtBearing(deg) {
+        var whole = Math.round(deg) % 360;
+        return whole + '\u00b0 ' + COMPASS[Math.round(whole / 22.5) % 16];
+    }
+
     function lastAtOrBefore(items, t) {
         var lo = 0, hi = items.length;
         while (lo < hi) {
@@ -111,6 +188,7 @@
         var rows = [];
         var view = { hidden: {}, hover: null, tracksOn: true, arcs: 'on' };
         var areaKm2 = 0;
+        var boresight = null;
 
         function ensureMap() {
             if (map) return;
@@ -152,6 +230,7 @@
             layers.wedge.clearLayers();
             layers.sites.clearLayers();
             var g = coverage && coverage.enabled ? coverage.geometry : null;
+            boresight = null;
             if (g) {
                 if ((coverage.span_ring || []).length) {
                     L.polyline(coverage.span_ring, { color: SPAN_INK, weight: 1.2, opacity: 0.7, dashArray: '6 5', interactive: false })
@@ -168,6 +247,15 @@
                     L.polygon(ring, { color: WEDGE_EDGE, weight: 1.4, fillColor: WEDGE_FILL, fillOpacity: 0.12, interactive: false })
                         .addTo(layers.wedge);
                 });
+                // now_ms and since_ms are both the node's clock.
+                boresight = coverage.now_ms - coverage.since_ms >= BORESIGHT_MIN_AGE_MS ? boresightOf(coverage) : null;
+                if (boresight) {
+                    // Dotted, and a little past the lobe so it shows over the fill.
+                    L.polyline([[g.rx.lat, g.rx.lon],
+                                destination(g.rx.lat, g.rx.lon, boresight.deg, boresight.reachKm * BORESIGHT_OVERSHOOT)],
+                               { color: BORESIGHT_INK, weight: 2.2, opacity: 0.9, dashArray: '1 6', interactive: false })
+                        .addTo(layers.wedge);
+                }
                 L.polyline([[g.rx.lat, g.rx.lon], [g.tx.lat, g.tx.lon]],
                            { color: '#9a978f', weight: 1, dashArray: '2 4', interactive: false }).addTo(layers.sites);
                 siteMarker(g.rx, 'RX').addTo(layers.sites);
@@ -183,6 +271,14 @@
             renderNotice();
             renderStat();
             renderArea();
+            renderBoresight();
+        }
+
+        // Hidden, like the area, when there is no lobe to take a direction from,
+        // and for the wedge's first hour.
+        function renderBoresight() {
+            opts.boresightEl.hidden = !boresight;
+            if (boresight) opts.boresightValueEl.textContent = '\u2248 ' + fmtBearing(boresight.deg);
         }
 
         // Hidden until a slice is proven, so the bar never states a zero.
@@ -464,5 +560,5 @@
         };
     }
 
-    window.TrackerWedge = { create: create };
+    window.TrackerWedge = { create: create, boresightOf: boresightOf, fmtBearing: fmtBearing };
 })();

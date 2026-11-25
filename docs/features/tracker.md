@@ -606,7 +606,8 @@ The Display control in the page header switches the panel between the Delay / Do
 detections, with the tracks drawn on it. Nothing in it comes from a declared antenna aim. The
 rail, the view window and the Tracks on/off control are shared by the scope and the wedge view; the Doppler,
 Detections and Clear buffer controls belong to the scope and are hidden in the wedge view, and
-the wedge view adds the [coverage area](#coverage-area) in the middle of the bar, the
+the wedge view adds the [coverage area](#coverage-area) and the
+[effective boresight](#effective-boresight) in the middle of the bar, the
 [Arcs control](#the-arcs-control), a "24 h max-hold" chip and Reset wedge. The panel's `data-display`
 attribute drives which controls and which body show (`.dd-only`, `.wedge-only`, and
 `.no-stored` / `.stored-only` for Stored Detections). The scope is
@@ -619,6 +620,7 @@ Every shape arrives ready made from retina-tracker, which owns the maths
 | --- | --- | --- |
 | The wedge | `GET /tracker/coverage`, polled every 30 s | Green lobes, each 5 degree slice drawn edge to edge at its held range |
 | Close-in slices | the same (`close_lobes`) | The same shape, much lighter with a dashed edge: slices held under `close_in_km` (10 km), which are mostly aircraft overhead rather than the antenna's pattern |
+| Effective boresight | worked out in the page from the same (`held_km`, `close_in`) | A dark dotted line from the receiver, a little past the lobe it is taken from. Not drawn in the wedge's first hour. See [Effective boresight](#effective-boresight) |
 | Receiver, transmitter, baseline | the same | RX ring, TX triangle, dashed line |
 | Processed range limit | the same (`span_ring`) | A grey dashed ellipse: the furthest bistatic range blah2 processes (`delayMax`). Absent when the node does not state one |
 | Labelled tracks | the stream's `lat`/`lon` columns | A trail through the verified positions, broken where they stop for over 15 s; an aircraft glyph with the hex while live (newest point under 15 s old), a small ring at the end otherwise |
@@ -668,14 +670,65 @@ slices never reads as zero. It is the
 area of the rings the map draws, `lobes` and `close_lobes` together, so it always agrees with the
 green shapes: close-in slices count, and so do slices at the processed range limit. Slices are
 sectors about the receiver and never overlap, so the rings are summed. `ringAreaKm2` in
-`static/tracker-wedge.js` measures each ring on a sphere; retina-tracker serves no area, and
-this is the one piece of arithmetic the page does on the wedge.
+`static/tracker-wedge.js` measures each ring on a sphere; retina-tracker serves no area. This
+and the [effective boresight](#effective-boresight) are the only arithmetic the page does on the wedge.
 
 It is an estimate, and the "≈" says so: it is the flat map's area (target altitude is ignored,
 as for the arcs), each slice is a whole 5 degree sector out to its held range, and it describes
 the last 24 hours, so it grows as more aircraft pass and starts again after a reset. It is
 hidden rather than zero while no slice is proven, when the node has no geometry and when the
 coverage cannot be read; the notice over the map says why.
+
+### Effective boresight
+
+Beside the area the toolbar states the direction this node sees best, for example
+"≈ 65° ENE effective boresight": a whole degree clockwise from true north and the nearest of 16
+compass points. The map draws it as a dark dotted line from the receiver, 12% longer than the
+lobe's furthest slice so its end shows beyond the green, and the legend has a key for it.
+
+It is called effective because it is the centre of what the node detected, whichever way the
+antenna is aimed. The wedge is still not told where the antenna points: no declared aim enters
+it. `boresightOf` in `static/tracker-wedge.js` works it out from `held_km`, `close_in` and
+`bin_deg`:
+
+1. Close-in slices are left out. They are mostly aircraft overhead, in every direction (see
+   above), and say nothing about the horizontal pattern.
+2. The remaining proven slices are grouped into lobes. A gap of up to two unproven slices
+   (10 degrees) does not end a lobe, since a bearing nobody flew along in 24 hours is common; a
+   wider gap does. A lobe lying across north is one lobe.
+3. The lobe with the greatest total of held range squared, which is its area, is the main lobe.
+   A back lobe or a side lobe is ignored rather than averaged in, which would drag the answer
+   toward it.
+4. The boresight is the circular mean of that lobe's slice centres, each weighted by its held
+   range squared: the bearing the lobe's area is centred on.
+
+The centre was chosen over the single longest slice because the longest slice is one aircraft's
+luck, moves by a whole 5 degrees at a time, and is meaningless where the lobe is flat against the
+[processed range limit](#wedge-view), as on a short-baseline node. The centre moves smoothly,
+uses every slice and is unchanged by a flat top.
+
+Nothing is stated, and no line is drawn:
+
+- for the wedge's first hour: until `now_ms - since_ms` reaches 3600 s (both the node's clock).
+  A young wedge's centre jumps with every new slice, so the page waits rather than show a
+  number that keeps changing. After a restart the saved wedge keeps its age; after Reset wedge,
+  or a wedge restarted because the receiver or transmitter moved, the hour starts again;
+- when the main lobe has fewer than three slices;
+- when it is too wide to point anywhere: the weighted slices' mean resultant length is under
+  0.5, which is about 215 degrees of even coverage, or an omnidirectional antenna;
+- whenever the area is hidden.
+
+After the first hour it is worked out again at each 30 s coverage poll, and moves only as far as
+the 24 hour max-hold does.
+
+It differs from the antenna's true aim wherever traffic or illumination is lopsided: the wedge
+is the antenna's pattern multiplied by where aircraft fly and how well the transmitter lights
+them, so a busy airway to one side pulls the centre that way. Slices are 5 degrees wide, so do
+not read it finer than that.
+
+Elevation, the angle the antenna looks up, is not stated. `/tracker/coverage` carries no
+altitude: a slice is a ground range. It needs retina-tracker to keep each verified detection's
+elevation and signal strength, which is its 3D wedge work.
 
 ### The Arcs control
 
