@@ -610,6 +610,26 @@ def test_the_page_carries_the_wedge_view(app_client):
     assert re.search(r'cartoKey: "[^"]*",', body)
 
 
+def test_the_wedge_view_states_its_area_and_offers_the_arcs_control(app_client):
+    """See docs/features/tracker.md#coverage-area and #the-arcs-control."""
+    body = app_client.get('/tracker').get_data(as_text=True)
+    # Hidden until the script has an area to state, and only in the wedge view.
+    assert re.search(r'<span class="wedge-area wedge-only" id="wedgeArea" role="status" hidden', body)
+    assert re.findall(r'data-arcs="(\w+)" aria-pressed="(\w+)"', body) == [
+        ('on', 'true'), ('off', 'false')]
+    assert "remember('arcs', v);" in body
+    # A saved value with no button falls back, rather than leaving none pressed.
+    assert "state.arcs = recall('arcs', 'on') === 'off' ? 'off' : 'on';" in body
+    assert 'arcs: state.arcs' in body
+
+    js = app_client.get('/static/tracker-wedge.js').get_data(as_text=True)
+    assert 'function ringAreaKm2' in js
+    assert "opts.units().fmtArea(areaKm2)" in js
+    # The replay draws its arc whatever the control says: only drawTracks reads it.
+    assert js.count('view.arcs') == 1
+    assert 'fmtArea' in app_client.get('/static/units.js').get_data(as_text=True)
+
+
 # ── units ───────────────────────────────────────────────────────────────────
 
 class TestTheUnitsToggle:
